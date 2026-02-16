@@ -345,10 +345,25 @@ class GuiProgressTracker:
         self._overall_bar["value"] = frac * 100
         self._overall_lbl.set(
             f"{frac*100:.1f}%  -  {self.processed} / {self.total_files} files")
+        remaining = self.total_files - self.processed
+        elapsed_secs = time.time() - self.start_time
+        if self.processed > 0 and remaining > 0 and elapsed_secs > 2:
+            avg_per_file = elapsed_secs / self.processed
+            eta_secs = int(avg_per_file * remaining)
+            em, es = divmod(eta_secs, 60)
+            eh, em = divmod(em, 60)
+            if eh:
+                eta_str = f"~{eh}h {em:02d}m {es:02d}s left"
+            else:
+                eta_str = f"~{em}m {es:02d}s left"
+        elif remaining == 0:
+            eta_str = "done"
+        else:
+            eta_str = "estimating..."
         self._stats_var.set(
             f"{self._format_bytes(self.total_bytes)} downloaded  |  "
             f"{self._elapsed()} elapsed  |  "
-            f"{self.total_files - self.processed} remaining")
+            f"{remaining} remaining  |  {eta_str}")
         self._count_var.set(
             f"Downloaded: {self.completed}    "
             f"Skipped: {self.skipped}    "
@@ -441,6 +456,7 @@ class GuiProgressTracker:
 
 # Global tracker, set during main()
 _tracker: ProgressTracker | GuiProgressTracker | None = None
+_failure_log: list[dict] = []  # {"filename": ..., "url": ..., "source": ..., "year": ...}
 
 
 # ── Session ────────────────────────────────────────────────────────────────────
@@ -495,6 +511,7 @@ def _get_browser_context():
             "Chrome/120.0.0.0 Safari/537.36"
         ),
         viewport={"width": 1920, "height": 1080},
+        accept_downloads=True,
     )
     return _pw_context
 
@@ -559,26 +576,64 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
 
 
 def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -> bool:
-    """Download a file using Playwright's browser context to bypass WAF."""
+    """Download a file using Playwright's browser context to bypass WAF.
+
+    Fully automated — no user clicks required. Uses three strategies:
+    1. Inject an anchor with download attribute to force download (no PDF viewer)
+    2. Intercept via page.request.get() (API-level fetch with browser cookies)
+    3. Navigate directly as last resort
+    """
     if dest_path.exists() and not overwrite and dest_path.stat().st_size > 0:
         print(f"    [SKIP] Already exists: {dest_path.name}")
         return True
 
     ctx = _get_browser_context()
-    page = ctx.new_page()
-    page.add_init_script(
-        'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-    )
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Strategy 1: Use page.request API (fetch with browser session/cookies, no UI)
     try:
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        page = ctx.new_page()
+        page.add_init_script(
+            'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+        )
+        # First navigate to the domain so cookies/session are established
+        parsed = urlparse(url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        page.goto(origin, timeout=15000, wait_until="domcontentloaded")
+        page.wait_for_timeout(500)
 
+        resp = page.request.get(url, timeout=120000)
+        if resp.ok and len(resp.body()) > 0:
+            dest_path.write_bytes(resp.body())
+            page.close()
+            return True
+        page.close()
+    except Exception:
+        try:
+            page.close()
+        except Exception:
+            pass
+
+    # Strategy 2: Trigger download via injected anchor element
+    try:
+        page = ctx.new_page()
+        page.add_init_script(
+            'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+        )
+        # Navigate to file's origin first
+        parsed = urlparse(url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        page.goto(origin, timeout=15000, wait_until="domcontentloaded")
+        page.wait_for_timeout(500)
+
+        # Escape the URL for JS
+        safe_url = url.replace("'", "\\'")
         with page.expect_download(timeout=120000) as download_info:
-            # Navigate to the file URL to trigger download
             page.evaluate(f"""() => {{
                 const a = document.createElement('a');
-                a.href = '{url}';
-                a.download = '';
+                a.href = '{safe_url}';
+                a.download = '{dest_path.name.replace("'", "\\'")}';
+                a.style.display = 'none';
                 document.body.appendChild(a);
                 a.click();
                 a.remove();
@@ -586,29 +641,39 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
 
         download = download_info.value
         download.save_as(str(dest_path))
-        size_mb = dest_path.stat().st_size / (1024 * 1024)
-        print(f"    [OK] {dest_path.name} ({size_mb:.1f} MB)")
+        page.close()
         return True
 
-    except Exception as e:
-        # Fallback: try direct page navigation download
+    except Exception:
         try:
-            resp = page.request.get(url, timeout=120000)
-            if resp.ok:
-                dest_path.parent.mkdir(parents=True, exist_ok=True)
-                dest_path.write_bytes(resp.body())
-                size_mb = dest_path.stat().st_size / (1024 * 1024)
-                print(f"    [OK] {dest_path.name} ({size_mb:.1f} MB)")
-                return True
+            page.close()
         except Exception:
             pass
 
-        print(f"    [FAIL] {dest_path.name}: {e}")
-        if dest_path.exists():
-            dest_path.unlink()
-        return False
-    finally:
+    # Strategy 3: Direct navigation (may open PDF viewer, but content still loads)
+    try:
+        page = ctx.new_page()
+        page.add_init_script(
+            'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+        )
+        resp = page.goto(url, timeout=120000, wait_until="load")
+        if resp and resp.ok:
+            body = resp.body()
+            if body and len(body) > 0:
+                dest_path.write_bytes(body)
+                page.close()
+                return True
         page.close()
+    except Exception:
+        try:
+            page.close()
+        except Exception:
+            pass
+
+    # All strategies failed
+    if dest_path.exists() and dest_path.stat().st_size == 0:
+        dest_path.unlink()
+    return False
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -825,6 +890,13 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
         if _tracker:
             size = dest_path.stat().st_size if dest_path.exists() else 0
             _tracker.file_done(fname, size, "ok" if ok else "fail")
+        if not ok:
+            _failure_log.append({
+                "filename": fname, "url": url,
+                "source": _tracker.current_source if _tracker else "",
+                "year": _tracker.current_year if _tracker else "",
+                "error": "All browser download strategies failed",
+            })
         return ok
 
     file_start = time.time()
@@ -857,6 +929,12 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
             _tracker.file_done(fname, 0, "fail")
         else:
             print(f"\r    [FAIL] {fname}: {e}          ")
+        _failure_log.append({
+            "filename": fname, "url": url,
+            "source": _tracker.current_source if _tracker else "",
+            "year": _tracker.current_year if _tracker else "",
+            "error": str(e),
+        })
         if dest_path.exists():
             dest_path.unlink()
         return False
@@ -1159,6 +1237,21 @@ def main():
     print(f"  Total size: {total_dl}")
     print(f"  Elapsed:    {elapsed}")
     print(f"  Location:   {args.output.resolve()}")
+
+    if _failure_log:
+        from datetime import datetime
+        log_path = args.output / f"failures_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write(f"DoD Budget Downloader - Failure Log\n")
+            f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Total failures: {len(_failure_log)}\n")
+            f.write(f"{'='*80}\n\n")
+            for i, entry in enumerate(_failure_log, 1):
+                f.write(f"{i}. {entry['filename']}\n")
+                f.write(f"   Source: FY{entry['year']} / {entry['source']}\n")
+                f.write(f"   URL:    {entry['url']}\n")
+                f.write(f"   Error:  {entry['error']}\n\n")
+        print(f"  Failures: {log_path.resolve()}")
 
     if isinstance(_tracker, GuiProgressTracker):
         # Keep GUI open for a moment so user can see final state
