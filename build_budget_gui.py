@@ -200,6 +200,10 @@ class BuildProgressWindow:
 
     # ── Build control ─────────────────────────────────────────────────────
 
+    # TODO: Add a cancellation mechanism — set a threading.Event that the progress
+    # callback checks, and convert the "Build Database" button to a "Cancel" button
+    # while a build is running. Currently, closing the window during a build silently
+    # continues the thread in the background until the process exits.
     def _start_build(self):
         docs = Path(self.docs_var.get())
         db = Path(self.db_var.get())
@@ -261,7 +265,9 @@ class BuildProgressWindow:
             self.progress_var.set(pct)
             self.pct_label.configure(text=f"{pct:.0f}%")
 
-            # ETA estimate
+            # TODO: ETA estimate is based on overall elapsed/current, which skews
+            # when the excel and pdf phases have very different per-file times.
+            # Track phase-specific start times for more accurate ETAs.
             if self.start_time and current > 0 and phase in ("excel", "pdf"):
                 elapsed = time.time() - self.start_time
                 rate = elapsed / current

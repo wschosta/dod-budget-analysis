@@ -13,7 +13,7 @@ Usage:
 """
 
 import argparse
-import os
+import os  # TODO: Remove unused import (os is never referenced)
 import re
 import sqlite3
 import sys
@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 import openpyxl
-import pandas as pd
+import pandas as pd  # TODO: Remove unused import (pandas is never referenced)
 import pdfplumber
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -74,6 +74,11 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             line_item TEXT,
             line_item_title TEXT,
             classification TEXT,
+            -- TODO: Fiscal year columns are hardcoded to FY2024-2026. When new
+            -- budget years are released, the schema, column mapping, and all INSERT
+            -- statements must be updated in lockstep. Consider a normalized design
+            -- (separate fiscal_year_amounts table with year/type/amount columns) or
+            -- storing amounts as JSON in extra_fields for forward compatibility.
             amount_fy2024_actual REAL,
             amount_fy2025_enacted REAL,
             amount_fy2025_supplemental REAL,
@@ -194,6 +199,10 @@ def _detect_exhibit_type(filename: str) -> str:
     return "unknown"
 
 
+# TODO: This function is ~110 lines with three large loops over h_lower doing
+# related but distinct work (common fields, sub-activity/line-item, amounts).
+# Consider splitting into _map_common_fields, _map_line_item_fields, and
+# _map_amount_fields for readability and easier per-exhibit customization.
 def _map_columns(headers: list, exhibit_type: str) -> dict:
     """Map column headers to standardized field names.
 
@@ -357,6 +366,10 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
             org_code = str(row[col_map["organization"]]).strip() if col_map.get("organization") is not None and col_map["organization"] < len(row) and row[col_map["organization"]] else ""
             org_name = ORG_MAP.get(org_code, org_code)
 
+            # TODO: get_val and get_str are redefined as closures on every row
+            # iteration, but they only depend on col_map (loop-invariant) and row.
+            # Move them outside the loop and pass row as a parameter to avoid
+            # re-creating function objects on every iteration.
             def get_val(field):
                 idx = col_map.get(field)
                 if idx is not None and idx < len(row):
@@ -441,6 +454,10 @@ def _extract_table_text(tables: list) -> str:
 
 def _determine_category(file_path: Path) -> str:
     """Determine the budget category from the file path."""
+    # TODO: Add handling for "space_force" / "spaceforce" and "marine_corps" /
+    # "marines" paths — ORG_MAP has Space Force and Marine Corps codes but this
+    # function would classify those files as "Other". Also consider using
+    # ORG_MAP values as the canonical list to keep the two in sync.
     parts = [p.lower() for p in file_path.parts]
     if "comptroller" in parts:
         return "Comptroller"
@@ -502,6 +519,9 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path) -> int:
 
     except Exception as e:
         print(f"  ERROR processing {file_path.name}: {e}")
+        # TODO(bug): This INSERT provides 6 values but ingested_files has 8 columns,
+        # so it will fail at runtime. Use explicit column names like the INSERT at
+        # line ~639, and include file_modified (st_mtime) instead of datetime('now').
         conn.execute(
             "INSERT OR REPLACE INTO ingested_files VALUES (?,?,?,datetime('now'),?,?)",
             (relative_path, "pdf", file_path.stat().st_size, 0, f"error: {e}")
@@ -580,6 +600,10 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     if not docs_dir.exists():
         _progress("error", 0, 0, f"Documents directory not found: {docs_dir}")
         print(f"ERROR: Documents directory not found: {docs_dir}")
+        # TODO: Raise an exception (e.g., FileNotFoundError) instead of calling
+        # sys.exit(1). The GUI calls build_database() in a background thread,
+        # so sys.exit() would kill the entire application instead of reporting
+        # the error gracefully through the progress callback.
         sys.exit(1)
 
     if rebuild and db_path.exists():

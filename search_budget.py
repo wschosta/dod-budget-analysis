@@ -134,6 +134,9 @@ def search_budget_lines(conn: sqlite3.Connection, query: str,
                 WHERE budget_lines_fts MATCH ?
             )
         """)
+        # TODO: Sanitize query before passing to FTS5 — special characters like
+        # quotes, parentheses, colons, and asterisks can cause FTS5 syntax errors
+        # or unexpected matches. Escape or strip FTS5 operators from user input.
         # Convert natural language to FTS5 query
         fts_query = " OR ".join(query.split())
         params.append(fts_query)
@@ -165,6 +168,9 @@ def search_budget_lines(conn: sqlite3.Connection, query: str,
     return conn.execute(sql, params).fetchall()
 
 
+# TODO: The category parameter is accepted here but never passed from the CLI
+# or interactive mode. Add a --category flag to the argument parser (like --org)
+# and wire it through so users can filter PDF results by source category.
 def search_pdf_pages(conn: sqlite3.Connection, query: str,
                      category: str = None, limit: int = 15) -> list:
     """Search PDF document content."""
@@ -266,6 +272,8 @@ def display_pdf_results(results: list, query: str):
                 print(f"    [TABLE] {table_snippet[:200]}")
 
 
+# TODO: Consider highlighting matching terms in the snippet output (e.g., with
+# ANSI bold/color codes or uppercase markers) to make matches easier to spot.
 def _extract_snippet(text: str, query: str, max_len: int = 300) -> str:
     """Extract a text snippet around query terms."""
     if not text or not query:
@@ -350,6 +358,8 @@ def interactive_mode(conn: sqlite3.Connection):
             parts = raw[4:].strip().split(None, 1)
             org_filter = parts[0]
             query = parts[1] if len(parts) > 1 else ""
+        # TODO: Add exhibit:<type> prefix to interactive mode (e.g., "exhibit:r1
+        # missile") — the CLI supports --exhibit but interactive mode does not.
         elif raw.lower().startswith("top "):
             org = raw[4:].strip()
             results = search_budget_lines(conn, "", org=org, limit=20)
@@ -403,6 +413,8 @@ def main():
                         help="Show data source tracking")
     parser.add_argument("--interactive", "-i", action="store_true",
                         help="Interactive search mode")
+    # TODO: Add --export flag (csv/json) so search results can be saved to a file
+    # for downstream analysis, e.g.: python search_budget.py "cyber" --export csv
     args = parser.parse_args()
 
     conn = get_connection(args.db)
