@@ -85,7 +85,7 @@ def show_summary(conn: sqlite3.Connection):
                SUM(amount_fy2026_request) as total
         FROM budget_lines
         WHERE amount_fy2026_request IS NOT NULL
-          AND sheet_name LIKE '%Exhibit%' OR sheet_name LIKE '%Title%' OR sheet_name LIKE '%FY 2026%'
+          AND (sheet_name LIKE '%Exhibit%' OR sheet_name LIKE '%Title%' OR sheet_name LIKE '%FY 2026%')
         GROUP BY account_title
         HAVING total > 0
         ORDER BY total DESC
