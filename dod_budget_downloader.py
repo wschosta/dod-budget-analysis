@@ -1,27 +1,45 @@
 """
-DoD Comptroller Budget Document Downloader
+DoD Budget Document Downloader
 
-Downloads budget documents (PDFs, Excel files, ZIPs) from the DoD Comptroller
-website and service-specific budget pages for selected fiscal years.
+Bulk-downloads budget justification documents (PDFs, Excel spreadsheets, ZIPs)
+from the Department of Defense Comptroller website and individual military
+service budget pages.  Supports both interactive and fully automated (CLI)
+operation, with optional GUI progress tracking via tkinter.
 
-Sources:
-  - comptroller : Main DoD summary budget documents (comptroller.war.gov)
-  - defense-wide: Defense Wide budget justification books (comptroller.war.gov)
-  - army        : US Army budget materials (asafm.army.mil)
-  - navy        : US Navy/Marine Corps budget materials (secnav.navy.mil)
-  - airforce    : US Air Force & Space Force budget materials (saffm.hq.af.mil)
+Data Sources
+------------
+  comptroller  : Main DoD summary budget documents   (comptroller.war.gov)
+  defense-wide : Defense-Wide budget justification    (comptroller.war.gov)
+  army         : US Army budget materials             (asafm.army.mil, WAF-protected)
+  navy         : US Navy / Marine Corps materials     (secnav.navy.mil, SharePoint)
+  airforce     : US Air Force / Space Force materials (saffm.hq.af.mil, WAF-protected)
 
-Requirements:
+Architecture
+------------
+- ``requests`` + ``BeautifulSoup`` for sites with standard HTML responses
+  (comptroller, defense-wide).
+- ``playwright`` (Chromium, headless=False) for WAF/bot-protected and
+  SharePoint-rendered sites (army, navy, airforce).  The browser window is
+  positioned off-screen so it never appears on the desktop.
+- Two-phase GUI: a *discovery* progress bar while scanning sources, followed
+  by a *download* progress bar with per-file speed, ETA, and running log.
+- File-existence checking skips previously downloaded files instantly (>1 KB)
+  without issuing any network requests.
+
+Requirements
+------------
   pip install requests beautifulsoup4 playwright
   python -m playwright install chromium
 
-Usage:
-    python dod_budget_downloader.py                              # Interactive
-    python dod_budget_downloader.py --years 2025                 # FY2025 comptroller only
-    python dod_budget_downloader.py --years 2025 --sources all   # FY2025 all sources
-    python dod_budget_downloader.py --years 2025 --sources army navy
-    python dod_budget_downloader.py --years 2025 --list          # List without downloading
-    python dod_budget_downloader.py --years all --sources all    # Everything
+Usage Examples
+--------------
+  python dod_budget_downloader.py                              # Interactive
+  python dod_budget_downloader.py --years 2026                 # FY2026 comptroller
+  python dod_budget_downloader.py --years 2026 --sources all   # FY2026 all sources
+  python dod_budget_downloader.py --years 2026 --sources army navy
+  python dod_budget_downloader.py --years 2026 --list          # Dry-run listing
+  python dod_budget_downloader.py --years all --sources all    # Everything
+  python dod_budget_downloader.py --no-gui                     # Terminal-only mode
 """
 
 import argparse
@@ -41,15 +59,22 @@ from bs4 import BeautifulSoup
 
 BASE_URL = "https://comptroller.war.gov"
 BUDGET_MATERIALS_URL = f"{BASE_URL}/Budget-Materials/"
+
+# File extensions treated as downloadable budget documents.
 DOWNLOADABLE_EXTENSIONS = {".pdf", ".xlsx", ".xls", ".zip", ".csv"}
+
+# Hostnames whose links are silently ignored during link extraction.
 IGNORED_HOSTS = {"dam.defense.gov"}
+
 DEFAULT_OUTPUT_DIR = Path("DoD_Budget_Documents")
 
+# Canonical list of data sources, in display order.
 ALL_SOURCES = ["comptroller", "defense-wide", "army", "navy", "airforce"]
 
-# Sources that require a real browser due to WAF/bot protection
+# Sources that need a Playwright browser to bypass WAF or render SharePoint.
 BROWSER_REQUIRED_SOURCES = {"army", "navy", "airforce"}
 
+# HTTP headers used by the requests-based session to mimic a real browser.
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -60,6 +85,8 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+# Per-source URL templates and human-readable labels.
+# Placeholders: {fy} = 4-digit year, {fy2} = 2-digit year.
 SERVICE_PAGE_TEMPLATES = {
     "defense-wide": {
         "url": "https://comptroller.war.gov/Budget-Materials/FY{fy}BudgetJustification/",
@@ -108,6 +135,7 @@ class ProgressTracker:
         return self.session_bytes + self.existing_bytes
 
     def _elapsed(self) -> str:
+        """Return elapsed time since session start as a human-readable string."""
         secs = int(time.time() - self.start_time)
         m, s = divmod(secs, 60)
         h, m = divmod(m, 60)
@@ -116,6 +144,7 @@ class ProgressTracker:
         return f"{m}m {s:02d}s"
 
     def _format_bytes(self, b: int) -> str:
+        """Format a byte count as KB / MB / GB for display."""
         if b < 1024 * 1024:
             return f"{b / 1024:.0f} KB"
         if b < 1024 * 1024 * 1024:
@@ -123,15 +152,17 @@ class ProgressTracker:
         return f"{b / (1024 * 1024 * 1024):.2f} GB"
 
     def _bar(self, fraction: float, width: int = 30) -> str:
+        """Render a simple ASCII progress bar like [####------]."""
         filled = int(width * fraction)
         return f"[{'#' * filled}{'-' * (width - filled)}]"
 
     def set_source(self, year: str, source: str):
+        """Update the active source/year context for display."""
         self.current_year = year
         self.current_source = source
 
     def print_overall(self):
-        """Print the overall progress line."""
+        """Print the overall progress line to the terminal."""
         frac = self.processed / self.total_files if self.total_files else 0
         pct = frac * 100
         bar = self._bar(frac, 25)
@@ -527,20 +558,24 @@ class GuiProgressTracker:
     # ── Download phase API ──
 
     def set_source(self, year: str, source: str):
+        """Update the active source/year context for the GUI header."""
         self.current_year = year
         self.current_source = source
 
     def print_overall(self):
-        pass  # GUI updates via _poll
+        """No-op — the GUI refreshes automatically via ``_poll``."""
+        pass
 
     def print_file_progress(self, filename: str, downloaded: int, total: int,
                             file_start: float):
+        """Update shared per-file state; the GUI thread reads it on next poll."""
         self._file_name = filename
         self._file_downloaded = downloaded
         self._file_total = total
         self._file_start = file_start
 
     def file_done(self, filename: str, size: int, status: str):
+        """Record a completed file: update counters, append to log, reset file bar."""
         tag = {"ok": "OK", "skip": "SKIP", "redownload": "OK",
                "fail": "FAIL"}.get(status, status.upper())
 
@@ -556,7 +591,7 @@ class GuiProgressTracker:
         size_str = f" ({self._format_bytes(size)})" if size > 0 else ""
         self._log_lines.append(f"[{tag}] {filename}{size_str}")
 
-        # Reset file bar
+        # Reset file bar for the next download
         self._file_name = ""
         self._file_downloaded = 0
         self._file_total = 0
@@ -579,6 +614,7 @@ _failure_log: list[dict] = []  # {"filename": ..., "url": ..., "source": ..., "y
 # ── Session ────────────────────────────────────────────────────────────────────
 
 def get_session() -> requests.Session:
+    """Create a ``requests.Session`` with retry logic and connection pooling."""
     session = requests.Session()
     session.headers.update(HEADERS)
     adapter = requests.adapters.HTTPAdapter(
@@ -639,6 +675,7 @@ def _get_browser_context():
 
 
 def _close_browser():
+    """Shut down the Playwright browser and stop the engine."""
     global _pw_instance, _pw_browser, _pw_context
     if _pw_browser:
         _pw_browser.close()
@@ -848,6 +885,7 @@ def _extract_downloadable_links(soup: BeautifulSoup, page_url: str,
 
 
 def _sanitize_filename(name: str) -> str:
+    """Remove query strings and illegal filesystem characters from a filename."""
     if "?" in name:
         name = name.split("?")[0]
     for ch in '<>:"/\\|?*':
@@ -856,12 +894,18 @@ def _sanitize_filename(name: str) -> str:
 
 
 def _is_browser_source(source: str) -> bool:
+    """Return True if the source requires Playwright instead of requests."""
     return source in BROWSER_REQUIRED_SOURCES
 
 
 # ── Comptroller (main page) ───────────────────────────────────────────────────
 
 def discover_fiscal_years(session: requests.Session) -> dict[str, str]:
+    """Scrape the Budget Materials page to find available fiscal year links.
+
+    Returns a dict mapping year strings (e.g. "2026") to their page URLs,
+    sorted most-recent first.
+    """
     print("Discovering available fiscal years...")
     resp = session.get(BUDGET_MATERIALS_URL, timeout=30)
     resp.raise_for_status()
@@ -879,6 +923,7 @@ def discover_fiscal_years(session: requests.Session) -> dict[str, str]:
 
 def discover_comptroller_files(session: requests.Session, year: str,
                                page_url: str) -> list[dict]:
+    """Discover downloadable files on a Comptroller fiscal-year page."""
     print(f"  [Comptroller] Scanning FY{year}...")
     resp = session.get(page_url, timeout=30)
     resp.raise_for_status()
@@ -889,6 +934,7 @@ def discover_comptroller_files(session: requests.Session, year: str,
 # ── Defense Wide ──────────────────────────────────────────────────────────────
 
 def discover_defense_wide_files(session: requests.Session, year: str) -> list[dict]:
+    """Discover Defense-Wide budget justification books for a given FY."""
     url = SERVICE_PAGE_TEMPLATES["defense-wide"]["url"].format(fy=year)
     print(f"  [Defense Wide] Scanning FY{year}...")
     try:
@@ -904,6 +950,7 @@ def discover_defense_wide_files(session: requests.Session, year: str) -> list[di
 # ── Army (browser required) ──────────────────────────────────────────────────
 
 def discover_army_files(_session: requests.Session, year: str) -> list[dict]:
+    """Discover US Army budget files via Playwright (WAF-protected site)."""
     url = SERVICE_PAGE_TEMPLATES["army"]["url"]
     print(f"  [Army] Scanning FY{year} (browser)...")
     files = _browser_extract_links(url, text_filter=f"/{year}/")
@@ -917,6 +964,12 @@ _navy_archive_cache: list[dict] | None = None
 
 
 def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
+    """Discover US Navy budget files from the FMB SharePoint archive page.
+
+    The archive page contains links for all fiscal years.  It is loaded once
+    via Playwright and the results are cached in ``_navy_archive_cache`` so
+    that subsequent FY queries are instant Python-side filters.
+    """
     global _navy_archive_cache
     url = SERVICE_PAGE_TEMPLATES["navy"]["url"]
     fy2 = year[-2:]
@@ -940,6 +993,7 @@ def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
 # ── Air Force (browser required) ─────────────────────────────────────────────
 
 def discover_airforce_files(_session: requests.Session, year: str) -> list[dict]:
+    """Discover US Air Force budget files via Playwright (WAF-protected site)."""
     fy2 = year[-2:]
     url = SERVICE_PAGE_TEMPLATES["airforce"]["url"].format(fy2=fy2)
     print(f"  [Air Force] Scanning FY{year} (browser)...")
@@ -1002,6 +1056,12 @@ def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
 
 def download_file(session: requests.Session, url: str, dest_path: Path,
                   overwrite: bool = False, use_browser: bool = False) -> bool:
+    """Download a single file, choosing requests or Playwright as appropriate.
+
+    Skips files that already exist and are >1 KB without any network call.
+    For smaller/empty files, a HEAD request verifies whether a redownload is
+    needed.  Returns True on success (or skip), False on failure.
+    """
     global _tracker
     fname = dest_path.name
 
@@ -1084,6 +1144,7 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
 # ── Display ───────────────────────────────────────────────────────────────────
 
 def list_files(all_files: dict[str, dict[str, list[dict]]]) -> None:
+    """Pretty-print all discovered files grouped by year and source (dry-run)."""
     grand_total = 0
     for year in sorted(all_files.keys(), reverse=True):
         sources = all_files[year]
@@ -1104,6 +1165,7 @@ def list_files(all_files: dict[str, dict[str, list[dict]]]) -> None:
 # ── Interactive ───────────────────────────────────────────────────────────────
 
 def interactive_select_years(available: dict[str, str]) -> list[str]:
+    """Prompt the user to pick fiscal years from a numbered menu."""
     years = list(available.keys())
     print("\nAvailable Fiscal Years:")
     print("-" * 40)
@@ -1141,6 +1203,7 @@ def interactive_select_years(available: dict[str, str]) -> list[str]:
 
 
 def interactive_select_sources() -> list[str]:
+    """Prompt the user to pick data sources from a numbered menu."""
     labels = {
         "comptroller": "Comptroller (main DoD summary documents)",
         "defense-wide": "Defense Wide (budget justification books)",
@@ -1186,6 +1249,7 @@ def interactive_select_sources() -> list[str]:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    """Entry point: parse arguments, discover files, and run downloads."""
     parser = argparse.ArgumentParser(
         description="Download budget documents from DoD Comptroller and service websites."
     )
