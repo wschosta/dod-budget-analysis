@@ -40,6 +40,146 @@ Usage Examples
   python dod_budget_downloader.py --years 2026 --list          # Dry-run listing
   python dod_budget_downloader.py --years all --sources all    # Everything
   python dod_budget_downloader.py --no-gui                     # Terminal-only mode
+
+──────────────────────────────────────────────────────────────────────────────
+Roadmap TODOs for this file (Step 1.A)
+──────────────────────────────────────────────────────────────────────────────
+
+TODO 1.A1-a: Audit source coverage by running --list --years all --sources all.
+    Capture the output and compare against the known universe of DoD budget
+    document types.  Record: which sources produce files, how many files per
+    source/FY, and which file types (PDF, XLSX, ZIP, CSV) are found.
+    Token-efficient tip: pipe output to a file, then write a 20-line script
+    that parses the listing and produces a coverage matrix (source × FY).
+    This is an investigative task — run in a live environment with network.
+
+TODO 1.A1-b: Identify missing DoD component sources.
+    The following agencies are NOT currently covered and may publish their own
+    budget justification books:
+    - Defense Logistics Agency (DLA)
+    - Missile Defense Agency (MDA) — may have standalone exhibits on mda.mil
+    - SOCOM (Special Operations Command) — socom.mil
+    - Defense Health Agency (DHA)
+    - Defense Information Systems Agency (DISA)
+    - National Guard Bureau
+    For each: manually check whether they publish budget materials at a distinct
+    URL (separate from the Defense-Wide page on comptroller.war.gov).  If yes,
+    add to SERVICE_PAGE_TEMPLATES with url and label.
+    Token-efficient tip: this requires web browsing.  For each agency, try a
+    single search query like "site:mda.mil budget justification" and check
+    the top result.  Record findings in DATA_SOURCES.md.
+
+TODO 1.A1-c: Verify that defense-wide discovery captures all J-Books.
+    The Defense-Wide page at comptroller.war.gov/Budget-Materials/FY{fy}
+    BudgetJustification/ may contain links to individual agency justification
+    books.  Run discover_defense_wide_files() for a sample FY and compare the
+    file list against the known set of defense agency J-Books.
+    Token-efficient tip: run with --list --years 2026 --sources defense-wide
+    and inspect output.  ~5 minutes of manual review.
+
+TODO 1.A2-a: Test historical fiscal year reach.
+    Run discover_fiscal_years() and record all years returned.  Then attempt
+    discover_comptroller_files() for the oldest year found.  Goal: confirm
+    data is available back to at least FY2017.
+    Token-efficient tip: run --list --years 2017 2018 2019 --sources comptroller
+    and check for non-empty results.  If the comptroller site doesn't list
+    years before a certain point, check the Wayback Machine or alternate
+    archive URLs.  This is investigative — must run with network access.
+
+TODO 1.A2-b: Handle alternate URL patterns for older fiscal years.
+    Older FYs may use different URL structures on comptroller.war.gov (e.g.,
+    different subdirectory naming, or documents hosted on a legacy domain).
+    If TODO 1.A2-a finds gaps, inspect the actual page HTML for those years
+    and add pattern variants to discover_comptroller_files().
+    Dependency: TODO 1.A2-a must be done first to identify which years fail.
+
+TODO 1.A2-c: Handle service-specific historical URL changes.
+    Each service site (Army, Navy, Air Force) may have reorganized over the
+    years.  Test discover_army_files(), discover_navy_files(), and
+    discover_airforce_files() for FY2017–FY2020 and record which succeed.
+    For failures, inspect the site and add alternate URL patterns.
+    Token-efficient tip: run --list --years 2017 2018 --sources army navy
+    airforce and check output.  Fix one service at a time.
+
+TODO 1.A3-a: Add download manifest generation.
+    After discovery (but before download), write a manifest.json to the output
+    directory listing every file to be downloaded: url, expected_filename,
+    source, fiscal_year, extension.  After download, update each entry with
+    status (ok/skip/fail), file_size, and file_hash (SHA-256).
+    Token-efficient tip: add ~30 lines to main() — serialize all_files to JSON
+    before the download loop, then update entries inside download_file().
+
+TODO 1.A3-b: Add SHA-256 checksum verification.
+    After downloading a file, compute its SHA-256 hash.  On subsequent runs,
+    compare the hash to the manifest.  If a file exists but its hash doesn't
+    match the manifest (corrupted), redownload it.
+    Modify _check_existing_file() to accept an optional expected_hash param.
+    Token-efficient tip: add hashlib.sha256() inside download_file() after
+    writing — ~10 lines.  Modify _check_existing_file() to read and compare.
+
+TODO 1.A3-c: Improve WAF/bot detection handling.
+    Currently, if a WAF blocks a request, the error is generic ("All browser
+    download strategies failed").  Detect common WAF block signatures:
+    - HTTP 403 with "Access Denied" body
+    - HTTP 200 with a CAPTCHA/challenge page (check for "captcha", "challenge",
+      "verify you are human" in response text)
+    - Cloudflare challenge (check for "cf-browser-verification")
+    When detected, log a specific warning and optionally pause to let the user
+    solve the CAPTCHA manually (in browser mode).
+    Token-efficient tip: add a 15-line _detect_waf_block(response) helper
+    called from download_file() and _browser_download_file().
+
+TODO 1.A3-d: Add configurable retry with exponential backoff for downloads.
+    The current retry logic is on the Session adapter (3 retries for 429/5xx).
+    Add application-level retry for download_file(): if a download fails,
+    retry up to 3 times with delays of 2s, 4s, 8s.  Log each retry attempt.
+    Token-efficient tip: wrap the try/except in download_file() in a
+    for attempt in range(max_retries) loop.  ~10 lines changed.
+
+TODO 1.A3-e: Detect and handle ZIP files containing nested documents.
+    Some sources provide ZIP archives that contain the actual Excel/PDF files.
+    After downloading a .zip, optionally extract it into the same directory
+    and add the extracted files to the manifest.
+    Token-efficient tip: add a --extract-zips flag.  After download_file()
+    succeeds for a .zip, call zipfile.extractall() into dest_dir.  ~20 lines.
+
+TODO 1.A4-a: Create a CLI-only download script (no GUI dependency).
+    Extract the core download logic into a function that can be called
+    programmatically: download_all(years, sources, output_dir, **opts).
+    This decouples the pipeline from the interactive/GUI code so it can be
+    called from cron, CI, or the refresh script (see TODO 2.B4-a).
+    Token-efficient tip: the logic already exists in main() — refactor by
+    pulling lines 1286–1406 into a download_all() function that takes args
+    as parameters instead of parsing sys.argv.  ~20 lines of refactoring.
+
+TODO 1.A4-b: Add a --since flag for incremental updates.
+    Accept --since YYYY-MM-DD.  During discovery, filter out files whose
+    page was last updated before that date (if the server provides
+    Last-Modified headers).  More practically: compare against the manifest
+    from the previous run — skip files already in the manifest with matching
+    hashes.
+    Dependency: TODO 1.A3-a (manifest) should be done first.
+
+TODO 1.A4-c: Create a GitHub Actions workflow for scheduled downloads.
+    Write .github/workflows/update-data.yml that:
+    1. Checks out the repo
+    2. Installs dependencies (including playwright)
+    3. Runs the download pipeline for the most recent 2 FYs
+    4. Runs build_budget_db.py
+    5. Commits and pushes updated data (or uploads as artifact)
+    Schedule: weekly or on workflow_dispatch.
+    Token-efficient tip: ~40 lines of YAML.  Use actions/cache for playwright
+    browsers.  Store the manifest as a committed file for diffing.
+
+TODO 1.A5-a: Create DATA_SOURCES.md documenting all data sources.
+    For each source (comptroller, defense-wide, army, navy, airforce, plus
+    any new ones from TODO 1.A1-b): document the base URL, URL pattern per FY,
+    file types available, fiscal years confirmed available, any access
+    requirements (WAF, browser needed), and notes on site behavior.
+    See DATA_SOURCES.md for the skeleton.
+    Token-efficient tip: most of this information is already in this file's
+    SERVICE_PAGE_TEMPLATES and source-specific functions — extract and format
+    as markdown.  ~100 lines.
 """
 
 import argparse
