@@ -1,0 +1,29 @@
+# Data files
+*.sqlite
+DoD_Budget_Documents/
+
+# Temp/working directories
+_ul*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/
