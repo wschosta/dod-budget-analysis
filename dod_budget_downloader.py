@@ -90,7 +90,8 @@ class ProgressTracker:
         self.completed = 0
         self.skipped = 0
         self.failed = 0
-        self.total_bytes = 0
+        self.session_bytes = 0   # bytes downloaded this session only
+        self.existing_bytes = 0  # bytes of files already on disk (skipped)
         self.start_time = time.time()
         self.current_source = ""
         self.current_year = ""
@@ -100,6 +101,11 @@ class ProgressTracker:
     @property
     def processed(self) -> int:
         return self.completed + self.skipped + self.failed
+
+    @property
+    def total_bytes(self) -> int:
+        """Total database size = downloaded this session + existing files."""
+        return self.session_bytes + self.existing_bytes
 
     def _elapsed(self) -> str:
         secs = int(time.time() - self.start_time)
@@ -129,13 +135,15 @@ class ProgressTracker:
         frac = self.processed / self.total_files if self.total_files else 0
         pct = frac * 100
         bar = self._bar(frac, 25)
-        dl = self._format_bytes(self.total_bytes)
+        dl = self._format_bytes(self.session_bytes)
+        db = self._format_bytes(self.total_bytes)
         elapsed = self._elapsed()
         remaining = self.total_files - self.processed
         line = (
             f"\r  Overall: {bar} {pct:5.1f}%  "
             f"{self.processed}/{self.total_files} files  "
             f"{dl} downloaded  "
+            f"({db} total)  "
             f"{elapsed} elapsed  "
             f"({remaining} remaining)"
         )
@@ -186,10 +194,10 @@ class ProgressTracker:
 
         if status == "ok" or status == "redownload":
             self.completed += 1
-            self.total_bytes += size
+            self.session_bytes += size
         elif status == "skip":
             self.skipped += 1
-            self.total_bytes += size
+            self.existing_bytes += size
         elif status == "fail":
             self.failed += 1
 
@@ -209,7 +217,8 @@ class GuiProgressTracker:
         self.completed = 0
         self.skipped = 0
         self.failed = 0
-        self.total_bytes = 0
+        self.session_bytes = 0   # bytes downloaded this session only
+        self.existing_bytes = 0  # bytes of files already on disk (skipped)
         self.start_time = time.time()
         self.current_source = ""
         self.current_year = ""
@@ -231,6 +240,11 @@ class GuiProgressTracker:
     @property
     def processed(self) -> int:
         return self.completed + self.skipped + self.failed
+
+    @property
+    def total_bytes(self) -> int:
+        """Total database size = downloaded this session + existing files."""
+        return self.session_bytes + self.existing_bytes
 
     def _format_bytes(self, b: int) -> str:
         if b < 1024 * 1024:
@@ -336,7 +350,7 @@ class GuiProgressTracker:
         root.mainloop()
 
     def _poll(self):
-        """Called every 150ms in the GUI thread to refresh widgets."""
+        """Called every 50ms in the GUI thread to refresh widgets."""
         if self._closed:
             return
 
@@ -361,9 +375,9 @@ class GuiProgressTracker:
         else:
             eta_str = "estimating..."
         self._stats_var.set(
-            f"{self._format_bytes(self.total_bytes)} downloaded  |  "
-            f"{self._elapsed()} elapsed  |  "
-            f"{remaining} remaining  |  {eta_str}")
+            f"{self._format_bytes(self.session_bytes)} downloaded  |  "
+            f"{self._format_bytes(self.total_bytes)} total  |  "
+            f"{self._elapsed()} elapsed  |  {eta_str}")
         self._count_var.set(
             f"Downloaded: {self.completed}    "
             f"Skipped: {self.skipped}    "
@@ -403,7 +417,7 @@ class GuiProgressTracker:
             self._log_text.see("end")
             self._log_text.configure(state="disabled")
 
-        self._root.after(150, self._poll)
+        self._root.after(50, self._poll)
 
     def _on_close(self):
         self._closed = True
@@ -429,10 +443,10 @@ class GuiProgressTracker:
 
         if status == "ok" or status == "redownload":
             self.completed += 1
-            self.total_bytes += size
+            self.session_bytes += size
         elif status == "skip":
             self.skipped += 1
-            self.total_bytes += size
+            self.existing_bytes += size
         elif status == "fail":
             self.failed += 1
 
@@ -872,16 +886,24 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
     fname = dest_path.name
 
     if not overwrite and dest_path.exists():
+        local_size = dest_path.stat().st_size
+        if local_size > 1024:
+            # File exists and is >1KB — skip immediately without HEAD request
+            if _tracker:
+                _tracker.file_done(fname, local_size, "skip")
+            else:
+                print(f"    [SKIP] Already exists: {fname}")
+            return True
+        # File is suspiciously small — verify via HEAD
         status = _check_existing_file(session, url, dest_path, use_browser)
         if status == "skip":
-            size = dest_path.stat().st_size
             if _tracker:
-                _tracker.file_done(fname, size, "skip")
+                _tracker.file_done(fname, local_size, "skip")
             else:
                 print(f"    [SKIP] Already exists: {fname}")
             return True
         if status == "redownload":
-            local_mb = dest_path.stat().st_size / (1024 * 1024)
+            local_mb = local_size / (1024 * 1024)
             print(f"\r    [REDOWNLOAD] Size mismatch for {fname} "
                   f"(local {local_mb:.1f} MB)")
 
@@ -1227,14 +1249,15 @@ def main():
 
     # ── Summary ──
     elapsed = _tracker._elapsed()
-    total_dl = _tracker._format_bytes(_tracker.total_bytes)
+    session_dl = _tracker._format_bytes(_tracker.session_bytes)
+    total_db = _tracker._format_bytes(_tracker.total_bytes)
     print(f"\n\n{'='*70}")
     print(f"  Download Complete")
     print(f"{'='*70}")
-    print(f"  Downloaded: {_tracker.completed}")
+    print(f"  Downloaded: {_tracker.completed}  ({session_dl})")
     print(f"  Skipped:    {_tracker.skipped}")
     print(f"  Failed:     {_tracker.failed}")
-    print(f"  Total size: {total_dl}")
+    print(f"  Database:   {total_db}")
     print(f"  Elapsed:    {elapsed}")
     print(f"  Location:   {args.output.resolve()}")
 
@@ -1256,9 +1279,9 @@ def main():
     if isinstance(_tracker, GuiProgressTracker):
         # Keep GUI open for a moment so user can see final state
         _tracker._log_lines.append(
-            f"\n--- Complete: {_tracker.completed} downloaded, "
+            f"\n--- Complete: {_tracker.completed} downloaded ({session_dl}), "
             f"{_tracker.skipped} skipped, {_tracker.failed} failed "
-            f"({total_dl}, {elapsed}) ---")
+            f"(DB: {total_db}, {elapsed}) ---")
         time.sleep(2)
         _tracker.close()
     _tracker = None
