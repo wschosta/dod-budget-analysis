@@ -516,7 +516,10 @@ def _get_browser_context():
     _pw_instance = sync_playwright().start()
     _pw_browser = _pw_instance.chromium.launch(
         headless=False,
-        args=["--disable-blink-features=AutomationControlled"],
+        args=[
+            "--disable-blink-features=AutomationControlled",
+            "--window-position=-32000,-32000",
+        ],
     )
     _pw_context = _pw_browser.new_context(
         user_agent=(
