@@ -582,6 +582,8 @@ def get_session() -> requests.Session:
     session = requests.Session()
     session.headers.update(HEADERS)
     adapter = requests.adapters.HTTPAdapter(
+        pool_connections=10,
+        pool_maxsize=10,
         max_retries=requests.adapters.Retry(
             total=3,
             backoff_factor=1,
@@ -1046,10 +1048,9 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
 
         total_size = int(resp.headers.get("content-length", 0))
         downloaded = 0
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(dest_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=8192):
+            for chunk in resp.iter_content(chunk_size=131072):  # 128 KB
                 f.write(chunk)
                 downloaded += len(chunk)
                 if _tracker:
@@ -1325,7 +1326,7 @@ def main():
             if use_gui:
                 _tracker.discovery_step(step_label, len(files))
 
-            time.sleep(0.5)
+            time.sleep(0.2)
 
     # ── List mode ──
     if args.list_only:
@@ -1367,13 +1368,17 @@ def main():
             print(f"{'='*70}")
             _tracker.set_source(year, source_label)
 
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            # Shorter delay for direct downloads; longer for browser (WAF)
+            delay = 0.3 if use_browser else 0.05
+
             for file_info in files:
                 dest = dest_dir / file_info["filename"]
                 download_file(
                     session, file_info["url"], dest,
                     args.overwrite, use_browser=use_browser,
                 )
-                time.sleep(0.3)
+                time.sleep(delay)
 
     # ── Cleanup ──
     _close_browser()
