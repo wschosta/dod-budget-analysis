@@ -48,7 +48,7 @@ DEFAULT_OUTPUT_DIR = Path("DoD_Budget_Documents")
 ALL_SOURCES = ["comptroller", "defense-wide", "army", "navy", "airforce"]
 
 # Sources that require a real browser due to WAF/bot protection
-BROWSER_REQUIRED_SOURCES = {"army", "airforce"}
+BROWSER_REQUIRED_SOURCES = {"army", "navy", "airforce"}
 
 HEADERS = {
     "User-Agent": (
@@ -70,7 +70,7 @@ SERVICE_PAGE_TEMPLATES = {
         "label": "US Army",
     },
     "navy": {
-        "url": "https://www.secnav.navy.mil/fmc/Pages/Fiscal-Year-{fy}.aspx",
+        "url": "https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx",
         "label": "US Navy",
     },
     "airforce": {
@@ -908,19 +908,31 @@ def discover_army_files(_session: requests.Session, year: str) -> list[dict]:
     return files
 
 
-# ── Navy ──────────────────────────────────────────────────────────────────────
+# ── Navy (browser required — SharePoint site) ────────────────────────────────
 
-def discover_navy_files(session: requests.Session, year: str) -> list[dict]:
-    url = SERVICE_PAGE_TEMPLATES["navy"]["url"].format(fy=year)
-    print(f"  [Navy] Scanning FY{year}...")
-    try:
-        resp = session.get(url, timeout=30)
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        print(f"    WARNING: Could not fetch Navy page for FY{year}: {e}")
-        return []
-    soup = BeautifulSoup(resp.text, "html.parser")
-    return _extract_downloadable_links(soup, url)
+# Cache: load the archive page once, reuse for all years
+_navy_archive_cache: list[dict] | None = None
+
+
+def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
+    global _navy_archive_cache
+    url = SERVICE_PAGE_TEMPLATES["navy"]["url"]
+    fy2 = year[-2:]
+    print(f"  [Navy] Scanning FY{year} (browser, archive page)...")
+
+    # Load archive page once and cache all links
+    if _navy_archive_cache is None:
+        print(f"    Loading Navy archive (first scan, may take a moment)...")
+        _navy_archive_cache = _browser_extract_links(url)
+
+    # Filter cached links for this fiscal year
+    # Navy URLs typically contain patterns like /26pres/ or /FY26/ or /2026/
+    matched = [f for f in _navy_archive_cache
+               if f"{fy2}pres" in f["url"].lower()
+               or f"/{fy2}/" in f["url"].lower()
+               or f"/fy{fy2}" in f["url"].lower()
+               or f"/{year}/" in f["url"]]
+    return matched
 
 
 # ── Air Force (browser required) ─────────────────────────────────────────────
