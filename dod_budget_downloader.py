@@ -868,9 +868,6 @@ SOURCE_DISCOVERERS = {
 
 
 # ── Download ──────────────────────────────────────────────────────────────────
-#TODO - this should be a full list compare, if we're trusting the local file we can
-# just totally ignore any matched file names. We don't need to do those in a loop,
-# just that don't appear
 def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
                          use_browser: bool = False) -> str:
     """Check if a local file matches the remote.
@@ -1247,7 +1244,24 @@ def main():
             print(f"{'='*70}")
             _tracker.set_source(year, source_label)
 
-            for file_info in files:
+            # Pre-filter: skip files that already exist locally (non-empty)
+            # to avoid per-file HEAD requests when not overwriting.
+            to_download = []
+            if not args.overwrite:
+                for file_info in files:
+                    dest = dest_dir / file_info["filename"]
+                    if dest.exists() and dest.stat().st_size > 0:
+                        size = dest.stat().st_size
+                        if _tracker:
+                            _tracker.file_done(dest.name, size, "skip")
+                        else:
+                            print(f"    [SKIP] Already exists: {dest.name}")
+                    else:
+                        to_download.append(file_info)
+            else:
+                to_download = files
+
+            for file_info in to_download:
                 dest = dest_dir / file_info["filename"]
                 download_file(
                     session, file_info["url"], dest,
