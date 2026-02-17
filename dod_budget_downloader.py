@@ -200,15 +200,14 @@ ALL_SOURCES = ["comptroller", "defense-wide", "army", "navy", "airforce"]
 # Sources that require a real browser due to WAF/bot protection
 BROWSER_REQUIRED_SOURCES = {"army", "navy", "airforce"}
 
-# TODO: The User-Agent string is duplicated here and in _get_browser_context().
-# Extract to a single constant (e.g., USER_AGENT) to avoid drift between the
-# requests session and the Playwright browser context.
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
+
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": USER_AGENT,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
 }
@@ -716,11 +715,7 @@ def _get_browser_context():
         ],
     )
     _pw_context = _pw_browser.new_context(
-        user_agent=(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
+        user_agent=USER_AGENT,
         viewport={"width": 1920, "height": 1080},
         accept_downloads=True,
     )
@@ -1282,6 +1277,10 @@ def main():
         "--no-gui", action="store_true",
         help="Disable GUI progress window (terminal-only output)",
     )
+    parser.add_argument(
+        "--delay", type=float, default=0.5,
+        help="Seconds to wait between requests (default: 0.5)",
+    )
     args = parser.parse_args()
 
     session = get_session()
@@ -1377,7 +1376,7 @@ def main():
             #if use_gui:
             #    _tracker.discovery_step(step_label, len(files))
 
-            time.sleep(0.5)  # TODO: Make inter-request delays configurable (--delay)
+            time.sleep(args.delay)
 
     # ── List mode ──
     if args.list_only:
@@ -1442,7 +1441,7 @@ def main():
                     session, file_info["url"], dest,
                     args.overwrite, use_browser=use_browser,
                 )
-                time.sleep(0.3)  # TODO: Use same configurable delay as discovery
+                time.sleep(args.delay)
 
     # ── Cleanup ──
     _close_browser()

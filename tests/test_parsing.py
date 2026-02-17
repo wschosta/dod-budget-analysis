@@ -15,11 +15,11 @@ import pytest
 # Ensure the project root is importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# build_budget_db imports pdfplumber at module level, which may fail in
-# environments without the full cryptography stack.  Stub it out so we
+# build_budget_db imports heavy third-party modules at module level, which may
+# fail in environments without the full dependency stack.  Stub them out so we
 # can import the pure-Python utilities we actually test.
-if "pdfplumber" not in sys.modules:
-    sys.modules.setdefault("pdfplumber", types.ModuleType("pdfplumber"))
+for _mod in ("pdfplumber", "openpyxl"):
+    sys.modules.setdefault(_mod, types.ModuleType(_mod))
 
 from build_budget_db import (
     _detect_exhibit_type,
@@ -81,6 +81,10 @@ def test_safe_float(val, expected):
     ("DoD_Budget_Documents/FY2026/Defense_Wide/file.pdf", "Defense-Wide"),
     ("DoD_Budget_Documents/FY2026/Navy/file.xlsx", "Navy"),
     ("DoD_Budget_Documents/FY2026/Air_Force/file.pdf", "Air Force"),
+    ("DoD_Budget_Documents/FY2026/Space_Force/file.pdf", "Space Force"),
+    ("DoD_Budget_Documents/FY2026/spaceforce/file.pdf", "Space Force"),
+    ("DoD_Budget_Documents/FY2026/Marine_Corps/file.pdf", "Marine Corps"),
+    ("DoD_Budget_Documents/FY2026/marines/file.xlsx", "Marine Corps"),
     ("DoD_Budget_Documents/FY2026/SomeOther/file.xlsx", "Other"),
 ])
 def test_determine_category(path_str, expected):

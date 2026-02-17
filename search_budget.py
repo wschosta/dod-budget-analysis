@@ -9,6 +9,7 @@ Usage:
     python search_budget.py "missile defense"
     python search_budget.py "Army basic research" --type excel
     python search_budget.py "cyber" --org Army --top 20
+    python search_budget.py "missile" --category Navy --type pdf
     python search_budget.py --summary
     python search_budget.py --sources
     python search_budget.py --interactive
@@ -195,9 +196,6 @@ def search_budget_lines(conn: sqlite3.Connection, query: str,
     return conn.execute(sql, params).fetchall()
 
 
-# TODO: The category parameter is accepted here but never passed from the CLI
-# or interactive mode. Add a --category flag to the argument parser (like --org)
-# and wire it through so users can filter PDF results by source category.
 def search_pdf_pages(conn: sqlite3.Connection, query: str,
                      category: str = None, limit: int = 15) -> list:
     """Search PDF document content."""
@@ -301,10 +299,21 @@ def display_pdf_results(results: list, query: str):
                 print(f"    [TABLE] {table_snippet[:200]}")
 
 
-# TODO: Consider highlighting matching terms in the snippet output (e.g., with
-# ANSI bold/color codes or uppercase markers) to make matches easier to spot.
+def _highlight_terms(text: str, query: str) -> str:
+    """Highlight query terms in text using ANSI bold."""
+    if not text or not query:
+        return text or ""
+    terms = query.split()
+    # Build a pattern that matches any of the search terms (case-insensitive)
+    escaped = [re.escape(t) for t in terms if t]
+    if not escaped:
+        return text
+    pattern = re.compile("(" + "|".join(escaped) + ")", re.IGNORECASE)
+    return pattern.sub(r"\033[1m\1\033[0m", text)
+
+
 def _extract_snippet(text: str, query: str, max_len: int = 300) -> str:
-    """Extract a text snippet around query terms."""
+    """Extract a text snippet around query terms with highlighted matches."""
     if not text or not query:
         return text[:max_len] if text else ""
 
@@ -319,7 +328,7 @@ def _extract_snippet(text: str, query: str, max_len: int = 300) -> str:
             best_pos = pos
 
     if best_pos == len(text):
-        return text[:max_len]
+        return _highlight_terms(text[:max_len], query)
 
     # Extract context around the match
     start = max(0, best_pos - 80)
@@ -331,7 +340,7 @@ def _extract_snippet(text: str, query: str, max_len: int = 300) -> str:
     if end < len(text):
         snippet = snippet + "..."
 
-    return snippet
+    return _highlight_terms(snippet, query)
 
 
 # ── Interactive Mode ──────────────────────────────────────────────────────────
@@ -347,6 +356,8 @@ def interactive_mode(conn: sqlite3.Connection):
     print("    excel:<query>          Search only budget line items")
     print("    pdf:<query>            Search only PDF documents")
     print("    org:<name> <query>     Filter by organization")
+    print("    exhibit:<type> <query>  Filter by exhibit type (p1, r1, etc.)")
+    print("    category:<name> <query> Filter PDFs by category (Army, Navy, etc.)")
     print("    summary                Show database summary")
     print("    sources                Show data source tracking")
     print("    top <org>              Top budget items by organization")
@@ -375,6 +386,8 @@ def interactive_mode(conn: sqlite3.Connection):
         # Parse command prefixes
         search_type = "both"
         org_filter = None
+        exhibit_filter = None
+        category_filter = None
         query = raw
 
         if raw.lower().startswith("excel:"):
@@ -387,8 +400,15 @@ def interactive_mode(conn: sqlite3.Connection):
             parts = raw[4:].strip().split(None, 1)
             org_filter = parts[0]
             query = parts[1] if len(parts) > 1 else ""
-        # TODO: Add exhibit:<type> prefix to interactive mode (e.g., "exhibit:r1
-        # missile") — the CLI supports --exhibit but interactive mode does not.
+        elif raw.lower().startswith("exhibit:"):
+            parts = raw[8:].strip().split(None, 1)
+            exhibit_filter = parts[0]
+            query = parts[1] if len(parts) > 1 else ""
+        elif raw.lower().startswith("category:"):
+            parts = raw[9:].strip().split(None, 1)
+            category_filter = parts[0]
+            query = parts[1] if len(parts) > 1 else ""
+            search_type = "pdf"
         elif raw.lower().startswith("top "):
             org = raw[4:].strip()
             results = search_budget_lines(conn, "", org=org, limit=20)
@@ -400,11 +420,12 @@ def interactive_mode(conn: sqlite3.Connection):
             continue
 
         if search_type in ("both", "excel"):
-            results = search_budget_lines(conn, query, org=org_filter)
+            results = search_budget_lines(conn, query, org=org_filter,
+                                          exhibit=exhibit_filter)
             display_budget_results(results, query)
 
         if search_type in ("both", "pdf"):
-            results = search_pdf_pages(conn, query)
+            results = search_pdf_pages(conn, query, category=category_filter)
             display_pdf_results(results, query)
 
 
@@ -434,6 +455,8 @@ def main():
                         help="Filter by organization (Army, Navy, Air Force, etc.)")
     parser.add_argument("--exhibit", default=None,
                         help="Filter by exhibit type (m1, o1, p1, r1, etc.)")
+    parser.add_argument("--category", default=None,
+                        help="Filter PDF results by source category (Army, Navy, Comptroller, etc.)")
     parser.add_argument("--top", type=int, default=25,
                         help="Number of results (default: 25)")
     parser.add_argument("--summary", action="store_true",
@@ -461,7 +484,8 @@ def main():
             display_budget_results(results, args.query)
 
         if args.type in ("both", "pdf"):
-            results = search_pdf_pages(conn, args.query, limit=args.top)
+            results = search_pdf_pages(conn, args.query,
+                                       category=args.category, limit=args.top)
             display_pdf_results(results, args.query)
     else:
         parser.print_help()
