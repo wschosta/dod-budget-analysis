@@ -9,6 +9,7 @@ Usage:
     python search_budget.py "missile defense"
     python search_budget.py "Army basic research" --type excel
     python search_budget.py "cyber" --org Army --top 20
+    python search_budget.py "missile" --category Navy --type pdf
     python search_budget.py --summary
     python search_budget.py --sources
     python search_budget.py --interactive
@@ -195,9 +196,6 @@ def search_budget_lines(conn: sqlite3.Connection, query: str,
     return conn.execute(sql, params).fetchall()
 
 
-# TODO: The category parameter is accepted here but never passed from the CLI
-# or interactive mode. Add a --category flag to the argument parser (like --org)
-# and wire it through so users can filter PDF results by source category.
 def search_pdf_pages(conn: sqlite3.Connection, query: str,
                      category: str = None, limit: int = 15) -> list:
     """Search PDF document content."""
@@ -359,6 +357,7 @@ def interactive_mode(conn: sqlite3.Connection):
     print("    pdf:<query>            Search only PDF documents")
     print("    org:<name> <query>     Filter by organization")
     print("    exhibit:<type> <query>  Filter by exhibit type (p1, r1, etc.)")
+    print("    category:<name> <query> Filter PDFs by category (Army, Navy, etc.)")
     print("    summary                Show database summary")
     print("    sources                Show data source tracking")
     print("    top <org>              Top budget items by organization")
@@ -388,6 +387,7 @@ def interactive_mode(conn: sqlite3.Connection):
         search_type = "both"
         org_filter = None
         exhibit_filter = None
+        category_filter = None
         query = raw
 
         if raw.lower().startswith("excel:"):
@@ -404,6 +404,11 @@ def interactive_mode(conn: sqlite3.Connection):
             parts = raw[8:].strip().split(None, 1)
             exhibit_filter = parts[0]
             query = parts[1] if len(parts) > 1 else ""
+        elif raw.lower().startswith("category:"):
+            parts = raw[9:].strip().split(None, 1)
+            category_filter = parts[0]
+            query = parts[1] if len(parts) > 1 else ""
+            search_type = "pdf"
         elif raw.lower().startswith("top "):
             org = raw[4:].strip()
             results = search_budget_lines(conn, "", org=org, limit=20)
@@ -420,7 +425,7 @@ def interactive_mode(conn: sqlite3.Connection):
             display_budget_results(results, query)
 
         if search_type in ("both", "pdf"):
-            results = search_pdf_pages(conn, query)
+            results = search_pdf_pages(conn, query, category=category_filter)
             display_pdf_results(results, query)
 
 
@@ -450,6 +455,8 @@ def main():
                         help="Filter by organization (Army, Navy, Air Force, etc.)")
     parser.add_argument("--exhibit", default=None,
                         help="Filter by exhibit type (m1, o1, p1, r1, etc.)")
+    parser.add_argument("--category", default=None,
+                        help="Filter PDF results by source category (Army, Navy, Comptroller, etc.)")
     parser.add_argument("--top", type=int, default=25,
                         help="Number of results (default: 25)")
     parser.add_argument("--summary", action="store_true",
@@ -477,7 +484,8 @@ def main():
             display_budget_results(results, args.query)
 
         if args.type in ("both", "pdf"):
-            results = search_pdf_pages(conn, args.query, limit=args.top)
+            results = search_pdf_pages(conn, args.query,
+                                       category=args.category, limit=args.top)
             display_pdf_results(results, args.query)
     else:
         parser.print_help()
