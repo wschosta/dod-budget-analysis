@@ -301,10 +301,21 @@ def display_pdf_results(results: list, query: str):
                 print(f"    [TABLE] {table_snippet[:200]}")
 
 
-# TODO: Consider highlighting matching terms in the snippet output (e.g., with
-# ANSI bold/color codes or uppercase markers) to make matches easier to spot.
+def _highlight_terms(text: str, query: str) -> str:
+    """Highlight query terms in text using ANSI bold."""
+    if not text or not query:
+        return text or ""
+    terms = query.split()
+    # Build a pattern that matches any of the search terms (case-insensitive)
+    escaped = [re.escape(t) for t in terms if t]
+    if not escaped:
+        return text
+    pattern = re.compile("(" + "|".join(escaped) + ")", re.IGNORECASE)
+    return pattern.sub(r"\033[1m\1\033[0m", text)
+
+
 def _extract_snippet(text: str, query: str, max_len: int = 300) -> str:
-    """Extract a text snippet around query terms."""
+    """Extract a text snippet around query terms with highlighted matches."""
     if not text or not query:
         return text[:max_len] if text else ""
 
@@ -319,7 +330,7 @@ def _extract_snippet(text: str, query: str, max_len: int = 300) -> str:
             best_pos = pos
 
     if best_pos == len(text):
-        return text[:max_len]
+        return _highlight_terms(text[:max_len], query)
 
     # Extract context around the match
     start = max(0, best_pos - 80)
@@ -331,7 +342,7 @@ def _extract_snippet(text: str, query: str, max_len: int = 300) -> str:
     if end < len(text):
         snippet = snippet + "..."
 
-    return snippet
+    return _highlight_terms(snippet, query)
 
 
 # ── Interactive Mode ──────────────────────────────────────────────────────────
@@ -347,6 +358,7 @@ def interactive_mode(conn: sqlite3.Connection):
     print("    excel:<query>          Search only budget line items")
     print("    pdf:<query>            Search only PDF documents")
     print("    org:<name> <query>     Filter by organization")
+    print("    exhibit:<type> <query>  Filter by exhibit type (p1, r1, etc.)")
     print("    summary                Show database summary")
     print("    sources                Show data source tracking")
     print("    top <org>              Top budget items by organization")
@@ -375,6 +387,7 @@ def interactive_mode(conn: sqlite3.Connection):
         # Parse command prefixes
         search_type = "both"
         org_filter = None
+        exhibit_filter = None
         query = raw
 
         if raw.lower().startswith("excel:"):
@@ -387,8 +400,10 @@ def interactive_mode(conn: sqlite3.Connection):
             parts = raw[4:].strip().split(None, 1)
             org_filter = parts[0]
             query = parts[1] if len(parts) > 1 else ""
-        # TODO: Add exhibit:<type> prefix to interactive mode (e.g., "exhibit:r1
-        # missile") — the CLI supports --exhibit but interactive mode does not.
+        elif raw.lower().startswith("exhibit:"):
+            parts = raw[8:].strip().split(None, 1)
+            exhibit_filter = parts[0]
+            query = parts[1] if len(parts) > 1 else ""
         elif raw.lower().startswith("top "):
             org = raw[4:].strip()
             results = search_budget_lines(conn, "", org=org, limit=20)
@@ -400,7 +415,8 @@ def interactive_mode(conn: sqlite3.Connection):
             continue
 
         if search_type in ("both", "excel"):
-            results = search_budget_lines(conn, query, org=org_filter)
+            results = search_budget_lines(conn, query, org=org_filter,
+                                          exhibit=exhibit_filter)
             display_budget_results(results, query)
 
         if search_type in ("both", "pdf"):
