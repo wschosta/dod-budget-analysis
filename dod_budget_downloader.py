@@ -822,6 +822,7 @@ def discover_defense_wide_files(session: requests.Session, year: str) -> list[di
     return _extract_downloadable_links(soup, url)
 
 
+#TODO prevent the browser window from flashing while running the browser required sections
 # ── Army (browser required) ──────────────────────────────────────────────────
 
 def discover_army_files(_session: requests.Session, year: str) -> list[dict]:
