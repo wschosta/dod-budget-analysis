@@ -187,6 +187,7 @@ import requests
 from bs4 import BeautifulSoup
 
 # ── Configuration ──────────────────────────────────────────────────────────────
+global tracker
 
 BASE_URL = "https://comptroller.war.gov"
 BUDGET_MATERIALS_URL = f"{BASE_URL}/Budget-Materials/"
@@ -1373,8 +1374,8 @@ def main():
             if _is_browser_source(source):
                 browser_labels.add(label)
 
-            if use_gui:
-                _tracker.discovery_step(step_label, len(files))
+            #if use_gui:
+            #    _tracker.discovery_step(step_label, len(files))
 
             time.sleep(0.5)  # TODO: Make inter-request delays configurable (--delay)
 
@@ -1385,7 +1386,6 @@ def main():
         return
 
     # ── Download ──
-    global _tracker
     total_files = sum(
         len(f) for yr in all_files.values() for f in yr.values()
     )
