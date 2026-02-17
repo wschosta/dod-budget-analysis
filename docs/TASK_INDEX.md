@@ -33,6 +33,7 @@ otherwise noted.
 | 1.A3 | Harden download reliability | AI-agent (3 sub-tasks) + ENVIRONMENT TESTING (1 sub-task) | [TODO](TODO_1A3_harden_download_reliability.md) | — |
 | 1.A4 | Automate download scheduling | AI-agent (decisions resolved: manual trigger, manifest as artifact) | [TODO](TODO_1A4_automate_download_scheduling.md) | `scripts/scheduled_download.py` |
 | 1.A5 | Document all data sources | AI-agent | [TODO](TODO_1A5_document_data_sources.md) | `docs/wiki/Data-Sources.md` |
+| 1.A6 | Retry failed downloads | AI-agent (3 sub-tasks: failure log, CLI flag, GUI polish) | [TODO](TODO_1A6_retry_failed_downloads.md) | — |
 
 ---
 

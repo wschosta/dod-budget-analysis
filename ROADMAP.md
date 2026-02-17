@@ -43,6 +43,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | **1.A3** | Harden download reliability | Improve retry logic, handle WAF/CAPTCHA changes on government sites, add checksum or size verification for downloaded files, and implement a manifest of expected vs. actual downloads. | Not started |
 | **1.A4** | Automate download scheduling | Create a repeatable, scriptable download pipeline (CLI-only, no GUI dependency) that can be run via cron or CI to keep data current when new fiscal-year documents are published. | Not started |
 | **1.A5** | Document all data sources | Create a `DATA_SOURCES.md` file listing every URL pattern, document type, file format, and fiscal-year availability for each service and agency. | Not started |
+| **1.A6** | Retry failed downloads | Write a structured failure log (`failed_downloads.json`) with URL, dest path, and browser flag for each failed file. Add a `--retry-failures` CLI flag that reads the log and re-attempts only those files. Update the GUI completion dialog to show failure URLs and a copy-retry-command button. | Not started |
 
 ### 1.B — Parsing & Normalization
 
@@ -205,8 +206,8 @@ Use the ID column when referencing tasks in issues, PRs, or discussions:
 
 | Phase | Tasks |
 |-------|-------|
-| Phase 1 — Data Extraction & Normalization | 14 |
+| Phase 1 — Data Extraction & Normalization | 15 |
 | Phase 2 — Database Design & Population | 15 |
 | Phase 3 — Front-End & Documentation | 15 |
 | Phase 4 — Publish, Feedback & Iteration | 12 |
-| **Total** | **56** |
+| **Total** | **57** |
