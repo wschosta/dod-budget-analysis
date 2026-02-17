@@ -1220,7 +1220,6 @@ def main():
             f"({total_dl}, {elapsed}) ---")
         time.sleep(2)
         _tracker.close()
-        # TODO - export the failed log to a text file with a description of the issue for the user
         # TODO - change this to pop up with close button and a button to open the failure log
     _tracker = None
 
