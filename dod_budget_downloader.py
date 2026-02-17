@@ -536,7 +536,13 @@ class GuiProgressTracker:
 
     def _on_close(self):
         self._closed = True
-        self._root.destroy()
+        try:
+            self._root.destroy()
+        except Exception:
+            pass
+        finally:
+            # Force cleanup of tkinter variables to prevent deallocator errors
+            self._root = None
 
     def set_source(self, year: str, source: str):
         self.current_year = year
@@ -637,6 +643,7 @@ class GuiProgressTracker:
             self._closed = True
             try:
                 self._root.after(0, self._root.destroy)
+                self._root = None
             except Exception:
                 pass
 
