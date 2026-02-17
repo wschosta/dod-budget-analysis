@@ -77,7 +77,7 @@ SERVICE_PAGE_TEMPLATES = {
         "url": "https://www.saffm.hq.af.mil/FM-Resources/Budget/Air-Force-Presidents-Budget-FY{fy2}/",
         "label": "US Air Force",
     },
-}
+} # TODO: add alternate navy source: https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx
 
 
 # ── Progress Tracker ──────────────────────────────────────────────────────────
