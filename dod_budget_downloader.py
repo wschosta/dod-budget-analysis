@@ -183,10 +183,10 @@ DOWNLOADABLE_EXTENSIONS = {".pdf", ".xlsx", ".xls", ".zip", ".csv"}
 IGNORED_HOSTS = {"dam.defense.gov"}
 DEFAULT_OUTPUT_DIR = Path("DoD_Budget_Documents")
 
-ALL_SOURCES = ["comptroller", "defense-wide", "army", "navy", "airforce"]
+ALL_SOURCES = ["comptroller", "defense-wide", "army", "navy", "navy-archive", "airforce"]
 
 # Sources that require a real browser due to WAF/bot protection
-BROWSER_REQUIRED_SOURCES = {"army", "navy", "airforce"}
+BROWSER_REQUIRED_SOURCES = {"army", "navy", "navy-archive", "airforce"}
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -217,7 +217,11 @@ SERVICE_PAGE_TEMPLATES = {
         "url": "https://www.saffm.hq.af.mil/FM-Resources/Budget/Air-Force-Presidents-Budget-FY{fy2}/",
         "label": "US Air Force",
     },
-} # TODO: add alternate navy source: https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx
+    "navy-archive": {
+        "url": "https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx",
+        "label": "US Navy Archive",
+    },
+}
 
 
 # ── Progress Tracker ──────────────────────────────────────────────────────────
@@ -1000,6 +1004,15 @@ def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
     return files
 
 
+# ── Navy Archive (browser required) ────────────────────────────────────────────
+
+def discover_navy_archive_files(_session: requests.Session, year: str) -> list[dict]:
+    url = SERVICE_PAGE_TEMPLATES["navy-archive"]["url"]
+    print(f"  [Navy Archive] Scanning FY{year} (browser)...")
+    files = _browser_extract_links(url, text_filter=f"/{year}/")
+    return files
+
+
 # ── Air Force (browser required) ─────────────────────────────────────────────
 
 def discover_airforce_files(_session: requests.Session, year: str) -> list[dict]:
@@ -1016,6 +1029,7 @@ SOURCE_DISCOVERERS = {
     "defense-wide": discover_defense_wide_files,
     "army": discover_army_files,
     "navy": discover_navy_files,
+    "navy-archive": discover_navy_archive_files,
     "airforce": discover_airforce_files,
 }
 
@@ -1212,6 +1226,7 @@ def interactive_select_sources() -> list[str]:
         "defense-wide": "Defense Wide (budget justification books)",
         "army": "US Army",
         "navy": "US Navy / Marine Corps",
+        "navy-archive": "US Navy Archive",
         "airforce": "US Air Force / Space Force",
     }
     print("\nAvailable Sources:")
