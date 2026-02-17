@@ -530,10 +530,6 @@ def _extract_table_text(tables: list) -> str:
 
 def _determine_category(file_path: Path) -> str:
     """Determine the budget category from the file path."""
-    # TODO: Add handling for "space_force" / "spaceforce" and "marine_corps" /
-    # "marines" paths — ORG_MAP has Space Force and Marine Corps codes but this
-    # function would classify those files as "Other". Also consider using
-    # ORG_MAP values as the canonical list to keep the two in sync.
     parts = [p.lower() for p in file_path.parts]
     if "comptroller" in parts:
         return "Comptroller"
@@ -545,6 +541,10 @@ def _determine_category(file_path: Path) -> str:
         return "Navy"
     elif "air_force" in parts or "airforce" in parts:
         return "Air Force"
+    elif "space_force" in parts or "spaceforce" in parts:
+        return "Space Force"
+    elif "marine_corps" in parts or "marines" in parts:
+        return "Marine Corps"
     return "Other"
 
 
