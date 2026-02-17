@@ -545,7 +545,10 @@ def _get_browser_context():
     _pw_instance = sync_playwright().start()
     _pw_browser = _pw_instance.chromium.launch(
         headless=False,
-        args=["--disable-blink-features=AutomationControlled"],
+        args=[
+            "--disable-blink-features=AutomationControlled",
+            "--window-position=-32000,-32000",
+        ],
     )
     _pw_context = _pw_browser.new_context(
         user_agent=(
@@ -822,7 +825,6 @@ def discover_defense_wide_files(session: requests.Session, year: str) -> list[di
     return _extract_downloadable_links(soup, url)
 
 
-#TODO prevent the browser window from flashing while running the browser required sections
 # ── Army (browser required) ──────────────────────────────────────────────────
 
 def discover_army_files(_session: requests.Session, year: str) -> list[dict]:
