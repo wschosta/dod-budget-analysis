@@ -96,6 +96,7 @@ import sqlite3
 import sys
 import time
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 import openpyxl
 import pdfplumber
@@ -252,6 +253,18 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             file_count INTEGER DEFAULT 0,
             notes TEXT
         );
+
+        -- Track extraction issues (timeouts, errors) for later analysis and retry
+        CREATE TABLE IF NOT EXISTS extraction_issues (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            file_path TEXT NOT NULL,
+            page_number INTEGER,
+            issue_type TEXT,
+            issue_detail TEXT,
+            encountered_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_extraction_issues_file
+            ON extraction_issues(file_path);
     """)
 
     conn.commit()
@@ -577,6 +590,29 @@ def _likely_has_tables(page) -> bool:
         return False
 
 
+def _extract_tables_with_timeout(page, timeout_seconds=30):
+    """
+    Extract tables from a PDF page with timeout to prevent hangs.
+    Returns (tables, issue_type) where issue_type is None on success, or
+    'timeout'/'error' if something went wrong.
+    """
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                page.extract_tables,
+                table_settings={
+                    "vertical_strategy": "lines",
+                    "horizontal_strategy": "lines"
+                }
+            )
+            tables = future.result(timeout=timeout_seconds)
+            return tables, None
+    except FuturesTimeoutError:
+        return None, "timeout"
+    except Exception as e:
+        return None, f"error: {str(e)[:50]}"
+
+
 def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path) -> int:
     """Ingest a single PDF file into the database."""
     category = _determine_category(file_path)
@@ -586,6 +622,7 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path) -> int:
     try:
         with pdfplumber.open(str(file_path)) as pdf:
             batch = []
+            page_issues_count = 0  # Track timeouts/errors for this file
             for i, page in enumerate(pdf.pages):
                 try:
                     # Use layout=False for 30-50% faster extraction (we don't need positioning)
@@ -597,21 +634,17 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path) -> int:
                     else:
                         raise
 
-                # Only extract tables if page likely has table structure (optimization)
+                # Extract tables with timeout to prevent hangs on malformed PDFs
                 tables = []
-                if _likely_has_tables(page):
-                    try:
-                        # Use optimized table settings for 20-30% faster extraction
-                        # Only detect tables with visible lines, skip inference from text
-                        tables = page.extract_tables(table_settings={
-                            "vertical_strategy": "lines",
-                            "horizontal_strategy": "lines",
-                        })
-                    except Exception as e:
-                        # If table extraction fails but we got text, continue
-                        if not text.strip():
-                            raise
-                        tables = []
+                tables, issue_type = _extract_tables_with_timeout(page, timeout_seconds=30)
+                if issue_type:
+                    # Record the issue for later analysis
+                    conn.execute(
+                        "INSERT INTO extraction_issues (file_path, page_number, issue_type, issue_detail) VALUES (?,?,?,?)",
+                        (relative_path, i + 1, issue_type.split(':')[0], issue_type)
+                    )
+                    page_issues_count += 1
+                    tables = []  # Use empty tables on timeout/error
 
                 table_text = _extract_table_text(tables)
 
@@ -833,10 +866,17 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             elapsed = time.time() - t0
             print(f"{pages} pages ({elapsed:.1f}s)")
 
+            # Check if this file had any extraction issues
+            issue_count = conn.execute(
+                "SELECT COUNT(*) FROM extraction_issues WHERE file_path = ?",
+                (rel_path,)
+            ).fetchone()[0]
+            file_status = "ok_with_issues" if issue_count > 0 else "ok"
+
             stat = pdf.stat()
             conn.execute(
                 "INSERT OR REPLACE INTO ingested_files (file_path, file_type, file_size, file_modified, ingested_at, row_count, status) VALUES (?,?,?,?,datetime('now'),?,?)",
-                (rel_path, "pdf", stat.st_size, stat.st_mtime, pages, "ok")
+                (rel_path, "pdf", stat.st_size, stat.st_mtime, pages, file_status)
             )
             total_pdf_pages += pages
 
