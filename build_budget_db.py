@@ -431,6 +431,16 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
         data_rows = rows[header_idx + 1:]
         batch = []
 
+        def get_val(row, field):
+            idx = col_map.get(field)
+            if idx is not None and idx < len(row):
+                return row[idx]
+            return None
+
+        def get_str(row, field):
+            v = get_val(row, field)
+            return str(v).strip() if v is not None else None
+
         for row in data_rows:
             if not row or all(v is None for v in row):
                 continue
@@ -442,47 +452,33 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
             org_code = str(row[col_map["organization"]]).strip() if col_map.get("organization") is not None and col_map["organization"] < len(row) and row[col_map["organization"]] else ""
             org_name = ORG_MAP.get(org_code, org_code)
 
-            # TODO: get_val and get_str are redefined as closures on every row
-            # iteration, but they only depend on col_map (loop-invariant) and row.
-            # Move them outside the loop and pass row as a parameter to avoid
-            # re-creating function objects on every iteration.
-            def get_val(field):
-                idx = col_map.get(field)
-                if idx is not None and idx < len(row):
-                    return row[idx]
-                return None
-
-            def get_str(field):
-                v = get_val(field)
-                return str(v).strip() if v is not None else None
-
             batch.append((
                 str(file_path.relative_to(DOCS_DIR)),
                 exhibit_type,
                 sheet_name,
                 fiscal_year,
                 str(acct).strip(),
-                get_str("account_title"),
+                get_str(row, "account_title"),
                 org_code,
                 org_name,
-                get_str("budget_activity"),
-                get_str("budget_activity_title"),
-                get_str("sub_activity"),
-                get_str("sub_activity_title"),
-                get_str("line_item"),
-                get_str("line_item_title"),
-                get_str("classification"),
-                _safe_float(get_val("amount_fy2024_actual")),
-                _safe_float(get_val("amount_fy2025_enacted")),
-                _safe_float(get_val("amount_fy2025_supplemental")),
-                _safe_float(get_val("amount_fy2025_total")),
-                _safe_float(get_val("amount_fy2026_request")),
-                _safe_float(get_val("amount_fy2026_reconciliation")),
-                _safe_float(get_val("amount_fy2026_total")),
-                _safe_float(get_val("quantity_fy2024")),
-                _safe_float(get_val("quantity_fy2025")),
-                _safe_float(get_val("quantity_fy2026_request")),
-                _safe_float(get_val("quantity_fy2026_total")),
+                get_str(row, "budget_activity"),
+                get_str(row, "budget_activity_title"),
+                get_str(row, "sub_activity"),
+                get_str(row, "sub_activity_title"),
+                get_str(row, "line_item"),
+                get_str(row, "line_item_title"),
+                get_str(row, "classification"),
+                _safe_float(get_val(row, "amount_fy2024_actual")),
+                _safe_float(get_val(row, "amount_fy2025_enacted")),
+                _safe_float(get_val(row, "amount_fy2025_supplemental")),
+                _safe_float(get_val(row, "amount_fy2025_total")),
+                _safe_float(get_val(row, "amount_fy2026_request")),
+                _safe_float(get_val(row, "amount_fy2026_reconciliation")),
+                _safe_float(get_val(row, "amount_fy2026_total")),
+                _safe_float(get_val(row, "quantity_fy2024")),
+                _safe_float(get_val(row, "quantity_fy2025")),
+                _safe_float(get_val(row, "quantity_fy2026_request")),
+                _safe_float(get_val(row, "quantity_fy2026_total")),
                 None,  # extra_fields
             ))
 
