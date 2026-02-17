@@ -1,6 +1,6 @@
 # Step 0.A1 — Merge ROADMAP into README
 
-**Status:** Not started
+**Status:** Complete
 **Type:** Documentation (AI-agent completable)
 **Depends on:** None
 

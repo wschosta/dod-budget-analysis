@@ -121,6 +121,29 @@ DoD_Budget_Documents/
 - **Navy archive caching**: The SharePoint archive page is loaded once and filtered in-memory for each fiscal year
 - **Connection pooling** with 10 concurrent connections and automatic retry (3 attempts with exponential backoff)
 
+## Project Roadmap
+
+> **Objective:** Build a public, web-facing, user-queryable database of Department of Defense budget data that allows users to filter, explore, and download results.
+
+| Phase | Title | Description |
+|-------|-------|-------------|
+| **0** | Project Description & Documentation | Updated readme, wiki skeleton, and project documentation |
+| **1** | Data Extraction & Normalization | Download, parse, and normalize DoD budget documents into clean, structured data |
+| **2** | Database Design & Population | Design the production schema, load all data, and expose it through an API |
+| **3** | Front-End & Documentation | Build a web UI for querying, filtering, and downloading data, plus user-facing docs |
+| **4** | Publish, Feedback & Iteration | Deploy publicly, collect user feedback, and iterate on improvements |
+
+### Current Project Status
+
+| Component | File | Covers |
+|-----------|------|--------|
+| Document downloader | `dod_budget_downloader.py` | Steps 1.A1-1.A4 (partial) |
+| Database builder (CLI) | `build_budget_db.py` | Steps 1.B1-1.B5 (partial), 2.B1 (partial) |
+| Database builder (GUI) | `build_budget_gui.py` | GUI wrapper for the above |
+| Search interface | `search_budget.py` | Prototype for 2.C query logic |
+
+See [ROADMAP.md](ROADMAP.md) for the full task breakdown (57 steps), and [docs/TASK_INDEX.md](docs/TASK_INDEX.md) for Phase 0-1 implementation details.
+
 ## License
 
 This tool downloads publicly available U.S. government budget documents. All downloaded content is public domain.
