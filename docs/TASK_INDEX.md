@@ -19,7 +19,7 @@ otherwise noted.
 
 | Step | Task | Type | TODO File | Skeleton File(s) |
 |------|------|------|-----------|-------------------|
-| 0.A1 | Merge ROADMAP into README | AI-agent | [TODO](TODO_0A1_merge_roadmap_into_readme.md) | `README.md` (modify) |
+| 0.A1 | Merge ROADMAP into README | AI-agent ✅ **Complete** | [TODO](TODO_0A1_merge_roadmap_into_readme.md) | `README.md` (modify) |
 | 0.A2 | Create wiki skeleton | AI-agent | [TODO](TODO_0A2_create_wiki_skeleton.md) | `docs/wiki/*.md` (created) |
 
 ---
@@ -46,7 +46,7 @@ otherwise noted.
 | 1.B3 | Normalize monetary values | DATA PROCESSING (decisions resolved: thousands canonical, display toggle to millions) | [TODO](TODO_1B3_normalize_monetary_values.md) | — |
 | 1.B4 | Extract PE/line-item metadata | AI-agent + DATA PROCESSING | [TODO](TODO_1B4_extract_pe_metadata.md) | — |
 | 1.B5 | PDF extraction quality audit | ENVIRONMENT TESTING | [TODO](TODO_1B5_pdf_extraction_audit.md) | — |
-| 1.B6 | Build validation suite | AI-agent | [TODO](TODO_1B6_build_validation_suite.md) | `validate_budget_db.py` |
+| 1.B6 | Build validation suite | AI-agent ✅ **Complete** | [TODO](TODO_1B6_build_validation_suite.md) | `validate_budget_db.py` |
 
 ---
 
@@ -64,9 +64,9 @@ otherwise noted.
 
 Tasks that can be done **immediately** (no dependencies, no data needed):
 
-1. **0.A1** — Merge ROADMAP into README
+1. ~~**0.A1** — Merge ROADMAP into README~~ ✅ Complete
 2. **0.A2** — Wiki skeleton (already created, just needs review)
-3. **1.B6** — Validation suite (works against existing DB schema)
+3. ~~**1.B6** — Validation suite (works against existing DB schema)~~ ✅ Complete
 4. **1.C2** — Unit tests for `_detect_exhibit_type`, `_safe_float`, `_map_columns`
    (tests against source code, no data files needed)
 5. **1.A5** — Document data sources (from reading current code)
