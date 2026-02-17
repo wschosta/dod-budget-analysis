@@ -31,7 +31,7 @@ otherwise noted.
 | 1.A1 | Audit downloader coverage | AI-agent + web research | [TODO](TODO_1A1_audit_downloader_coverage.md) | — |
 | 1.A2 | Expand fiscal-year coverage | ENVIRONMENT TESTING | [TODO](TODO_1A2_expand_fiscal_year_coverage.md) | — |
 | 1.A3 | Harden download reliability | AI-agent (3 sub-tasks) + ENVIRONMENT TESTING (1 sub-task) | [TODO](TODO_1A3_harden_download_reliability.md) | — |
-| 1.A4 | Automate download scheduling | AI-agent + USER INTERVENTION | [TODO](TODO_1A4_automate_download_scheduling.md) | `scripts/scheduled_download.py` |
+| 1.A4 | Automate download scheduling | AI-agent (decisions resolved: manual trigger, manifest as artifact) | [TODO](TODO_1A4_automate_download_scheduling.md) | `scripts/scheduled_download.py` |
 | 1.A5 | Document all data sources | AI-agent | [TODO](TODO_1A5_document_data_sources.md) | `docs/wiki/Data-Sources.md` |
 
 ---
@@ -42,7 +42,7 @@ otherwise noted.
 |------|------|------|-----------|-------------------|
 | 1.B1 | Catalog all exhibit types | DATA PROCESSING | [TODO](TODO_1B1_catalog_exhibit_types.md) | `docs/wiki/Exhibit-Types.md` |
 | 1.B2 | Standardize column mappings | AI-agent + DATA PROCESSING | [TODO](TODO_1B2_standardize_column_mappings.md) | — |
-| 1.B3 | Normalize monetary values | DATA PROCESSING + USER INTERVENTION | [TODO](TODO_1B3_normalize_monetary_values.md) | — |
+| 1.B3 | Normalize monetary values | DATA PROCESSING (decisions resolved: thousands canonical, display toggle to millions) | [TODO](TODO_1B3_normalize_monetary_values.md) | — |
 | 1.B4 | Extract PE/line-item metadata | AI-agent + DATA PROCESSING | [TODO](TODO_1B4_extract_pe_metadata.md) | — |
 | 1.B5 | PDF extraction quality audit | ENVIRONMENT TESTING | [TODO](TODO_1B5_pdf_extraction_audit.md) | — |
 | 1.B6 | Build validation suite | AI-agent | [TODO](TODO_1B6_build_validation_suite.md) | `validate_budget_db.py` |
@@ -78,7 +78,8 @@ Tasks that need **downloaded data**:
 9. **1.B2** — Standardize column mappings (needs 1.B1)
 10. **1.C1** — Create test fixtures (needs downloaded files)
 
-Tasks that need **user decisions**:
+Tasks with **user decisions now resolved**:
 
-11. **1.A4** — Scheduling (user chooses frequency/strategy)
-12. **1.B3** — Monetary normalization (user confirms canonical unit)
+11. **1.A4** — Scheduling: manual trigger via `workflow_dispatch`, manifest as artifact
+12. **1.B3** — Monetary normalization: store in thousands, display toggle to millions
+13. **1.B3b** — Add `--unit thousands|millions` toggle to `search_budget.py`
