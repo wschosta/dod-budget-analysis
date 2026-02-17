@@ -1277,6 +1277,10 @@ def main():
         "--no-gui", action="store_true",
         help="Disable GUI progress window (terminal-only output)",
     )
+    parser.add_argument(
+        "--delay", type=float, default=0.5,
+        help="Seconds to wait between requests (default: 0.5)",
+    )
     args = parser.parse_args()
 
     session = get_session()
@@ -1372,7 +1376,7 @@ def main():
             #if use_gui:
             #    _tracker.discovery_step(step_label, len(files))
 
-            time.sleep(0.5)  # TODO: Make inter-request delays configurable (--delay)
+            time.sleep(args.delay)
 
     # ── List mode ──
     if args.list_only:
@@ -1437,7 +1441,7 @@ def main():
                     session, file_info["url"], dest,
                     args.overwrite, use_browser=use_browser,
                 )
-                time.sleep(0.3)  # TODO: Use same configurable delay as discovery
+                time.sleep(args.delay)
 
     # ── Cleanup ──
     _close_browser()
