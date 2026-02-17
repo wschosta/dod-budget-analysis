@@ -200,15 +200,14 @@ ALL_SOURCES = ["comptroller", "defense-wide", "army", "navy", "airforce"]
 # Sources that require a real browser due to WAF/bot protection
 BROWSER_REQUIRED_SOURCES = {"army", "navy", "airforce"}
 
-# TODO: The User-Agent string is duplicated here and in _get_browser_context().
-# Extract to a single constant (e.g., USER_AGENT) to avoid drift between the
-# requests session and the Playwright browser context.
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
+
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": USER_AGENT,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
 }
@@ -716,11 +715,7 @@ def _get_browser_context():
         ],
     )
     _pw_context = _pw_browser.new_context(
-        user_agent=(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
+        user_agent=USER_AGENT,
         viewport={"width": 1920, "height": 1080},
         accept_downloads=True,
     )
