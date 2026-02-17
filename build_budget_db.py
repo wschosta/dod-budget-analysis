@@ -10,6 +10,84 @@ Usage:
     python build_budget_db.py                  # Build or update the database
     python build_budget_db.py --rebuild        # Force full rebuild
     python build_budget_db.py --db mydb.sqlite # Custom database path
+
+──────────────────────────────────────────────────────────────────────────────
+Roadmap TODOs for this file (Steps 1.B2 – 1.B5)
+──────────────────────────────────────────────────────────────────────────────
+
+TODO 1.B2-a: Replace hard-coded _map_columns() with exhibit_catalog.py lookups.
+    Import EXHIBIT_CATALOG and use its column_spec entries to drive column
+    detection.  Fall back to the current heuristic matching only for unknown
+    exhibit types.  This makes column mapping data-driven instead of code-driven.
+    Dependency: exhibit_catalog.py TODO 1.B1-b must be done first.
+
+TODO 1.B2-b: Add unit tests for _map_columns() covering every exhibit type.
+    For each exhibit in EXHIBIT_CATALOG, create a sample header row and assert
+    that _map_columns returns the expected field→index mapping.
+    File: tests/test_parsing.py (see Step 1.C TODOs).
+
+TODO 1.B2-c: Handle multi-row headers.
+    Some exhibits split column headers across 2–3 rows (e.g., "FY 2026" on row 1
+    and "Request" on row 2).  Detect this by checking if the row after the header
+    row also contains header-like text, and merge them.
+    Token-efficient tip: modify the header_idx detection loop in ingest_excel_file()
+    to peek at rows[header_idx+1] and join cells vertically when non-data.
+
+TODO 1.B3-a: Normalize all monetary values to thousands of dollars.
+    Audit the downloaded exhibits to determine which use whole dollars vs.
+    thousands vs. millions.  Add a multiplier field to EXHIBIT_CATALOG and
+    apply it during ingestion.
+    Token-efficient tip: run a quick script that samples the first few data rows
+    from each exhibit and checks magnitude — values > 1M likely are in whole
+    dollars and need dividing by 1000.
+
+TODO 1.B3-b: Add a currency_year column to budget_lines.
+    Track whether amounts are in then-year dollars or constant dollars.  Parse
+    this from the exhibit header or sheet name where available.
+
+TODO 1.B3-c: Distinguish Budget Authority, Appropriations, and Outlays.
+    Add an 'amount_type' column (or separate columns) to budget_lines.  C-1
+    already has authorization vs. appropriation; other exhibits may have TOA
+    (Total Obligation Authority) vs. BA.  Map these distinctions during
+    ingestion.
+
+TODO 1.B4-a: Parse Program Element (PE) numbers into a dedicated column.
+    PE numbers follow a pattern like "0602702E".  Extract from the line_item or
+    account fields using regex r'\\d{7}[A-Z]' and store in a new pe_number
+    column for direct querying.
+
+TODO 1.B4-b: Normalize budget activity codes.
+    Budget activity codes are currently stored as raw text from the spreadsheet.
+    Standardize to a consistent format (e.g., "01", "02") and add a reference
+    table mapping codes to descriptions per appropriation.
+
+TODO 1.B4-c: Parse appropriation title from account_title.
+    The account_title field often contains both an account code and a title
+    (e.g., "2035 Aircraft Procurement, Army").  Split these into separate
+    appropriation_code and appropriation_title fields.
+
+TODO 1.B5-a: Audit PDF extraction quality for common layouts.
+    Run build_budget_db.py on a sample of PDFs from each service and manually
+    inspect the extracted text in the database.  Record which source/layout
+    combinations produce garbled output.
+    Token-efficient tip: write a 30-line script that queries pdf_pages for pages
+    with high ratios of non-ASCII or whitespace-only lines and flags them.
+
+TODO 1.B5-b: Implement table-aware PDF extraction.
+    For PDF pages where pdfplumber's extract_tables() fails or produces poor
+    results, try alternative strategies: (1) explicit table settings with
+    custom line tolerance, (2) camelot as a fallback, (3) tabula-py for
+    stream-mode extraction.  Gate fallback behind a config flag.
+    Token-efficient tip: start with pdfplumber's table_settings parameter —
+    try {"vertical_strategy": "text", "horizontal_strategy": "text"} for
+    tables without visible lines.
+
+TODO 1.B5-c: Extract structured data from narrative PDF sections.
+    R-2/R-3 exhibits contain program descriptions, schedule tables, and
+    milestone information in PDF form.  Design a lightweight extraction that
+    captures section headers and associated text blocks so they are searchable.
+    This is lower priority — only do after TODO 1.B5-a identifies which PDFs
+    matter most.
 """
 
 import argparse
