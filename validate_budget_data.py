@@ -5,93 +5,269 @@ Automated checks that run against a populated dod_budget.sqlite database and
 flag anomalies.  Designed to run after every build_budget_db.py invocation
 (or as a standalone QA step).
 
-Usage (planned):
+Usage:
     python validate_budget_data.py                      # Validate default DB
     python validate_budget_data.py --db path/to/db      # Custom DB path
     python validate_budget_data.py --strict              # Non-zero exit on warnings
+    python validate_budget_data.py --json                # Output as JSON
 
-──────────────────────────────────────────────────────────────────────────────
-TODOs — each is an independent validation check unless noted otherwise
-──────────────────────────────────────────────────────────────────────────────
-
-TODO 1.B6-a: Check for missing fiscal-year coverage per service.
-    Query budget_lines grouped by (organization_name, fiscal_year).  Flag any
-    service that has data for FY X but not FY X-1 or X+1 within the expected
-    range.  Output: list of (service, missing_fy) pairs.
-    Standalone function, ~20 lines.
-
-TODO 1.B6-b: Detect duplicate rows.
-    Query for rows that share the same (source_file, exhibit_type, account,
-    organization, budget_activity, line_item, fiscal_year).  These likely
-    indicate a parsing bug (e.g., ingesting the same sheet twice).
-    Standalone function, ~15 lines.
-
-TODO 1.B6-c: Flag zero-sum or null-heavy line items.
-    Identify budget_lines where ALL amount columns are NULL or zero.  These
-    are either header/separator rows that leaked through or genuine zero-budget
-    items.  Report count per exhibit type so we can decide whether to filter
-    them during ingestion.
-
-TODO 1.B6-d: Detect column misalignment.
-    Heuristic: if a text column (e.g., account_title) contains only numeric
-    values, or a numeric column (e.g., amount_fy2026_request) contains text,
-    the column mapping is likely wrong for that file.  Query a sample from each
-    source_file and check types.
-
-TODO 1.B6-e: Flag unexpected exhibit types.
-    Compare the set of exhibit_type values in budget_lines against the known
-    set in exhibit_catalog.EXHIBIT_CATALOG.  Anything labeled "unknown" or
-    not in the catalog needs investigation.
-
-TODO 1.B6-f: Validate monetary value ranges.
-    Flag budget_lines where any amount column has an absolute value > 1 trillion
-    (in thousands) or is negative when it shouldn't be.  Large outliers often
-    indicate unit-of-measure mismatches (whole dollars ingested as thousands).
-
-TODO 1.B6-g: Cross-check row counts against ingested_files.
-    For each entry in ingested_files, verify that the row_count matches the
-    actual count in budget_lines/pdf_pages for that source_file.  Mismatches
-    indicate a partial or failed ingestion that didn't get properly recorded.
-
-TODO 1.B6-h: Wire validation into build_budget_db.py.
-    After the build pipeline finishes, call the validation checks and log
-    results.  In --strict mode, exit non-zero if any warnings are found.
-    This is integration work — do after the individual checks above are done.
-
-TODO 1.B6-i: Generate a validation summary report (text or JSON).
-    Aggregate all check results into a structured report with pass/warn/fail
-    counts and details.  Write to validation_report.json so CI can consume it.
+Remaining TODOs:
+    1.B6-a: Check for missing fiscal-year coverage per service.
+    1.B6-d: Detect column misalignment (text in numeric columns or vice versa).
+    1.B6-h: Wire validation into build_budget_db.py post-build step.
 """
 
+import json
 import sqlite3
+import sys
 from pathlib import Path
 
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 
+AMOUNT_COLUMNS = [
+    "amount_fy2024_actual",
+    "amount_fy2025_enacted",
+    "amount_fy2025_supplemental",
+    "amount_fy2025_total",
+    "amount_fy2026_request",
+    "amount_fy2026_reconciliation",
+    "amount_fy2026_total",
+]
+
+KNOWN_EXHIBIT_TYPES = {"m1", "o1", "p1", "p1r", "r1", "rf1", "c1"}
+
+
+# ── Individual checks ────────────────────────────────────────────────────────
+
+def check_database_stats(conn: sqlite3.Connection) -> dict:
+    """Basic stats — not a validation, but useful context for the report."""
+    budget_count = conn.execute("SELECT COUNT(*) FROM budget_lines").fetchone()[0]
+    pdf_count = conn.execute("SELECT COUNT(*) FROM pdf_pages").fetchone()[0]
+    file_count = conn.execute("SELECT COUNT(*) FROM ingested_files").fetchone()[0]
+
+    if budget_count == 0 and pdf_count == 0:
+        return {
+            "name": "database_stats",
+            "status": "fail",
+            "message": "Database is empty — no data to validate",
+            "details": {"budget_lines": 0, "pdf_pages": 0, "ingested_files": 0},
+        }
+    return {
+        "name": "database_stats",
+        "status": "pass",
+        "message": f"{budget_count} budget lines, {pdf_count} PDF pages, {file_count} files",
+        "details": {
+            "budget_lines": budget_count,
+            "pdf_pages": pdf_count,
+            "ingested_files": file_count,
+        },
+    }
+
+
+def check_duplicate_rows(conn: sqlite3.Connection) -> dict:
+    """1.B6-b: Detect rows with identical key fields (likely parsing bugs)."""
+    cur = conn.execute("""
+        SELECT source_file, exhibit_type, account, organization,
+               budget_activity, line_item, sheet_name, COUNT(*) as cnt
+        FROM budget_lines
+        GROUP BY source_file, exhibit_type, account, organization,
+                 budget_activity, line_item, sheet_name
+        HAVING cnt > 1
+        ORDER BY cnt DESC
+        LIMIT 50
+    """)
+    dupes = [dict(zip([d[0] for d in cur.description], row)) for row in cur.fetchall()]
+    total_dupes = sum(d["cnt"] - 1 for d in dupes)
+    return {
+        "name": "duplicate_rows",
+        "status": "warn" if dupes else "pass",
+        "message": f"{total_dupes} duplicate row(s) across {len(dupes)} key combination(s)"
+                   if dupes else "No duplicates found",
+        "details": dupes,
+    }
+
+
+def check_null_heavy_rows(conn: sqlite3.Connection) -> dict:
+    """1.B6-c: Flag rows where ALL amount columns are NULL or zero."""
+    conditions = " AND ".join(
+        f"(COALESCE({col}, 0) = 0)" for col in AMOUNT_COLUMNS
+    )
+    cur = conn.execute(f"""
+        SELECT exhibit_type, COUNT(*) as cnt
+        FROM budget_lines
+        WHERE {conditions}
+        GROUP BY exhibit_type
+        ORDER BY cnt DESC
+    """)
+    rows = [{"exhibit_type": r[0], "count": r[1]} for r in cur.fetchall()]
+    total = sum(r["count"] for r in rows)
+
+    total_rows = conn.execute("SELECT COUNT(*) FROM budget_lines").fetchone()[0]
+    pct = (total / total_rows * 100) if total_rows else 0
+
+    return {
+        "name": "null_heavy_rows",
+        "status": "warn" if pct > 10 else "pass",
+        "message": f"{total} row(s) ({pct:.1f}%) have all-null/zero amounts",
+        "details": rows,
+    }
+
+
+def check_unknown_exhibit_types(conn: sqlite3.Connection) -> dict:
+    """1.B6-e: Flag exhibit types not in the known set."""
+    placeholders = ",".join(f"'{t}'" for t in KNOWN_EXHIBIT_TYPES)
+    cur = conn.execute(f"""
+        SELECT exhibit_type, COUNT(*) as cnt
+        FROM budget_lines
+        WHERE exhibit_type NOT IN ({placeholders})
+        GROUP BY exhibit_type
+        ORDER BY cnt DESC
+    """)
+    rows = [{"exhibit_type": r[0], "count": r[1]} for r in cur.fetchall()]
+    return {
+        "name": "unknown_exhibit_types",
+        "status": "warn" if rows else "pass",
+        "message": f"{len(rows)} unknown exhibit type(s) found" if rows
+                   else "All exhibit types are known",
+        "details": rows,
+    }
+
+
+def check_value_ranges(conn: sqlite3.Connection) -> dict:
+    """1.B6-f: Flag extreme monetary values (likely unit-of-measure errors)."""
+    threshold = 1_000_000_000  # $1T in thousands
+    outliers = []
+    for col in AMOUNT_COLUMNS:
+        cur = conn.execute(f"""
+            SELECT source_file, exhibit_type, account, organization, {col}
+            FROM budget_lines
+            WHERE ABS({col}) > ?
+            LIMIT 10
+        """, (threshold,))
+        for row in cur.fetchall():
+            outliers.append({
+                "source_file": row[0], "exhibit_type": row[1],
+                "account": row[2], "organization": row[3],
+                "column": col, "value": row[4],
+            })
+    return {
+        "name": "value_ranges",
+        "status": "warn" if outliers else "pass",
+        "message": f"{len(outliers)} extreme value(s) found (>$1T in thousands)"
+                   if outliers else "All values within expected range",
+        "details": outliers,
+    }
+
+
+def check_row_count_consistency(conn: sqlite3.Connection) -> dict:
+    """1.B6-g: Cross-check ingested_files.row_count against actual counts."""
+    cur = conn.execute("""
+        SELECT i.file_path, i.row_count, i.file_type,
+               CASE i.file_type
+                   WHEN 'excel' THEN (SELECT COUNT(*) FROM budget_lines
+                                      WHERE source_file = i.file_path)
+                   WHEN 'pdf'   THEN (SELECT COUNT(*) FROM pdf_pages
+                                      WHERE source_file = i.file_path)
+               END as actual_count
+        FROM ingested_files i
+        WHERE i.row_count IS NOT NULL
+    """)
+    mismatches = []
+    for row in cur.fetchall():
+        file_path, expected, file_type, actual = row
+        if actual is not None and expected != actual:
+            mismatches.append({
+                "file_path": file_path, "file_type": file_type,
+                "expected": expected, "actual": actual,
+            })
+    return {
+        "name": "row_count_consistency",
+        "status": "warn" if mismatches else "pass",
+        "message": f"{len(mismatches)} file(s) have row count mismatches"
+                   if mismatches else "All row counts consistent",
+        "details": mismatches,
+    }
+
+
+# ── Orchestrator ──────────────────────────────────────────────────────────────
+
+ALL_CHECKS = [
+    check_database_stats,
+    check_duplicate_rows,
+    check_null_heavy_rows,
+    check_unknown_exhibit_types,
+    check_value_ranges,
+    check_row_count_consistency,
+]
+
 
 def validate_all(db_path: Path = DEFAULT_DB_PATH, strict: bool = False) -> dict:
-    """Run all validation checks and return a summary dict.
+    """Run all validation checks and return a summary dict."""
+    if not db_path.exists():
+        print(f"ERROR: Database not found: {db_path}")
+        print("Run 'python build_budget_db.py' first to build the database.")
+        sys.exit(1)
 
-    Returns:
-        {
-            "checks": [
-                {"name": "missing_fy_coverage", "status": "pass"|"warn"|"fail",
-                 "details": [...]},
-                ...
-            ],
-            "total_warnings": int,
-            "total_failures": int,
-        }
-    """
-    # TODO: implement — call each check function, collect results
-    raise NotImplementedError("Validation checks not yet implemented — see TODOs above")
+    conn = sqlite3.connect(str(db_path))
+    results = []
+    for check_fn in ALL_CHECKS:
+        result = check_fn(conn)
+        results.append(result)
+    conn.close()
+
+    total_warnings = sum(1 for r in results if r["status"] == "warn")
+    total_failures = sum(1 for r in results if r["status"] == "fail")
+
+    summary = {
+        "database": str(db_path),
+        "checks": results,
+        "total_checks": len(results),
+        "total_warnings": total_warnings,
+        "total_failures": total_failures,
+        "exit_code": 1 if strict and (total_warnings + total_failures) > 0 else 0,
+    }
+    return summary
+
+
+def print_report(summary: dict):
+    """Print a human-readable validation report."""
+    print(f"\n{'='*60}")
+    print(f"  Budget Database Validation Report")
+    print(f"  Database: {summary['database']}")
+    print(f"{'='*60}\n")
+
+    for check in summary["checks"]:
+        icon = {"pass": "OK", "warn": "WARN", "fail": "FAIL"}[check["status"]]
+        print(f"  [{icon:4s}] {check['name']}: {check['message']}")
+        if check["status"] != "pass" and check.get("details"):
+            details = check["details"]
+            if isinstance(details, list):
+                for d in details[:5]:
+                    print(f"           {d}")
+                if len(details) > 5:
+                    print(f"           ... and {len(details) - 5} more")
+
+    print(f"\n  Summary: {summary['total_checks']} checks, "
+          f"{summary['total_warnings']} warning(s), "
+          f"{summary['total_failures']} failure(s)\n")
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Validate budget database")
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
-    parser.add_argument("--strict", action="store_true")
+    parser.add_argument("--strict", action="store_true",
+                        help="Exit non-zero on any warnings or failures")
+    parser.add_argument("--json", action="store_true", dest="output_json",
+                        help="Output results as JSON")
     args = parser.parse_args()
-    validate_all(args.db, strict=args.strict)
+
+    summary = validate_all(args.db, strict=args.strict)
+
+    if args.output_json:
+        print(json.dumps(summary, indent=2))
+    else:
+        print_report(summary)
+
+    sys.exit(summary["exit_code"])

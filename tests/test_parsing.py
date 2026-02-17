@@ -2,59 +2,160 @@
 Unit tests for parsing logic — Step 1.C2
 
 Tests for column detection, value normalization, exhibit-type identification,
-and PE/line-item extraction.  Each test function should be self-contained and
-not depend on external files (use fixtures from conftest.py or inline data).
-
-──────────────────────────────────────────────────────────────────────────────
-TODOs — each is an independent test or small group of tests
-──────────────────────────────────────────────────────────────────────────────
-
-TODO 1.C2-a: Test _detect_exhibit_type() with known filenames.
-    Cases: "p1_display.xlsx" → "p1", "r1.xlsx" → "r1", "c1_display.xlsx" → "c1",
-    "p1r_display.xlsx" → "p1r", "unknown_file.xlsx" → "unknown",
-    "m1_something_else.xlsx" → "m1".
-    Standalone — no fixtures needed, just import and call.
-
-TODO 1.C2-b: Test _map_columns() for each exhibit type.
-    For each exhibit in EXHIBIT_CATALOG (once populated), construct a sample
-    header list and assert the returned mapping contains the expected keys.
-    Include edge cases: extra columns, missing optional columns, different
-    capitalization.
-    Dependency: exhibit_catalog.py must have at least sample headers.
-    Token-efficient tip: parametrize with @pytest.mark.parametrize over a list
-    of (headers, exhibit_type, expected_keys) tuples.
-
-TODO 1.C2-c: Test _safe_float() edge cases.
-    Cases: None→None, ""→None, " "→None, "123"→123.0, 123→123.0,
-    "abc"→None, 0→0.0, "-5.5"→-5.5.
-    Standalone — ~10 lines.
-
-TODO 1.C2-d: Test _determine_category() path mapping.
-    Feed in Path objects with various directory structures and assert correct
-    category strings.  E.g., Path("FY2026/US_Army/file.pdf") → "Army".
-    Standalone — ~15 lines.
-
-TODO 1.C2-e: Test _extract_table_text() formatting.
-    Feed in sample table data (list of lists) and verify the output string
-    format: cells joined by " | ", rows joined by newlines, empty cells skipped.
-    Standalone — ~10 lines.
-
-TODO 1.C2-f: Test header row detection in ingest_excel_file().
-    Create a minimal .xlsx (using openpyxl in the test) with the header row at
-    position 0, 1, 2, and 3 — verify that each is correctly detected.
-    Token-efficient tip: use a helper that writes a workbook to tmp_path, then
-    call ingest_excel_file() with an in-memory SQLite db and check row counts.
-
-TODO 1.C2-g: Test that blank/empty rows are skipped.
-    Create an .xlsx with data rows interspersed with fully-blank rows and
-    rows where only whitespace is present.  Verify they don't produce
-    budget_lines entries.
-
-TODO 1.C2-h: Test fiscal year detection from sheet names.
-    Cases: "FY 2026" → "FY 2026", "FY2025" → "FY 2025", "Sheet1" → "Sheet1",
-    "Exhibit FY 2024" → "FY 2024".
-    Token-efficient tip: extract the FY regex logic into a small testable
-    function if it isn't already.
+and PE/line-item extraction.
 """
+import importlib
+import sys
+import types
+from pathlib import Path
+from unittest import mock
 
-# TODO: implement tests per TODOs above
+import pytest
+
+# Ensure the project root is importable
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# build_budget_db imports pdfplumber at module level, which may fail in
+# environments without the full cryptography stack.  Stub it out so we
+# can import the pure-Python utilities we actually test.
+if "pdfplumber" not in sys.modules:
+    sys.modules.setdefault("pdfplumber", types.ModuleType("pdfplumber"))
+
+from build_budget_db import (
+    _detect_exhibit_type,
+    _safe_float,
+    _extract_table_text,
+    _determine_category,
+    _map_columns,
+)
+
+
+# ── TODO 1.C2-a: _detect_exhibit_type ────────────────────────────────────────
+
+@pytest.mark.parametrize("filename, expected", [
+    ("p1_display.xlsx", "p1"),
+    ("r1.xlsx", "r1"),
+    ("c1_display.xlsx", "c1"),
+    ("p1r_display.xlsx", "p1r"),
+    ("m1_something_else.xlsx", "m1"),
+    ("o1_display.xlsx", "o1"),
+    ("rf1_display.xlsx", "rf1"),
+    ("unknown_file.xlsx", "unknown"),
+    ("P1_DISPLAY.xlsx", "p1"),           # case insensitive
+    ("army_p1r_fy2026.xlsx", "p1r"),     # p1r matched before p1
+    ("budget_summary.xlsx", "unknown"),
+])
+def test_detect_exhibit_type(filename, expected):
+    assert _detect_exhibit_type(filename) == expected
+
+
+# ── TODO 1.C2-c: _safe_float ─────────────────────────────────────────────────
+
+@pytest.mark.parametrize("val, expected", [
+    (None, None),
+    ("", None),
+    (" ", None),
+    ("123", 123.0),
+    (123, 123.0),
+    (0, 0.0),
+    (0.0, 0.0),
+    (-5.5, -5.5),
+    ("-5.5", -5.5),
+    ("abc", None),
+    ("12.34", 12.34),
+    (True, 1.0),     # bool is numeric in Python
+])
+def test_safe_float(val, expected):
+    result = _safe_float(val)
+    if expected is None:
+        assert result is None
+    else:
+        assert result == expected
+
+
+# ── TODO 1.C2-d: _determine_category ─────────────────────────────────────────
+
+@pytest.mark.parametrize("path_str, expected", [
+    ("DoD_Budget_Documents/FY2026/Comptroller/file.pdf", "Comptroller"),
+    ("DoD_Budget_Documents/FY2026/US_Army/file.xlsx", "Army"),
+    ("DoD_Budget_Documents/FY2026/Defense_Wide/file.pdf", "Defense-Wide"),
+    ("DoD_Budget_Documents/FY2026/Navy/file.xlsx", "Navy"),
+    ("DoD_Budget_Documents/FY2026/Air_Force/file.pdf", "Air Force"),
+    ("DoD_Budget_Documents/FY2026/SomeOther/file.xlsx", "Other"),
+])
+def test_determine_category(path_str, expected):
+    assert _determine_category(Path(path_str)) == expected
+
+
+# ── TODO 1.C2-e: _extract_table_text ─────────────────────────────────────────
+
+def test_extract_table_text_basic():
+    tables = [[
+        ["Header1", "Header2", "Header3"],
+        ["A", "B", "C"],
+        ["D", None, "F"],
+    ]]
+    result = _extract_table_text(tables)
+    lines = result.strip().split("\n")
+    assert len(lines) == 3
+    assert "Header1 | Header2 | Header3" == lines[0]
+    assert "A | B | C" == lines[1]
+    assert "D | F" == lines[2]  # None cell skipped
+
+
+def test_extract_table_text_empty():
+    assert _extract_table_text([]) == ""
+    assert _extract_table_text(None) == ""
+
+
+def test_extract_table_text_multiple_tables():
+    tables = [
+        [["A", "B"]],
+        [["C", "D"]],
+    ]
+    result = _extract_table_text(tables)
+    lines = result.strip().split("\n")
+    assert len(lines) == 2
+
+
+# ── TODO 1.C2-b (partial): _map_columns basic coverage ───────────────────────
+
+def test_map_columns_p1_headers():
+    """Test that _map_columns finds standard P-1 column mappings."""
+    headers = [
+        "Account", "Account Title", "Organization",
+        "Budget Activity", "Budget Activity Title",
+        "Budget Line Item", "Budget Line Item (BLI) Title",
+        "FY2024 Actual\nAmount", "FY2025 Enacted\nAmount",
+        "FY2026 Request\nAmount",
+    ]
+    mapping = _map_columns(headers, "p1")
+    assert "account" in mapping
+    assert "account_title" in mapping
+    assert "organization" in mapping
+    assert "budget_activity" in mapping
+    assert "budget_activity_title" in mapping
+    assert "line_item" in mapping
+    assert "line_item_title" in mapping
+
+
+def test_map_columns_c1_authorization():
+    """Test that C-1 authorization/appropriation columns are mapped."""
+    headers = [
+        "Account", "Account Title", "Construction Project",
+        "Construction Project Title",
+        "Authorization Amount", "Appropriation Amount",
+    ]
+    mapping = _map_columns(headers, "c1")
+    assert "account" in mapping
+    assert "line_item" in mapping         # construction project
+    assert "line_item_title" in mapping   # construction project title
+    # Authorization → amount_fy2026_request, Appropriation → amount_fy2025_enacted
+    assert "amount_fy2026_request" in mapping
+    assert "amount_fy2025_enacted" in mapping
+
+
+def test_map_columns_empty_headers():
+    """Empty header list should return empty mapping without crashing."""
+    mapping = _map_columns([], "p1")
+    assert mapping == {}
