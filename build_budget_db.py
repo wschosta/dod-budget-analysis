@@ -597,12 +597,9 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path) -> int:
 
     except Exception as e:
         print(f"  ERROR processing {file_path.name}: {e}")
-        # TODO(bug): This INSERT provides 6 values but ingested_files has 8 columns,
-        # so it will fail at runtime. Use explicit column names like the INSERT at
-        # line ~639, and include file_modified (st_mtime) instead of datetime('now').
         conn.execute(
-            "INSERT OR REPLACE INTO ingested_files VALUES (?,?,?,datetime('now'),?,?)",
-            (relative_path, "pdf", file_path.stat().st_size, 0, f"error: {e}")
+            "INSERT OR REPLACE INTO ingested_files (file_path, file_type, file_size, file_modified, ingested_at, row_count, status) VALUES (?,?,?,?,datetime('now'),?,?)",
+            (relative_path, "pdf", file_path.stat().st_size, file_path.stat().st_mtime, 0, f"error: {e}")
         )
         return 0
 
@@ -677,12 +674,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
     if not docs_dir.exists():
         _progress("error", 0, 0, f"Documents directory not found: {docs_dir}")
-        print(f"ERROR: Documents directory not found: {docs_dir}")
-        # TODO: Raise an exception (e.g., FileNotFoundError) instead of calling
-        # sys.exit(1). The GUI calls build_database() in a background thread,
-        # so sys.exit() would kill the entire application instead of reporting
-        # the error gracefully through the progress callback.
-        sys.exit(1)
+        raise FileNotFoundError(f"Documents directory not found: {docs_dir}")
 
     if rebuild and db_path.exists():
         db_path.unlink()
@@ -883,7 +875,11 @@ def main():
                         help="Force full rebuild (delete existing database)")
     args = parser.parse_args()
 
-    build_database(args.docs, args.db, rebuild=args.rebuild)
+    try:
+        build_database(args.docs, args.db, rebuild=args.rebuild)
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

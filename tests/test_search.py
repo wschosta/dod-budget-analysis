@@ -1,8 +1,14 @@
 """
 Unit tests for search_budget.py — FTS5 query sanitization, snippet highlighting,
 and interactive mode prefix parsing.
+
+Also covers build_budget_db.py fixes:
+- ingested_files error-path INSERT (column-count bug fix)
+- build_database raising FileNotFoundError instead of sys.exit
 """
+import sqlite3
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -11,6 +17,12 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from search_budget import _sanitize_fts5_query, _highlight_terms, _extract_snippet
+
+# Stub heavy third-party deps so we can import build_budget_db in test envs
+for _mod in ("pdfplumber", "openpyxl", "pandas"):
+    sys.modules.setdefault(_mod, types.ModuleType(_mod))
+
+from build_budget_db import create_database, build_database
 
 
 # ── _sanitize_fts5_query ─────────────────────────────────────────────────────
@@ -160,3 +172,55 @@ class TestExtractSnippet:
         text = "A" * 500
         snippet = _extract_snippet(text, "A", max_len=100)
         assert snippet.endswith("...")
+
+
+# ── build_database: FileNotFoundError ────────────────────────────────────────
+
+class TestBuildDatabaseMissingDir:
+    """build_database() should raise FileNotFoundError for a missing docs dir."""
+
+    def test_raises_file_not_found(self, tmp_path):
+        missing = tmp_path / "no_such_dir"
+        db_path = tmp_path / "test.sqlite"
+        with pytest.raises(FileNotFoundError, match="not found"):
+            build_database(missing, db_path)
+
+    def test_progress_callback_receives_error(self, tmp_path):
+        missing = tmp_path / "no_such_dir"
+        db_path = tmp_path / "test.sqlite"
+        events = []
+        with pytest.raises(FileNotFoundError):
+            build_database(missing, db_path,
+                           progress_callback=lambda *a: events.append(a))
+        assert any(phase == "error" for phase, *_ in events)
+
+
+# ── ingested_files error-path INSERT ─────────────────────────────────────────
+
+class TestIngestedFilesErrorInsert:
+    """The error-path INSERT in ingest_pdf_file must match the table schema."""
+
+    def test_error_insert_matches_schema(self, tmp_path):
+        """Simulate the error-path INSERT and verify it succeeds."""
+        db_path = tmp_path / "test.sqlite"
+        conn = create_database(db_path)
+
+        # This mirrors the fixed INSERT in ingest_pdf_file's except block
+        conn.execute(
+            "INSERT OR REPLACE INTO ingested_files "
+            "(file_path, file_type, file_size, file_modified, ingested_at, row_count, status) "
+            "VALUES (?,?,?,?,datetime('now'),?,?)",
+            ("test/file.pdf", "pdf", 1024, 1700000000.0, 0, "error: test")
+        )
+        conn.commit()
+
+        row = conn.execute(
+            "SELECT * FROM ingested_files WHERE file_path = ?",
+            ("test/file.pdf",)
+        ).fetchone()
+        assert row is not None
+        assert row[1] == "pdf"          # file_type
+        assert row[3] == 1700000000.0   # file_modified
+        assert row[5] == 0              # row_count
+        assert row[6] == "error: test"  # status
+        conn.close()
