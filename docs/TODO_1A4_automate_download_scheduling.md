@@ -2,48 +2,72 @@
 
 **Status:** Not started
 **Type:** Code + Configuration (AI-agent completable)
-**Depends on:** 1.A3 (manifest is useful but not blocking)
+**Depends on:** 1.A3-a (manifest useful but not blocking)
 
 ## User Decisions (RESOLVED)
 
 - **Schedule:** Manual trigger only (`workflow_dispatch`) — no automatic schedule
-- **Storage:** Downloaded files are NOT committed to the repo. The workflow
-  uploads the download manifest as a GitHub Actions artifact for tracking.
+- **Storage:** Downloaded files NOT committed to repo. Manifest uploaded as artifact.
 
-## Task
-
-Create a repeatable, scriptable download pipeline that can run without GUI
-dependency, triggered manually via GitHub Actions or local CLI.
+---
 
 ## Sub-tasks
 
-### 1A4a — CLI-only pipeline script (AI-agent completable)
-Create a `scripts/scheduled_download.py` (or shell script) that:
-- Calls `dod_budget_downloader.py --years all --sources all --no-gui --output ...`
-- Captures stdout/stderr to a timestamped log file
-- Exits with non-zero status on any failures
-- Agent instructions: Write a thin wrapper script. Use `subprocess.run()` or
-  just a bash script. Include `--no-gui` flag. Write log to
-  `{output_dir}/download_{date}.log`.
-  Estimated tokens: ~400
+### 1.A4-a — Refactor main() into callable download_all() function
+**Type:** AI-agent (refactoring)
+**Estimated tokens:** ~500 output
 
-### 1A4b — GitHub Actions workflow (AI-agent completable)
-Create `.github/workflows/download.yml` that:
-- Triggered by `workflow_dispatch` only (manual trigger, no cron schedule)
-- Accepts inputs: fiscal years (default: "all"), sources (default: "all")
-- Installs dependencies including Playwright Chromium
-- Runs the download script from 1A4a
-- Uploads the manifest (`manifest.json`) as a GitHub Actions artifact
-- Does NOT commit downloaded files to the repo
-- Agent instructions: Write a standard GitHub Actions YAML. Use
-  `actions/checkout`, `actions/setup-python`, install deps from
-  `requirements.txt`, run `python -m playwright install chromium`,
-  run the download script, use `actions/upload-artifact` for manifest.
-  Estimated tokens: ~600
+1. Extract download pipeline from `main()` (~lines 1286–1406) into a
+   `download_all(years, sources, output_dir, **opts) -> dict` function
+2. Function returns summary dict (total, ok, skip, fail)
+3. `main()` calls `download_all()` after parsing args
+4. Decouples pipeline from CLI/GUI for programmatic use
+
+**File:** `dod_budget_downloader.py`
+
+---
+
+### 1.A4-b — Create CLI-only pipeline wrapper script
+**Type:** AI-agent
+**Estimated tokens:** ~400 output
+
+1. Implement `scripts/scheduled_download.py` (currently a skeleton)
+2. Import and call `download_all()` from the refactored downloader
+3. Capture stdout/stderr to timestamped log
+4. Exit with non-zero on any failures
+
+**File:** `scripts/scheduled_download.py`
+
+---
+
+### 1.A4-c — Create GitHub Actions workflow
+**Type:** AI-agent
+**Estimated tokens:** ~600 output
+
+1. Create `.github/workflows/download.yml`
+2. Trigger: `workflow_dispatch` only (inputs: years, sources)
+3. Steps: checkout, setup-python, install deps + playwright, run script,
+   upload manifest as artifact
+4. Do NOT commit downloaded files
+
+**File:** `.github/workflows/download.yml`
+
+---
+
+### 1.A4-d — Verify --no-gui flag works without tkinter
+**Type:** AI-agent
+**Estimated tokens:** ~300 output
+
+1. Verify `--no-gui` flag exists in argparse
+2. Ensure `GuiProgressTracker` is not imported/initialized when set
+3. Ensure CLI-only mode works in headless environments (CI)
+
+**File:** `dod_budget_downloader.py`
+
+---
 
 ## Annotations
 
-- ~~**USER INTERVENTION:** User should decide the schedule frequency and whether
-  downloaded files should be committed to the repo or stored externally~~
-  **RESOLVED:** Manual trigger only, files stored externally, manifest as artifact.
-- Both sub-tasks are independently completable by an AI agent
+- All sub-tasks are AI-agent completable
+- 1.A4-a is highest-value (enables programmatic use)
+- 1.A4-c depends on 1.A4-b (workflow runs the script)

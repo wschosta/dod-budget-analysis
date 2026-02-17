@@ -2,29 +2,54 @@
 
 **Status:** Not started
 **Type:** Documentation (AI-agent completable)
-**Depends on:** 1.A1 (audit results feed into this), 1.A2 (fiscal year coverage)
+**Depends on:** 1.A1 (audit), 1.A2 (FY coverage) — but can start now
 
-## Task
+## Overview
 
-Create `DATA_SOURCES.md` listing every URL pattern, document type, file format,
-and fiscal-year availability for each service and agency. This is the
-authoritative reference for the downloader's scope.
+Create authoritative `DATA_SOURCES.md` documenting every URL pattern,
+document type, file format, and fiscal-year availability.
 
-## Agent Instructions
+---
 
-1. Read `dod_budget_downloader.py` — extract `SERVICE_PAGE_TEMPLATES`, all
-   discoverer functions, URL patterns, and file extension filters
-2. Cross-reference with audit results from Step 1.A1
-3. Cross-reference with fiscal year coverage from Step 1.A2
-4. Create `DATA_SOURCES.md` in the project root with:
-   - A table per source: URL template, file formats, FY range, download method
-   - A combined coverage matrix (source x fiscal year)
-   - Notes on any sources that require special handling (browser, WAF, etc.)
-5. Also update `docs/wiki/Data-Sources.md` with the same content
-6. Estimated tokens: ~1200 output tokens
+## Sub-tasks
+
+### 1.A5-a — Create DATA_SOURCES.md from current code
+**Type:** AI-agent
+**Estimated tokens:** ~800 output
+
+1. Read `dod_budget_downloader.py`: extract `SERVICE_PAGE_TEMPLATES`,
+   discoverer functions, `ALL_SOURCES`, `BROWSER_REQUIRED_SOURCES`
+2. Create `DATA_SOURCES.md` in project root with:
+   - Section per source: URL template, file formats, download method
+   - Notes on WAF/browser requirements
+   - Known FY range (mark unverified with `<!-- TODO: verify -->`)
+3. Include the failure log JSON schema for reference
+
+---
+
+### 1.A5-b — Sync wiki Data-Sources page
+**Type:** AI-agent
+**Estimated tokens:** ~400 output
+**Depends on:** 1.A5-a
+
+1. Sync content from `DATA_SOURCES.md` to `docs/wiki/Data-Sources.md`
+2. Adjust relative links, add cross-references
+
+---
+
+### 1.A5-c — Add coverage matrix after audit
+**Type:** AI-agent (documentation)
+**Estimated tokens:** ~500 output
+**Depends on:** 1.A1-a, 1.A2-a
+
+1. Fill coverage matrix with verified file counts per source × FY
+2. Mark gaps with explanatory notes
+3. Update both `DATA_SOURCES.md` and wiki page
+
+---
 
 ## Annotations
 
-- Best completed after 1.A1 and 1.A2, but can be started with current knowledge
-- If 1.A1/1.A2 are not yet complete, document what is currently known and mark
-  gaps with `<!-- TODO: verify -->` comments
+- 1.A5-a can be done immediately from reading source code
+- 1.A5-c requires audit results from 1.A1 and 1.A2
+- If audit not done, mark gaps with `<!-- TODO: verify after audit -->`

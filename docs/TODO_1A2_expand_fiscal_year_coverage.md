@@ -1,37 +1,74 @@
 # Step 1.A2 — Expand Fiscal-Year Coverage
 
 **Status:** Not started
-**Type:** Research + Code modification (AI-agent completable)
-**Depends on:** None
+**Type:** ENVIRONMENT TESTING + Code modification
+**Depends on:** 1.A1-a (audit shows which years currently work)
 
-## Task
+## Overview
 
-Verify the downloader can discover and retrieve documents for all publicly
-available fiscal years, back to at least FY2017. Identify any years that
-fail and fix the discovery logic.
+Ensure the downloader discovers and retrieves documents for all publicly
+available fiscal years (target: FY2017–FY2026+).
 
-## Current State
+---
 
-- `discover_fiscal_years()` dynamically scrapes comptroller.war.gov for
-  available years — works for recent years
-- Service-specific pages use URL templates with `{fy}` or `{fy2}` placeholders
-- Unknown how far back each service source goes
+## Sub-tasks
 
-## Agent Instructions
+### 1.A2-a — Test historical FY reach for Comptroller
+**Type:** ENVIRONMENT TESTING (requires network)
+**Estimated tokens:** ~400 output
 
-1. Read `discover_fiscal_years()` in `dod_budget_downloader.py`
-2. Run the function (or simulate by fetching the comptroller page) to list
-   all years it discovers
-3. For each service source, test URL templates for years 2017–2026 to see
-   which return valid pages vs. 404s
-4. Document the coverage matrix: which years are available from which sources
-5. If any years fail due to URL pattern changes (older pages may use different
-   URL structures), propose fixes to the discovery functions
-6. Estimated tokens: ~1500 output tokens + web fetches
+1. Run `discover_fiscal_years()` and record all years returned
+2. Run `--list --years 2017 2018 2019 2020 --sources comptroller`
+3. Record: which years return files, which 404, which redirect
+4. Check if pre-FY2020 uses different URL patterns
+
+---
+
+### 1.A2-b — Fix Comptroller historical URL patterns
+**Type:** AI-agent (code modification)
+**Estimated tokens:** ~600 output
+**Depends on:** 1.A2-a (must know which years fail)
+
+If older FYs use different URL patterns:
+1. Inspect page HTML for failing years
+2. Add URL variants to `discover_comptroller_files()`
+3. Use fallback: try primary → alternate → skip with warning
+
+---
+
+### 1.A2-c — Test historical FY reach for service sources
+**Type:** ENVIRONMENT TESTING (requires network)
+**Estimated tokens:** ~500 output
+
+1. Run `--list --years 2017 2018 2019 2020 --sources army navy airforce`
+2. Record which service/year combinations return files
+3. For failures: inspect site for correct URL pattern
+
+---
+
+### 1.A2-d — Fix service-specific historical URL patterns
+**Type:** AI-agent (code modification)
+**Estimated tokens:** ~800 output
+**Depends on:** 1.A2-c
+
+For each failing service/year:
+1. Add alternate URL patterns to the relevant `discover_*_files()` function
+2. Use try/fallback approach: primary URL → alternate → skip with warning
+
+---
+
+### 1.A2-e — Update coverage documentation
+**Type:** AI-agent (documentation)
+**Estimated tokens:** ~400 output
+**Depends on:** 1.A2-a through 1.A2-d
+
+1. Fill in coverage matrix in `docs/wiki/Data-Sources.md`
+2. Update this TODO status
+
+---
 
 ## Annotations
 
-- **DATA PROCESSING:** Requires fetching multiple URLs to test year availability
-- **ENVIRONMENT TESTING:** Run `discover_fiscal_years()` to verify dynamic
-  discovery. If environment lacks network access, document the test plan for
-  a future session with network
+- All testing sub-tasks require network access to government sites
+- URL pattern changes are the most likely cause of historical year failures
+- Some historical data may not be published online (pre-FY2017)
