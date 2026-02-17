@@ -91,7 +91,6 @@ TODO 1.B5-c: Extract structured data from narrative PDF sections.
 """
 
 import argparse
-import os  # TODO: Remove unused import (os is never referenced)
 import re
 import sqlite3
 import sys
@@ -99,7 +98,6 @@ import time
 from pathlib import Path
 
 import openpyxl
-import pandas as pd  # TODO: Remove unused import (pandas is never referenced)
 import pdfplumber
 
 # ── Configuration ─────────────────────────────────────────────────────────────
