@@ -367,6 +367,7 @@ class GuiProgressTracker:
 
         self._closed = False
         self._ready = threading.Event()
+        self._tk_vars = []  # Track all Variable objects for cleanup
 
         self._thread = threading.Thread(target=self._run_gui, daemon=True)
         self._thread.start()
@@ -412,6 +413,7 @@ class GuiProgressTracker:
 
         # ── Source label ──
         self._src_var = tk.StringVar(value="Initializing...")
+        self._tk_vars.append(self._src_var)
         ttk.Label(root, textvariable=self._src_var,
                   font=("Segoe UI", 11, "bold")).pack(**pad, anchor="w")
 
@@ -420,6 +422,7 @@ class GuiProgressTracker:
         frm_overall.pack(fill="x", **pad)
 
         self._overall_lbl = tk.StringVar(value="0.0%  -  0 / 0 files")
+        self._tk_vars.append(self._overall_lbl)
         ttk.Label(frm_overall, textvariable=self._overall_lbl,
                   font=("Segoe UI", 9)).pack(anchor="w")
         self._overall_bar = ttk.Progressbar(
@@ -429,6 +432,7 @@ class GuiProgressTracker:
 
         # ── Stats row ──
         self._stats_var = tk.StringVar(value="0 KB downloaded  |  0m 00s elapsed  |  0 remaining")
+        self._tk_vars.append(self._stats_var)
         ttk.Label(root, textvariable=self._stats_var,
                   font=("Segoe UI", 9)).pack(**pad, anchor="w")
 
@@ -437,6 +441,7 @@ class GuiProgressTracker:
         sep1.pack(fill="x", padx=10, pady=2)
 
         self._file_lbl = tk.StringVar(value="Waiting...")
+        self._tk_vars.append(self._file_lbl)
         ttk.Label(root, textvariable=self._file_lbl,
                   font=("Segoe UI", 9)).pack(padx=10, pady=2, anchor="w")
         self._file_bar = ttk.Progressbar(
@@ -445,6 +450,7 @@ class GuiProgressTracker:
         self._file_bar.pack(fill="x", padx=10, pady=2)
 
         self._file_stats_var = tk.StringVar(value="")
+        self._tk_vars.append(self._file_stats_var)
         ttk.Label(root, textvariable=self._file_stats_var,
                   font=("Segoe UI", 9)).pack(padx=10, anchor="w")
 
@@ -456,6 +462,7 @@ class GuiProgressTracker:
         frm_counts.pack(fill="x", padx=10)
         self._count_var = tk.StringVar(
             value="Downloaded: 0    Skipped: 0    Failed: 0")
+        self._tk_vars.append(self._count_var)
         ttk.Label(frm_counts, textvariable=self._count_var,
                   font=("Segoe UI", 9, "bold")).pack(anchor="w")
 
@@ -536,12 +543,21 @@ class GuiProgressTracker:
 
     def _on_close(self):
         self._closed = True
+        if not hasattr(self, '_root') or not self._root:
+            return
         try:
+            # Clear all Variable values and references to break references before destroy
+            for var in self._tk_vars:
+                try:
+                    var.set("")
+                except Exception:
+                    pass
             self._root.destroy()
         except Exception:
             pass
         finally:
-            # Force cleanup of tkinter variables to prevent deallocator errors
+            # Clear all references to prevent deallocator access to dead Tk instance
+            self._tk_vars.clear()
             self._root = None
 
     def set_source(self, year: str, source: str):
@@ -594,8 +610,16 @@ class GuiProgressTracker:
 
         failure_lines = list(self._failure_lines)
 
-        # Destroy the old progress window
-        self.close()
+        # Destroy the old progress window and quit main loop
+        self._closed = True
+        try:
+            if hasattr(self, '_root') and self._root:
+                self._root.quit()
+                self._root.destroy()
+        except Exception:
+            pass
+        finally:
+            self._root = None
 
         # Build completion dialog
         dlg = tk.Tk()
@@ -1493,6 +1517,11 @@ def main():
                    f"Failed: {_tracker.failed}\n"
                    f"Total size: {total_dl}   Elapsed: {elapsed}")
         _tracker.show_completion_dialog(summary)
+        # Wait for the GUI thread to finish before exiting
+        try:
+            _tracker._thread.join(timeout=5)
+        except Exception:
+            pass
     _tracker = None
 
 
