@@ -113,12 +113,6 @@ TODO 1.A3-c: Improve WAF/bot detection handling.
     Token-efficient tip: add a 15-line _detect_waf_block(response) helper
     called from download_file() and _browser_download_file().
 
-TODO 1.A3-e: Detect and handle ZIP files containing nested documents.
-    Some sources provide ZIP archives that contain the actual Excel/PDF files.
-    After downloading a .zip, optionally extract it into the same directory
-    and add the extracted files to the manifest.
-    Token-efficient tip: add a --extract-zips flag.  After download_file()
-    succeeds for a .zip, call zipfile.extractall() into dest_dir.  ~20 lines.
 
 TODO 1.A4-a: Create a CLI-only download script (no GUI dependency).
     Extract the core download logic into a function that can be called
@@ -173,6 +167,7 @@ import shutil
 import sys
 import threading
 import time
+import zipfile
 from pathlib import Path
 from urllib.parse import urljoin, urlparse, unquote
 
@@ -1138,6 +1133,17 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
     return False
 
 
+def _extract_zip(zip_path: Path, dest_dir: Path):
+    """Extract a ZIP archive into dest_dir and log the result."""
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            names = zf.namelist()
+            zf.extractall(dest_dir)
+            print(f"    [ZIP] Extracted {len(names)} file(s) from {zip_path.name}")
+    except zipfile.BadZipFile as e:
+        print(f"    [ZIP] Bad ZIP, skipping extraction of {zip_path.name}: {e}")
+
+
 # ── Display ───────────────────────────────────────────────────────────────────
 
 def list_files(all_files: dict[str, dict[str, list[dict]]]) -> None:
@@ -1283,6 +1289,10 @@ def main():
     parser.add_argument(
         "--delay", type=float, default=0.5,
         help="Seconds to wait between requests (default: 0.5)",
+    )
+    parser.add_argument(
+        "--extract-zips", action="store_true", dest="extract_zips",
+        help="Extract ZIP archives after downloading them",
     )
     args = parser.parse_args()
 
@@ -1440,10 +1450,12 @@ def main():
 
             for file_info in to_download:
                 dest = dest_dir / file_info["filename"]
-                download_file(
+                ok = download_file(
                     session, file_info["url"], dest,
                     args.overwrite, use_browser=use_browser,
                 )
+                if ok and args.extract_zips and dest.suffix.lower() == ".zip":
+                    _extract_zip(dest, dest_dir)
                 time.sleep(args.delay)
 
     # ── Cleanup ──
