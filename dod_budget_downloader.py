@@ -113,13 +113,6 @@ TODO 1.A3-c: Improve WAF/bot detection handling.
     Token-efficient tip: add a 15-line _detect_waf_block(response) helper
     called from download_file() and _browser_download_file().
 
-TODO 1.A3-d: Add configurable retry with exponential backoff for downloads.
-    The current retry logic is on the Session adapter (3 retries for 429/5xx).
-    Add application-level retry for download_file(): if a download fails,
-    retry up to 3 times with delays of 2s, 4s, 8s.  Log each retry attempt.
-    Token-efficient tip: wrap the try/except in download_file() in a
-    for attempt in range(max_retries) loop.  ~10 lines changed.
-
 TODO 1.A3-e: Detect and handle ZIP files containing nested documents.
     Some sources provide ZIP archives that contain the actual Excel/PDF files.
     After downloading a .zip, optionally extract it into the same directory
@@ -1101,38 +1094,48 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
         return ok
 
     file_start = time.time()
-    try:
-        resp = session.get(url, timeout=120, stream=True)
-        resp.raise_for_status()
+    _retry_delays = [2, 4, 8]
+    last_exc = None
+    for attempt in range(len(_retry_delays) + 1):
+        if attempt > 0:
+            delay = _retry_delays[attempt - 1]
+            print(f"\r    [RETRY {attempt}/{len(_retry_delays)}] {fname}: "
+                  f"retrying in {delay}s...          ")
+            time.sleep(delay)
+        try:
+            resp = session.get(url, timeout=120, stream=True)
+            resp.raise_for_status()
 
-        total_size = int(resp.headers.get("content-length", 0))
-        downloaded = 0
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
+            total_size = int(resp.headers.get("content-length", 0))
+            downloaded = 0
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(dest_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=8192):
-                f.write(chunk)
-                downloaded += len(chunk)
-                if _tracker:
-                    _tracker.print_file_progress(
-                        fname, downloaded, total_size, file_start
-                    )
+            with open(dest_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if _tracker:
+                        _tracker.print_file_progress(
+                            fname, downloaded, total_size, file_start
+                        )
 
-        if _tracker:
-            _tracker.file_done(fname, downloaded, "ok")
-        else:
-            size_mb = downloaded / (1024 * 1024)
-            print(f"\r    [OK] {fname} ({size_mb:.1f} MB)          ")
-        return True
+            if _tracker:
+                _tracker.file_done(fname, downloaded, "ok")
+            else:
+                size_mb = downloaded / (1024 * 1024)
+                print(f"\r    [OK] {fname} ({size_mb:.1f} MB)          ")
+            return True
 
-    except requests.RequestException as e:
-        if _tracker:
-            _tracker.file_done(fname, 0, "fail")
-        else:
-            print(f"\r    [FAIL] {fname}: {e}          ")
-        if dest_path.exists():
-            dest_path.unlink()
-        return False
+        except requests.RequestException as e:
+            last_exc = e
+            if dest_path.exists():
+                dest_path.unlink()
+
+    if _tracker:
+        _tracker.file_done(fname, 0, "fail")
+    else:
+        print(f"\r    [FAIL] {fname}: {last_exc}          ")
+    return False
 
 
 # ── Display ───────────────────────────────────────────────────────────────────
