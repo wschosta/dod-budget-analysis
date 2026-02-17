@@ -77,7 +77,7 @@ SERVICE_PAGE_TEMPLATES = {
         "url": "https://www.saffm.hq.af.mil/FM-Resources/Budget/Air-Force-Presidents-Budget-FY{fy2}/",
         "label": "US Air Force",
     },
-}
+} # TODO: add alternate navy source: https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx
 
 
 # ── Progress Tracker ──────────────────────────────────────────────────────────
@@ -90,8 +90,7 @@ class ProgressTracker:
         self.completed = 0
         self.skipped = 0
         self.failed = 0
-        self.session_bytes = 0   # bytes downloaded this session only
-        self.existing_bytes = 0  # bytes of files already on disk (skipped)
+        self.total_bytes = 0
         self.start_time = time.time()
         self.current_source = ""
         self.current_year = ""
@@ -101,11 +100,6 @@ class ProgressTracker:
     @property
     def processed(self) -> int:
         return self.completed + self.skipped + self.failed
-
-    @property
-    def total_bytes(self) -> int:
-        """Total database size = downloaded this session + existing files."""
-        return self.session_bytes + self.existing_bytes
 
     def _elapsed(self) -> str:
         secs = int(time.time() - self.start_time)
@@ -135,15 +129,13 @@ class ProgressTracker:
         frac = self.processed / self.total_files if self.total_files else 0
         pct = frac * 100
         bar = self._bar(frac, 25)
-        dl = self._format_bytes(self.session_bytes)
-        db = self._format_bytes(self.total_bytes)
+        dl = self._format_bytes(self.total_bytes)
         elapsed = self._elapsed()
         remaining = self.total_files - self.processed
         line = (
             f"\r  Overall: {bar} {pct:5.1f}%  "
             f"{self.processed}/{self.total_files} files  "
             f"{dl} downloaded  "
-            f"({db} total)  "
             f"{elapsed} elapsed  "
             f"({remaining} remaining)"
         )
@@ -194,10 +186,10 @@ class ProgressTracker:
 
         if status == "ok" or status == "redownload":
             self.completed += 1
-            self.session_bytes += size
+            self.total_bytes += size
         elif status == "skip":
             self.skipped += 1
-            self.existing_bytes += size
+            self.total_bytes += size
         elif status == "fail":
             self.failed += 1
 
@@ -210,30 +202,17 @@ class ProgressTracker:
 # ── GUI Progress Tracker ─────────────────────────────────────────────────────
 
 class GuiProgressTracker:
-    """Tkinter GUI window that displays download progress.
+    """Tkinter GUI window that displays download progress."""
 
-    Supports two phases:
-      1. Discovery — scanning data sources (own progress bar)
-      2. Download  — downloading files (main progress bar + file bar)
-    """
-
-    def __init__(self, total_files: int = 0):
+    def __init__(self, total_files: int):
         self.total_files = total_files
         self.completed = 0
         self.skipped = 0
         self.failed = 0
-        self.session_bytes = 0   # bytes downloaded this session only
-        self.existing_bytes = 0  # bytes of files already on disk (skipped)
+        self.total_bytes = 0
         self.start_time = time.time()
         self.current_source = ""
         self.current_year = ""
-
-        # Discovery phase state
-        self._discovery_total = 0
-        self._discovery_done = 0
-        self._discovery_label = ""
-        self._discovery_results: list[str] = []  # log lines during discovery
-        self._discovery_finished = False
 
         # Per-file state (read by GUI thread)
         self._file_name = ""
@@ -252,11 +231,6 @@ class GuiProgressTracker:
     @property
     def processed(self) -> int:
         return self.completed + self.skipped + self.failed
-
-    @property
-    def total_bytes(self) -> int:
-        """Total database size = downloaded this session + existing files."""
-        return self.session_bytes + self.existing_bytes
 
     def _format_bytes(self, b: int) -> str:
         if b < 1024 * 1024:
@@ -279,7 +253,7 @@ class GuiProgressTracker:
 
         self._root = root = tk.Tk()
         root.title("DoD Budget Downloader")
-        root.geometry("620x460")
+        root.geometry("620x420")
         root.resizable(True, True)
         root.attributes("-topmost", True)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -289,50 +263,16 @@ class GuiProgressTracker:
                          troughcolor="#e0e0e0", background="#2196F3")
         style.configure("File.Horizontal.TProgressbar",
                          troughcolor="#e0e0e0", background="#4CAF50")
-        style.configure("Discovery.Horizontal.TProgressbar",
-                         troughcolor="#e0e0e0", background="#FF9800")
 
         pad = {"padx": 10, "pady": 4}
 
-        # ══════════════════════════════════════════════════════════════════
-        #  DISCOVERY PHASE widgets
-        # ══════════════════════════════════════════════════════════════════
-        self._disc_frame = disc_frame = ttk.LabelFrame(
-            root, text="  Scanning Data Sources  ", padding=8)
-        disc_frame.pack(fill="x", **pad)
-
-        self._disc_lbl = tk.StringVar(value="Initializing...")
-        ttk.Label(disc_frame, textvariable=self._disc_lbl,
-                  font=("Segoe UI", 9)).pack(anchor="w")
-
-        self._disc_bar = ttk.Progressbar(
-            disc_frame, length=560, mode="determinate",
-            style="Discovery.Horizontal.TProgressbar")
-        self._disc_bar.pack(fill="x", pady=4)
-
-        self._disc_stats = tk.StringVar(value="")
-        ttk.Label(disc_frame, textvariable=self._disc_stats,
-                  font=("Segoe UI", 9)).pack(anchor="w")
-
-        # Discovery results log
-        self._disc_log = tk.Text(disc_frame, height=4, wrap="none",
-                                  font=("Consolas", 8), state="disabled",
-                                  bg="#f5f5f5")
-        self._disc_log.pack(fill="x", pady=(4, 0))
-
-        # ══════════════════════════════════════════════════════════════════
-        #  DOWNLOAD PHASE widgets (initially hidden)
-        # ══════════════════════════════════════════════════════════════════
-        self._dl_frame = dl_frame = ttk.Frame(root)
-        # dl_frame is NOT packed yet — shown after discovery finishes
-
         # ── Source label ──
-        self._src_var = tk.StringVar(value="")
-        ttk.Label(dl_frame, textvariable=self._src_var,
+        self._src_var = tk.StringVar(value="Initializing...")
+        ttk.Label(root, textvariable=self._src_var,
                   font=("Segoe UI", 11, "bold")).pack(**pad, anchor="w")
 
         # ── Overall progress ──
-        frm_overall = ttk.Frame(dl_frame)
+        frm_overall = ttk.Frame(root)
         frm_overall.pack(fill="x", **pad)
 
         self._overall_lbl = tk.StringVar(value="0.0%  -  0 / 0 files")
@@ -344,31 +284,31 @@ class GuiProgressTracker:
         self._overall_bar.pack(fill="x", pady=2)
 
         # ── Stats row ──
-        self._stats_var = tk.StringVar(value="")
-        ttk.Label(dl_frame, textvariable=self._stats_var,
+        self._stats_var = tk.StringVar(value="0 KB downloaded  |  0m 00s elapsed  |  0 remaining")
+        ttk.Label(root, textvariable=self._stats_var,
                   font=("Segoe UI", 9)).pack(**pad, anchor="w")
 
         # ── Current file ──
-        sep1 = ttk.Separator(dl_frame, orient="horizontal")
+        sep1 = ttk.Separator(root, orient="horizontal")
         sep1.pack(fill="x", padx=10, pady=2)
 
         self._file_lbl = tk.StringVar(value="Waiting...")
-        ttk.Label(dl_frame, textvariable=self._file_lbl,
+        ttk.Label(root, textvariable=self._file_lbl,
                   font=("Segoe UI", 9)).pack(padx=10, pady=2, anchor="w")
         self._file_bar = ttk.Progressbar(
-            dl_frame, length=580, mode="determinate",
+            root, length=580, mode="determinate",
             style="File.Horizontal.TProgressbar")
         self._file_bar.pack(fill="x", padx=10, pady=2)
 
         self._file_stats_var = tk.StringVar(value="")
-        ttk.Label(dl_frame, textvariable=self._file_stats_var,
+        ttk.Label(root, textvariable=self._file_stats_var,
                   font=("Segoe UI", 9)).pack(padx=10, anchor="w")
 
         # ── Counters ──
-        sep2 = ttk.Separator(dl_frame, orient="horizontal")
+        sep2 = ttk.Separator(root, orient="horizontal")
         sep2.pack(fill="x", padx=10, pady=4)
 
-        frm_counts = ttk.Frame(dl_frame)
+        frm_counts = ttk.Frame(root)
         frm_counts.pack(fill="x", padx=10)
         self._count_var = tk.StringVar(
             value="Downloaded: 0    Skipped: 0    Failed: 0")
@@ -376,10 +316,10 @@ class GuiProgressTracker:
                   font=("Segoe UI", 9, "bold")).pack(anchor="w")
 
         # ── File log ──
-        sep3 = ttk.Separator(dl_frame, orient="horizontal")
+        sep3 = ttk.Separator(root, orient="horizontal")
         sep3.pack(fill="x", padx=10, pady=4)
 
-        log_frame = ttk.Frame(dl_frame)
+        log_frame = ttk.Frame(root)
         log_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         self._log_text = tk.Text(log_frame, height=8, wrap="none",
@@ -396,66 +336,19 @@ class GuiProgressTracker:
         root.mainloop()
 
     def _poll(self):
-        """Called every 50ms in the GUI thread to refresh widgets."""
+        """Called every 150ms in the GUI thread to refresh widgets."""
         if self._closed:
             return
-
-        # ── Discovery phase updates ──
-        if not self._discovery_finished:
-            if self._discovery_total > 0:
-                dfrac = self._discovery_done / self._discovery_total
-                self._disc_bar["value"] = dfrac * 100
-                self._disc_lbl.set(
-                    f"{self._discovery_label}  "
-                    f"({self._discovery_done} / {self._discovery_total})")
-                self._disc_stats.set(
-                    f"{dfrac*100:.0f}% complete  |  {self._elapsed()} elapsed")
-            else:
-                self._disc_lbl.set(self._discovery_label or "Initializing...")
-
-            # Discovery log
-            if self._discovery_results:
-                results = self._discovery_results.copy()
-                self._discovery_results.clear()
-                self._disc_log.configure(state="normal")
-                for ln in results:
-                    self._disc_log.insert("end", ln + "\n")
-                self._disc_log.see("end")
-                self._disc_log.configure(state="disabled")
-
-            self._root.after(50, self._poll)
-            return
-
-        # ── Download phase updates ──
-
-        # Transition: show download frame if not yet visible
-        if not self._dl_frame.winfo_ismapped():
-            self._dl_frame.pack(fill="both", expand=True)
 
         # Overall
         frac = self.processed / self.total_files if self.total_files else 0
         self._overall_bar["value"] = frac * 100
         self._overall_lbl.set(
             f"{frac*100:.1f}%  -  {self.processed} / {self.total_files} files")
-        remaining = self.total_files - self.processed
-        elapsed_secs = time.time() - self.start_time
-        if self.processed > 0 and remaining > 0 and elapsed_secs > 2:
-            avg_per_file = elapsed_secs / self.processed
-            eta_secs = int(avg_per_file * remaining)
-            em, es = divmod(eta_secs, 60)
-            eh, em = divmod(em, 60)
-            if eh:
-                eta_str = f"~{eh}h {em:02d}m {es:02d}s left"
-            else:
-                eta_str = f"~{em}m {es:02d}s left"
-        elif remaining == 0:
-            eta_str = "done"
-        else:
-            eta_str = "estimating..."
         self._stats_var.set(
-            f"{self._format_bytes(self.session_bytes)} downloaded  |  "
-            f"{self._format_bytes(self.total_bytes)} total  |  "
-            f"{self._elapsed()} elapsed  |  {eta_str}")
+            f"{self._format_bytes(self.total_bytes)} downloaded  |  "
+            f"{self._elapsed()} elapsed  |  "
+            f"{self.total_files - self.processed} remaining")
         self._count_var.set(
             f"Downloaded: {self.completed}    "
             f"Skipped: {self.skipped}    "
@@ -495,36 +388,11 @@ class GuiProgressTracker:
             self._log_text.see("end")
             self._log_text.configure(state="disabled")
 
-        self._root.after(50, self._poll)
+        self._root.after(150, self._poll)
 
     def _on_close(self):
         self._closed = True
         self._root.destroy()
-
-    # ── Discovery phase API ──
-
-    def set_discovery_total(self, total: int):
-        """Set the total number of discovery steps (year × source combos)."""
-        self._discovery_total = total
-
-    def discovery_step(self, label: str, file_count: int | None = None):
-        """Record completion of one discovery step."""
-        self._discovery_done += 1
-        self._discovery_label = label
-        result = f"  {label}"
-        if file_count is not None:
-            result += f" — {file_count} file(s) found"
-        self._discovery_results.append(result)
-
-    def finish_discovery(self, total_files: int):
-        """End the discovery phase and transition to download phase."""
-        self.total_files = total_files
-        self._discovery_done = self._discovery_total  # ensure bar shows 100%
-        self._discovery_label = f"Scan complete — {total_files} file(s) found"
-        self.start_time = time.time()  # reset elapsed for download phase
-        self._discovery_finished = True
-
-    # ── Download phase API ──
 
     def set_source(self, year: str, source: str):
         self.current_year = year
@@ -546,10 +414,10 @@ class GuiProgressTracker:
 
         if status == "ok" or status == "redownload":
             self.completed += 1
-            self.session_bytes += size
+            self.total_bytes += size
         elif status == "skip":
             self.skipped += 1
-            self.existing_bytes += size
+            self.total_bytes += size
         elif status == "fail":
             self.failed += 1
 
@@ -573,7 +441,6 @@ class GuiProgressTracker:
 
 # Global tracker, set during main()
 _tracker: ProgressTracker | GuiProgressTracker | None = None
-_failure_log: list[dict] = []  # {"filename": ..., "url": ..., "source": ..., "year": ...}
 
 
 # ── Session ────────────────────────────────────────────────────────────────────
@@ -619,10 +486,7 @@ def _get_browser_context():
     _pw_instance = sync_playwright().start()
     _pw_browser = _pw_instance.chromium.launch(
         headless=False,
-        args=[
-            "--disable-blink-features=AutomationControlled",
-            "--window-position=-32000,-32000",
-        ],
+        args=["--disable-blink-features=AutomationControlled"],
     )
     _pw_context = _pw_browser.new_context(
         user_agent=(
@@ -909,7 +773,8 @@ def discover_army_files(_session: requests.Session, year: str) -> list[dict]:
 
 
 # ── Navy ──────────────────────────────────────────────────────────────────────
-
+# TODO: Navy still showing 0 files when running the scan, not sure why. Need to
+# dig into it - it's 0 for every year 
 def discover_navy_files(session: requests.Session, year: str) -> list[dict]:
     url = SERVICE_PAGE_TEMPLATES["navy"]["url"].format(fy=year)
     print(f"  [Navy] Scanning FY{year}...")
@@ -944,7 +809,9 @@ SOURCE_DISCOVERERS = {
 
 
 # ── Download ──────────────────────────────────────────────────────────────────
-
+#TODO - this should be a full list compare, if we're trusting the local file we can
+# just totally ignore any matched file names. We don't need to do those in a loop,
+# just that don't appear
 def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
                          use_browser: bool = False) -> str:
     """Check if a local file matches the remote.
@@ -992,24 +859,16 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
     fname = dest_path.name
 
     if not overwrite and dest_path.exists():
-        local_size = dest_path.stat().st_size
-        if local_size > 1024:
-            # File exists and is >1KB — skip immediately without HEAD request
-            if _tracker:
-                _tracker.file_done(fname, local_size, "skip")
-            else:
-                print(f"    [SKIP] Already exists: {fname}")
-            return True
-        # File is suspiciously small — verify via HEAD
         status = _check_existing_file(session, url, dest_path, use_browser)
         if status == "skip":
+            size = dest_path.stat().st_size
             if _tracker:
-                _tracker.file_done(fname, local_size, "skip")
+                _tracker.file_done(fname, size, "skip")
             else:
                 print(f"    [SKIP] Already exists: {fname}")
             return True
         if status == "redownload":
-            local_mb = local_size / (1024 * 1024)
+            local_mb = dest_path.stat().st_size / (1024 * 1024)
             print(f"\r    [REDOWNLOAD] Size mismatch for {fname} "
                   f"(local {local_mb:.1f} MB)")
 
@@ -1018,13 +877,6 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
         if _tracker:
             size = dest_path.stat().st_size if dest_path.exists() else 0
             _tracker.file_done(fname, size, "ok" if ok else "fail")
-        if not ok:
-            _failure_log.append({
-                "filename": fname, "url": url,
-                "source": _tracker.current_source if _tracker else "",
-                "year": _tracker.current_year if _tracker else "",
-                "error": "All browser download strategies failed",
-            })
         return ok
 
     file_start = time.time()
@@ -1057,12 +909,6 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
             _tracker.file_done(fname, 0, "fail")
         else:
             print(f"\r    [FAIL] {fname}: {e}          ")
-        _failure_log.append({
-            "filename": fname, "url": url,
-            "source": _tracker.current_source if _tracker else "",
-            "year": _tracker.current_year if _tracker else "",
-            "error": str(e),
-        })
         if dest_path.exists():
             dest_path.unlink()
         return False
@@ -1273,15 +1119,6 @@ def main():
         type_filter = {f".{t.lower().strip('.')}" for t in args.types}
         print(f"File type filter: {', '.join(type_filter)}")
 
-    # ── Set up GUI before discovery ──
-    global _tracker
-    use_gui = not args.no_gui and not args.list_only
-
-    if use_gui:
-        _tracker = GuiProgressTracker()  # start with 0 total, discovery phase
-        discovery_steps = len(selected_years) * len(selected_sources)
-        _tracker.set_discovery_total(discovery_steps)
-
     # ── Discover files ──
     all_files: dict[str, dict[str, list[dict]]] = {}
     # Track which source labels need browser downloads
@@ -1291,10 +1128,6 @@ def main():
         all_files[year] = {}
 
         for source in selected_sources:
-            label = (SERVICE_PAGE_TEMPLATES[source]["label"]
-                     if source != "comptroller" else "Comptroller")
-            step_label = f"FY{year} / {label}"
-
             if source == "comptroller":
                 url = available_years[year]
                 files = discover_comptroller_files(session, year, url)
@@ -1305,13 +1138,12 @@ def main():
             if type_filter:
                 files = [f for f in files if f["extension"] in type_filter]
 
+            label = (SERVICE_PAGE_TEMPLATES[source]["label"]
+                     if source != "comptroller" else "Comptroller")
             all_files[year][label] = files
 
             if _is_browser_source(source):
                 browser_labels.add(label)
-
-            if use_gui:
-                _tracker.discovery_step(step_label, len(files))
 
             time.sleep(0.5)
 
@@ -1322,17 +1154,18 @@ def main():
         return
 
     # ── Download ──
+    global _tracker
     total_files = sum(
         len(f) for yr in all_files.values() for f in yr.values()
     )
     print(f"\nReady to download {total_files} file(s) to: {args.output.resolve()}\n")
 
-    if use_gui:
-        _tracker.finish_discovery(total_files)
-    else:
+    if args.no_gui:
         _tracker = ProgressTracker(total_files)
         _tracker.print_overall()
         print()  # newline after initial overall bar
+    else:
+        _tracker = GuiProgressTracker(total_files)
 
     for year in sorted(all_files.keys(), reverse=True):
         sources = all_files[year]
@@ -1368,41 +1201,26 @@ def main():
 
     # ── Summary ──
     elapsed = _tracker._elapsed()
-    session_dl = _tracker._format_bytes(_tracker.session_bytes)
-    total_db = _tracker._format_bytes(_tracker.total_bytes)
+    total_dl = _tracker._format_bytes(_tracker.total_bytes)
     print(f"\n\n{'='*70}")
     print(f"  Download Complete")
     print(f"{'='*70}")
-    print(f"  Downloaded: {_tracker.completed}  ({session_dl})")
+    print(f"  Downloaded: {_tracker.completed}")
     print(f"  Skipped:    {_tracker.skipped}")
     print(f"  Failed:     {_tracker.failed}")
-    print(f"  Database:   {total_db}")
+    print(f"  Total size: {total_dl}")
     print(f"  Elapsed:    {elapsed}")
     print(f"  Location:   {args.output.resolve()}")
-
-    if _failure_log:
-        from datetime import datetime
-        log_path = args.output / f"failures_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        with open(log_path, "w", encoding="utf-8") as f:
-            f.write(f"DoD Budget Downloader - Failure Log\n")
-            f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Total failures: {len(_failure_log)}\n")
-            f.write(f"{'='*80}\n\n")
-            for i, entry in enumerate(_failure_log, 1):
-                f.write(f"{i}. {entry['filename']}\n")
-                f.write(f"   Source: FY{entry['year']} / {entry['source']}\n")
-                f.write(f"   URL:    {entry['url']}\n")
-                f.write(f"   Error:  {entry['error']}\n\n")
-        print(f"  Failures: {log_path.resolve()}")
 
     if isinstance(_tracker, GuiProgressTracker):
         # Keep GUI open for a moment so user can see final state
         _tracker._log_lines.append(
-            f"\n--- Complete: {_tracker.completed} downloaded ({session_dl}), "
+            f"\n--- Complete: {_tracker.completed} downloaded, "
             f"{_tracker.skipped} skipped, {_tracker.failed} failed "
-            f"(DB: {total_db}, {elapsed}) ---")
+            f"({total_dl}, {elapsed}) ---")
         time.sleep(2)
         _tracker.close()
+        # TODO - change this to pop up with close button and a button to open the failure log
     _tracker = None
 
 

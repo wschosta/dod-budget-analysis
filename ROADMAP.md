@@ -10,10 +10,23 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 
 | Phase | Title | Description |
 |-------|-------|-------------|
+| **0** | Project Description and Creation of Documentation | Creation of an updated readme file incorporating this roadmap as well as the appropriate skeleton for future documentation |
 | **1** | Data Extraction & Normalization | Download, parse, and normalize DoD budget documents into clean, structured data |
 | **2** | Database Design & Population | Design the production schema, load all data, and expose it through an API |
 | **3** | Front-End & Documentation | Build a web UI for querying, filtering, and downloading data, plus user-facing docs |
 | **4** | Publish, Feedback & Iteration | Deploy publicly, collect user feedback, and iterate on improvements |
+
+---
+
+## Phase 0 - Project Description and Creation of Documentation
+
+**Goal:** Create a clear outline of the project and how to use it such that other parties can contribute to the development and/or easily use the results.
+
+### 0.A — Phase 0 Tasks
+| ID | Task | Details | Status |
+|----|------|---------|--------|
+| **0.A1** | Merge ROADMAP into README | Merge ROADMAP into README for clarity in the path forward for the project | Not started |
+| **0.A2** | Create Wiki Skeleton | Create skeleton of wiki pages for completion as supsequent phases and tasks complete | Not started |
 
 ---
 
