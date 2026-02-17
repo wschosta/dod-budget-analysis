@@ -551,32 +551,6 @@ def _determine_category(file_path: Path) -> str:
     return "Other"
 
 
-def _likely_has_tables(page) -> bool:
-    """
-    Lightweight heuristic to detect if a PDF page likely contains tables.
-    Avoids expensive extract_tables() on text-only pages.
-
-    Note: This is a best-effort optimization. False positives (text pages
-    extracted as tables) are acceptable since table extraction gracefully
-    handles them. False negatives (tables not extracted) are acceptable
-    since we prioritize speed over comprehensiveness.
-    """
-    try:
-        # Lightweight approach: just check if page has significant structured content
-        # Don't access page.lines directly (it's expensive to compute)
-        # Instead, use page.rects and page.curves as proxy for table structure
-        rects = len(page.rects) if hasattr(page, 'rects') else 0
-        curves = len(page.curves) if hasattr(page, 'curves') else 0
-
-        # Pages with many rectangles or curves likely have tables/structured layouts
-        # Threshold is conservative: only skip extraction if very text-like
-        return (rects + curves) > 10
-    except Exception:
-        # If any error computing heuristic, skip table extraction (save time)
-        # Missing some tables is better than crashing
-        return False
-
-
 def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path) -> int:
     """Ingest a single PDF file into the database."""
     category = _determine_category(file_path)
@@ -597,21 +571,10 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path) -> int:
                     else:
                         raise
 
-                # Only extract tables if page likely has table structure (optimization)
+                # SKIP table extraction - causes hangs on some PDFs
+                # Tables extraction via pdfplumber can hang indefinitely on malformed PDFs
+                # Text content is sufficient for full-text search; skip tables for reliability
                 tables = []
-                if _likely_has_tables(page):
-                    try:
-                        # Use optimized table settings for 20-30% faster extraction
-                        # Only detect tables with visible lines, skip inference from text
-                        tables = page.extract_tables(table_settings={
-                            "vertical_strategy": "lines",
-                            "horizontal_strategy": "lines",
-                        })
-                    except Exception as e:
-                        # If table extraction fails but we got text, continue
-                        if not text.strip():
-                            raise
-                        tables = []
 
                 table_text = _extract_table_text(tables)
 
