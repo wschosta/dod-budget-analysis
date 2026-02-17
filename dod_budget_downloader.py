@@ -1,45 +1,27 @@
 """
-DoD Budget Document Downloader
+DoD Comptroller Budget Document Downloader
 
-Bulk-downloads budget justification documents (PDFs, Excel spreadsheets, ZIPs)
-from the Department of Defense Comptroller website and individual military
-service budget pages.  Supports both interactive and fully automated (CLI)
-operation, with optional GUI progress tracking via tkinter.
+Downloads budget documents (PDFs, Excel files, ZIPs) from the DoD Comptroller
+website and service-specific budget pages for selected fiscal years.
 
-Data Sources
-------------
-  comptroller  : Main DoD summary budget documents   (comptroller.war.gov)
-  defense-wide : Defense-Wide budget justification    (comptroller.war.gov)
-  army         : US Army budget materials             (asafm.army.mil, WAF-protected)
-  navy         : US Navy / Marine Corps materials     (secnav.navy.mil, SharePoint)
-  airforce     : US Air Force / Space Force materials (saffm.hq.af.mil, WAF-protected)
+Sources:
+  - comptroller : Main DoD summary budget documents (comptroller.war.gov)
+  - defense-wide: Defense Wide budget justification books (comptroller.war.gov)
+  - army        : US Army budget materials (asafm.army.mil)
+  - navy        : US Navy/Marine Corps budget materials (secnav.navy.mil)
+  - airforce    : US Air Force & Space Force budget materials (saffm.hq.af.mil)
 
-Architecture
-------------
-- ``requests`` + ``BeautifulSoup`` for sites with standard HTML responses
-  (comptroller, defense-wide).
-- ``playwright`` (Chromium, headless=False) for WAF/bot-protected and
-  SharePoint-rendered sites (army, navy, airforce).  The browser window is
-  positioned off-screen so it never appears on the desktop.
-- Two-phase GUI: a *discovery* progress bar while scanning sources, followed
-  by a *download* progress bar with per-file speed, ETA, and running log.
-- File-existence checking skips previously downloaded files instantly (>1 KB)
-  without issuing any network requests.
-
-Requirements
-------------
+Requirements:
   pip install requests beautifulsoup4 playwright
   python -m playwright install chromium
 
-Usage Examples
---------------
-  python dod_budget_downloader.py                              # Interactive
-  python dod_budget_downloader.py --years 2026                 # FY2026 comptroller
-  python dod_budget_downloader.py --years 2026 --sources all   # FY2026 all sources
-  python dod_budget_downloader.py --years 2026 --sources army navy
-  python dod_budget_downloader.py --years 2026 --list          # Dry-run listing
-  python dod_budget_downloader.py --years all --sources all    # Everything
-  python dod_budget_downloader.py --no-gui                     # Terminal-only mode
+Usage:
+    python dod_budget_downloader.py                              # Interactive
+    python dod_budget_downloader.py --years 2025                 # FY2025 comptroller only
+    python dod_budget_downloader.py --years 2025 --sources all   # FY2025 all sources
+    python dod_budget_downloader.py --years 2025 --sources army navy
+    python dod_budget_downloader.py --years 2025 --list          # List without downloading
+    python dod_budget_downloader.py --years all --sources all    # Everything
 """
 
 import argparse
@@ -59,22 +41,15 @@ from bs4 import BeautifulSoup
 
 BASE_URL = "https://comptroller.war.gov"
 BUDGET_MATERIALS_URL = f"{BASE_URL}/Budget-Materials/"
-
-# File extensions treated as downloadable budget documents.
 DOWNLOADABLE_EXTENSIONS = {".pdf", ".xlsx", ".xls", ".zip", ".csv"}
-
-# Hostnames whose links are silently ignored during link extraction.
 IGNORED_HOSTS = {"dam.defense.gov"}
-
 DEFAULT_OUTPUT_DIR = Path("DoD_Budget_Documents")
 
-# Canonical list of data sources, in display order.
 ALL_SOURCES = ["comptroller", "defense-wide", "army", "navy", "airforce"]
 
-# Sources that need a Playwright browser to bypass WAF or render SharePoint.
-BROWSER_REQUIRED_SOURCES = {"army", "navy", "airforce"}
+# Sources that require a real browser due to WAF/bot protection
+BROWSER_REQUIRED_SOURCES = {"army", "airforce"}
 
-# HTTP headers used by the requests-based session to mimic a real browser.
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -85,8 +60,6 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-# Per-source URL templates and human-readable labels.
-# Placeholders: {fy} = 4-digit year, {fy2} = 2-digit year.
 SERVICE_PAGE_TEMPLATES = {
     "defense-wide": {
         "url": "https://comptroller.war.gov/Budget-Materials/FY{fy}BudgetJustification/",
@@ -97,7 +70,7 @@ SERVICE_PAGE_TEMPLATES = {
         "label": "US Army",
     },
     "navy": {
-        "url": "https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx",
+        "url": "https://www.secnav.navy.mil/fmc/Pages/Fiscal-Year-{fy}.aspx",
         "label": "US Navy",
     },
     "airforce": {
@@ -117,8 +90,7 @@ class ProgressTracker:
         self.completed = 0
         self.skipped = 0
         self.failed = 0
-        self.session_bytes = 0   # bytes downloaded this session only
-        self.existing_bytes = 0  # bytes of files already on disk (skipped)
+        self.total_bytes = 0
         self.start_time = time.time()
         self.current_source = ""
         self.current_year = ""
@@ -129,13 +101,7 @@ class ProgressTracker:
     def processed(self) -> int:
         return self.completed + self.skipped + self.failed
 
-    @property
-    def total_bytes(self) -> int:
-        """Total database size = downloaded this session + existing files."""
-        return self.session_bytes + self.existing_bytes
-
     def _elapsed(self) -> str:
-        """Return elapsed time since session start as a human-readable string."""
         secs = int(time.time() - self.start_time)
         m, s = divmod(secs, 60)
         h, m = divmod(m, 60)
@@ -144,7 +110,6 @@ class ProgressTracker:
         return f"{m}m {s:02d}s"
 
     def _format_bytes(self, b: int) -> str:
-        """Format a byte count as KB / MB / GB for display."""
         if b < 1024 * 1024:
             return f"{b / 1024:.0f} KB"
         if b < 1024 * 1024 * 1024:
@@ -152,29 +117,25 @@ class ProgressTracker:
         return f"{b / (1024 * 1024 * 1024):.2f} GB"
 
     def _bar(self, fraction: float, width: int = 30) -> str:
-        """Render a simple ASCII progress bar like [####------]."""
         filled = int(width * fraction)
         return f"[{'#' * filled}{'-' * (width - filled)}]"
 
     def set_source(self, year: str, source: str):
-        """Update the active source/year context for display."""
         self.current_year = year
         self.current_source = source
 
     def print_overall(self):
-        """Print the overall progress line to the terminal."""
+        """Print the overall progress line."""
         frac = self.processed / self.total_files if self.total_files else 0
         pct = frac * 100
         bar = self._bar(frac, 25)
-        dl = self._format_bytes(self.session_bytes)
-        db = self._format_bytes(self.total_bytes)
+        dl = self._format_bytes(self.total_bytes)
         elapsed = self._elapsed()
         remaining = self.total_files - self.processed
         line = (
             f"\r  Overall: {bar} {pct:5.1f}%  "
             f"{self.processed}/{self.total_files} files  "
             f"{dl} downloaded  "
-            f"({db} total)  "
             f"{elapsed} elapsed  "
             f"({remaining} remaining)"
         )
@@ -225,10 +186,10 @@ class ProgressTracker:
 
         if status == "ok" or status == "redownload":
             self.completed += 1
-            self.session_bytes += size
+            self.total_bytes += size
         elif status == "skip":
             self.skipped += 1
-            self.existing_bytes += size
+            self.total_bytes += size
         elif status == "fail":
             self.failed += 1
 
@@ -241,30 +202,17 @@ class ProgressTracker:
 # ── GUI Progress Tracker ─────────────────────────────────────────────────────
 
 class GuiProgressTracker:
-    """Tkinter GUI window that displays download progress.
+    """Tkinter GUI window that displays download progress."""
 
-    Supports two phases:
-      1. Discovery — scanning data sources (own progress bar)
-      2. Download  — downloading files (main progress bar + file bar)
-    """
-
-    def __init__(self, total_files: int = 0):
+    def __init__(self, total_files: int):
         self.total_files = total_files
         self.completed = 0
         self.skipped = 0
         self.failed = 0
-        self.session_bytes = 0   # bytes downloaded this session only
-        self.existing_bytes = 0  # bytes of files already on disk (skipped)
+        self.total_bytes = 0
         self.start_time = time.time()
         self.current_source = ""
         self.current_year = ""
-
-        # Discovery phase state
-        self._discovery_total = 0
-        self._discovery_done = 0
-        self._discovery_label = ""
-        self._discovery_results: list[str] = []  # log lines during discovery
-        self._discovery_finished = False
 
         # Per-file state (read by GUI thread)
         self._file_name = ""
@@ -283,11 +231,6 @@ class GuiProgressTracker:
     @property
     def processed(self) -> int:
         return self.completed + self.skipped + self.failed
-
-    @property
-    def total_bytes(self) -> int:
-        """Total database size = downloaded this session + existing files."""
-        return self.session_bytes + self.existing_bytes
 
     def _format_bytes(self, b: int) -> str:
         if b < 1024 * 1024:
@@ -310,7 +253,7 @@ class GuiProgressTracker:
 
         self._root = root = tk.Tk()
         root.title("DoD Budget Downloader")
-        root.geometry("620x460")
+        root.geometry("620x420")
         root.resizable(True, True)
         root.attributes("-topmost", True)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -320,50 +263,16 @@ class GuiProgressTracker:
                          troughcolor="#e0e0e0", background="#2196F3")
         style.configure("File.Horizontal.TProgressbar",
                          troughcolor="#e0e0e0", background="#4CAF50")
-        style.configure("Discovery.Horizontal.TProgressbar",
-                         troughcolor="#e0e0e0", background="#FF9800")
 
         pad = {"padx": 10, "pady": 4}
 
-        # ══════════════════════════════════════════════════════════════════
-        #  DISCOVERY PHASE widgets
-        # ══════════════════════════════════════════════════════════════════
-        self._disc_frame = disc_frame = ttk.LabelFrame(
-            root, text="  Scanning Data Sources  ", padding=8)
-        disc_frame.pack(fill="x", **pad)
-
-        self._disc_lbl = tk.StringVar(value="Initializing...")
-        ttk.Label(disc_frame, textvariable=self._disc_lbl,
-                  font=("Segoe UI", 9)).pack(anchor="w")
-
-        self._disc_bar = ttk.Progressbar(
-            disc_frame, length=560, mode="determinate",
-            style="Discovery.Horizontal.TProgressbar")
-        self._disc_bar.pack(fill="x", pady=4)
-
-        self._disc_stats = tk.StringVar(value="")
-        ttk.Label(disc_frame, textvariable=self._disc_stats,
-                  font=("Segoe UI", 9)).pack(anchor="w")
-
-        # Discovery results log
-        self._disc_log = tk.Text(disc_frame, height=4, wrap="none",
-                                  font=("Consolas", 8), state="disabled",
-                                  bg="#f5f5f5")
-        self._disc_log.pack(fill="x", pady=(4, 0))
-
-        # ══════════════════════════════════════════════════════════════════
-        #  DOWNLOAD PHASE widgets (initially hidden)
-        # ══════════════════════════════════════════════════════════════════
-        self._dl_frame = dl_frame = ttk.Frame(root)
-        # dl_frame is NOT packed yet — shown after discovery finishes
-
         # ── Source label ──
-        self._src_var = tk.StringVar(value="")
-        ttk.Label(dl_frame, textvariable=self._src_var,
+        self._src_var = tk.StringVar(value="Initializing...")
+        ttk.Label(root, textvariable=self._src_var,
                   font=("Segoe UI", 11, "bold")).pack(**pad, anchor="w")
 
         # ── Overall progress ──
-        frm_overall = ttk.Frame(dl_frame)
+        frm_overall = ttk.Frame(root)
         frm_overall.pack(fill="x", **pad)
 
         self._overall_lbl = tk.StringVar(value="0.0%  -  0 / 0 files")
@@ -375,31 +284,31 @@ class GuiProgressTracker:
         self._overall_bar.pack(fill="x", pady=2)
 
         # ── Stats row ──
-        self._stats_var = tk.StringVar(value="")
-        ttk.Label(dl_frame, textvariable=self._stats_var,
+        self._stats_var = tk.StringVar(value="0 KB downloaded  |  0m 00s elapsed  |  0 remaining")
+        ttk.Label(root, textvariable=self._stats_var,
                   font=("Segoe UI", 9)).pack(**pad, anchor="w")
 
         # ── Current file ──
-        sep1 = ttk.Separator(dl_frame, orient="horizontal")
+        sep1 = ttk.Separator(root, orient="horizontal")
         sep1.pack(fill="x", padx=10, pady=2)
 
         self._file_lbl = tk.StringVar(value="Waiting...")
-        ttk.Label(dl_frame, textvariable=self._file_lbl,
+        ttk.Label(root, textvariable=self._file_lbl,
                   font=("Segoe UI", 9)).pack(padx=10, pady=2, anchor="w")
         self._file_bar = ttk.Progressbar(
-            dl_frame, length=580, mode="determinate",
+            root, length=580, mode="determinate",
             style="File.Horizontal.TProgressbar")
         self._file_bar.pack(fill="x", padx=10, pady=2)
 
         self._file_stats_var = tk.StringVar(value="")
-        ttk.Label(dl_frame, textvariable=self._file_stats_var,
+        ttk.Label(root, textvariable=self._file_stats_var,
                   font=("Segoe UI", 9)).pack(padx=10, anchor="w")
 
         # ── Counters ──
-        sep2 = ttk.Separator(dl_frame, orient="horizontal")
+        sep2 = ttk.Separator(root, orient="horizontal")
         sep2.pack(fill="x", padx=10, pady=4)
 
-        frm_counts = ttk.Frame(dl_frame)
+        frm_counts = ttk.Frame(root)
         frm_counts.pack(fill="x", padx=10)
         self._count_var = tk.StringVar(
             value="Downloaded: 0    Skipped: 0    Failed: 0")
@@ -407,10 +316,10 @@ class GuiProgressTracker:
                   font=("Segoe UI", 9, "bold")).pack(anchor="w")
 
         # ── File log ──
-        sep3 = ttk.Separator(dl_frame, orient="horizontal")
+        sep3 = ttk.Separator(root, orient="horizontal")
         sep3.pack(fill="x", padx=10, pady=4)
 
-        log_frame = ttk.Frame(dl_frame)
+        log_frame = ttk.Frame(root)
         log_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
         self._log_text = tk.Text(log_frame, height=8, wrap="none",
@@ -427,66 +336,19 @@ class GuiProgressTracker:
         root.mainloop()
 
     def _poll(self):
-        """Called every 50ms in the GUI thread to refresh widgets."""
+        """Called every 150ms in the GUI thread to refresh widgets."""
         if self._closed:
             return
-
-        # ── Discovery phase updates ──
-        if not self._discovery_finished:
-            if self._discovery_total > 0:
-                dfrac = self._discovery_done / self._discovery_total
-                self._disc_bar["value"] = dfrac * 100
-                self._disc_lbl.set(
-                    f"{self._discovery_label}  "
-                    f"({self._discovery_done} / {self._discovery_total})")
-                self._disc_stats.set(
-                    f"{dfrac*100:.0f}% complete  |  {self._elapsed()} elapsed")
-            else:
-                self._disc_lbl.set(self._discovery_label or "Initializing...")
-
-            # Discovery log
-            if self._discovery_results:
-                results = self._discovery_results.copy()
-                self._discovery_results.clear()
-                self._disc_log.configure(state="normal")
-                for ln in results:
-                    self._disc_log.insert("end", ln + "\n")
-                self._disc_log.see("end")
-                self._disc_log.configure(state="disabled")
-
-            self._root.after(50, self._poll)
-            return
-
-        # ── Download phase updates ──
-
-        # Transition: show download frame if not yet visible
-        if not self._dl_frame.winfo_ismapped():
-            self._dl_frame.pack(fill="both", expand=True)
 
         # Overall
         frac = self.processed / self.total_files if self.total_files else 0
         self._overall_bar["value"] = frac * 100
         self._overall_lbl.set(
             f"{frac*100:.1f}%  -  {self.processed} / {self.total_files} files")
-        remaining = self.total_files - self.processed
-        elapsed_secs = time.time() - self.start_time
-        if self.processed > 0 and remaining > 0 and elapsed_secs > 2:
-            avg_per_file = elapsed_secs / self.processed
-            eta_secs = int(avg_per_file * remaining)
-            em, es = divmod(eta_secs, 60)
-            eh, em = divmod(em, 60)
-            if eh:
-                eta_str = f"~{eh}h {em:02d}m {es:02d}s left"
-            else:
-                eta_str = f"~{em}m {es:02d}s left"
-        elif remaining == 0:
-            eta_str = "done"
-        else:
-            eta_str = "estimating..."
         self._stats_var.set(
-            f"{self._format_bytes(self.session_bytes)} downloaded  |  "
-            f"{self._format_bytes(self.total_bytes)} total  |  "
-            f"{self._elapsed()} elapsed  |  {eta_str}")
+            f"{self._format_bytes(self.total_bytes)} downloaded  |  "
+            f"{self._elapsed()} elapsed  |  "
+            f"{self.total_files - self.processed} remaining")
         self._count_var.set(
             f"Downloaded: {self.completed}    "
             f"Skipped: {self.skipped}    "
@@ -526,72 +388,43 @@ class GuiProgressTracker:
             self._log_text.see("end")
             self._log_text.configure(state="disabled")
 
-        self._root.after(50, self._poll)
+        self._root.after(150, self._poll)
 
     def _on_close(self):
         self._closed = True
         self._root.destroy()
 
-    # ── Discovery phase API ──
-
-    def set_discovery_total(self, total: int):
-        """Set the total number of discovery steps (year × source combos)."""
-        self._discovery_total = total
-
-    def discovery_step(self, label: str, file_count: int | None = None):
-        """Record completion of one discovery step."""
-        self._discovery_done += 1
-        self._discovery_label = label
-        result = f"  {label}"
-        if file_count is not None:
-            result += f" — {file_count} file(s) found"
-        self._discovery_results.append(result)
-
-    def finish_discovery(self, total_files: int):
-        """End the discovery phase and transition to download phase."""
-        self.total_files = total_files
-        self._discovery_done = self._discovery_total  # ensure bar shows 100%
-        self._discovery_label = f"Scan complete — {total_files} file(s) found"
-        self.start_time = time.time()  # reset elapsed for download phase
-        self._discovery_finished = True
-
-    # ── Download phase API ──
-
     def set_source(self, year: str, source: str):
-        """Update the active source/year context for the GUI header."""
         self.current_year = year
         self.current_source = source
 
     def print_overall(self):
-        """No-op — the GUI refreshes automatically via ``_poll``."""
-        pass
+        pass  # GUI updates via _poll
 
     def print_file_progress(self, filename: str, downloaded: int, total: int,
                             file_start: float):
-        """Update shared per-file state; the GUI thread reads it on next poll."""
         self._file_name = filename
         self._file_downloaded = downloaded
         self._file_total = total
         self._file_start = file_start
 
     def file_done(self, filename: str, size: int, status: str):
-        """Record a completed file: update counters, append to log, reset file bar."""
         tag = {"ok": "OK", "skip": "SKIP", "redownload": "OK",
                "fail": "FAIL"}.get(status, status.upper())
 
         if status == "ok" or status == "redownload":
             self.completed += 1
-            self.session_bytes += size
+            self.total_bytes += size
         elif status == "skip":
             self.skipped += 1
-            self.existing_bytes += size
+            self.total_bytes += size
         elif status == "fail":
             self.failed += 1
 
         size_str = f" ({self._format_bytes(size)})" if size > 0 else ""
         self._log_lines.append(f"[{tag}] {filename}{size_str}")
 
-        # Reset file bar for the next download
+        # Reset file bar
         self._file_name = ""
         self._file_downloaded = 0
         self._file_total = 0
@@ -608,18 +441,14 @@ class GuiProgressTracker:
 
 # Global tracker, set during main()
 _tracker: ProgressTracker | GuiProgressTracker | None = None
-_failure_log: list[dict] = []  # {"filename": ..., "url": ..., "source": ..., "year": ...}
 
 
 # ── Session ────────────────────────────────────────────────────────────────────
 
 def get_session() -> requests.Session:
-    """Create a ``requests.Session`` with retry logic and connection pooling."""
     session = requests.Session()
     session.headers.update(HEADERS)
     adapter = requests.adapters.HTTPAdapter(
-        pool_connections=10,
-        pool_maxsize=10,
         max_retries=requests.adapters.Retry(
             total=3,
             backoff_factor=1,
@@ -657,10 +486,7 @@ def _get_browser_context():
     _pw_instance = sync_playwright().start()
     _pw_browser = _pw_instance.chromium.launch(
         headless=False,
-        args=[
-            "--disable-blink-features=AutomationControlled",
-            "--window-position=-32000,-32000",
-        ],
+        args=["--disable-blink-features=AutomationControlled"],
     )
     _pw_context = _pw_browser.new_context(
         user_agent=(
@@ -675,7 +501,6 @@ def _get_browser_context():
 
 
 def _close_browser():
-    """Shut down the Playwright browser and stop the engine."""
     global _pw_instance, _pw_browser, _pw_context
     if _pw_browser:
         _pw_browser.close()
@@ -885,7 +710,6 @@ def _extract_downloadable_links(soup: BeautifulSoup, page_url: str,
 
 
 def _sanitize_filename(name: str) -> str:
-    """Remove query strings and illegal filesystem characters from a filename."""
     if "?" in name:
         name = name.split("?")[0]
     for ch in '<>:"/\\|?*':
@@ -894,18 +718,12 @@ def _sanitize_filename(name: str) -> str:
 
 
 def _is_browser_source(source: str) -> bool:
-    """Return True if the source requires Playwright instead of requests."""
     return source in BROWSER_REQUIRED_SOURCES
 
 
 # ── Comptroller (main page) ───────────────────────────────────────────────────
 
 def discover_fiscal_years(session: requests.Session) -> dict[str, str]:
-    """Scrape the Budget Materials page to find available fiscal year links.
-
-    Returns a dict mapping year strings (e.g. "2026") to their page URLs,
-    sorted most-recent first.
-    """
     print("Discovering available fiscal years...")
     resp = session.get(BUDGET_MATERIALS_URL, timeout=30)
     resp.raise_for_status()
@@ -923,7 +741,6 @@ def discover_fiscal_years(session: requests.Session) -> dict[str, str]:
 
 def discover_comptroller_files(session: requests.Session, year: str,
                                page_url: str) -> list[dict]:
-    """Discover downloadable files on a Comptroller fiscal-year page."""
     print(f"  [Comptroller] Scanning FY{year}...")
     resp = session.get(page_url, timeout=30)
     resp.raise_for_status()
@@ -934,7 +751,6 @@ def discover_comptroller_files(session: requests.Session, year: str,
 # ── Defense Wide ──────────────────────────────────────────────────────────────
 
 def discover_defense_wide_files(session: requests.Session, year: str) -> list[dict]:
-    """Discover Defense-Wide budget justification books for a given FY."""
     url = SERVICE_PAGE_TEMPLATES["defense-wide"]["url"].format(fy=year)
     print(f"  [Defense Wide] Scanning FY{year}...")
     try:
@@ -950,50 +766,31 @@ def discover_defense_wide_files(session: requests.Session, year: str) -> list[di
 # ── Army (browser required) ──────────────────────────────────────────────────
 
 def discover_army_files(_session: requests.Session, year: str) -> list[dict]:
-    """Discover US Army budget files via Playwright (WAF-protected site)."""
     url = SERVICE_PAGE_TEMPLATES["army"]["url"]
     print(f"  [Army] Scanning FY{year} (browser)...")
     files = _browser_extract_links(url, text_filter=f"/{year}/")
     return files
 
 
-# ── Navy (browser required — SharePoint site) ────────────────────────────────
-
-# Cache: load the archive page once, reuse for all years
-_navy_archive_cache: list[dict] | None = None
-
-
-def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
-    """Discover US Navy budget files from the FMB SharePoint archive page.
-
-    The archive page contains links for all fiscal years.  It is loaded once
-    via Playwright and the results are cached in ``_navy_archive_cache`` so
-    that subsequent FY queries are instant Python-side filters.
-    """
-    global _navy_archive_cache
-    url = SERVICE_PAGE_TEMPLATES["navy"]["url"]
-    fy2 = year[-2:]
-    print(f"  [Navy] Scanning FY{year} (browser, archive page)...")
-
-    # Load archive page once and cache all links
-    if _navy_archive_cache is None:
-        print(f"    Loading Navy archive (first scan, may take a moment)...")
-        _navy_archive_cache = _browser_extract_links(url)
-
-    # Filter cached links for this fiscal year
-    # Navy URLs typically contain patterns like /26pres/ or /FY26/ or /2026/
-    matched = [f for f in _navy_archive_cache
-               if f"{fy2}pres" in f["url"].lower()
-               or f"/{fy2}/" in f["url"].lower()
-               or f"/fy{fy2}" in f["url"].lower()
-               or f"/{year}/" in f["url"]]
-    return matched
+# ── Navy ──────────────────────────────────────────────────────────────────────
+# TODO: Navy still showing 0 files when running the scan, not sure why. Need to
+# dig into it - it's 0 for every year 
+def discover_navy_files(session: requests.Session, year: str) -> list[dict]:
+    url = SERVICE_PAGE_TEMPLATES["navy"]["url"].format(fy=year)
+    print(f"  [Navy] Scanning FY{year}...")
+    try:
+        resp = session.get(url, timeout=30)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        print(f"    WARNING: Could not fetch Navy page for FY{year}: {e}")
+        return []
+    soup = BeautifulSoup(resp.text, "html.parser")
+    return _extract_downloadable_links(soup, url)
 
 
 # ── Air Force (browser required) ─────────────────────────────────────────────
 
 def discover_airforce_files(_session: requests.Session, year: str) -> list[dict]:
-    """Discover US Air Force budget files via Playwright (WAF-protected site)."""
     fy2 = year[-2:]
     url = SERVICE_PAGE_TEMPLATES["airforce"]["url"].format(fy2=fy2)
     print(f"  [Air Force] Scanning FY{year} (browser)...")
@@ -1056,34 +853,20 @@ def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
 
 def download_file(session: requests.Session, url: str, dest_path: Path,
                   overwrite: bool = False, use_browser: bool = False) -> bool:
-    """Download a single file, choosing requests or Playwright as appropriate.
-
-    Skips files that already exist and are >1 KB without any network call.
-    For smaller/empty files, a HEAD request verifies whether a redownload is
-    needed.  Returns True on success (or skip), False on failure.
-    """
     global _tracker
     fname = dest_path.name
 
     if not overwrite and dest_path.exists():
-        local_size = dest_path.stat().st_size
-        if local_size > 1024:
-            # File exists and is >1KB — skip immediately without HEAD request
-            if _tracker:
-                _tracker.file_done(fname, local_size, "skip")
-            else:
-                print(f"    [SKIP] Already exists: {fname}")
-            return True
-        # File is suspiciously small — verify via HEAD
         status = _check_existing_file(session, url, dest_path, use_browser)
         if status == "skip":
+            size = dest_path.stat().st_size
             if _tracker:
-                _tracker.file_done(fname, local_size, "skip")
+                _tracker.file_done(fname, size, "skip")
             else:
                 print(f"    [SKIP] Already exists: {fname}")
             return True
         if status == "redownload":
-            local_mb = local_size / (1024 * 1024)
+            local_mb = dest_path.stat().st_size / (1024 * 1024)
             print(f"\r    [REDOWNLOAD] Size mismatch for {fname} "
                   f"(local {local_mb:.1f} MB)")
 
@@ -1092,13 +875,6 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
         if _tracker:
             size = dest_path.stat().st_size if dest_path.exists() else 0
             _tracker.file_done(fname, size, "ok" if ok else "fail")
-        if not ok:
-            _failure_log.append({
-                "filename": fname, "url": url,
-                "source": _tracker.current_source if _tracker else "",
-                "year": _tracker.current_year if _tracker else "",
-                "error": "All browser download strategies failed",
-            })
         return ok
 
     file_start = time.time()
@@ -1108,9 +884,10 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
 
         total_size = int(resp.headers.get("content-length", 0))
         downloaded = 0
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(dest_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=131072):  # 128 KB
+            for chunk in resp.iter_content(chunk_size=8192):
                 f.write(chunk)
                 downloaded += len(chunk)
                 if _tracker:
@@ -1130,12 +907,6 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
             _tracker.file_done(fname, 0, "fail")
         else:
             print(f"\r    [FAIL] {fname}: {e}          ")
-        _failure_log.append({
-            "filename": fname, "url": url,
-            "source": _tracker.current_source if _tracker else "",
-            "year": _tracker.current_year if _tracker else "",
-            "error": str(e),
-        })
         if dest_path.exists():
             dest_path.unlink()
         return False
@@ -1144,7 +915,6 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
 # ── Display ───────────────────────────────────────────────────────────────────
 
 def list_files(all_files: dict[str, dict[str, list[dict]]]) -> None:
-    """Pretty-print all discovered files grouped by year and source (dry-run)."""
     grand_total = 0
     for year in sorted(all_files.keys(), reverse=True):
         sources = all_files[year]
@@ -1165,7 +935,6 @@ def list_files(all_files: dict[str, dict[str, list[dict]]]) -> None:
 # ── Interactive ───────────────────────────────────────────────────────────────
 
 def interactive_select_years(available: dict[str, str]) -> list[str]:
-    """Prompt the user to pick fiscal years from a numbered menu."""
     years = list(available.keys())
     print("\nAvailable Fiscal Years:")
     print("-" * 40)
@@ -1203,7 +972,6 @@ def interactive_select_years(available: dict[str, str]) -> list[str]:
 
 
 def interactive_select_sources() -> list[str]:
-    """Prompt the user to pick data sources from a numbered menu."""
     labels = {
         "comptroller": "Comptroller (main DoD summary documents)",
         "defense-wide": "Defense Wide (budget justification books)",
@@ -1249,7 +1017,6 @@ def interactive_select_sources() -> list[str]:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
-    """Entry point: parse arguments, discover files, and run downloads."""
     parser = argparse.ArgumentParser(
         description="Download budget documents from DoD Comptroller and service websites."
     )
@@ -1350,15 +1117,6 @@ def main():
         type_filter = {f".{t.lower().strip('.')}" for t in args.types}
         print(f"File type filter: {', '.join(type_filter)}")
 
-    # ── Set up GUI before discovery ──
-    global _tracker
-    use_gui = not args.no_gui and not args.list_only
-
-    if use_gui:
-        _tracker = GuiProgressTracker()  # start with 0 total, discovery phase
-        discovery_steps = len(selected_years) * len(selected_sources)
-        _tracker.set_discovery_total(discovery_steps)
-
     # ── Discover files ──
     all_files: dict[str, dict[str, list[dict]]] = {}
     # Track which source labels need browser downloads
@@ -1368,10 +1126,6 @@ def main():
         all_files[year] = {}
 
         for source in selected_sources:
-            label = (SERVICE_PAGE_TEMPLATES[source]["label"]
-                     if source != "comptroller" else "Comptroller")
-            step_label = f"FY{year} / {label}"
-
             if source == "comptroller":
                 url = available_years[year]
                 files = discover_comptroller_files(session, year, url)
@@ -1382,15 +1136,14 @@ def main():
             if type_filter:
                 files = [f for f in files if f["extension"] in type_filter]
 
+            label = (SERVICE_PAGE_TEMPLATES[source]["label"]
+                     if source != "comptroller" else "Comptroller")
             all_files[year][label] = files
 
             if _is_browser_source(source):
                 browser_labels.add(label)
 
-            if use_gui:
-                _tracker.discovery_step(step_label, len(files))
-
-            time.sleep(0.2)
+            time.sleep(0.5)
 
     # ── List mode ──
     if args.list_only:
@@ -1399,17 +1152,18 @@ def main():
         return
 
     # ── Download ──
+    global _tracker
     total_files = sum(
         len(f) for yr in all_files.values() for f in yr.values()
     )
     print(f"\nReady to download {total_files} file(s) to: {args.output.resolve()}\n")
 
-    if use_gui:
-        _tracker.finish_discovery(total_files)
-    else:
+    if args.no_gui:
         _tracker = ProgressTracker(total_files)
         _tracker.print_overall()
         print()  # newline after initial overall bar
+    else:
+        _tracker = GuiProgressTracker(total_files)
 
     for year in sorted(all_files.keys(), reverse=True):
         sources = all_files[year]
@@ -1432,56 +1186,36 @@ def main():
             print(f"{'='*70}")
             _tracker.set_source(year, source_label)
 
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            # Shorter delay for direct downloads; longer for browser (WAF)
-            delay = 0.3 if use_browser else 0.05
-
             for file_info in files:
                 dest = dest_dir / file_info["filename"]
                 download_file(
                     session, file_info["url"], dest,
                     args.overwrite, use_browser=use_browser,
                 )
-                time.sleep(delay)
+                time.sleep(0.3)
 
     # ── Cleanup ──
     _close_browser()
 
     # ── Summary ──
     elapsed = _tracker._elapsed()
-    session_dl = _tracker._format_bytes(_tracker.session_bytes)
-    total_db = _tracker._format_bytes(_tracker.total_bytes)
+    total_dl = _tracker._format_bytes(_tracker.total_bytes)
     print(f"\n\n{'='*70}")
     print(f"  Download Complete")
     print(f"{'='*70}")
-    print(f"  Downloaded: {_tracker.completed}  ({session_dl})")
+    print(f"  Downloaded: {_tracker.completed}")
     print(f"  Skipped:    {_tracker.skipped}")
     print(f"  Failed:     {_tracker.failed}")
-    print(f"  Database:   {total_db}")
+    print(f"  Total size: {total_dl}")
     print(f"  Elapsed:    {elapsed}")
     print(f"  Location:   {args.output.resolve()}")
-
-    if _failure_log:
-        from datetime import datetime
-        log_path = args.output / f"failures_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        with open(log_path, "w", encoding="utf-8") as f:
-            f.write(f"DoD Budget Downloader - Failure Log\n")
-            f.write(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Total failures: {len(_failure_log)}\n")
-            f.write(f"{'='*80}\n\n")
-            for i, entry in enumerate(_failure_log, 1):
-                f.write(f"{i}. {entry['filename']}\n")
-                f.write(f"   Source: FY{entry['year']} / {entry['source']}\n")
-                f.write(f"   URL:    {entry['url']}\n")
-                f.write(f"   Error:  {entry['error']}\n\n")
-        print(f"  Failures: {log_path.resolve()}")
 
     if isinstance(_tracker, GuiProgressTracker):
         # Keep GUI open for a moment so user can see final state
         _tracker._log_lines.append(
-            f"\n--- Complete: {_tracker.completed} downloaded ({session_dl}), "
+            f"\n--- Complete: {_tracker.completed} downloaded, "
             f"{_tracker.skipped} skipped, {_tracker.failed} failed "
-            f"(DB: {total_db}, {elapsed}) ---")
+            f"({total_dl}, {elapsed}) ---")
         time.sleep(2)
         _tracker.close()
     _tracker = None
