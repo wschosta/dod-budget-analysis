@@ -220,6 +220,7 @@ class GuiProgressTracker:
         self._file_total = 0
         self._file_start = 0.0
         self._log_lines: list[str] = []
+        self._failure_lines: list[str] = []
 
         self._closed = False
         self._ready = threading.Event()
@@ -422,12 +423,70 @@ class GuiProgressTracker:
             self.failed += 1
 
         size_str = f" ({self._format_bytes(size)})" if size > 0 else ""
-        self._log_lines.append(f"[{tag}] {filename}{size_str}")
+        log_entry = f"[{tag}] {filename}{size_str}"
+        self._log_lines.append(log_entry)
+        if status == "fail":
+            self._failure_lines.append(log_entry)
 
         # Reset file bar
         self._file_name = ""
         self._file_downloaded = 0
         self._file_total = 0
+
+    def show_completion_dialog(self, summary: str):
+        """Replace the progress window with a completion dialog.
+
+        Shows a summary message, a Close button, and (if there were
+        failures) a View Failures button that opens the failure lines
+        in a scrollable text window.
+        """
+        import tkinter as tk
+        from tkinter import ttk
+
+        failure_lines = list(self._failure_lines)
+
+        # Destroy the old progress window
+        self.close()
+
+        # Build completion dialog
+        dlg = tk.Tk()
+        dlg.title("Download Complete")
+        dlg.geometry("460x200")
+        dlg.resizable(False, False)
+        dlg.attributes("-topmost", True)
+
+        ttk.Label(dlg, text="Download Complete",
+                  font=("Segoe UI", 13, "bold")).pack(pady=(18, 6))
+        ttk.Label(dlg, text=summary,
+                  font=("Segoe UI", 10), wraplength=420,
+                  justify="center").pack(pady=(0, 14))
+
+        btn_frame = ttk.Frame(dlg)
+        btn_frame.pack(pady=(0, 14))
+
+        def _view_failures():
+            win = tk.Toplevel(dlg)
+            win.title("Failed Downloads")
+            win.geometry("560x320")
+            win.attributes("-topmost", True)
+            txt = tk.Text(win, wrap="word", font=("Consolas", 9))
+            sb = ttk.Scrollbar(win, orient="vertical", command=txt.yview)
+            txt.configure(yscrollcommand=sb.set)
+            txt.pack(side="left", fill="both", expand=True)
+            sb.pack(side="right", fill="y")
+            txt.insert("end", "\n".join(failure_lines) if failure_lines
+                       else "No failure details available.")
+            txt.configure(state="disabled")
+
+        if self.failed > 0 and failure_lines:
+            ttk.Button(btn_frame, text="View Failures",
+                       command=_view_failures).pack(side="left", padx=6)
+
+        ttk.Button(btn_frame, text="Close",
+                   command=dlg.destroy).pack(side="left", padx=6)
+
+        dlg.protocol("WM_DELETE_WINDOW", dlg.destroy)
+        dlg.mainloop()
 
     def close(self):
         """Close the GUI window."""
@@ -1213,14 +1272,17 @@ def main():
     print(f"  Location:   {args.output.resolve()}")
 
     if isinstance(_tracker, GuiProgressTracker):
-        # Keep GUI open for a moment so user can see final state
+        # Append final log line so it appears in the log widget before we grab it
         _tracker._log_lines.append(
             f"\n--- Complete: {_tracker.completed} downloaded, "
             f"{_tracker.skipped} skipped, {_tracker.failed} failed "
             f"({total_dl}, {elapsed}) ---")
-        time.sleep(2)
-        _tracker.close()
-        # TODO - change this to pop up with close button and a button to open the failure log
+        # Give the GUI poll loop one cycle to flush the log lines
+        time.sleep(0.3)
+        summary = (f"Downloaded: {_tracker.completed}   Skipped: {_tracker.skipped}   "
+                   f"Failed: {_tracker.failed}\n"
+                   f"Total size: {total_dl}   Elapsed: {elapsed}")
+        _tracker.show_completion_dialog(summary)
     _tracker = None
 
 
