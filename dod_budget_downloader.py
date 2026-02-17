@@ -809,7 +809,9 @@ SOURCE_DISCOVERERS = {
 
 
 # ── Download ──────────────────────────────────────────────────────────────────
-
+#TODO - this should be a full list compare, if we're trusting the local file we can
+# just totally ignore any matched file names. We don't need to do those in a loop,
+# just that don't appear
 def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
                          use_browser: bool = False) -> str:
     """Check if a local file matches the remote.
