@@ -801,9 +801,15 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     processed = 0
     last_commit_time = time.time()
 
-    # Disable FTS5 triggers during bulk PDF insert for massive speedup
-    # Triggers will be re-enabled after bulk insert and FTS5 will be rebuilt
-    conn.execute("PRAGMA disable_trigger = 1")
+    # Drop FTS5 triggers for bulk insert speedup - we'll rebuild FTS5 at the end
+    # PRAGMA disable_trigger doesn't work on virtual table triggers, so we drop and recreate
+    print("  Dropping FTS5 triggers for bulk insert optimization...")
+    try:
+        conn.execute("DROP TRIGGER IF EXISTS pdf_pages_ai")
+        conn.execute("DROP TRIGGER IF EXISTS pdf_pages_ad")
+        conn.commit()
+    except Exception as e:
+        print(f"    (Warning: {e})")
 
     try:
         for i, pdf in enumerate(pdf_files):
@@ -840,9 +846,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 last_commit_time = time.time()
 
     finally:
-        # Re-enable triggers and rebuild FTS5 indexes in batch
-        conn.execute("PRAGMA disable_trigger = 0")
-
+        # Rebuild FTS5 indexes in batch (triggers were dropped, now rebuild in one go)
         print("\n  Rebuilding full-text search indexes...")
         conn.execute("""
             DELETE FROM pdf_pages_fts;
@@ -851,8 +855,24 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data)
             SELECT id, page_text, source_file, table_data FROM pdf_pages;
         """)
+
+        # Recreate the triggers for future incremental updates
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS pdf_pages_ai AFTER INSERT ON pdf_pages BEGIN
+                INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data)
+                VALUES (new.id, new.page_text, new.source_file, new.table_data);
+            END
+        """)
+
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN
+                INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data)
+                VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data);
+            END
+        """)
+
         conn.commit()
-        print("  FTS5 rebuild complete")
+        print("  FTS5 rebuild complete and triggers recreated")
 
     if skipped_pdf:
         print(f"\n  Skipped {skipped_pdf} unchanged PDF file(s)")
