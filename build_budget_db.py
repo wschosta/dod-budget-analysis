@@ -544,6 +544,32 @@ def _determine_category(file_path: Path) -> str:
     return "Other"
 
 
+def _likely_has_tables(page) -> bool:
+    """
+    Heuristic to detect if a PDF page is likely to contain tables.
+    This avoids expensive extract_tables() on pages that are mostly text.
+
+    Tables typically have:
+    - Structured rectangular regions
+    - Consistent spacing/alignment
+    - Multiple text elements in grid pattern
+
+    Simple heuristic: pages with many horizontal/vertical lines are likely tables
+    """
+    try:
+        # Check if page has many lines (indicating table structure)
+        lines = page.lines
+        h_lines = [l for l in lines if l["orientation"] == "h"]
+        v_lines = [l for l in lines if l["orientation"] == "v"]
+
+        # If page has significant line structure, likely has tables
+        # Most text-only pages have < 5 lines
+        return len(h_lines) + len(v_lines) > 5
+    except Exception:
+        # If any error, try extraction (conservative)
+        return True
+
+
 def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path) -> int:
     """Ingest a single PDF file into the database."""
     category = _determine_category(file_path)
@@ -563,14 +589,16 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path) -> int:
                     else:
                         raise
 
-                try:
-                    tables = page.extract_tables()
-                except Exception as e:
-                    # If table extraction fails but we got text, continue
-                    if text.strip():
+                # Only extract tables if page likely has table structure (optimization)
+                tables = []
+                if _likely_has_tables(page):
+                    try:
+                        tables = page.extract_tables()
+                    except Exception as e:
+                        # If table extraction fails but we got text, continue
+                        if not text.strip():
+                            raise
                         tables = []
-                    else:
-                        raise
 
                 table_text = _extract_table_text(tables)
 
@@ -587,8 +615,8 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path) -> int:
                     table_text if table_text else None,
                 ))
 
-                # Batch insert every 100 pages
-                if len(batch) >= 100:
+                # Batch insert every 500 pages (larger batch = fewer executemany calls)
+                if len(batch) >= 500:
                     conn.executemany("""
                         INSERT INTO pdf_pages (source_file, source_category,
                             page_number, page_text, has_tables, table_data)
@@ -758,39 +786,61 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     total_pdf_pages = 0
     skipped_pdf = 0
     processed = 0
-    for i, pdf in enumerate(pdf_files):
-        rel_path = str(pdf.relative_to(docs_dir))
-        if not rebuild and not _file_needs_update(conn, rel_path, pdf):
-            skipped_pdf += 1
+    last_commit_time = time.time()
+
+    # Disable FTS5 triggers during bulk PDF insert for massive speedup
+    # Triggers will be re-enabled after bulk insert and FTS5 will be rebuilt
+    conn.execute("PRAGMA disable_trigger = 1")
+
+    try:
+        for i, pdf in enumerate(pdf_files):
+            rel_path = str(pdf.relative_to(docs_dir))
+            if not rebuild and not _file_needs_update(conn, rel_path, pdf):
+                skipped_pdf += 1
+                _progress("pdf", i + 1, len(pdf_files),
+                          f"Skipped (unchanged): {pdf.name}")
+                continue
+
+            processed += 1
             _progress("pdf", i + 1, len(pdf_files),
-                      f"Skipped (unchanged): {pdf.name}")
-            continue
+                      f"[{processed}] {pdf.name}")
+            print(f"  [{processed}/{len(pdf_files) - skipped_pdf}] {pdf.name}...", end=" ", flush=True)
 
-        processed += 1
-        _progress("pdf", i + 1, len(pdf_files),
-                  f"[{processed}] {pdf.name}")
-        print(f"  [{processed}/{len(pdf_files) - skipped_pdf}] {pdf.name}...", end=" ", flush=True)
+            # Remove old data if re-ingesting
+            _remove_file_data(conn, rel_path, "pdf")
 
-        # Remove old data if re-ingesting
-        _remove_file_data(conn, rel_path, "pdf")
+            t0 = time.time()
+            pages = ingest_pdf_file(conn, pdf)
+            elapsed = time.time() - t0
+            print(f"{pages} pages ({elapsed:.1f}s)")
 
-        t0 = time.time()
-        pages = ingest_pdf_file(conn, pdf)
-        elapsed = time.time() - t0
-        print(f"{pages} pages ({elapsed:.1f}s)")
+            stat = pdf.stat()
+            conn.execute(
+                "INSERT OR REPLACE INTO ingested_files (file_path, file_type, file_size, file_modified, ingested_at, row_count, status) VALUES (?,?,?,?,datetime('now'),?,?)",
+                (rel_path, "pdf", stat.st_size, stat.st_mtime, pages, "ok")
+            )
+            total_pdf_pages += pages
 
-        stat = pdf.stat()
-        conn.execute(
-            "INSERT OR REPLACE INTO ingested_files (file_path, file_type, file_size, file_modified, ingested_at, row_count, status) VALUES (?,?,?,?,datetime('now'),?,?)",
-            (rel_path, "pdf", stat.st_size, stat.st_mtime, pages, "ok")
-        )
-        total_pdf_pages += pages
+            # Commit every 2 seconds for good durability without excessive I/O
+            if time.time() - last_commit_time > 2.0:
+                conn.commit()
+                last_commit_time = time.time()
 
-        # Commit every 10 files
-        if processed % 10 == 0:
-            conn.commit()
+    finally:
+        # Re-enable triggers and rebuild FTS5 indexes in batch
+        conn.execute("PRAGMA disable_trigger = 0")
 
-    conn.commit()
+        print("\n  Rebuilding full-text search indexes...")
+        conn.execute("""
+            DELETE FROM pdf_pages_fts;
+        """)
+        conn.execute("""
+            INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data)
+            SELECT id, page_text, source_file, table_data FROM pdf_pages;
+        """)
+        conn.commit()
+        print("  FTS5 rebuild complete")
+
     if skipped_pdf:
         print(f"\n  Skipped {skipped_pdf} unchanged PDF file(s)")
     print(f"  Ingested PDF pages: {total_pdf_pages:,}")
