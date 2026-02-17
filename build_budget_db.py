@@ -554,8 +554,24 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path) -> int:
         with pdfplumber.open(str(file_path)) as pdf:
             batch = []
             for i, page in enumerate(pdf.pages):
-                text = page.extract_text() or ""
-                tables = page.extract_tables()
+                try:
+                    text = page.extract_text() or ""
+                except Exception as e:
+                    # Skip pages with font extraction errors (malformed FontBBox, etc.)
+                    if "FontBBox" in str(e) or "cannot be parsed" in str(e):
+                        text = ""
+                    else:
+                        raise
+
+                try:
+                    tables = page.extract_tables()
+                except Exception as e:
+                    # If table extraction fails but we got text, continue
+                    if text.strip():
+                        tables = []
+                    else:
+                        raise
+
                 table_text = _extract_table_text(tables)
 
                 # Skip truly empty pages
