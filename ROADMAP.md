@@ -26,7 +26,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | ID | Task | Details | Status |
 |----|------|---------|--------|
 | **0.A1** | Merge ROADMAP into README | Merge ROADMAP into README for clarity in the path forward for the project | **Complete** |
-| **0.A2** | Create Wiki Skeleton | Create skeleton of wiki pages for completion as supsequent phases and tasks complete | Not started |
+| **0.A2** | Create Wiki Skeleton | Create skeleton of wiki pages for completion as supsequent phases and tasks complete | **Complete** |
 
 ---
 

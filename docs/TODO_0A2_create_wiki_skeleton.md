@@ -1,6 +1,6 @@
 # Step 0.A2 — Create Wiki Skeleton
 
-**Status:** Not started
+**Status:** Complete
 **Type:** Documentation (AI-agent completable)
 **Depends on:** None
 

@@ -20,7 +20,7 @@ otherwise noted.
 | Step | Task | Type | TODO File | Skeleton File(s) |
 |------|------|------|-----------|-------------------|
 | 0.A1 | Merge ROADMAP into README | AI-agent ✅ **Complete** | [TODO](TODO_0A1_merge_roadmap_into_readme.md) | `README.md` (modify) |
-| 0.A2 | Create wiki skeleton | AI-agent | [TODO](TODO_0A2_create_wiki_skeleton.md) | `docs/wiki/*.md` (created) |
+| 0.A2 | Create wiki skeleton | AI-agent ✅ **Complete** | [TODO](TODO_0A2_create_wiki_skeleton.md) | `docs/wiki/*.md` (created) |
 
 ---
 
@@ -65,7 +65,7 @@ otherwise noted.
 Tasks that can be done **immediately** (no dependencies, no data needed):
 
 1. ~~**0.A1** — Merge ROADMAP into README~~ ✅ Complete
-2. **0.A2** — Wiki skeleton (already created, just needs review)
+2. ~~**0.A2** — Wiki skeleton (already created, just needs review)~~ ✅ Complete
 3. ~~**1.B6** — Validation suite (works against existing DB schema)~~ ✅ Complete
 4. **1.C2** — Unit tests for `_detect_exhibit_type`, `_safe_float`, `_map_columns`
    (tests against source code, no data files needed)
