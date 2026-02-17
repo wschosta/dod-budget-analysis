@@ -199,6 +199,9 @@ ALL_SOURCES = ["comptroller", "defense-wide", "army", "navy", "airforce"]
 # Sources that require a real browser due to WAF/bot protection
 BROWSER_REQUIRED_SOURCES = {"army", "navy", "airforce"}
 
+# TODO: The User-Agent string is duplicated here and in _get_browser_context().
+# Extract to a single constant (e.g., USER_AGENT) to avoid drift between the
+# requests session and the Playwright browser context.
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -231,6 +234,9 @@ SERVICE_PAGE_TEMPLATES = {
 
 # ── Progress Tracker ──────────────────────────────────────────────────────────
 
+# TODO: Extract shared helper methods (_format_bytes, _elapsed) from ProgressTracker
+# and GuiProgressTracker into a base class or module-level utilities to eliminate
+# the duplicated implementations in both classes.
 class ProgressTracker:
     """Tracks overall download session progress and renders status bars."""
 
@@ -647,6 +653,11 @@ class GuiProgressTracker:
                 pass
 
 
+# TODO: Replace global mutable state (_tracker, _failure_log, _pw_instance,
+# _pw_browser, _pw_context) with a DownloadSession class that encapsulates
+# tracker, failure log, and browser lifecycle. This would make the code more
+# testable and avoid implicit coupling through module globals.
+
 # Global tracker, set during main()
 _tracker: ProgressTracker | GuiProgressTracker | None = None
 
@@ -675,6 +686,10 @@ _pw_browser = None
 _pw_context = None
 
 
+# TODO: Encapsulate Playwright lifecycle in a context manager class so the
+# browser is reliably cleaned up, and replace the 5 repeated calls to
+# page.add_init_script('Object.defineProperty(navigator, "webdriver", ...)')
+# with a shared helper that creates pre-configured pages.
 def _get_browser_context():
     """Lazily initialize a Playwright browser context for WAF-protected sites."""
     global _pw_instance, _pw_browser, _pw_context
@@ -738,6 +753,11 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
                 btn.click()
                 page.wait_for_timeout(1500)
 
+        # TODO: The downloadable extensions list is duplicated between the Python
+        # constant DOWNLOADABLE_EXTENSIONS and the JavaScript array below. If one
+        # is updated without the other, file discovery will be inconsistent.
+        # Consider injecting the Python set into the JS via page.evaluate args.
+
         # Extract links via JavaScript in the browser
         js_filter = f"'{text_filter}'" if text_filter else "null"
         raw = page.evaluate(f"""() => {{
@@ -770,6 +790,10 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
         page.close()
 
 
+# TODO: The three download strategies below share identical page setup boilerplate
+# (new_page, add_init_script, goto origin, wait). Extract a _new_browser_page(url)
+# helper that returns a page already navigated to the file's origin, reducing the
+# ~50 lines of repeated setup/teardown to a single call per strategy.
 def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -> bool:
     """Download a file using Playwright's browser context to bypass WAF.
 
@@ -1137,6 +1161,9 @@ def list_files(all_files: dict[str, dict[str, list[dict]]]) -> None:
 
 # ── Interactive ───────────────────────────────────────────────────────────────
 
+# TODO: interactive_select_years and interactive_select_sources have nearly
+# identical structure (display numbered list, parse comma-separated input, validate).
+# Refactor into a generic _interactive_select(title, items, all_label) helper.
 def interactive_select_years(available: dict[str, str]) -> list[str]:
     years = list(available.keys())
     print("\nAvailable Fiscal Years:")
@@ -1346,7 +1373,10 @@ def main():
             if _is_browser_source(source):
                 browser_labels.add(label)
 
-            time.sleep(0.5)
+            if use_gui:
+                _tracker.discovery_step(step_label, len(files))
+
+            time.sleep(0.5)  # TODO: Make inter-request delays configurable (--delay)
 
     # ── List mode ──
     if args.list_only:
@@ -1412,7 +1442,7 @@ def main():
                     session, file_info["url"], dest,
                     args.overwrite, use_browser=use_browser,
                 )
-                time.sleep(0.3)
+                time.sleep(0.3)  # TODO: Use same configurable delay as discovery
 
     # ── Cleanup ──
     _close_browser()
