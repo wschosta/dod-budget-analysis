@@ -48,7 +48,7 @@ DEFAULT_OUTPUT_DIR = Path("DoD_Budget_Documents")
 ALL_SOURCES = ["comptroller", "defense-wide", "army", "navy", "airforce"]
 
 # Sources that require a real browser due to WAF/bot protection
-BROWSER_REQUIRED_SOURCES = {"army", "airforce"}
+BROWSER_REQUIRED_SOURCES = {"army", "navy", "airforce"}
 
 HEADERS = {
     "User-Agent": (
@@ -831,20 +831,13 @@ def discover_army_files(_session: requests.Session, year: str) -> list[dict]:
     return files
 
 
-# ── Navy ──────────────────────────────────────────────────────────────────────
-# TODO: Navy still showing 0 files when running the scan, not sure why. Need to
-# dig into it - it's 0 for every year 
-def discover_navy_files(session: requests.Session, year: str) -> list[dict]:
+# ── Navy (browser required) ──────────────────────────────────────────────────
+
+def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
     url = SERVICE_PAGE_TEMPLATES["navy"]["url"].format(fy=year)
-    print(f"  [Navy] Scanning FY{year}...")
-    try:
-        resp = session.get(url, timeout=30)
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        print(f"    WARNING: Could not fetch Navy page for FY{year}: {e}")
-        return []
-    soup = BeautifulSoup(resp.text, "html.parser")
-    return _extract_downloadable_links(soup, url)
+    print(f"  [Navy] Scanning FY{year} (browser)...")
+    files = _browser_extract_links(url)
+    return files
 
 
 # ── Air Force (browser required) ─────────────────────────────────────────────
