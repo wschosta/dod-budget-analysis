@@ -16,6 +16,8 @@ Usage:
 """
 
 import argparse
+import csv
+import json
 import re
 import sqlite3
 import sys
@@ -429,6 +431,46 @@ def interactive_mode(conn: sqlite3.Connection):
             display_pdf_results(results, query)
 
 
+# ── Export ────────────────────────────────────────────────────────────────────
+
+def export_results(budget_results: list, pdf_results: list, query: str, fmt: str):
+    """Export search results to CSV or JSON files."""
+    slug = re.sub(r'[^\w\-]', '_', query)[:30]
+
+    if fmt == "json":
+        out = Path(f"results_{slug}.json")
+        data = {
+            "query": query,
+            "budget_lines": [dict(r) for r in budget_results],
+            "pdf_pages": [dict(r) for r in pdf_results],
+        }
+        out.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        print(f"\n  Exported {len(budget_results)} budget line(s) and "
+              f"{len(pdf_results)} PDF page(s) to {out}")
+
+    elif fmt == "csv":
+        if budget_results:
+            out = Path(f"results_{slug}_budget_lines.csv")
+            rows = [dict(r) for r in budget_results]
+            with open(out, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+                writer.writeheader()
+                writer.writerows(rows)
+            print(f"\n  Exported {len(rows)} budget line(s) to {out}")
+
+        if pdf_results:
+            out = Path(f"results_{slug}_pdf_pages.csv")
+            rows = [dict(r) for r in pdf_results]
+            with open(out, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+                writer.writeheader()
+                writer.writerows(rows)
+            print(f"  Exported {len(rows)} PDF page(s) to {out}")
+
+        if not budget_results and not pdf_results:
+            print("\n  No results to export.")
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main():
@@ -440,6 +482,8 @@ def main():
               python search_budget.py "missile defense"
               python search_budget.py "cyber" --org Army
               python search_budget.py "DARPA" --type pdf --top 30
+              python search_budget.py "cyber" --export csv
+              python search_budget.py "missile" --export json --type excel
               python search_budget.py --summary
               python search_budget.py --sources
               python search_budget.py --interactive
@@ -465,8 +509,10 @@ def main():
                         help="Show data source tracking")
     parser.add_argument("--interactive", "-i", action="store_true",
                         help="Interactive search mode")
-    # TODO: Add --export flag (csv/json) so search results can be saved to a file
-    # for downstream analysis, e.g.: python search_budget.py "cyber" --export csv
+    parser.add_argument("--export", choices=["csv", "json"], default=None,
+                        help="Export results to file (csv or json). "
+                             "CSV writes separate files per result type; "
+                             "JSON writes one file with both sections.")
     args = parser.parse_args()
 
     conn = get_connection(args.db)
@@ -478,15 +524,21 @@ def main():
     elif args.interactive:
         interactive_mode(conn)
     elif args.query:
+        excel_results = []
+        pdf_results = []
+
         if args.type in ("both", "excel"):
-            results = search_budget_lines(conn, args.query, org=args.org,
-                                          exhibit=args.exhibit, limit=args.top)
-            display_budget_results(results, args.query)
+            excel_results = search_budget_lines(conn, args.query, org=args.org,
+                                                exhibit=args.exhibit, limit=args.top)
+            display_budget_results(excel_results, args.query)
 
         if args.type in ("both", "pdf"):
-            results = search_pdf_pages(conn, args.query,
-                                       category=args.category, limit=args.top)
-            display_pdf_results(results, args.query)
+            pdf_results = search_pdf_pages(conn, args.query,
+                                           category=args.category, limit=args.top)
+            display_pdf_results(pdf_results, args.query)
+
+        if args.export:
+            export_results(excel_results, pdf_results, args.query, args.export)
     else:
         parser.print_help()
 

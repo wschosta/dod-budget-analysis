@@ -53,6 +53,7 @@ class BuildProgressWindow:
         self.msg_queue: queue.Queue = queue.Queue()
         self.build_thread: threading.Thread | None = None
         self.start_time: float | None = None
+        self.phase_start_times: dict = {}
         self.running = False
 
         self._build_ui()
@@ -214,6 +215,7 @@ class BuildProgressWindow:
 
         self.running = True
         self.start_time = time.time()
+        self.phase_start_times = {}
         self.build_btn.configure(state="disabled", text="Building...", bg=FG_DIM)
         self._clear_log()
         self._log("Build started...\n", "phase")
@@ -265,11 +267,10 @@ class BuildProgressWindow:
             self.progress_var.set(pct)
             self.pct_label.configure(text=f"{pct:.0f}%")
 
-            # TODO: ETA estimate is based on overall elapsed/current, which skews
-            # when the excel and pdf phases have very different per-file times.
-            # Track phase-specific start times for more accurate ETAs.
             if self.start_time and current > 0 and phase in ("excel", "pdf"):
-                elapsed = time.time() - self.start_time
+                if phase not in self.phase_start_times:
+                    self.phase_start_times[phase] = time.time()
+                elapsed = time.time() - self.phase_start_times[phase]
                 rate = elapsed / current
                 remaining = rate * (total - current)
                 if remaining > 60:
