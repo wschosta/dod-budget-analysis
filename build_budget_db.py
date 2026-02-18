@@ -165,11 +165,25 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             line_item TEXT,
             line_item_title TEXT,
             classification TEXT,
-            -- TODO: Fiscal year columns are hardcoded to FY2024-2026. When new
-            -- budget years are released, the schema, column mapping, and all INSERT
-            -- statements must be updated in lockstep. Consider a normalized design
-            -- (separate fiscal_year_amounts table with year/type/amount columns) or
-            -- storing amounts as JSON in extra_fields for forward compatibility.
+            -- DESIGN NOTE: Fiscal year columns are denormalized (FY2024-2026 hardcoded).
+            -- When new budget years are released, update:
+            --   1. This CREATE TABLE schema
+            --   2. Column mapping in build_budget_db.py (_map_columns, _extract_amount_for_fy)
+            --   3. Excel ingestion logic (ingest_excel_file)
+            --   4. All INSERT/SELECT statements below
+            --
+            -- Future refactoring options:
+            --   A. Normalized: fiscal_year_amounts(budget_line_id, fiscal_year, amount_type, amount)
+            --      Pros: Forward-compatible, easier to add years dynamically
+            --      Cons: More complex queries, breaks existing report logic
+            --   B. JSON: Store all years as {"2024": {types...}, "2025": {...}}
+            --      Pros: Self-documenting, flexible
+            --      Cons: Harder to query/filter, less efficient
+            --   C. Current (denormalized): Easiest for queries, safest for reports
+            --      Trade-off: Manual schema updates needed for new fiscal years
+            --
+            -- Recommended: Keep denormalized approach until 2027 when FY2027 data arrives.
+            -- At that point, evaluate performance vs. flexibility and consider migration.
             amount_fy2024_actual REAL,
             amount_fy2025_enacted REAL,
             amount_fy2025_supplemental REAL,
@@ -942,7 +956,7 @@ def _mark_session_complete(conn: sqlite3.Connection, session_id: str, notes: str
 
 
 def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
-                   progress_callback=None, resume: bool = False):
+                   progress_callback=None, resume: bool = False, cancel_event=None):
     """Build or incrementally update the budget database.
 
     Args:
@@ -953,6 +967,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             where phase is 'scan', 'excel', 'pdf', 'index', or 'done',
             current/total are progress counts, and detail is a status string.
         resume: If True, attempt to resume from last checkpoint.
+        cancel_event: Optional threading.Event that, when set, signals the build
+            to stop gracefully at the next checkpoint.
     """
     def _progress(phase, current, total, detail=""):
         if progress_callback:
@@ -995,6 +1011,12 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     total_budget_rows = 0
     skipped_xlsx = 0
     for xi, xlsx in enumerate(xlsx_files):
+        # Check for cancellation
+        if cancel_event and cancel_event.is_set():
+            print("\n  Build cancelled by user")
+            conn.close()
+            return
+
         rel_path = str(xlsx.relative_to(docs_dir))
         if not rebuild and not _file_needs_update(conn, rel_path, xlsx):
             skipped_xlsx += 1
@@ -1049,6 +1071,11 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
     try:
         for i, pdf in enumerate(pdf_files):
+            # Check for cancellation
+            if cancel_event and cancel_event.is_set():
+                print("\n  Build cancelled by user")
+                break
+
             rel_path = str(pdf.relative_to(docs_dir))
             if not rebuild and not _file_needs_update(conn, rel_path, pdf):
                 skipped_pdf += 1

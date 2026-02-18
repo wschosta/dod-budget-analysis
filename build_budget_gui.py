@@ -55,6 +55,7 @@ class BuildProgressWindow:
         self.start_time: float | None = None
         self.phase_start_times: dict = {}
         self.running = False
+        self.cancel_event: threading.Event = threading.Event()
 
         self._build_ui()
         self._poll_queue()
@@ -173,7 +174,7 @@ class BuildProgressWindow:
             btn_frame, text="Build Database", width=18,
             bg=ACCENT, fg="#1e1e2e", activebackground=GREEN,
             font=("Segoe UI", 11, "bold"), relief="flat",
-            command=self._start_build)
+            command=self._on_build_btn_click)
         self.build_btn.pack(side="left", padx=(0, 10))
 
         self.close_btn = tk.Button(
@@ -201,10 +202,13 @@ class BuildProgressWindow:
 
     # ── Build control ─────────────────────────────────────────────────────
 
-    # TODO: Add a cancellation mechanism — set a threading.Event that the progress
-    # callback checks, and convert the "Build Database" button to a "Cancel" button
-    # while a build is running. Currently, closing the window during a build silently
-    # continues the thread in the background until the process exits.
+    def _on_build_btn_click(self):
+        """Handle Build/Cancel button click."""
+        if self.running:
+            self._cancel_build()
+        else:
+            self._start_build()
+
     def _start_build(self):
         docs = Path(self.docs_var.get())
         db = Path(self.db_var.get())
@@ -214,9 +218,10 @@ class BuildProgressWindow:
             return
 
         self.running = True
+        self.cancel_event.clear()
         self.start_time = time.time()
         self.phase_start_times = {}
-        self.build_btn.configure(state="disabled", text="Building...", bg=FG_DIM)
+        self.build_btn.configure(state="normal", text="Cancel Build", bg=RED)
         self._clear_log()
         self._log("Build started...\n", "phase")
 
@@ -225,11 +230,22 @@ class BuildProgressWindow:
             target=self._run_build, args=(docs, db, rebuild), daemon=True)
         self.build_thread.start()
 
+    def _cancel_build(self):
+        """Signal the build thread to stop."""
+        self.cancel_event.set()
+        self.build_btn.configure(state="disabled", text="Cancelling...")
+        self._log("\nBuild cancellation requested.\n", "dim")
+
     def _run_build(self, docs: Path, db: Path, rebuild: bool):
         """Runs in the background thread."""
         try:
             build_database(docs, db, rebuild=rebuild,
-                           progress_callback=self._on_progress)
+                           progress_callback=self._on_progress,
+                           cancel_event=self.cancel_event)
+            if self.cancel_event.is_set():
+                self.msg_queue.put(("cancelled", 0, 0, "Build cancelled by user"))
+            else:
+                self.msg_queue.put(("done", 100, 100, "Build completed successfully"))
         except Exception as e:
             self.msg_queue.put(("error", 0, 0, str(e)))
 
@@ -256,6 +272,7 @@ class BuildProgressWindow:
             "pdf":   "Ingesting PDF files",
             "index": "Creating indexes",
             "done":  "Build complete",
+            "cancelled": "Build cancelled",
             "error": "Error",
         }
         self.phase_label.configure(text=phase_labels.get(phase, phase))
@@ -282,7 +299,12 @@ class BuildProgressWindow:
 
         # Log detail
         if detail and "Skipped" not in detail:
-            tag = "ok" if phase == "done" else ("err" if phase == "error" else None)
+            if phase == "done":
+                tag = "ok"
+            elif phase in ("error", "cancelled"):
+                tag = "err"
+            else:
+                tag = None
             self._log(f"[{phase:>5}] {detail}\n", tag)
 
         # Build finished
@@ -296,6 +318,15 @@ class BuildProgressWindow:
             self.build_btn.configure(state="normal", text="Build Database",
                                      bg=ACCENT)
             self.phase_label.configure(text="Build complete")
+
+        if phase == "cancelled":
+            self.running = False
+            self.eta_label.configure(text="")
+            elapsed = time.time() - self.start_time if self.start_time else 0
+            self._log(f"\nCancelled after {elapsed:.1f}s\n", "err")
+            self.build_btn.configure(state="normal", text="Build Database",
+                                     bg=ACCENT)
+            self.phase_label.configure(text="Build cancelled")
 
         if phase == "error":
             self.running = False
