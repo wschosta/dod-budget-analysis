@@ -1883,9 +1883,6 @@ def main():
             if _is_browser_source(source):
                 browser_labels.add(label)
 
-            #if use_gui:
-            #    _tracker.discovery_step(step_label, len(files))
-
             time.sleep(args.delay)
 
     # ── List mode ──
