@@ -1,0 +1,95 @@
+# DoD Budget API — Multi-stage Dockerfile (Step 4.A2-a)
+#
+# Stage 1 (builder): install Playwright + all deps, download source docs,
+#                    run build_budget_db.py to produce dod_budget.sqlite.
+# Stage 2 (runtime): copy only the sqlite file + app code.
+#                    Keeps the runtime image small (~150MB vs ~2GB for builder).
+#
+# NOTE: Stage 1 requires network access and can take considerable time
+#       (Playwright downloads Chromium, then scrapes DoD sites).
+#       For most deployments, mount a pre-built DB instead (see Dockerfile).
+#
+# Build:  docker build -f Dockerfile.multistage -t dod-budget-full .
+# Run:    docker run -p 8000:8000 dod-budget-full
+
+# ── Stage 1: data builder ─────────────────────────────────────────────────────
+FROM python:3.12 AS builder
+
+WORKDIR /build
+
+# Install system deps for Playwright (Chromium) and pdfplumber (poppler)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    poppler-utils \
+    libglib2.0-0 \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libdbus-1-3 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install all Python dependencies including Playwright
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+RUN playwright install chromium
+
+# Copy all source files needed to build the database
+COPY . .
+
+# Download source documents and build the SQLite database.
+# Set PLAYWRIGHT_BROWSERS_PATH to where we installed above.
+ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
+RUN python build_budget_db.py --skip-download || true
+# If download is needed (full build), uncomment the next line and comment above:
+# RUN python refresh_data.py --all-years -v
+
+# ── Stage 2: runtime ──────────────────────────────────────────────────────────
+FROM python:3.12-slim AS runtime
+
+LABEL org.opencontainers.image.title="DoD Budget API (self-contained)"
+LABEL org.opencontainers.image.description="REST API with embedded DoD budget database"
+
+# Non-root user
+RUN useradd --create-home --shell /bin/bash appuser
+
+WORKDIR /app
+
+# Runtime Python deps only (no playwright, no pandas build tools needed at runtime)
+COPY requirements.txt .
+RUN pip install --no-cache-dir fastapi uvicorn[standard] jinja2 python-multipart \
+    pdfplumber openpyxl requests beautifulsoup4 \
+    && rm -rf /root/.cache/pip
+
+# Copy app source
+COPY api/           api/
+COPY utils/         utils/
+COPY templates/     templates/
+COPY static/        static/
+COPY exhibit_catalog.py      .
+COPY validate_budget_data.py .
+COPY validate_budget_db.py   .
+COPY search_budget.py        .
+
+# Copy the pre-built database from the builder stage
+COPY --from=builder /build/dod_budget.sqlite /app/dod_budget.sqlite
+
+ENV APP_DB_PATH=/app/dod_budget.sqlite
+
+RUN chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+
+CMD ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

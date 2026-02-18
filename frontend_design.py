@@ -69,55 +69,33 @@ DONE 3.B3-a  Top-N horizontal bar chart on charts page; fetches
 TODOs — Step 3.C (User Documentation)
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO 3.C1-a [Complexity: LOW] [Tokens: ~3000] [User: NO]
-    Write Getting Started guide (docs/getting_started.md).
-    Steps:
-      1. Sections: What is this?, Data included, How to search/filter/download
-      2. Plain language for: Congressional staffers, journalists, researchers
-      3. ~150 lines of markdown
-    Success: Non-technical users can use the tool after reading this.
+DONE 3.C1-a  docs/getting_started.md (~204 lines): What is DoD Budget Explorer?,
+    data included, how to search/filter/download, how to read amounts ($K).
+    Written for Congressional staffers, journalists, researchers.
 
-TODO 3.C2-a [Complexity: MEDIUM] [Tokens: ~4000] [User: NO]
-    Write data dictionary (docs/data_dictionary.md).
-    Steps:
-      1. Generate skeleton from schema DDL (one entry per field)
-      2. For each: field name, type, description, source exhibit, caveats
-      3. ~200 lines of markdown
-    Success: Every field in UI/API is documented with provenance.
+DONE 3.C2-a  docs/data_dictionary.md (~572 lines): all 25 budget_lines fields
+    with type, description, source exhibit, caveats; reference tables;
+    API naming conventions; 8 data quality caveats.
 
-TODO 3.C3-a [Complexity: LOW] [Tokens: ~2000] [User: NO]
-    Write FAQ (docs/faq.md).
-    Steps:
-      1. Answer: data currency, missing years, "thousands" meaning,
-         PB vs enacted, service total discrepancies, citation guidance
-      2. ~100 lines of markdown
-    Success: Common user questions answered.
+DONE 3.C3-a  docs/faq.md (~180 lines): data currency, missing years, $K meaning,
+    PB vs enacted vs CR, why totals don't reconcile, how to cite, PE numbers,
+    exhibit types, error reporting.
 
-TODO 3.C4-a [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Customize OpenAPI documentation.
-    Steps:
-      1. Add rich descriptions to each FastAPI endpoint docstring
-      2. Add example requests/responses to Pydantic Field() definitions
-      3. Add top-level API description in create_app()
-    Dependency: Requires API endpoints to exist (Phase 2).
-    Success: /docs page has complete, useful API documentation.
+DONE 3.C4-a  OpenAPI documentation enhanced:
+    - api/app.py: rich description, rate-limit notes, tag descriptions,
+      contact, license_info fields in create_app()
+    - api/models.py: Field() descriptions + examples on all fields.
 
-TODO 3.C5-a [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Add contextual help tooltips to the UI.
-    Steps:
-      1. Add data-tooltip attributes to filter labels + table headers
-      2. CSS-only tooltip using ::after pseudo-element (~20 lines)
-      3. Derive tooltip text from data dictionary
-    Success: Hovering any filter/column shows explanatory tooltip.
+DONE 3.C5-a  CSS tooltips added:
+    - static/css/main.css: [data-tooltip] ::after/::before rules (~50 lines)
+    - templates/index.html: data-tooltip on q, fiscal_year, service,
+      exhibit_type filter labels
+    - templates/partials/results.html: data-tooltip on FY, Exhibit,
+      Account, PE #, FY25 Enacted column headers.
 
-TODO 3.C6-a [Complexity: LOW] [Tokens: ~2500] [User: NO]
-    Write methodology & limitations page (docs/methodology.md).
-    Steps:
-      1. Explain: data sources, collection process, parsing approach
-      2. Document: known limitations (PDF accuracy, coverage gaps)
-      3. Include: how to report errors
-      4. ~120 lines of markdown
-    Success: Transparency about data quality and collection methods.
+DONE 3.C6-a  docs/methodology.md (~206 lines): data sources, collection process
+    (Playwright/Chromium), Excel parsing (openpyxl), PDF parsing (pdfplumber),
+    FTS5 architecture, known limitations, error reporting.
 """
 
 # Placeholder — front-end structure will be created when implementation begins.

@@ -85,10 +85,69 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     app = FastAPI(
         title="DoD Budget API",
         summary="REST API for searching and analyzing DoD budget justification data.",
+        description=(
+            "## DoD Budget Explorer API\n\n"
+            "Provides programmatic access to Department of Defense budget justification "
+            "data extracted from publicly posted XLSX and PDF documents.\n\n"
+            "### Key concepts\n"
+            "- **Amounts** are in **thousands of dollars ($K)** unless `amount_unit` says otherwise.\n"
+            "- **Fiscal year** runs October 1 – September 30 "
+            "(e.g., FY2026 = Oct 2025 – Sep 2026).\n"
+            "- **Exhibit types**: R-2 (RDT&E programs), P-5 (procurement), "
+            "O-1 (O&M), P-1/R-1 (summary rolls), C-1 (construction), "
+            "M-1 (military personnel).\n"
+            "- **FTS5 search** uses SQLite full-text search with BM25 ranking "
+            "across all line item titles, descriptions, and PDF page text.\n\n"
+            "### Rate limits\n"
+            "- `/api/v1/search`: 60 req/min per IP\n"
+            "- `/api/v1/download`: 10 req/min per IP\n"
+            "- All other endpoints: 120 req/min per IP\n\n"
+            "Returns `429 Too Many Requests` with `Retry-After: 60` when exceeded.\n\n"
+            "### Data freshness\n"
+            "Data is refreshed weekly via GitHub Actions from official DoD "
+            "Comptroller and service budget office sites."
+        ),
         version="1.0.0",
         lifespan=lifespan,
         docs_url="/docs",
         redoc_url="/redoc",
+        contact={
+            "name": "DoD Budget Explorer",
+            "url": "https://github.com/wschosta/dod-budget-analysis",
+        },
+        license_info={
+            "name": "Public Domain (government data)",
+            "url": "https://creativecommons.org/publicdomain/zero/1.0/",
+        },
+        openapi_tags=[
+            {
+                "name": "search",
+                "description": "Full-text search across budget lines and PDF pages.",
+            },
+            {
+                "name": "budget-lines",
+                "description": (
+                    "List, filter, sort, and retrieve individual budget line items. "
+                    "All amounts are in $K (thousands of dollars)."
+                ),
+            },
+            {
+                "name": "aggregations",
+                "description": "GROUP BY summaries for charts and dashboards.",
+            },
+            {
+                "name": "reference",
+                "description": "Reference lists: services, exhibit types, fiscal years.",
+            },
+            {
+                "name": "download",
+                "description": "Bulk export of filtered budget lines as CSV or NDJSON.",
+            },
+            {
+                "name": "meta",
+                "description": "Health check and API metadata.",
+            },
+        ],
     )
 
     # ── Request logging + rate limiting middleware (4.C3-a, 4.C4-a) ──────────

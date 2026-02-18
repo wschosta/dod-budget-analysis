@@ -44,10 +44,10 @@
               {% if sort_by == "organization_name" %}<span class="sort-icon">{{ "▲" if sort_dir == "asc" else "▼" }}</span>{% endif %}
             </a>
           </th>
-          <th class="col-fy">FY</th>
-          <th class="col-exhibit">Exhibit</th>
-          <th class="col-account">Account</th>
-          <th class="col-pe">PE #</th>
+          <th class="col-fy" data-tooltip="Fiscal year: Oct 1 – Sep 30">FY</th>
+          <th class="col-exhibit" data-tooltip="Budget exhibit type (R-2, P-5, O-1, etc.)">Exhibit</th>
+          <th class="col-account" data-tooltip="Appropriation account code">Account</th>
+          <th class="col-pe" data-tooltip="Program Element number — unique identifier for each R&amp;D program">PE #</th>
           <th class="col-fy24 td-amount">
             <a hx-get="/partials/results" hx-target="#results-container"
                hx-push-url="true"
@@ -57,7 +57,7 @@
               {% if sort_by == "amount_fy2024_actual" %}<span class="sort-icon">{{ "▲" if sort_dir == "asc" else "▼" }}</span>{% endif %}
             </a>
           </th>
-          <th class="col-fy25 td-amount">FY25 Enacted ($K)</th>
+          <th class="col-fy25 td-amount" data-tooltip="FY2025 enacted amount in thousands of dollars ($K). Enacted = signed into law by Congress.">FY25 Enacted ($K)</th>
           <th class="col-fy26 td-amount">
             <a hx-get="/partials/results" hx-target="#results-container"
                hx-push-url="true"
