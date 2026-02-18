@@ -16,7 +16,7 @@ The DoD Budget Downloader has been optimized with **13 performance enhancements*
 - **Optimizations**: 13 across 3 phases
 - **Backward Compatible**: 100% (no breaking changes)
 - **New Dependencies**: Zero (stdlib only)
-- **Documentation**: 11 comprehensive guides in `OPTIMIZATION_DOCS/` folder
+- **Documentation**: 11 comprehensive guides in the `optimizations/` folder
 
 ---
 
@@ -134,25 +134,25 @@ python dod_budget_downloader.py --years 2026 --sources all
 
 ## Documentation
 
-For detailed information about all optimizations, see the **[OPTIMIZATION_DOCS/](../../OPTIMIZATION_DOCS/)** folder:
+For detailed information about all optimizations, see the **[optimizations/](./optimizations/)** folder:
 
 | Document | Purpose | Read Time |
 |----------|---------|-----------|
-| [00_START_HERE.md](../../OPTIMIZATION_DOCS/00_START_HERE.md) | Quick overview | 5 min |
-| [README_OPTIMIZATIONS.md](../../OPTIMIZATION_DOCS/README_OPTIMIZATIONS.md) | Complete index | 10 min |
-| [PROJECT_STATUS.md](../../OPTIMIZATION_DOCS/PROJECT_STATUS.md) | Completion status | 5 min |
-| [COMPLETE_OPTIMIZATION_GUIDE.md](../../OPTIMIZATION_DOCS/COMPLETE_OPTIMIZATION_GUIDE.md) | Full reference | 20 min |
-| [PHASE_3_SUMMARY.md](../../OPTIMIZATION_DOCS/PHASE_3_SUMMARY.md) | Phase 3 details (40-60%!) | 15 min |
-| [OPTIMIZATION_SUMMARY.md](../../OPTIMIZATION_DOCS/OPTIMIZATION_SUMMARY.md) | Phases 1-2 details | 10 min |
-| [OPTIMIZATION_QUICKREF.md](../../OPTIMIZATION_DOCS/OPTIMIZATION_QUICKREF.md) | One-page summary | 3 min |
-| [FUTURE_OPTIMIZATIONS.md](../../OPTIMIZATION_DOCS/FUTURE_OPTIMIZATIONS.md) | 8+ more opportunities | 10 min |
-| [OPTIMIZATION_ANALYSIS.md](../../OPTIMIZATION_DOCS/OPTIMIZATION_ANALYSIS.md) | Research & analysis | 10 min |
+| [00_START_HERE.md](./optimizations/00_START_HERE.md) | Quick overview | 5 min |
+| [README_OPTIMIZATIONS.md](./optimizations/README_OPTIMIZATIONS.md) | Complete index | 10 min |
+| [PROJECT_STATUS.md](./optimizations/PROJECT_STATUS.md) | Completion status | 5 min |
+| [COMPLETE_OPTIMIZATION_GUIDE.md](./optimizations/COMPLETE_OPTIMIZATION_GUIDE.md) | Full reference | 20 min |
+| [PHASE_3_SUMMARY.md](./optimizations/PHASE_3_SUMMARY.md) | Phase 3 details (40-60%!) | 15 min |
+| [OPTIMIZATION_SUMMARY.md](./optimizations/OPTIMIZATION_SUMMARY.md) | Phases 1-2 details | 10 min |
+| [OPTIMIZATION_QUICKREF.md](./optimizations/OPTIMIZATION_QUICKREF.md) | One-page summary | 3 min |
+| [FUTURE_OPTIMIZATIONS.md](./optimizations/FUTURE_OPTIMIZATIONS.md) | 8+ more opportunities | 10 min |
+| [OPTIMIZATION_ANALYSIS.md](./optimizations/OPTIMIZATION_ANALYSIS.md) | Research & analysis | 10 min |
 
 ---
 
 ## Future Opportunities
 
-8+ additional optimizations are possible for even greater speedup (potential 8-20x total). See [FUTURE_OPTIMIZATIONS.md](../../OPTIMIZATION_DOCS/FUTURE_OPTIMIZATIONS.md) for:
+8+ additional optimizations are possible for even greater speedup (potential 8-20x total). See [FUTURE_OPTIMIZATIONS.md](./optimizations/FUTURE_OPTIMIZATIONS.md) for:
 
 - Parallelize non-browser downloads (40-60% gain)
 - Batch HEAD requests more efficiently (5-10% gain)
@@ -190,7 +190,7 @@ A: Graceful fallbacks are in place. If parallel operations fail, the tool automa
 A: You don't need to. They're transparent and safe. The tool automatically handles edge cases.
 
 **Q: What if I want even faster downloads?**
-A: See [FUTURE_OPTIMIZATIONS.md](../../OPTIMIZATION_DOCS/FUTURE_OPTIMIZATIONS.md) for 8+ more opportunities (potential 8-20x total speedup).
+A: See [FUTURE_OPTIMIZATIONS.md](./optimizations/FUTURE_OPTIMIZATIONS.md) for 8+ more opportunities (potential 8-20x total speedup).
 
 ---
 
@@ -208,4 +208,4 @@ A: See [FUTURE_OPTIMIZATIONS.md](../../OPTIMIZATION_DOCS/FUTURE_OPTIMIZATIONS.md
 ---
 
 **Last Updated**: February 17, 2026
-**Documentation**: See [OPTIMIZATION_DOCS/](../../OPTIMIZATION_DOCS/) folder for complete details
+**Documentation**: See [optimizations/](./optimizations/) folder for complete details
