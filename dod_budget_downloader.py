@@ -171,6 +171,7 @@ import sys
 import threading
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urljoin, urlparse, unquote
@@ -302,8 +303,48 @@ _timeout_mgr = TimeoutManager()
 _refresh_cache = False
 
 
+class DomainRateLimiter:
+    """Enforces per-domain minimum delay between requests (Option B).
+
+    Each domain gets its own lock so threads downloading from *different*
+    domains proceed in parallel, while requests to the *same* domain are
+    serialised with the configured delay.
+    """
+
+    def __init__(self, delay: float):
+        self._delay = delay
+        self._meta_lock = threading.Lock()
+        self._domain_locks: dict[str, threading.Lock] = {}
+        self._last_request: dict[str, float] = {}
+
+    def _get_domain_lock(self, domain: str) -> threading.Lock:
+        with self._meta_lock:
+            if domain not in self._domain_locks:
+                self._domain_locks[domain] = threading.Lock()
+            return self._domain_locks[domain]
+
+    def wait(self, url: str) -> None:
+        """Block until at least ``delay`` seconds have passed since the last
+        request to the same domain, then mark the current time."""
+        domain = urlparse(url).netloc
+        lock = self._get_domain_lock(domain)
+        with lock:
+            now = time.time()
+            last = self._last_request.get(domain, 0.0)
+            wait_time = self._delay - (now - last)
+            if wait_time > 0:
+                time.sleep(wait_time)
+            self._last_request[domain] = time.time()
+
+
 class ProgressTracker:
-    """Tracks overall download session progress and renders status bars."""
+    """Tracks overall download session progress and renders status bars.
+
+    Thread-safe: all counter mutations and print calls are protected by an
+    RLock so concurrent download workers can update progress safely.
+    Source/year context uses thread-local storage so each worker thread
+    records the correct metadata for failure entries.
+    """
 
     def __init__(self, total_files: int):
         """Initialize counters, timers, and terminal width for progress rendering.
@@ -324,6 +365,9 @@ class ProgressTracker:
         # Structured failure records for --retry-failures (TODO 1.A6-a)
         # Schema: {url, dest, filename, error, source, year, use_browser, timestamp}
         self._failed_files: list[dict] = []
+        # Thread-safety primitives
+        self._lock = threading.RLock()
+        self._tls = threading.local()
 
     @property
     def processed(self) -> int:
@@ -336,27 +380,35 @@ class ProgressTracker:
         return f"[{'#' * filled}{'-' * (width - filled)}]"
 
     def set_source(self, year: str, source: str):
-        """Update the current fiscal year and source label for display."""
+        """Update the current fiscal year and source label.
+
+        Uses thread-local storage so concurrent workers each track their own
+        context without overwriting each other.
+        """
+        self._tls.current_year = year
+        self._tls.current_source = source
+        # Also set instance attrs (last-writer-wins, used for display only)
         self.current_year = year
         self.current_source = source
 
     def print_overall(self):
         """Print the overall progress line."""
-        frac = self.processed / self.total_files if self.total_files else 0
-        pct = frac * 100
-        bar = self._bar(frac, 25)
-        dl = format_bytes(self.total_bytes)
-        elapsed_str = elapsed(self.start_time)
-        remaining = self.total_files - self.processed
-        line = (
-            f"\r  Overall: {bar} {pct:5.1f}%  "
-            f"{self.processed}/{self.total_files} files  "
-            f"{dl} downloaded  "
-            f"{elapsed_str} elapsed  "
-            f"({remaining} remaining)"
-        )
-        # Pad to terminal width to clear previous line
-        print(f"{line:<{self.term_width}}", end="", flush=True)
+        with self._lock:
+            frac = self.processed / self.total_files if self.total_files else 0
+            pct = frac * 100
+            bar = self._bar(frac, 25)
+            dl = format_bytes(self.total_bytes)
+            elapsed_str = elapsed(self.start_time)
+            remaining = self.total_files - self.processed
+            line = (
+                f"\r  Overall: {bar} {pct:5.1f}%  "
+                f"{self.processed}/{self.total_files} files  "
+                f"{dl} downloaded  "
+                f"{elapsed_str} elapsed  "
+                f"({remaining} remaining)"
+            )
+            # Pad to terminal width to clear previous line
+            print(f"{line:<{self.term_width}}", end="", flush=True)
 
     def print_file_progress(self, filename: str, downloaded: int, total: int,
                             file_start: float):
@@ -367,52 +419,54 @@ class ProgressTracker:
             return
         self._last_progress_time = now
 
-        if total <= 0:
-            print(f"\r    Downloading {filename}... {format_bytes(downloaded)}",
-                  end="", flush=True)
-            return
+        with self._lock:
+            if total <= 0:
+                print(f"\r    Downloading {filename}... {format_bytes(downloaded)}",
+                      end="", flush=True)
+                return
 
-        frac = downloaded / total
-        pct = frac * 100
-        bar = self._bar(frac, 20)
-        file_elapsed = time.time() - file_start
-        speed = downloaded / file_elapsed if file_elapsed > 0 else 0
-        speed_str = f"{format_bytes(int(speed))}/s"
-        eta = ""
-        if speed > 0:
-            remaining_bytes = total - downloaded
-            eta_secs = int(remaining_bytes / speed)
-            if eta_secs < 60:
-                eta = f"ETA {eta_secs}s"
-            else:
-                eta = f"ETA {eta_secs // 60}m {eta_secs % 60:02d}s"
+            frac = downloaded / total
+            pct = frac * 100
+            bar = self._bar(frac, 20)
+            file_elapsed = time.time() - file_start
+            speed = downloaded / file_elapsed if file_elapsed > 0 else 0
+            speed_str = f"{format_bytes(int(speed))}/s"
+            eta = ""
+            if speed > 0:
+                remaining_bytes = total - downloaded
+                eta_secs = int(remaining_bytes / speed)
+                if eta_secs < 60:
+                    eta = f"ETA {eta_secs}s"
+                else:
+                    eta = f"ETA {eta_secs // 60}m {eta_secs % 60:02d}s"
 
-        name = filename[:40] + "..." if len(filename) > 43 else filename
-        line = (
-            f"\r    {name}  {bar} {pct:5.1f}%  "
-            f"{format_bytes(downloaded)}/{format_bytes(total)}  "
-            f"{speed_str}  {eta}"
-        )
-        print(f"{line:<{self.term_width}}", end="", flush=True)
+            name = filename[:40] + "..." if len(filename) > 43 else filename
+            line = (
+                f"\r    {name}  {bar} {pct:5.1f}%  "
+                f"{format_bytes(downloaded)}/{format_bytes(total)}  "
+                f"{speed_str}  {eta}"
+            )
+            print(f"{line:<{self.term_width}}", end="", flush=True)
 
     def file_done(self, filename: str, size: int, status: str):
         """Record a completed file and print result."""
-        tag = {"ok": "OK", "skip": "SKIP", "redownload": "OK",
-               "fail": "FAIL"}.get(status, status.upper())
+        with self._lock:
+            tag = {"ok": "OK", "skip": "SKIP", "redownload": "OK",
+                   "fail": "FAIL"}.get(status, status.upper())
 
-        if status == "ok" or status == "redownload":
-            self.completed += 1
-            self.total_bytes += size
-        elif status == "skip":
-            self.skipped += 1
-            self.total_bytes += size
-        elif status == "fail":
-            self.failed += 1
+            if status == "ok" or status == "redownload":
+                self.completed += 1
+                self.total_bytes += size
+            elif status == "skip":
+                self.skipped += 1
+                self.total_bytes += size
+            elif status == "fail":
+                self.failed += 1
 
-        size_str = format_bytes(size) if size > 0 else ""
-        line = f"    [{tag}] {filename} ({size_str})" if size_str else f"    [{tag}] {filename}"
-        print(f"\r{line:<{self.term_width}}")
-        self.print_overall()
+            size_str = format_bytes(size) if size > 0 else ""
+            line = f"    [{tag}] {filename} ({size_str})" if size_str else f"    [{tag}] {filename}"
+            print(f"\r{line:<{self.term_width}}")
+            self.print_overall()
 
     def file_failed(self, url: str, dest: str, filename: str, error: str,
                     use_browser: bool = False) -> None:
@@ -420,14 +474,17 @@ class ProgressTracker:
 
         Stores the full metadata needed to retry the download later via
         ``--retry-failures``, then delegates to ``file_done`` for display.
+        Reads source/year from thread-local storage for correct concurrent context.
         """
+        source = getattr(self._tls, "current_source", self.current_source)
+        year = getattr(self._tls, "current_year", self.current_year)
         self._failed_files.append({
             "url": url,
             "dest": dest,
             "filename": filename,
             "error": str(error),
-            "source": self.current_source,
-            "year": self.current_year,
+            "source": source,
+            "year": year,
             "use_browser": use_browser,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
@@ -776,6 +833,7 @@ _global_session = None
 # In-memory manifest; written to disk by write_manifest() / update_manifest_entry()
 _manifest: dict = {}
 _manifest_path: Path | None = None
+_manifest_lock = threading.Lock()
 
 
 def _compute_sha256(file_path: Path) -> str:
@@ -829,26 +887,28 @@ def update_manifest_entry(url: str, status: str, file_size: int,
     """Update a manifest entry after a download attempt.
 
     Writes the updated manifest to disk immediately so it survives crashes.
+    Thread-safe: serialised via ``_manifest_lock``.
     Implements TODO 1.A3-a / 1.A3-b.
     """
     global _manifest, _manifest_path
-    if not _manifest_path or url not in _manifest:
-        return
-    _manifest[url].update({
-        "status": status,
-        "file_size": file_size,
-        "sha256": file_hash,
-        "downloaded_at": datetime.now(timezone.utc).isoformat(),
-    })
-    try:
-        with open(_manifest_path, "w", encoding="utf-8") as fh:
-            json.dump(
-                {"generated_at": _manifest.get("_meta_generated_at", ""),
-                 "files": _manifest},
-                fh, indent=2,
-            )
-    except OSError:
-        pass  # Non-fatal: manifest update failures don't block downloads
+    with _manifest_lock:
+        if not _manifest_path or url not in _manifest:
+            return
+        _manifest[url].update({
+            "status": status,
+            "file_size": file_size,
+            "sha256": file_hash,
+            "downloaded_at": datetime.now(timezone.utc).isoformat(),
+        })
+        try:
+            with open(_manifest_path, "w", encoding="utf-8") as fh:
+                json.dump(
+                    {"generated_at": _manifest.get("_meta_generated_at", ""),
+                     "files": _manifest},
+                    fh, indent=2,
+                )
+        except OSError:
+            pass  # Non-fatal: manifest update failures don't block downloads
 
 
 # ── Session ────────────────────────────────────────────────────────────────────
@@ -1835,10 +1895,11 @@ def download_all(
     browser_labels: set,
     *,
     overwrite: bool = False,
-    delay: float = 0.5,
+    delay: float = 0.1,
     extract_zips: bool = False,
     use_gui: bool = False,
     manifest_path: Path | None = None,
+    workers: int = 4,
 ) -> dict:
     """Download all discovered files and return a summary dict.
 
@@ -1846,17 +1907,26 @@ def download_all(
     can be called from cron jobs, CI pipelines, or the data-refresh script
     (TODO 2.B4-a) without depending on the interactive/GUI layer.
 
+    Uses concurrent downloads (Option A) with per-domain rate limiting
+    (Option B) for significant speed improvements over sequential downloading.
+    HTTP downloads run on ``workers`` threads in parallel; browser-based
+    downloads (Playwright, not thread-safe) run on a single dedicated thread
+    that overlaps with the HTTP pool.
+
     Args:
         all_files:      Nested dict {year: {source_label: [file_info, ...]}}
                         as returned by the discover_* functions.
         output_dir:     Root directory to write downloaded files into.
         browser_labels: Set of source labels that require Playwright.
         overwrite:      Re-download files that already exist locally.
-        delay:          Seconds to sleep between requests (rate-limit courtesy).
+        delay:          Per-domain minimum seconds between requests (rate-limit
+                        courtesy).  Default 0.1 (Option C).
         extract_zips:   Automatically extract .zip archives after downloading.
         use_gui:        Show a Tkinter GUI progress window (requires display).
         manifest_path:  Where to write/update the download manifest JSON.
                         Defaults to output_dir/manifest.json.
+        workers:        Number of concurrent HTTP download threads (default 4).
+                        Browser downloads always use a single dedicated thread.
 
     Returns:
         Summary dict with keys: downloaded, skipped, failed, total_bytes.
@@ -1874,7 +1944,8 @@ def download_all(
     total_files = sum(
         len(f) for yr in all_files.values() for f in yr.values()
     )
-    print(f"\nReady to download {total_files} file(s) to: {output_dir.resolve()}\n")
+    print(f"\nReady to download {total_files} file(s) to: {output_dir.resolve()}")
+    print(f"  Workers: {workers} HTTP + 1 browser  |  Per-domain delay: {delay}s\n")
 
     if use_gui:
         _tracker = GuiProgressTracker(total_files)
@@ -1882,6 +1953,10 @@ def download_all(
         _tracker = ProgressTracker(total_files)
         _tracker.print_overall()
         print()
+
+    # ── Phase 1: Flatten files into a task list, pre-filtering skips ──────
+    http_tasks: list[dict] = []
+    browser_tasks: list[dict] = []
 
     for year in sorted(all_files.keys(), reverse=True):
         sources = all_files[year]
@@ -1897,41 +1972,91 @@ def download_all(
             use_browser = source_label in browser_labels
             safe_label = source_label.replace(" ", "_")
             dest_dir = output_dir / f"FY{year}" / safe_label
-            print(f"\n{'='*70}")
             method = "browser" if use_browser else "direct"
             print(f"  FY{year} / {source_label} "
                   f"({len(files)} files, {method}) -> {dest_dir}")
-            print(f"{'='*70}")
-            _tracker.set_source(year, source_label)
 
             # Pre-filter: skip files that already exist locally (non-empty)
-            to_download = []
-            if not overwrite:
-                for file_info in files:
-                    dest = dest_dir / file_info["filename"]
-                    if dest.exists() and dest.stat().st_size > 0:
-                        size = dest.stat().st_size
-                        if _tracker:
-                            _tracker.file_done(dest.name, size, "skip")
-                        else:
-                            print(f"    [SKIP] Already exists: {dest.name}")
-                        update_manifest_entry(file_info["url"], "skip", size,
-                                              (_manifest.get(file_info["url"]) or {}).get("sha256"))
-                    else:
-                        to_download.append(file_info)
-            else:
-                to_download = files
-
-            for file_info in to_download:
+            _tracker.set_source(year, source_label)
+            for file_info in files:
                 dest = dest_dir / file_info["filename"]
-                ok = download_file(
-                    session, file_info["url"], dest,
-                    overwrite, use_browser=use_browser,
-                )
-                if ok and extract_zips and dest.suffix.lower() == ".zip":
-                    _extract_zip(dest, dest_dir)
-                time.sleep(delay)
+                if not overwrite and dest.exists() and dest.stat().st_size > 0:
+                    size = dest.stat().st_size
+                    _tracker.file_done(dest.name, size, "skip")
+                    update_manifest_entry(
+                        file_info["url"], "skip", size,
+                        (_manifest.get(file_info["url"]) or {}).get("sha256"),
+                    )
+                    continue
 
+                task = {
+                    "file_info": file_info,
+                    "dest": dest,
+                    "dest_dir": dest_dir,
+                    "use_browser": use_browser,
+                    "source_label": source_label,
+                    "year": year,
+                }
+                if use_browser:
+                    browser_tasks.append(task)
+                else:
+                    http_tasks.append(task)
+
+    pending = len(http_tasks) + len(browser_tasks)
+    if pending:
+        print(f"\n  Queued: {len(http_tasks)} HTTP + {len(browser_tasks)} browser "
+              f"({pending} total, {total_files - pending} skipped)")
+
+    # ── Phase 2: Concurrent download with per-domain rate limiting ────────
+    rate_limiter = DomainRateLimiter(delay)
+
+    def _download_worker(task: dict) -> bool:
+        """Download a single file (called from a thread-pool worker)."""
+        _tracker.set_source(task["year"], task["source_label"])
+        rate_limiter.wait(task["file_info"]["url"])
+        ok = download_file(
+            session,
+            task["file_info"]["url"],
+            task["dest"],
+            overwrite,
+            use_browser=task["use_browser"],
+        )
+        if ok and extract_zips and task["dest"].suffix.lower() == ".zip":
+            _extract_zip(task["dest"], task["dest_dir"])
+        return ok
+
+    futures: list = []
+
+    # HTTP pool: N worker threads
+    http_pool = None
+    if http_tasks:
+        n_http = min(workers, len(http_tasks))
+        http_pool = ThreadPoolExecutor(max_workers=n_http,
+                                       thread_name_prefix="http-dl")
+        for task in http_tasks:
+            futures.append(http_pool.submit(_download_worker, task))
+
+    # Browser pool: 1 dedicated thread (Playwright is not thread-safe)
+    browser_pool = None
+    if browser_tasks:
+        browser_pool = ThreadPoolExecutor(max_workers=1,
+                                          thread_name_prefix="browser-dl")
+        for task in browser_tasks:
+            futures.append(browser_pool.submit(_download_worker, task))
+
+    # Wait for all futures to complete
+    for future in as_completed(futures):
+        try:
+            future.result()
+        except Exception:
+            pass  # Individual failures already recorded by download_file
+
+    if http_pool:
+        http_pool.shutdown(wait=True)
+    if browser_pool:
+        browser_pool.shutdown(wait=True)
+
+    # ── Phase 3: Summary and cleanup ─────────────────────────────────────
     summary = {
         "downloaded": _tracker.completed,
         "skipped": _tracker.skipped,
@@ -2013,8 +2138,13 @@ def main():
         help="Disable GUI progress window (terminal-only output)",
     )
     parser.add_argument(
-        "--delay", type=float, default=0.5,
-        help="Seconds to wait between requests (default: 0.5)",
+        "--delay", type=float, default=0.1,
+        help="Per-domain seconds between requests (default: 0.1)",
+    )
+    parser.add_argument(
+        "--workers", type=int, default=4,
+        help="Number of concurrent HTTP download threads (default: 4). "
+             "Browser downloads always use 1 dedicated thread.",
     )
     parser.add_argument(
         "--extract-zips", action="store_true", dest="extract_zips",
@@ -2205,6 +2335,7 @@ def main():
         extract_zips=args.extract_zips,
         use_gui=not args.no_gui,
         manifest_path=args.output / "manifest.json",
+        workers=args.workers,
     )
 
     # ── Terminal summary (GUI summary is shown inside download_all) ──

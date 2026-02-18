@@ -29,6 +29,7 @@ def run_scheduled_download(
     years: list[str] | None = None,
     sources: list[str] | None = None,
     log_file: Path | None = None,
+    workers: int = 4,
 ) -> int:
     """Run the downloader in unattended mode with logging and error tracking.
 
@@ -150,6 +151,7 @@ def run_scheduled_download(
             browser_labels,
             use_gui=False,          # Always headless for scheduled runs (1.A4-d)
             manifest_path=output_dir / "manifest.json",
+            workers=workers,
         )
 
         elapsed = (datetime.now() - start_time).total_seconds()
@@ -214,9 +216,15 @@ def main():
         "--log", type=Path, default=None,
         help="Log file path (default: timestamped file in output directory)",
     )
+    parser.add_argument(
+        "--workers", type=int, default=4,
+        help="Number of concurrent HTTP download threads (default: 4)",
+    )
     args = parser.parse_args()
 
-    sys.exit(run_scheduled_download(args.output, args.years, args.sources, args.log))
+    sys.exit(run_scheduled_download(
+        args.output, args.years, args.sources, args.log, workers=args.workers,
+    ))
 
 
 if __name__ == "__main__":
