@@ -28,6 +28,7 @@ from build_budget_db import (
     _determine_category,
     _map_columns,
     _extract_pe_number,
+    _detect_amount_unit,
 )
 from utils.common import sanitize_filename
 
@@ -341,3 +342,42 @@ def test_extract_pe_number_returns_first():
     """When multiple PE numbers appear, the first match is returned."""
     result = _extract_pe_number("0602702E and 0305116BB programs")
     assert result == "0602702E"
+
+
+# ── 1.B3-a: _detect_amount_unit tests ────────────────────────────────────────
+
+def test_detect_amount_unit_default():
+    """Returns 'thousands' when no unit indicator is found."""
+    rows = [["Account", "Title", "FY2026 Request"]]
+    assert _detect_amount_unit(rows, 0) == "thousands"
+
+
+def test_detect_amount_unit_thousands():
+    """Explicit 'in thousands' label returns 'thousands'."""
+    rows = [["DoD Budget", "in thousands", None], ["Account", "Title"]]
+    assert _detect_amount_unit(rows, 1) == "thousands"
+
+
+def test_detect_amount_unit_millions():
+    """'in millions' label returns 'millions'."""
+    rows = [["$ millions"], ["Account", "Title"]]
+    assert _detect_amount_unit(rows, 1) == "millions"
+
+
+def test_detect_amount_unit_millions_in_header_row():
+    """Unit keyword in the header row itself is detected."""
+    rows = [["Account", "($ millions)", "FY2026"]]
+    assert _detect_amount_unit(rows, 0) == "millions"
+
+
+def test_detect_amount_unit_empty_rows():
+    """Empty/None cells are skipped without error."""
+    rows = [[None, None], [None]]
+    assert _detect_amount_unit(rows, 1) == "thousands"
+
+
+def test_detect_amount_unit_millions_priority():
+    """Millions keyword takes precedence when detected before thousands."""
+    rows = [["in millions of dollars, prior amounts in thousands"]]
+    # 'in millions' appears first in the keyword scan → millions wins
+    assert _detect_amount_unit(rows, 0) == "millions"

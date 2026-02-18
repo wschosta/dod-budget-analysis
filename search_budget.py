@@ -213,14 +213,31 @@ def search_pdf_pages(conn: sqlite3.Connection, query: str,
 # format_amount() provides consistent currency formatting across the codebase
 
 
-def display_budget_results(results: list, query: str) -> None:
-    """Display budget line item search results."""
+def display_budget_results(results: list, query: str,
+                           unit: str = "thousands") -> None:
+    """Display budget line item search results.
+
+    Args:
+        results: Rows from search_budget_lines().
+        query:   Original search string (shown in header).
+        unit:    "thousands" (default) or "millions" — controls display scale.
+                 Amounts are stored in thousands; "millions" divides by 1,000.
+                 (Step 1.B3-e)
+    """
     if not results:
         print(f"\n  No budget line items found for: '{query}'")
         return
 
+    divisor = 1_000.0 if unit == "millions" else 1.0
+    unit_label = " ($M)" if unit == "millions" else " ($K)"
+
+    def _amt(value):
+        if value is None:
+            return format_amount(None)
+        return format_amount(value / divisor, precision=1 if unit == "millions" else 0)
+
     print(f"\n{'='*90}")
-    print(f"  BUDGET LINE ITEMS ({len(results)} results)")
+    print(f"  BUDGET LINE ITEMS ({len(results)} results){unit_label}")
     print(f"{'='*90}")
 
     for r in results:
@@ -237,11 +254,11 @@ def display_budget_results(results: list, query: str) -> None:
 
         print(f"\n  [{org}] {title}")
         print(f"    Account: {r['account']}  |  Exhibit: {r['exhibit_type']}  |  Sheet: {r['sheet_name']}")
-        print(f"    FY2024 Actual: {format_amount(r['amount_fy2024_actual']):>15}"
-              f"    FY2025 Enacted: {format_amount(r['amount_fy2025_enacted']):>15}"
-              f"    FY2026 Request: {format_amount(r['amount_fy2026_request']):>15}")
+        print(f"    FY2024 Actual: {_amt(r['amount_fy2024_actual']):>15}"
+              f"    FY2025 Enacted: {_amt(r['amount_fy2025_enacted']):>15}"
+              f"    FY2026 Request: {_amt(r['amount_fy2026_request']):>15}")
         if r["amount_fy2026_total"] and r["amount_fy2026_total"] != r["amount_fy2026_request"]:
-            print(f"    FY2026 Total:   {format_amount(r['amount_fy2026_total']):>15}")
+            print(f"    FY2026 Total:   {_amt(r['amount_fy2026_total']):>15}")
         print(f"    Source: {r['source_file']}")
 
 
@@ -318,8 +335,15 @@ def _extract_snippet(text: str, query: str, max_len: int = 300) -> str:
 
 # ── Interactive Mode ──────────────────────────────────────────────────────────
 
-def interactive_mode(conn: sqlite3.Connection) -> None:
-    """Interactive search REPL."""
+def interactive_mode(conn: sqlite3.Connection, unit: str = "thousands") -> None:
+    """Interactive search REPL.
+
+    Args:
+        conn: Open database connection.
+        unit: Starting display unit — "thousands" or "millions". Can be
+              changed at runtime with the ``unit <thousands|millions>``
+              command. (Step 1.B3-e)
+    """
     print("=" * 65)
     print("  DoD BUDGET DATABASE - Interactive Search")
     print("=" * 65)
@@ -334,7 +358,10 @@ def interactive_mode(conn: sqlite3.Connection) -> None:
     print("    summary                Show database summary")
     print("    sources                Show data source tracking")
     print("    top <org>              Top budget items by organization")
+    print("    unit thousands|millions  Toggle amount display unit")
     print("    quit / exit            Exit")
+    print()
+    print(f"  Amount display: {unit.upper()}")
     print()
 
     while True:
@@ -354,6 +381,16 @@ def interactive_mode(conn: sqlite3.Connection) -> None:
             continue
         if raw.lower() == "sources":
             show_sources(conn)
+            continue
+
+        # Unit toggle command (Step 1.B3-e)
+        if raw.lower().startswith("unit "):
+            new_unit = raw[5:].strip().lower()
+            if new_unit in ("thousands", "millions"):
+                unit = new_unit
+                print(f"  Amount display set to: {unit.upper()}")
+            else:
+                print("  Usage: unit thousands   OR   unit millions")
             continue
 
         # Parse command prefixes
@@ -385,7 +422,7 @@ def interactive_mode(conn: sqlite3.Connection) -> None:
         elif raw.lower().startswith("top "):
             org = raw[4:].strip()
             results = search_budget_lines(conn, "", org=org, limit=20)
-            display_budget_results(results, f"top items for {org}")
+            display_budget_results(results, f"top items for {org}", unit=unit)
             continue
 
         if not query:
@@ -395,7 +432,7 @@ def interactive_mode(conn: sqlite3.Connection) -> None:
         if search_type in ("both", "excel"):
             results = search_budget_lines(conn, query, org=org_filter,
                                           exhibit=exhibit_filter)
-            display_budget_results(results, query)
+            display_budget_results(results, query, unit=unit)
 
         if search_type in ("both", "pdf"):
             results = search_pdf_pages(conn, query, category=category_filter)
@@ -484,6 +521,14 @@ def main() -> None:
                         help="Export results to file (csv or json). "
                              "CSV writes separate files per result type; "
                              "JSON writes one file with both sections.")
+    parser.add_argument(
+        "--unit", choices=["thousands", "millions"], default="thousands",
+        help=(
+            "Display amounts in thousands (default) or millions of dollars. "
+            "Amounts are stored in thousands; '--unit millions' divides by 1,000. "
+            "(Step 1.B3-e)"
+        ),
+    )
     args = parser.parse_args()
 
     conn = get_connection(args.db)
@@ -493,7 +538,7 @@ def main() -> None:
     elif args.sources:
         show_sources(conn)
     elif args.interactive:
-        interactive_mode(conn)
+        interactive_mode(conn, unit=args.unit)
     elif args.query:
         excel_results = []
         pdf_results = []
@@ -501,7 +546,7 @@ def main() -> None:
         if args.type in ("both", "excel"):
             excel_results = search_budget_lines(conn, args.query, org=args.org,
                                                 exhibit=args.exhibit, limit=args.top)
-            display_budget_results(excel_results, args.query)
+            display_budget_results(excel_results, args.query, unit=args.unit)
 
         if args.type in ("both", "pdf"):
             pdf_results = search_pdf_pages(conn, args.query,

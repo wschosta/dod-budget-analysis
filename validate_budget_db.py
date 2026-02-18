@@ -225,6 +225,41 @@ def check_ingestion_errors(conn: sqlite3.Connection) -> list[dict]:
     return issues
 
 
+def check_unit_consistency(conn: sqlite3.Connection) -> list[dict]:
+    """Flag budget lines where amount_unit is not 'thousands' (Step 1.B3-f).
+
+    After normalisation all stored amounts should be in thousands of dollars.
+    Rows where amount_unit differs indicate a missed unit conversion and the
+    stored values may be off by a factor of 1,000.
+    """
+    issues = []
+    try:
+        rows = conn.execute("""
+            SELECT exhibit_type, source_file, amount_unit, COUNT(*) AS n
+            FROM budget_lines
+            WHERE amount_unit IS NOT NULL AND amount_unit != 'thousands'
+            GROUP BY exhibit_type, source_file, amount_unit
+            ORDER BY n DESC
+        """).fetchall()
+    except Exception:
+        # Column may not exist in pre-1.B3-b databases
+        return []
+
+    for r in rows:
+        issues.append({
+            "check": "unit_consistency",
+            "severity": "warning",
+            "detail": (
+                f"{r['exhibit_type']} exhibit '{r['source_file']}' has "
+                f"amount_unit='{r['amount_unit']}' ({r['n']} rows) — "
+                "unit normalisation may not have been applied"
+            ),
+            "file_path": r["source_file"],
+        })
+
+    return issues
+
+
 def check_empty_files(conn: sqlite3.Connection) -> list[dict]:
     """Find ingested files that produced zero rows/pages."""
     issues = []
@@ -256,6 +291,7 @@ ALL_CHECKS = [
     ("Unknown Exhibit Types", check_unknown_exhibits),
     ("Ingestion Errors", check_ingestion_errors),
     ("Empty Files", check_empty_files),
+    ("Unit Consistency", check_unit_consistency),      # Step 1.B3-f
 ]
 
 

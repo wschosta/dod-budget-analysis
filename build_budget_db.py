@@ -199,13 +199,18 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             quantity_fy2026_request REAL,
             quantity_fy2026_total REAL,
             extra_fields TEXT,
-            -- TODO 1.B4-a: PE number extracted from line_item/account fields
+            -- PE number extracted from line_item/account fields (Step 1.B4-a)
             pe_number TEXT,
-            -- TODO 1.B3-b: Currency year (then-year or constant dollars)
+            -- Currency year context: "then-year" or "constant" (Step 1.B3-b)
             currency_year TEXT,
-            -- TODO 1.B4-c: Appropriation code and title split from account_title
+            -- Appropriation code and title split from account_title (Step 1.B4-c)
             appropriation_code TEXT,
-            appropriation_title TEXT
+            appropriation_title TEXT,
+            -- Source unit for stored amounts (Step 1.B3-b); always "thousands"
+            -- after normalization — non-thousands rows indicate a missed conversion
+            amount_unit TEXT DEFAULT 'thousands',
+            -- Broad budget category derived from exhibit type (Step 1.B3-d)
+            budget_type TEXT
         );
 
         -- Full-text search index for budget lines
@@ -407,6 +412,50 @@ def _detect_currency_year(sheet_name: str, filename: str) -> str:
     return "then-year"
 
 
+def _detect_amount_unit(rows: list, header_idx: int) -> str:
+    """Scan title rows above the header for unit indicators (TODO 1.B3-a).
+
+    Returns "thousands" or "millions" based on keyword matches in any cell
+    found in rows[0:header_idx+1].  Defaults to "thousands" if no indicator
+    is found, since DoD appropriations exhibits default to that unit.
+    """
+    _MILLIONS = frozenset([
+        "in millions", "$ millions", "($millions)", "($ millions)",
+        "millions of dollars", "$ in millions", "in $millions",
+    ])
+    _THOUSANDS = frozenset([
+        "in thousands", "$ thousands", "($thousands)", "($ thousands)",
+        "thousands of dollars", "$ in thousands", "in $thousands",
+    ])
+
+    for row in rows[:header_idx + 1]:
+        for cell in row:
+            if cell is None:
+                continue
+            cell_lower = str(cell).strip().lower()
+            for pat in _MILLIONS:
+                if pat in cell_lower:
+                    return "millions"
+            for pat in _THOUSANDS:
+                if pat in cell_lower:
+                    return "thousands"
+
+    return "thousands"  # Default per DoD convention
+
+
+# Map exhibit type → budget_type label stored in budget_lines (TODO 1.B3-d)
+_EXHIBIT_BUDGET_TYPE: dict[str, str] = {
+    "m1": "MilPers",
+    "o1": "O&M",
+    "p1": "Procurement",
+    "p1r": "Procurement",
+    "r1": "RDT&E",
+    "r2": "RDT&E",
+    "rf1": "Revolving",
+    "c1": "Construction",
+}
+
+
 # Note: This function is ~110 lines with three logical sections:
 # 1) Common fields mapping (account, organization, budget activity)
 # 2) Sub-activity/line-item fields (varies by exhibit type)
@@ -589,14 +638,16 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
         currency_year = _detect_currency_year(sheet_name, file_path.name)
 
         data_rows = rows[header_idx + 1:]
-        # TODO 1.B3-a [MEDIUM, ~2000 tokens]: Add _detect_amount_unit(rows, header_idx) -> str.
-        #   Scan rows[0:header_idx] (title rows above the header) and the headers themselves
-        #   for keywords: "in thousands", "$ thousands", "$ millions", "in millions".
-        #   Returns "thousands" (default) or "millions". Store as amount_unit TEXT in
-        #   budget_lines (add column to CREATE TABLE in create_database() and to the INSERT
-        #   column list). If amount_unit == "millions", multiply all _safe_float amounts
-        #   by 1000 before inserting. Add parametrized tests in test_parsing.py.
-        #   ⚠️ Schema change required — coordinate with 1.B2-a if done in same session.
+
+        # Detect source unit and compute normalisation multiplier (Step 1.B3-a/c)
+        amount_unit = _detect_amount_unit(rows, header_idx)
+        # All stored amounts must be in thousands; multiply millions-denominated
+        # values by 1000 before inserting (Step 1.B3-c)
+        unit_multiplier = 1000.0 if amount_unit == "millions" else 1.0
+
+        # Derive budget_type from exhibit type (Step 1.B3-d)
+        budget_type = _EXHIBIT_BUDGET_TYPE.get(exhibit_type)
+
         batch = []
 
         def get_val(row, field):
@@ -634,6 +685,11 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
             acct_title_val = get_str(row, "account_title")
             approp_code, approp_title = _parse_appropriation(acct_title_val)
 
+            def _amt(field):
+                """Read a float amount and apply the unit multiplier (1.B3-c)."""
+                v = _safe_float(get_val(row, field))
+                return v * unit_multiplier if v else v
+
             batch.append((
                 str(file_path.relative_to(DOCS_DIR)),
                 exhibit_type,
@@ -650,22 +706,24 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
                 line_item_val,
                 get_str(row, "line_item_title"),
                 get_str(row, "classification"),
-                _safe_float(get_val(row, "amount_fy2024_actual")),
-                _safe_float(get_val(row, "amount_fy2025_enacted")),
-                _safe_float(get_val(row, "amount_fy2025_supplemental")),
-                _safe_float(get_val(row, "amount_fy2025_total")),
-                _safe_float(get_val(row, "amount_fy2026_request")),
-                _safe_float(get_val(row, "amount_fy2026_reconciliation")),
-                _safe_float(get_val(row, "amount_fy2026_total")),
-                _safe_float(get_val(row, "quantity_fy2024")),
+                _amt("amount_fy2024_actual"),
+                _amt("amount_fy2025_enacted"),
+                _amt("amount_fy2025_supplemental"),
+                _amt("amount_fy2025_total"),
+                _amt("amount_fy2026_request"),
+                _amt("amount_fy2026_reconciliation"),
+                _amt("amount_fy2026_total"),
+                _safe_float(get_val(row, "quantity_fy2024")),    # quantities are unit-less
                 _safe_float(get_val(row, "quantity_fy2025")),
                 _safe_float(get_val(row, "quantity_fy2026_request")),
                 _safe_float(get_val(row, "quantity_fy2026_total")),
-                None,         # extra_fields
-                pe_number,    # Step 1.B4-a: PE number from line_item or account
-                currency_year,  # Step 1.B3-b: currency year context
-                approp_code,  # Step 1.B4-c: appropriation code from account title
-                approp_title, # Step 1.B4-c: appropriation title from account title
+                None,          # extra_fields
+                pe_number,     # Step 1.B4-a: PE number from line_item or account
+                currency_year, # Step 1.B3-b: currency year context
+                approp_code,   # Step 1.B4-c: appropriation code from account title
+                approp_title,  # Step 1.B4-c: appropriation title from account title
+                amount_unit,   # Step 1.B3-b: normalised to "thousands"
+                budget_type,   # Step 1.B3-d: budget category from exhibit type
             ))
 
         if batch:
@@ -684,8 +742,9 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
                     quantity_fy2026_request, quantity_fy2026_total,
                     extra_fields,
                     pe_number, currency_year,
-                    appropriation_code, appropriation_title
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    appropriation_code, appropriation_title,
+                    amount_unit, budget_type
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, batch)
             total_rows += len(batch)
 
