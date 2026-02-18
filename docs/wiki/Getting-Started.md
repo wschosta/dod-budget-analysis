@@ -1,8 +1,8 @@
 # Getting Started
 
-<!-- TODO [Step 3.C1]: Write a full plain-language guide after the web UI is built. -->
+A guide to searching, filtering, and downloading DoD budget data using the command-line tools.
 
-A guide to searching, filtering, and downloading DoD budget data.
+> **Current Status:** Phase 3.C, Step 3.C1 — Partial. CLI tools are fully functional; web UI is planned for Phase 3.
 
 ---
 

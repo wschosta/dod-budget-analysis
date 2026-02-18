@@ -147,22 +147,25 @@ See [docs/wiki/optimizations/START_HERE.md](docs/wiki/optimizations/START_HERE.m
 
 > **Objective:** Build a public, web-facing, user-queryable database of Department of Defense budget data that allows users to filter, explore, and download results.
 
-| Phase | Title | Description |
-|-------|-------|-------------|
-| **0** | Project Description & Documentation | Updated readme, wiki skeleton, and project documentation |
-| **1** | Data Extraction & Normalization | Download, parse, and normalize DoD budget documents into clean, structured data |
-| **2** | Database Design & Population | Design the production schema, load all data, and expose it through an API |
-| **3** | Front-End & Documentation | Build a web UI for querying, filtering, and downloading data, plus user-facing docs |
-| **4** | Publish, Feedback & Iteration | Deploy publicly, collect user feedback, and iterate on improvements |
+| Phase | Title | Status | Description |
+|-------|-------|--------|-------------|
+| **0** | Project Description & Documentation | ✅ Complete | Updated readme, wiki skeleton, and project documentation |
+| **1** | Data Extraction & Normalization | 🔄 In Progress | Download, parse, and normalize DoD budget documents into clean, structured data |
+| **2** | Database Design & Population | 📋 Planned | Design the production schema, load all data, and expose it through an API |
+| **3** | Front-End & Documentation | 📋 Planned | Build a web UI for querying, filtering, and downloading data, plus user-facing docs |
+| **4** | Publish, Feedback & Iteration | 📋 Planned | Deploy publicly, collect user feedback, and iterate on improvements |
 
 ### Current Project Status
 
-| Component | File | Covers |
-|-----------|------|--------|
-| Document downloader | `dod_budget_downloader.py` | Steps 1.A1-1.A4 (partial) |
-| Database builder (CLI) | `build_budget_db.py` | Steps 1.B1-1.B5 (partial), 2.B1 (partial) |
-| Database builder (GUI) | `build_budget_gui.py` | GUI wrapper for the above |
-| Search interface | `search_budget.py` | Prototype for 2.C query logic |
+| Component | File | Status | Covers |
+|-----------|------|--------|--------|
+| **Document downloader** | `dod_budget_downloader.py` (1476 lines) | ✅ Functional | Multi-source discovery, Playwright browser automation, parallel downloads, progress tracking |
+| **Database builder (CLI)** | `build_budget_db.py` (1011+ lines) | ✅ Functional | Excel/PDF parsing, SQLite database creation, incremental updates |
+| **Database builder (GUI)** | `build_budget_gui.py` | ✅ Functional | tkinter GUI wrapper for database building with progress tracking |
+| **Data validation suite** | `validate_budget_db.py` (332 lines) | ✅ Complete | Automated quality checks (Step 1.B6) |
+| **Search interface** | `search_budget.py` (549 lines) | ✅ Functional | Full-text search with FTS5, results display, export options |
+| **Test suite** | `tests/` | ✅ In Progress | Unit tests for parsing, optimization, search, validation |
+| **Performance optimizations** | Documentation in `docs/wiki/optimizations/` | ✅ Complete | 3-6x speedup with 13 optimizations |
 
 See [ROADMAP.md](ROADMAP.md) for the full task breakdown (57 steps), and [docs/TASK_INDEX.md](docs/TASK_INDEX.md) for Phase 0-1 implementation details.
 
