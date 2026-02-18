@@ -1,0 +1,141 @@
+{# Results table partial — rendered server-side and swapped by HTMX (3.A4-a) #}
+
+{% if items %}
+<div class="results-panel">
+  <div class="results-header">
+    <span class="results-count">
+      {{ "{:,}".format(total) }} result{{ "s" if total != 1 }} — page {{ page }} of {{ total_pages }}
+      <span style="font-size:.75rem;color:#888">(showing {{ items|length }})</span>
+    </span>
+
+    {# Column toggles (3.A4-b) #}
+    <div class="col-toggles" id="col-toggles">
+      <button class="col-toggle active" data-col="org"      onclick="toggleCol(this,'col-org')">Service</button>
+      <button class="col-toggle active" data-col="fy"       onclick="toggleCol(this,'col-fy')">FY</button>
+      <button class="col-toggle active" data-col="exhibit"  onclick="toggleCol(this,'col-exhibit')">Exhibit</button>
+      <button class="col-toggle active" data-col="account"  onclick="toggleCol(this,'col-account')">Account</button>
+      <button class="col-toggle active" data-col="pe"       onclick="toggleCol(this,'col-pe')">PE#</button>
+      <button class="col-toggle active" data-col="fy24"     onclick="toggleCol(this,'col-fy24')">FY24 Act.</button>
+      <button class="col-toggle active" data-col="fy25"     onclick="toggleCol(this,'col-fy25')">FY25 Enact.</button>
+      <button class="col-toggle active" data-col="fy26"     onclick="toggleCol(this,'col-fy26')">FY26 Req.</button>
+    </div>
+  </div>
+
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>
+            {% set next_dir = "desc" if sort_by == "line_item_title" and sort_dir == "asc" else "asc" %}
+            <a hx-get="/partials/results" hx-target="#results-container"
+               hx-push-url="true"
+               hx-vals='{"sort_by":"line_item_title","sort_dir":"{{ next_dir }}","page":"1"}'
+               hx-include="#filter-form">
+              Program / Line Item
+              {% if sort_by == "line_item_title" %}<span class="sort-icon">{{ "▲" if sort_dir == "asc" else "▼" }}</span>{% endif %}
+            </a>
+          </th>
+          <th class="col-org">
+            <a hx-get="/partials/results" hx-target="#results-container"
+               hx-push-url="true"
+               hx-vals='{"sort_by":"organization_name","sort_dir":"{% if sort_by == "organization_name" and sort_dir == "asc" %}desc{% else %}asc{% endif %}","page":"1"}'
+               hx-include="#filter-form">
+              Service
+              {% if sort_by == "organization_name" %}<span class="sort-icon">{{ "▲" if sort_dir == "asc" else "▼" }}</span>{% endif %}
+            </a>
+          </th>
+          <th class="col-fy" data-tooltip="Fiscal year: Oct 1 – Sep 30">FY</th>
+          <th class="col-exhibit" data-tooltip="Budget exhibit type (R-2, P-5, O-1, etc.)">Exhibit</th>
+          <th class="col-account" data-tooltip="Appropriation account code">Account</th>
+          <th class="col-pe" data-tooltip="Program Element number — unique identifier for each R&amp;D program">PE #</th>
+          <th class="col-fy24 td-amount">
+            <a hx-get="/partials/results" hx-target="#results-container"
+               hx-push-url="true"
+               hx-vals='{"sort_by":"amount_fy2024_actual","sort_dir":"{% if sort_by == "amount_fy2024_actual" and sort_dir == "desc" %}asc{% else %}desc{% endif %}","page":"1"}'
+               hx-include="#filter-form">
+              FY24 Actual ($K)
+              {% if sort_by == "amount_fy2024_actual" %}<span class="sort-icon">{{ "▲" if sort_dir == "asc" else "▼" }}</span>{% endif %}
+            </a>
+          </th>
+          <th class="col-fy25 td-amount" data-tooltip="FY2025 enacted amount in thousands of dollars ($K). Enacted = signed into law by Congress.">FY25 Enacted ($K)</th>
+          <th class="col-fy26 td-amount">
+            <a hx-get="/partials/results" hx-target="#results-container"
+               hx-push-url="true"
+               hx-vals='{"sort_by":"amount_fy2026_request","sort_dir":"{% if sort_by == "amount_fy2026_request" and sort_dir == "desc" %}asc{% else %}desc{% endif %}","page":"1"}'
+               hx-include="#filter-form">
+              FY26 Request ($K)
+              {% if sort_by == "amount_fy2026_request" %}<span class="sort-icon">{{ "▲" if sort_dir == "asc" else "▼" }}</span>{% endif %}
+            </a>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in items %}
+        <tr hx-get="/partials/detail/{{ item.id }}"
+            hx-target="#detail-container"
+            hx-swap="innerHTML"
+            onclick="selectRow(this)">
+          <td>
+            <div style="font-weight:600;font-size:.88rem">
+              {{ item.line_item_title or item.account_title or "—" }}
+            </div>
+            {% if item.budget_activity_title %}
+            <div style="font-size:.78rem;color:#555">{{ item.budget_activity_title }}</div>
+            {% endif %}
+          </td>
+          <td class="col-org td-org">{{ item.organization_name or "—" }}</td>
+          <td class="col-fy">{{ item.fiscal_year or "—" }}</td>
+          <td class="col-exhibit">
+            {% if item.exhibit_type %}
+            <span class="badge">{{ item.exhibit_type | upper }}</span>
+            {% else %}—{% endif %}
+          </td>
+          <td class="col-account" style="font-size:.8rem">{{ item.account or "—" }}</td>
+          <td class="col-pe" style="font-size:.8rem;font-family:monospace">{{ item.pe_number or "—" }}</td>
+          <td class="col-fy24 td-amount">{{ item.amount_fy2024_actual | fmt_amount if item.amount_fy2024_actual is not none else "—" }}</td>
+          <td class="col-fy25 td-amount">{{ item.amount_fy2025_enacted | fmt_amount if item.amount_fy2025_enacted is not none else "—" }}</td>
+          <td class="col-fy26 td-amount">{{ item.amount_fy2026_request | fmt_amount if item.amount_fy2026_request is not none else "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {# Pagination (3.A4-a) #}
+  {% if total_pages > 1 %}
+  <div class="pagination">
+    {% if page > 1 %}
+    <button class="page-btn"
+            hx-get="/partials/results" hx-target="#results-container"
+            hx-push-url="true"
+            hx-vals='{"page":"{{ page - 1 }}"}'
+            hx-include="#filter-form">‹ Prev</button>
+    {% endif %}
+
+    {% for p in range([1, page - 2]|max, [total_pages + 1, page + 3]|min) %}
+    <button class="page-btn {{ 'active' if p == page }}"
+            hx-get="/partials/results" hx-target="#results-container"
+            hx-push-url="true"
+            hx-vals='{"page":"{{ p }}"}'
+            hx-include="#filter-form">{{ p }}</button>
+    {% endfor %}
+
+    {% if page < total_pages %}
+    <button class="page-btn"
+            hx-get="/partials/results" hx-target="#results-container"
+            hx-push-url="true"
+            hx-vals='{"page":"{{ page + 1 }}"}'
+            hx-include="#filter-form">Next ›</button>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+{% else %}
+<div class="results-panel">
+  <div class="empty-state">
+    <p>No results found.</p>
+    <p style="font-size:.85rem">Try broadening your filters or using different keywords.</p>
+  </div>
+</div>
+{% endif %}

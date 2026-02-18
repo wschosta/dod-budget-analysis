@@ -9,35 +9,18 @@ Plans and TODOs for containerization, CI/CD, deployment, and monitoring.
 TODOs — Step 4.A (Containerization & Infrastructure)
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO 4.A1-a [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
-    Write Dockerfile for the application.
-    Steps:
-      1. Use python:3.12-slim as base image
-      2. COPY requirements.txt and pip install
-      3. COPY source code (api/, templates/, static/, utils/, *.py)
-      4. COPY pre-built database (dod_budget.sqlite) into image
-      5. EXPOSE 8000; CMD uvicorn api.app:create_app --host 0.0.0.0
-      6. Add .dockerignore for tests/, docs/, .git/, __pycache__/
-    Success: `docker build -t dod-budget . && docker run -p 8000:8000 dod-budget`
-    serves the app on localhost:8000.
+DONE 4.A1-a  Dockerfile: python:3.12-slim, non-root appuser, HEALTHCHECK,
+    COPY requirements.txt + pip install, COPY api/ utils/ templates/ static/ *.py,
+    ENV APP_DB_PATH, EXPOSE 8000, CMD uvicorn 2-worker.
 
-TODO 4.A1-b [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Write docker-compose.yml for local development.
-    Steps:
-      1. Define service: web (build: ., ports: 8000:8000, volumes for hot reload)
-      2. Mount database file as volume for persistence
-      3. Add healthcheck: curl localhost:8000/api/v1/reference/fiscal-years
-    Success: `docker-compose up` starts the full application locally.
+DONE 4.A1-b  docker-compose.yml: web service ports 8000:8000, volume mounts for
+    dod_budget.sqlite (ro) and api/ utils/ for hot-reload, healthcheck.
 
-TODO 4.A2-a [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Create a data-build Docker stage (multi-stage build).
-    Steps:
-      1. Stage 1 (builder): install playwright + all deps, run download +
-         build_budget_db.py to produce dod_budget.sqlite
-      2. Stage 2 (runtime): copy only the sqlite file + app code
-      3. This keeps the runtime image small (~100MB vs ~2GB)
-    Note: Stage 1 requires network access and may take hours.
-    Success: Multi-stage build produces lean runtime image with embedded data.
+DONE 4.A2-a  Dockerfile.multistage: 2-stage build.
+    Stage 1 (builder): python:3.12 full + Playwright Chromium + poppler-utils;
+    runs build_budget_db.py to produce dod_budget.sqlite.
+    Stage 2 (runtime): python:3.12-slim, copies only sqlite + app code from builder;
+    runtime image ~150MB vs ~2GB for builder.
 
 TODO 4.A3-a [Complexity: MEDIUM] [Tokens: ~2000] [User: YES — needs cloud account]
     Choose hosting platform and document decision.
@@ -55,15 +38,10 @@ TODO 4.A3-a [Complexity: MEDIUM] [Tokens: ~2000] [User: YES — needs cloud acco
 TODOs — Step 4.B (CI/CD Pipeline)
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO 4.B1-a [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
-    Create GitHub Actions CI workflow (.github/workflows/ci.yml).
-    Steps:
-      1. Trigger on: push to main, pull requests
-      2. Matrix: Python 3.11, 3.12
-      3. Steps: checkout, install deps, run pytest, run precommit checks
-      4. Fail on: test failures or precommit violations
-      5. Upload test results as artifact
-    Success: PRs show pass/fail status; main branch always green.
+DONE 4.B1-a  .github/workflows/ci.yml: matrix Python 3.11/3.12, checkout + pip install
+    + ruff lint + pytest (ignoring test_gui_tracker.py) + upload artifact.
+DONE 4.B3-a  .github/workflows/refresh-data.yml: weekly cron + manual dispatch,
+    playwright install, refresh_data.py, upload db artifact, step summary.
 
 TODO 4.B2-a [Complexity: MEDIUM] [Tokens: ~2000] [User: YES — needs secrets]
     Create GitHub Actions deploy workflow (.github/workflows/deploy.yml).
@@ -74,15 +52,6 @@ TODO 4.B2-a [Complexity: MEDIUM] [Tokens: ~2000] [User: YES — needs secrets]
       4. Run smoke test against deployed URL
     Dependency: TODO 4.A3-a (platform choice) must be done first.
     Success: Merging to main auto-deploys within minutes.
-
-TODO 4.B3-a [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Create data refresh workflow (.github/workflows/refresh-data.yml).
-    Steps:
-      1. Trigger: weekly schedule + manual workflow_dispatch
-      2. Install playwright, run dod_budget_downloader.py, build DB
-      3. Upload new database as release artifact or deploy update
-      4. Notify on failure (GitHub Actions notification)
-    Success: Database refreshed weekly without manual intervention.
 
 
 ──────────────────────────────────────────────────────────────────────────────
@@ -97,37 +66,16 @@ TODO 4.C1-a [Complexity: LOW] [Tokens: ~1000] [User: YES — needs domain]
       3. Enable HTTPS (most platforms provide free TLS via Let's Encrypt)
     Success: App accessible at https://custom-domain.com.
 
-TODO 4.C2-a [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add health check endpoint and basic monitoring.
-    Steps:
-      1. Add GET /health endpoint returning {status: ok, db_rows: N, uptime: Ns}
-      2. Configure hosting platform health check to hit /health
-      3. Set up uptime monitoring (e.g., UptimeRobot free tier)
-    Success: Downtime detected and alerted within 5 minutes.
+DONE 4.C2-a  GET /health endpoint in api/app.py: returns {status, database, budget_lines}
+    or 503 if DB absent/degraded.
+DONE 4.C3-a  HTTP middleware in api/app.py: structured access logging (method/path/
+    status/duration_ms/ip) + slow-query warnings (>500ms).
+DONE 4.C4-a  Rate limiting middleware in api/app.py: fixed-window per-IP counter,
+    search=60/min, download=10/min, others=120/min; returns 429 + Retry-After.
 
-TODO 4.C3-a [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add request logging and error tracking.
-    Steps:
-      1. Add structured access logging (method, path, status, duration)
-      2. Add Sentry free tier for error tracking (or simple error log)
-      3. Log slow queries (>500ms) for performance monitoring
-    Success: Errors and slow queries visible in dashboard/logs.
-
-TODO 4.C4-a [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Add rate limiting to prevent abuse.
-    Steps:
-      1. Add slowapi or custom middleware for rate limiting
-      2. Limits: 60 req/min for search, 10 req/min for download
-      3. Return 429 Too Many Requests with Retry-After header
-    Success: Excessive requests get rate-limited gracefully.
-
-TODO 4.C5-a [Complexity: LOW] [Tokens: ~2000] [User: NO]
-    Write deployment runbook (docs/deployment.md).
-    Steps:
-      1. Document: how to deploy, how to update data, how to rollback
-      2. Include: environment variables, secrets management, database backup
-      3. ~100 lines of markdown
-    Success: A new maintainer can deploy and manage the app.
+DONE 4.C5-a  docs/deployment.md (~147 lines): prerequisites, quick start,
+    Docker deploy, docker-compose, data updates, env vars (APP_DB_PATH),
+    database backup, rollback, health check, secrets management.
 
 TODO 4.C6-a [Complexity: LOW] [Tokens: ~1500] [User: YES — needs community review]
     Prepare for public launch.

@@ -340,7 +340,6 @@ class ReportFormatter:
             lines.append("")
 
         for section in self.sections:
-            indent = "  " * (section["level"] - 1)
             heading = section["heading"]
             content = section["content"]
 

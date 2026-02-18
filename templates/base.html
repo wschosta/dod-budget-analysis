@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}DoD Budget Explorer{% endblock %}</title>
+
+  <!-- HTMX for dynamic page updates without full reloads -->
+  <script src="https://unpkg.com/htmx.org@1.9.10" crossorigin="anonymous"></script>
+  <!-- Chart.js for visualizations (3.B*) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"
+          crossorigin="anonymous"></script>
+
+  <link rel="stylesheet" href="/static/css/main.css">
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+
+<header class="site-header">
+  <div class="container header-inner">
+    <a class="site-title" href="/">DoD Budget Explorer</a>
+    <nav class="site-nav">
+      <a href="/"         {% if request.url.path == "/" %}class="active"{% endif %}>Search</a>
+      <a href="/charts"   {% if request.url.path == "/charts" %}class="active"{% endif %}>Charts</a>
+      <a href="/docs"     target="_blank" rel="noopener">API Docs</a>
+    </nav>
+  </div>
+</header>
+
+<main class="container main-content">
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="site-footer">
+  <div class="container">
+    Data sourced from <a href="https://comptroller.defense.gov/Budget-Materials/" target="_blank"
+      rel="noopener">DoD Comptroller</a>.
+    This is an independent research tool; not affiliated with the U.S. Department of Defense.
+    <a href="/docs" target="_blank" rel="noopener">API</a>
+  </div>
+</footer>
+
+{% block extra_scripts %}{% endblock %}
+</body>
+</html>

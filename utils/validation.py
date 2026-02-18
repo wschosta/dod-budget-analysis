@@ -107,7 +107,7 @@ class ValidationResult:
     def summary_text(self) -> str:
         """Generate human-readable validation summary."""
         lines = []
-        lines.append(f"Validation Summary:")
+        lines.append("Validation Summary:")
         lines.append(f"  Passed Checks: {len(self.passed_checks)}")
         lines.append(f"  Failed Checks: {len(self.failed_checks)}")
         lines.append(f"  Issues: {len(self.issues)}")

@@ -5,7 +5,6 @@ during data ingestion. Using pre-compiled patterns and efficient string operatio
 yields ~10-15% speedup in build_budget_db.py.
 """
 
-import re
 from utils.patterns import WHITESPACE, CURRENCY_SYMBOLS, FTS5_SPECIAL_CHARS
 
 

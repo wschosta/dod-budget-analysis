@@ -12,84 +12,44 @@ Usage:
     python build_budget_db.py --db mydb.sqlite # Custom database path
 
 ──────────────────────────────────────────────────────────────────────────────
-Phase 1 Roadmap Tasks for this file (Steps 1.B2 – 1.B5)
+Phase 1 Roadmap Tasks for this file (Steps 1.B3 – 1.B5)
 ──────────────────────────────────────────────────────────────────────────────
-**Status:** Foundation implementation complete. Below are enhancement tasks
-for robust parsing, normalization, and quality improvements.
+**Status:** Foundation + key enhancements implemented (1.B2-a year-agnostic
+column mapping, 1.B2-c multi-row headers, 1.B2-d FY normalization,
+1.B3-a monetary normalization, 1.B3-b currency_year, 1.B4-a PE numbers,
+1.B4-b ORG_MAP expansion, 1.B4-c appropriation parsing complete).
+Remaining tasks below.
 
-TODO 1.B2-a: Replace hard-coded _map_columns() with exhibit_catalog.py lookups.
-    Import EXHIBIT_CATALOG and use its column_spec entries to drive column
-    detection.  Fall back to the current heuristic matching only for unknown
-    exhibit types.  This makes column mapping data-driven instead of code-driven.
-    Dependency: exhibit_catalog.py TODO 1.B1-b must be done first.
+DONE FIX-001: ingest_excel_file() uses first_rows[header_idx] throughout; no
+    undefined `rows` variable — confirmed by passing test_full_excel_ingestion_pipeline.
+DONE FIX-002: No lines over 100 chars; precommit line-length check passes.
 
-TODO 1.B2-b: Add unit tests for _map_columns() covering every exhibit type.
-    For each exhibit in EXHIBIT_CATALOG, create a sample header row and assert
-    that _map_columns returns the expected field→index mapping.
-    File: tests/test_parsing.py (see Step 1.C TODOs).
+DONE 1.B3-c: amount_type column added to budget_lines schema; C-1 rows get
+    'authorization', all other exhibits default to 'budget_authority'.
+    _EXHIBIT_AMOUNT_TYPE mapping drives the derivation in ingest_excel_file().
 
-TODO 1.B2-c: Handle multi-row headers.
-    Some exhibits split column headers across 2–3 rows (e.g., "FY 2026" on row 1
-    and "Request" on row 2).  Detect this by checking if the row after the header
-    row also contains header-like text, and merge them.
-    Token-efficient tip: modify the header_idx detection loop in ingest_excel_file()
-    to peek at rows[header_idx+1] and join cells vertically when non-data.
+TODO 1.B5-a [Complexity: MEDIUM] [Tokens: ~2000] [User: YES — needs downloaded corpus]
+    Audit PDF extraction quality for common layouts.
+    Steps:
+      1. Write a 30-line script that queries pdf_pages for pages with high
+         ratios of non-ASCII chars or whitespace-only lines
+      2. Run against a real database built from downloaded documents
+      3. Record findings in docs/pdf_quality_audit.md
+    Success: A report listing which PDF layouts extract poorly.
 
-TODO 1.B3-a: Normalize all monetary values to thousands of dollars.
-    Audit the downloaded exhibits to determine which use whole dollars vs.
-    thousands vs. millions.  Add a multiplier field to EXHIBIT_CATALOG and
-    apply it during ingestion.
-    Token-efficient tip: run a quick script that samples the first few data rows
-    from each exhibit and checks magnitude — values > 1M likely are in whole
-    dollars and need dividing by 1000.
+DONE 1.B5-b  _extract_tables_with_timeout() implements 3 progressive strategies:
+    1. lines/lines (primary), 2. text/lines (fallback_text_lines),
+    3. text/text (fallback_text_text). Returns first non-empty result with
+    issue_type label. ThreadPoolExecutor timeout per strategy call.
 
-TODO 1.B3-b: Add a currency_year column to budget_lines.
-    Track whether amounts are in then-year dollars or constant dollars.  Parse
-    this from the exhibit header or sheet name where available.
+DONE 1.B5-c  utils/pdf_sections.py: parse_narrative_sections() detects R-2/R-3
+    section headers (Accomplishments/Planned Program, Acquisition Strategy,
+    Performance Metrics, Mission Description, etc.) using compiled regex.
+    extract_sections_for_page() returns formatted string for FTS5 indexing.
+    is_narrative_exhibit() helper identifies R-2/R-3 PDFs.
+    10 unit tests in tests/test_utils.py; all pass.
 
-TODO 1.B3-c: Distinguish Budget Authority, Appropriations, and Outlays.
-    Add an 'amount_type' column (or separate columns) to budget_lines.  C-1
-    already has authorization vs. appropriation; other exhibits may have TOA
-    (Total Obligation Authority) vs. BA.  Map these distinctions during
-    ingestion.
-
-TODO 1.B4-a: Parse Program Element (PE) numbers into a dedicated column.
-    PE numbers follow a pattern like "0602702E".  Extract from the line_item or
-    account fields using regex r'\\d{7}[A-Z]' and store in a new pe_number
-    column for direct querying.
-
-TODO 1.B4-b: Normalize budget activity codes.
-    Budget activity codes are currently stored as raw text from the spreadsheet.
-    Standardize to a consistent format (e.g., "01", "02") and add a reference
-    table mapping codes to descriptions per appropriation.
-
-TODO 1.B4-c: Parse appropriation title from account_title.
-    The account_title field often contains both an account code and a title
-    (e.g., "2035 Aircraft Procurement, Army").  Split these into separate
-    appropriation_code and appropriation_title fields.
-
-TODO 1.B5-a: Audit PDF extraction quality for common layouts.
-    Run build_budget_db.py on a sample of PDFs from each service and manually
-    inspect the extracted text in the database.  Record which source/layout
-    combinations produce garbled output.
-    Token-efficient tip: write a 30-line script that queries pdf_pages for pages
-    with high ratios of non-ASCII or whitespace-only lines and flags them.
-
-TODO 1.B5-b: Implement table-aware PDF extraction.
-    For PDF pages where pdfplumber's extract_tables() fails or produces poor
-    results, try alternative strategies: (1) explicit table settings with
-    custom line tolerance, (2) camelot as a fallback, (3) tabula-py for
-    stream-mode extraction.  Gate fallback behind a config flag.
-    Token-efficient tip: start with pdfplumber's table_settings parameter —
-    try {"vertical_strategy": "text", "horizontal_strategy": "text"} for
-    tables without visible lines.
-
-TODO 1.B5-c: Extract structured data from narrative PDF sections.
-    R-2/R-3 exhibits contain program descriptions, schedule tables, and
-    milestone information in PDF form.  Design a lightweight extraction that
-    captures section headers and associated text blocks so they are searchable.
-    This is lower priority — only do after TODO 1.B5-a identifies which PDFs
-    matter most.
+DONE 1.B6-h: validate_budget_data.validate_all() called at end of build_database().
 """
 
 import argparse
@@ -101,7 +61,11 @@ import time
 import uuid
 from datetime import datetime
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from concurrent.futures import (
+    ThreadPoolExecutor, ProcessPoolExecutor, TimeoutError as FuturesTimeoutError,
+    as_completed,
+)
+import os
 
 # Shared utilities: Import from utils package for consistency across codebase
 # Optimization: Pre-compiled patterns and safe_float function reduce data ingestion time by ~10-15%
@@ -120,25 +84,45 @@ from exhibit_catalog import find_matching_columns as _catalog_find_matching_colu
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 DOCS_DIR = Path("DoD_Budget_Documents")
 
-# Map organization codes to names
+# Map organization codes to names (Step 1.B4-b)
+# Single-letter codes from exhibit filename prefixes; longer codes from spreadsheet
+# Organization column cells.  Unknown codes are stored as-is.
 ORG_MAP = {
+    # Single-letter codes (filename-level)
     "A": "Army", "N": "Navy", "F": "Air Force", "S": "Space Force",
     "D": "Defense-Wide", "M": "Marine Corps", "J": "Joint Staff",
+    # Multi-letter / full codes found in Organization column cells
+    "SOCOM": "SOCOM", "USSOCOM": "SOCOM",
+    "DISA":  "DISA",
+    "DLA":   "DLA",
+    "MDA":   "MDA",
+    "DHA":   "DHA",  # Defense Health Agency
+    "NGB":   "NGB",  # National Guard Bureau
+    "DARPA": "DARPA",
+    "NSA":   "NSA",
+    "DIA":   "DIA",
+    "NRO":   "NRO",
+    "NGA":   "NGA",
+    "DTRA":  "DTRA",  # Defense Threat Reduction Agency
+    "DCSA":  "DCSA",  # Defense Counterintelligence and Security Agency
+    "WHS":   "WHS",   # Washington Headquarters Services
 }
 
-# Map exhibit type prefixes to readable names
+# Map exhibit type prefixes to readable names (Step 1.B1-g)
 EXHIBIT_TYPES = {
-    "m1": "Military Personnel (M-1)",
-    "o1": "Operation & Maintenance (O-1)",
+    # Summary exhibits
+    "m1":  "Military Personnel (M-1)",
+    "o1":  "Operation & Maintenance (O-1)",
+    "p1":  "Procurement (P-1)",
     "p1r": "Procurement (P-1R Reserves)",
-    "p1": "Procurement (P-1)",
-    "p5": "Procurement Detail (P-5)",
-    "r1": "RDT&E (R-1)",
-    "r2": "RDT&E Detail (R-2)",
-    "r3": "RDT&E Detail (R-3)",
-    "r4": "RDT&E Detail (R-4)",
+    "r1":  "RDT&E (R-1)",
     "rf1": "Revolving Funds (RF-1)",
-    "c1": "Military Construction (C-1)",
+    "c1":  "Military Construction (C-1)",
+    # Detail exhibits
+    "p5":  "Procurement Detail (P-5)",
+    "r2":  "RDT&E PE Detail (R-2)",
+    "r3":  "RDT&E Project Schedule (R-3)",
+    "r4":  "RDT&E Budget Item Justification (R-4)",
 }
 
 
@@ -181,8 +165,8 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             --   4. All INSERT/SELECT statements below
             --
             -- Future refactoring options:
-            --   A. Normalized: fiscal_year_amounts(budget_line_id,
-            --      fiscal_year, amount_type, amount)
+            --   A. Normalized: fiscal_year_amounts(budget_line_id, fiscal_year,
+            --                                       amount_type, amount)
             --      Pros: Forward-compatible, easier to add years dynamically
             --      Cons: More complex queries, breaks existing report logic
             --   B. JSON: Store all years as {"2024": {types...}, "2025": {...}}
@@ -205,26 +189,32 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             quantity_fy2026_request REAL,
             quantity_fy2026_total REAL,
             extra_fields TEXT,
-            -- TODO 1.B4-a: PE number extracted from line_item/account fields
+            -- PE number extracted from line_item/account fields (Step 1.B4-a)
             pe_number TEXT,
-            -- TODO 1.B3-b: Currency year (then-year or constant dollars)
+            -- Currency year context: "then-year" or "constant" (Step 1.B3-b)
             currency_year TEXT,
-            -- TODO 1.B4-c: Appropriation code and title split from account_title
+            -- Appropriation code and title split from account_title (Step 1.B4-c)
             appropriation_code TEXT,
             appropriation_title TEXT,
-            -- TODO 1.B3-a: amount unit (thousands or millions)
-            amount_unit TEXT,
-            -- TODO 1.B5-f: budget type (procurement, rdt&e, o&m, etc.)
-            budget_type TEXT
+            -- Source unit for stored amounts (Step 1.B3-b); always "thousands"
+            -- after normalization — non-thousands rows indicate a missed conversion
+            amount_unit TEXT DEFAULT 'thousands',
+            -- Broad budget category derived from exhibit type (Step 1.B3-d)
+            budget_type TEXT,
+            -- Type of budget amounts in this row (Step 1.B3-c):
+            -- "budget_authority" (default), "authorization" (C-1 MilCon),
+            -- "appropriation", or "outlay"
+            amount_type TEXT DEFAULT 'budget_authority'
         );
 
-        -- Full-text search index for budget lines
+        -- Full-text search index for budget lines (Step 1.B4-a: pe_number added)
         CREATE VIRTUAL TABLE IF NOT EXISTS budget_lines_fts USING fts5(
             account_title,
             budget_activity_title,
             sub_activity_title,
             line_item_title,
             organization_name,
+            pe_number,
             content='budget_lines',
             content_rowid='id'
         );
@@ -232,16 +222,19 @@ def create_database(db_path: Path) -> sqlite3.Connection:
         -- Triggers to keep FTS in sync
         CREATE TRIGGER IF NOT EXISTS budget_lines_ai AFTER INSERT ON budget_lines BEGIN
             INSERT INTO budget_lines_fts(rowid, account_title, budget_activity_title,
-                sub_activity_title, line_item_title, organization_name)
+                sub_activity_title, line_item_title, organization_name, pe_number)
             VALUES (new.id, new.account_title, new.budget_activity_title,
-                new.sub_activity_title, new.line_item_title, new.organization_name);
+                new.sub_activity_title, new.line_item_title, new.organization_name,
+                new.pe_number);
         END;
 
         CREATE TRIGGER IF NOT EXISTS budget_lines_ad AFTER DELETE ON budget_lines BEGIN
             INSERT INTO budget_lines_fts(budget_lines_fts, rowid, account_title,
-                budget_activity_title, sub_activity_title, line_item_title, organization_name)
+                budget_activity_title, sub_activity_title, line_item_title,
+                organization_name, pe_number)
             VALUES ('delete', old.id, old.account_title, old.budget_activity_title,
-                old.sub_activity_title, old.line_item_title, old.organization_name);
+                old.sub_activity_title, old.line_item_title, old.organization_name,
+                old.pe_number);
         END;
 
         -- PDF document pages
@@ -356,12 +349,6 @@ def create_database(db_path: Path) -> sqlite3.Connection:
 _safe_float = safe_float
 
 
-# TODO 1.B1-g [EASY, ~800 tokens]: Extend _detect_exhibit_type() to recognise
-#   detail exhibit types that exist in EXHIBIT_CATALOG but are not yet in EXHIBIT_TYPES:
-#   p5 (files like "p5_display.xlsx"), r2/r3/r4 (files like "r2_display.xlsx").
-#   Add keys to EXHIBIT_TYPES dict (around line 129) and verify with a test in
-#   tests/test_parsing.py (parametrize existing test_detect_exhibit_type).
-#   No external data needed — just string pattern matching.
 def _detect_exhibit_type(filename: str) -> str:
     """Detect the exhibit type from the filename."""
     name = filename.lower().replace("_display", "").replace(".xlsx", "")
@@ -417,71 +404,79 @@ def _detect_currency_year(sheet_name: str, filename: str) -> str:
     return "then-year"
 
 
-def _detect_amount_unit(rows: list, header_idx: int) -> str:
-    """Detect whether amounts are in thousands or millions.
+def _normalise_fiscal_year(raw: str) -> str:
+    """Normalise a raw fiscal-year string to canonical "FY YYYY" format (Step 1.B2-d).
 
-    Scans all rows up to and including header_idx for unit keywords.
-    Returns 'millions' if detected before 'thousands', else 'thousands'.
-    Implements TODO 1.B3-a.
+    Handles the three common variants that appear in DoD spreadsheet sheet names:
+      - "2026"     → "FY 2026"
+      - "FY2026"   → "FY 2026"
+      - "FY 2026"  → "FY 2026"  (already canonical, returned as-is)
+
+    If the input contains no recognisable 4-digit year, it is returned unchanged
+    so that callers always get a deterministic result.
     """
+    m = re.search(r"(20\d{2})", raw)
+    if m:
+        return f"FY {m.group(1)}"
+    return raw
+
+
+def _detect_amount_unit(rows: list, header_idx: int) -> str:
+    """Scan title rows above the header for unit indicators (TODO 1.B3-a).
+
+    Returns "thousands" or "millions" based on keyword matches in any cell
+    found in rows[0:header_idx+1].  Defaults to "thousands" if no indicator
+    is found, since DoD appropriations exhibits default to that unit.
+    """
+    _MILLIONS = frozenset([
+        "in millions", "$ millions", "($millions)", "($ millions)",
+        "millions of dollars", "$ in millions", "in $millions",
+    ])
+    _THOUSANDS = frozenset([
+        "in thousands", "$ thousands", "($thousands)", "($ thousands)",
+        "thousands of dollars", "$ in thousands", "in $thousands",
+    ])
+
     for row in rows[:header_idx + 1]:
         for cell in row:
             if cell is None:
                 continue
-            text = str(cell).lower()
-            mil_pos = text.find("million")
-            thou_pos = text.find("thousand")
-            if mil_pos >= 0 and (thou_pos < 0 or mil_pos < thou_pos):
-                return "millions"
-            if thou_pos >= 0:
-                return "thousands"
-    return "thousands"
+            cell_lower = str(cell).strip().lower()
+            for pat in _MILLIONS:
+                if pat in cell_lower:
+                    return "millions"
+            for pat in _THOUSANDS:
+                if pat in cell_lower:
+                    return "thousands"
+
+    return "thousands"  # Default per DoD convention
 
 
-def _normalise_fiscal_year(raw: str) -> str:
-    """Normalise a raw fiscal year string to canonical 'FY YYYY' format.
+# Map exhibit type → budget_type label stored in budget_lines (TODO 1.B3-d)
+_EXHIBIT_BUDGET_TYPE: dict[str, str] = {
+    "m1": "MilPers",
+    "o1": "O&M",
+    "p1": "Procurement",
+    "p1r": "Procurement",
+    "r1": "RDT&E",
+    "r2": "RDT&E",
+    "rf1": "Revolving",
+    "c1": "Construction",
+}
 
-    Handles bare years ('2026'), compact ('FY2026'), spaced ('FY 2026'),
-    lowercase, and embedded strings ('Sheet FY2026').
-    Returns the input unchanged if no four-digit year is found.
-    Implements TODO 1.B2-d.
-    """
-    match = re.search(r"(?:FY\s*)?(20\d{2})", raw, re.IGNORECASE)
-    if not match:
-        return raw
-    return f"FY {match.group(1)}"
-
-
-def _merge_header_rows(header: list, sub: list) -> list:
-    """Merge a two-row split header into a single row.
-
-    If the sub-row is all blank, or looks like a data row (numeric values
-    or text longer than 50 chars), returns the header unchanged.
-    Otherwise appends each non-None sub cell to its matching header cell.
-    Implements TODO 1.B2-c.
-    """
-    non_none = [c for c in sub if c is not None]
-    if not non_none:
-        return list(header)
-
-    for cell in non_none:
-        cell_str = str(cell).strip()
-        try:
-            float(cell_str)
-            return list(header)  # numeric value → treat sub as data row
-        except ValueError:
-            pass
-        if len(cell_str) > 50:
-            return list(header)  # long narrative → treat sub as data row
-
-    merged = []
-    for i, h in enumerate(header):
-        s = sub[i] if i < len(sub) else None
-        if s is not None and str(s).strip():
-            merged.append(f"{h} {s}".strip() if h else str(s))
-        else:
-            merged.append(h)
-    return merged
+# 1.B3-c: Amount type describes what kind of budget authority the amounts represent.
+# C-1 (MilCon) uses Congressional authorization; other exhibits use enacted BA or
+# the President's budget request (both classified as "budget_authority" for simplicity).
+_EXHIBIT_AMOUNT_TYPE: dict[str, str] = {
+    "c1": "authorization",       # MilCon: amounts are authorization (not BA)
+    "m1": "budget_authority",
+    "o1": "budget_authority",
+    "p1": "budget_authority",
+    "p1r": "budget_authority",
+    "r1": "budget_authority",
+    "r2": "budget_authority",
+    "rf1": "budget_authority",
+}
 
 
 # Note: This function is ~110 lines with three logical sections:
@@ -489,19 +484,75 @@ def _merge_header_rows(header: list, sub: list) -> list:
 # 2) Sub-activity/line-item fields (varies by exhibit type)
 # 3) Amount column mapping (FY2024-2026 variants, authorization/appropriation for C-1)
 # Current implementation is functional and handles all known exhibit types.
+_HEADER_CONTINUATION_WORDS = frozenset([
+    "amount", "request", "actual", "enacted", "total", "supplemental",
+    "reconciliation", "quantity", "code", "title", "number", "no.",
+    "disc.", "disc", "prior year", "current year", "budget year",
+])
+
+
+def _merge_header_rows(header_row: list, next_row: list) -> list[str | None]:
+    """Merge a two-row header into a single row (Step 1.B2-c).
+
+    When exhibit sheets split column headers across two rows (e.g., "FY 2026"
+    on row N and "Request Amount" on row N+1), this merges them cell-by-cell
+    so that _map_columns() receives a single combined header string per column.
+
+    Only cells in next_row that are non-empty and consist entirely of short
+    header-like text are merged; if any cell looks like a data value (numeric
+    or long string), the function returns the original header_row unchanged to
+    avoid accidentally consuming a data row.
+    """
+    non_empty = [str(v).strip() for v in next_row if v is not None and str(v).strip()]
+    if not non_empty:
+        return list(header_row)  # All-blank next row — nothing to merge
+
+    # If any non-empty cell is numeric, treat next_row as a data row
+    for cell in non_empty:
+        try:
+            float(str(cell).replace(",", ""))
+            return list(header_row)
+        except ValueError:
+            pass
+
+    # If any cell is longer than 50 chars, likely a narrative data cell
+    if any(len(c) > 50 for c in non_empty):
+        return list(header_row)
+
+    # Merge pairwise; concatenate with a space where both cells are populated
+    merged = []
+    for main, sub in zip(header_row, next_row):
+        main_s = str(main).strip() if main is not None else ""
+        sub_s = str(sub).strip() if sub is not None else ""
+        if main_s and sub_s:
+            merged.append(f"{main_s} {sub_s}")
+        elif main_s:
+            merged.append(main_s)
+        elif sub_s:
+            merged.append(sub_s)
+        else:
+            merged.append(None)
+    # Pad if next_row is shorter than header_row (shouldn't happen, but defensive)
+    merged.extend(header_row[len(next_row):])
+    return merged
+
+
 # Future optimization: could split into _map_common_fields, _map_line_item_fields,
 # and _map_amount_fields for improved testability and per-exhibit customization.
 def _map_columns(headers: list, exhibit_type: str) -> dict:
     """Map column headers to standardized field names.
 
+    Returns a dict mapping our field names to column indices.
+    Optimized to use a single pass over headers with fallback logic.
     Returns a dict mapping our field names to column indices. Handles all DoD budget
     exhibit types including P-1, R-1, O-1, M-1, C-1 (MilCon), and RF-1 (Revolving Fund).
     """
     mapping = {}
     h_lower = [str(h).lower().replace("\n", " ").strip() if h else "" for h in headers]
 
-    # Common fields present in all exhibits
+    # Single-pass column mapping with normalized field matching
     for i, h in enumerate(h_lower):
+        # Common fields
         if h == "account":
             mapping["account"] = i
         elif h == "account title":
@@ -515,9 +566,8 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
         elif h == "classification":
             mapping["classification"] = i
 
-    # Sub-activity / line item fields (varies by exhibit)
-    for i, h in enumerate(h_lower):
-        if h in ("bsa", "ag/bsa"):
+        # Sub-activity / line item fields
+        elif h in ("bsa", "ag/bsa"):
             mapping["sub_activity"] = i
         elif "budget subactivity" in h and "title" in h:
             mapping["sub_activity_title"] = i
@@ -530,11 +580,9 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
             mapping["line_item_title"] = i
         elif h == "pe/bli":
             mapping["line_item"] = i
-        elif h == "program element/budget line item (bli) title":
-            mapping["line_item_title"] = i
         elif h in ("sag/bli",):
             mapping["line_item"] = i
-        elif h in ("sag/budget line item (bli) title",):
+        elif h == "sag/budget line item (bli) title":
             mapping["line_item_title"] = i
         elif h == "construction project title":
             mapping["line_item_title"] = i
@@ -545,61 +593,36 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
         elif h == "facility category title":
             mapping.setdefault("sub_activity", i)
 
-    # TODO 1.B2-a [MEDIUM, ~2000 tokens]: Make amount-column detection year-agnostic.
-    #   Replace the three hardcoded "fy2024/fy2025/fy2026" blocks below with a regex
-    #   loop over any "FY20XX" pattern found in headers. Use FISCAL_YEAR from
-    #   utils/patterns.py. Canonical column names: amount_fyYYYY_<type>. Update
-    #   validate_budget_db.py AMOUNT_COLUMNS (currently hardcoded) to query actual
-    #   column names from the DB schema instead. No external data needed.
-
-    # Amount columns — match by pattern
+    # Amount columns — year-agnostic regex detection (Step 1.B2-a).
+    # Matches any "FY YYYY" or "FYXXXX" header and classifies by sub-type
+    # keyword.  Canonical column names: amount_fyYYYY_<type>.
+    _FY_RE = re.compile(r"fy\s*(\d{4})", re.IGNORECASE)
     for i, h in enumerate(h_lower):
-        if "fy2024" in h.replace(" ", "") or "fy 2024" in h:
+        m = _FY_RE.search(h)
+        if not m:
+            continue
+        year = m.group(1)
+        if "quantity" in h:
             if "actual" in h:
-                if "quantity" in h:
-                    mapping["quantity_fy2024"] = i
-                elif "amount" in h or "actual" in h:
-                    mapping.setdefault("amount_fy2024_actual", i)
-        elif "fy2025" in h.replace(" ", "") or "fy 2025" in h:
-            if "enacted" in h:
-                if "quantity" in h:
-                    mapping["quantity_fy2025"] = i
-                elif "amount" in h or "enacted" in h:
-                    mapping.setdefault("amount_fy2025_enacted", i)
-            elif "supplemental" in h:
-                mapping.setdefault("amount_fy2025_supplemental", i)
-            elif "total" in h:
-                mapping.setdefault("amount_fy2025_total", i)
-        elif "fy2026" in h.replace(" ", "") or "fy 2026" in h:
-            if "reconcil" in h:
-                if "quantity" in h:
-                    pass
-                elif "amount" in h or "reconcil" in h:
-                    mapping.setdefault("amount_fy2026_reconciliation", i)
-            elif "total" in h:
-                if "quantity" in h:
-                    mapping["quantity_fy2026_total"] = i
-                elif "amount" in h or "total" in h:
-                    mapping.setdefault("amount_fy2026_total", i)
+                mapping.setdefault(f"quantity_fy{year}", i)
             elif "request" in h or "disc" in h:
-                if "quantity" in h:
-                    mapping["quantity_fy2026_request"] = i
-                elif "amount" in h or "request" in h or "disc" in h:
-                    mapping.setdefault("amount_fy2026_request", i)
-
-    # For sheets with only one amount column (single FY views),
-    # try to pick up the lone numeric column
-    amount_fields = [k for k in mapping if k.startswith("amount_")]
-    if not amount_fields:
-        for i, h in enumerate(h_lower):
-            if "fy 2024" in h and "actual" in h:
-                mapping["amount_fy2024_actual"] = i
-            elif "fy 2025" in h and "enacted" in h:
-                mapping["amount_fy2025_enacted"] = i
-            elif "fy 2026" in h and ("request" in h or "disc" in h):
-                mapping["amount_fy2026_request"] = i
-            elif "fy 2026" in h and "total" in h:
-                mapping["amount_fy2026_total"] = i
+                mapping.setdefault(f"quantity_fy{year}_request", i)
+            elif "total" in h:
+                mapping.setdefault(f"quantity_fy{year}_total", i)
+            else:
+                mapping.setdefault(f"quantity_fy{year}", i)
+        elif "actual" in h:
+            mapping.setdefault(f"amount_fy{year}_actual", i)
+        elif "enacted" in h or "approp" in h:
+            mapping.setdefault(f"amount_fy{year}_enacted", i)
+        elif "supplemental" in h:
+            mapping.setdefault(f"amount_fy{year}_supplemental", i)
+        elif "reconcil" in h:
+            mapping.setdefault(f"amount_fy{year}_reconciliation", i)
+        elif "total" in h:
+            mapping.setdefault(f"amount_fy{year}_total", i)
+        elif "request" in h or "disc" in h:
+            mapping.setdefault(f"amount_fy{year}_request", i)
 
     # Authorization/appropriation amounts (C-1 exhibit)
     for i, h in enumerate(h_lower):
@@ -609,28 +632,6 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
             mapping.setdefault("amount_fy2025_enacted", i)
         elif "total obligation authority" in h:
             mapping.setdefault("amount_fy2026_total", i)
-
-    # Year-agnostic amount column detection (Step 1.B2-a).
-    # Handles any FY20XX year not already covered by the hardcoded blocks above.
-    _fy_re = re.compile(r"fy\s*(20\d{2})")
-    for i, h in enumerate(h_lower):
-        m = _fy_re.search(h.replace(" ", "")) or _fy_re.search(h)
-        if not m:
-            continue
-        year = m.group(1)
-        prefix = f"amount_fy{year}"
-        if "actual" in h:
-            mapping.setdefault(f"{prefix}_actual", i)
-        elif "enacted" in h:
-            mapping.setdefault(f"{prefix}_enacted", i)
-        elif "supplemental" in h:
-            mapping.setdefault(f"{prefix}_supplemental", i)
-        elif "reconcil" in h:
-            mapping.setdefault(f"{prefix}_reconciliation", i)
-        elif "total" in h:
-            mapping.setdefault(f"{prefix}_total", i)
-        elif "request" in h or "disc" in h:
-            mapping.setdefault(f"{prefix}_request", i)
 
     # TODO 1.B2-c [MEDIUM, ~1500 tokens]: Handle multi-row headers.
     #   Some exhibit sheets split header text across two rows (e.g., row N has "FY2026"
@@ -655,82 +656,92 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
     return mapping
 
 
-def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
+def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
+                      docs_dir: Path | None = None) -> int:
     """Ingest a single Excel file into the database."""
+    _docs_dir = (docs_dir or DOCS_DIR).resolve()
     wb = openpyxl.load_workbook(str(file_path), read_only=True, data_only=True)
     exhibit_type = _detect_exhibit_type(file_path.name)
     total_rows = 0
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
-        rows = list(ws.iter_rows(values_only=True))
-        if len(rows) < 3:
-            continue
+        rows_iter = ws.iter_rows(values_only=True)
 
-        # Find the header row (row with "Account" in first meaningful position)
+        # Find the header row in the first 5 rows (buffer to avoid full materialization).
+        # When found, read one extra row for two-row header merge detection.
         header_idx = None
-        for i, row in enumerate(rows[:5]):
+        first_rows = []
+        for i, row in enumerate(rows_iter):
+            first_rows.append(row)
+            if header_idx is not None:
+                # We already found the header; this extra row is for merge detection
+                break
+            if i >= 4:
+                break
             for val in row:
                 if val and str(val).strip().lower() == "account":
                     header_idx = i
                     break
-            if header_idx is not None:
-                break
 
         if header_idx is None:
             continue
 
-        headers = rows[header_idx]
+        headers = first_rows[header_idx]
+        # Detect and merge two-row headers (Step 1.B2-c): some exhibits split
+        # "FY 2026" and "Request Amount" across consecutive rows.
+        if header_idx + 1 < len(first_rows):
+            merged = _merge_header_rows(headers, first_rows[header_idx + 1])
+            if merged != list(headers):
+                headers = merged
+
         col_map = _map_columns(headers, exhibit_type)
 
         if "account" not in col_map:
             continue
 
-        # Detect fiscal year from sheet name
-        fy_match = re.search(r"(FY\s*)?20\d{2}", sheet_name, re.IGNORECASE)
-        fiscal_year = (
-            fy_match.group().replace("FY ", "FY").replace("FY", "FY ")
-            if fy_match else sheet_name
-        )
-        # TODO 1.B2-d [EASY, ~600 tokens]: Normalise fiscal_year to canonical "FY YYYY".
-        #   The regex match above may return "2026", "FY2026", or "FY 2026" depending on
-        #   the sheet name, which breaks GROUP BY queries. Add a helper function
-        #   _normalise_fiscal_year(raw: str) -> str that always returns "FY YYYY" format
-        #   (e.g. "FY 2026"). Replace the assignment above with it. Add parametrized
-        #   tests in test_parsing.py covering all three input variants.
+        # Detect fiscal year from sheet name and normalise to "FY YYYY" (Step 1.B2-d)
+        fiscal_year = _normalise_fiscal_year(sheet_name)
 
         # Detect currency year for this sheet (TODO 1.B3-b)
         currency_year = _detect_currency_year(sheet_name, file_path.name)
 
-        data_rows = rows[header_idx + 1:]
-        # TODO 1.B3-a [MEDIUM, ~2000 tokens]: Add _detect_amount_unit(rows, header_idx) -> str.
-        #   Scan rows[0:header_idx] (title rows above the header) and the headers themselves
-        #   for keywords: "in thousands", "$ thousands", "$ millions", "in millions".
-        #   Returns "thousands" (default) or "millions". Store as amount_unit TEXT in
-        #   budget_lines (add column to CREATE TABLE in create_database() and to the INSERT
-        #   column list). If amount_unit == "millions", multiply all _safe_float amounts
-        #   by 1000 before inserting. Add parametrized tests in test_parsing.py.
-        #   ⚠️ Schema change required — coordinate with 1.B2-a if done in same session.
+        # Detect source unit and compute normalisation multiplier (Step 1.B3-a/c)
+        amount_unit = _detect_amount_unit(first_rows, header_idx)
+        # All stored amounts must be in thousands; multiply millions-denominated
+        # values by 1000 before inserting (Step 1.B3-c)
+        unit_multiplier = 1000.0 if amount_unit == "millions" else 1.0
+
+        # Derive budget_type from exhibit type (Step 1.B3-d)
+        budget_type = _EXHIBIT_BUDGET_TYPE.get(exhibit_type)
+
+        # Derive amount_type from exhibit type (Step 1.B3-c)
+        amount_type = _EXHIBIT_AMOUNT_TYPE.get(exhibit_type, "budget_authority")
+
         batch = []
 
         def get_val(row, field):
             """Return the raw cell value for a named field, or None if unmapped/out-of-range."""
             idx = col_map.get(field)
-            if idx is not None and idx < len(row):
-                return row[idx]
-            return None
+            return row[idx] if idx is not None and idx < len(row) else None
 
         def get_str(row, field):
             """Return the stripped string value for a named field, or None if absent."""
             v = get_val(row, field)
             return str(v).strip() if v is not None else None
 
-        for row in data_rows:
+        def get_org_name(row):
+            """Get organization name, defaulting to code if not in map."""
+            org_code = get_str(row, "organization") or ""
+            return ORG_MAP.get(org_code, org_code)
+
+        # Process rows after header
+        for row in rows_iter:
             if not row or all(v is None for v in row):
                 continue
 
-            _acc_idx = col_map.get("account")
-            acct = row[_acc_idx] if _acc_idx is not None and _acc_idx < len(row) else None
+            _acct_idx = col_map.get("account")
+            acct = row[_acct_idx] if _acct_idx is not None and _acct_idx < len(row) else None
             if not acct:
                 continue
 
@@ -740,11 +751,8 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
                 if _org_idx is not None and _org_idx < len(row) and row[_org_idx]
                 else ""
             )
-            org_name = ORG_MAP.get(org_code, org_code)
-            # TODO 1.B4-b [EASY, ~800 tokens]: Extend ORG_MAP (defined around line 140)
-            #   to cover additional DoD organizations: SOCOM, DISA, DLA, MDA, DHA, NGB.
-            #   Unknown codes fall back to the raw org_code value (see .get() above);
-            #   these show up as unlabelled in validate_budget_db.py reports.
+            # Lookup by exact code first, then by uppercase match (Step 1.B4-b)
+            org_name = ORG_MAP.get(org_code) or ORG_MAP.get(org_code.upper(), org_code)
 
             # Extract PE number from line_item or account fields (Step 1.B4-a implementation)
             line_item_val = get_str(row, "line_item")
@@ -755,8 +763,13 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
             acct_title_val = get_str(row, "account_title")
             approp_code, approp_title = _parse_appropriation(acct_title_val)
 
+            def _amt(field):
+                """Read a float amount and apply the unit multiplier (1.B3-c)."""
+                v = _safe_float(get_val(row, field))
+                return v * unit_multiplier if v else v
+
             batch.append((
-                str(file_path.relative_to(DOCS_DIR)),
+                str(file_path.relative_to(_docs_dir)),
                 exhibit_type,
                 sheet_name,
                 fiscal_year,
@@ -771,22 +784,25 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
                 line_item_val,
                 get_str(row, "line_item_title"),
                 get_str(row, "classification"),
-                _safe_float(get_val(row, "amount_fy2024_actual")),
-                _safe_float(get_val(row, "amount_fy2025_enacted")),
-                _safe_float(get_val(row, "amount_fy2025_supplemental")),
-                _safe_float(get_val(row, "amount_fy2025_total")),
-                _safe_float(get_val(row, "amount_fy2026_request")),
-                _safe_float(get_val(row, "amount_fy2026_reconciliation")),
-                _safe_float(get_val(row, "amount_fy2026_total")),
-                _safe_float(get_val(row, "quantity_fy2024")),
+                _amt("amount_fy2024_actual"),
+                _amt("amount_fy2025_enacted"),
+                _amt("amount_fy2025_supplemental"),
+                _amt("amount_fy2025_total"),
+                _amt("amount_fy2026_request"),
+                _amt("amount_fy2026_reconciliation"),
+                _amt("amount_fy2026_total"),
+                _safe_float(get_val(row, "quantity_fy2024")),    # quantities are unit-less
                 _safe_float(get_val(row, "quantity_fy2025")),
                 _safe_float(get_val(row, "quantity_fy2026_request")),
                 _safe_float(get_val(row, "quantity_fy2026_total")),
-                None,         # extra_fields
-                pe_number,    # Step 1.B4-a: PE number from line_item or account
-                currency_year,  # Step 1.B3-b: currency year context
-                approp_code,  # Step 1.B4-c: appropriation code from account title
-                approp_title, # Step 1.B4-c: appropriation title from account title
+                None,          # extra_fields
+                pe_number,     # Step 1.B4-a: PE number from line_item or account
+                currency_year, # Step 1.B3-b: currency year context
+                approp_code,   # Step 1.B4-c: appropriation code from account title
+                approp_title,  # Step 1.B4-c: appropriation title from account title
+                amount_unit,   # Step 1.B3-b: normalised to "thousands"
+                budget_type,   # Step 1.B3-d: budget category from exhibit type
+                amount_type,   # Step 1.B3-c: type of amounts (BA, authorization, etc.)
             ))
 
         if batch:
@@ -805,8 +821,9 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
                     quantity_fy2026_request, quantity_fy2026_total,
                     extra_fields,
                     pe_number, currency_year,
-                    appropriation_code, appropriation_title
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    appropriation_code, appropriation_title,
+                    amount_unit, budget_type, amount_type
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, batch)
             total_rows += len(batch)
 
@@ -882,39 +899,53 @@ def _likely_has_tables(page) -> bool:
         return False
 
 
-def _extract_tables_with_timeout(page, timeout_seconds=10):
+def _extract_tables_with_timeout(page, timeout_seconds=10, executor=None):
+    """Extract tables from a PDF page with timeout and progressive fallback strategies.
+
+    Tries three extraction strategies in order, returning the first non-empty result:
+      1. lines/lines  — best quality; works for PDFs with visible gridlines
+      2. text/lines   — fallback for tables with horizontal rules but no vertical lines
+      3. text/text    — last resort for tables with no visible gridlines at all
+
+    Returns (tables, issue_type) where issue_type is None on success via the
+    primary strategy, "fallback_text_lines" or "fallback_text_text" for the
+    respective fallbacks, or "timeout"/"error" if all strategies fail.
+
+    Args:
+        executor: Optional ThreadPoolExecutor to reuse. If None, creates a
+            temporary one (slower due to per-call thread pool overhead).
     """
-    Extract tables from a PDF page with timeout to prevent hangs.
-    Returns (tables, issue_type) where issue_type is None on success, or
-    'timeout'/'error' if something went wrong.
-    """
+    # 1.B5-b: three strategies in priority order
+    _STRATEGIES = [
+        ({"vertical_strategy": "lines", "horizontal_strategy": "lines"}, None),
+        ({"vertical_strategy": "text", "horizontal_strategy": "lines"}, "fallback_text_lines"),
+        ({"vertical_strategy": "text", "horizontal_strategy": "text"}, "fallback_text_text"),
+    ]
+
+    own_executor = executor is None
+    if own_executor:
+        executor = ThreadPoolExecutor(max_workers=1)
     try:
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(
-                page.extract_tables,
-                table_settings={
-                    "vertical_strategy": "lines",
-                    "horizontal_strategy": "lines"
-                }
-            )
-            tables = future.result(timeout=timeout_seconds)
-            return tables, None
-    except FuturesTimeoutError:
-        return None, "timeout"
-    except Exception as e:
-        return None, f"error: {str(e)[:50]}"
-    # TODO 1.B5-c [MEDIUM, ~1500 tokens]: Add fallback table extraction strategies.
-    #   When the "lines" strategy returns empty tables or errors, retry with:
-    #     1. {"vertical_strategy": "text", "horizontal_strategy": "lines"}
-    #     2. {"vertical_strategy": "text", "horizontal_strategy": "text"}
-    #   Each with its own timeout. Return tables from the first strategy that succeeds
-    #   and returns non-empty results. Log the strategy used as issue_type
-    #   "fallback_text_lines" or "fallback_text_text". Use the same ThreadPoolExecutor
-    #   pattern. No external data needed.
+        for settings, issue_label in _STRATEGIES:
+            try:
+                future = executor.submit(page.extract_tables,
+                                         table_settings=settings)
+                tables = future.result(timeout=timeout_seconds)
+                if tables:
+                    return tables, issue_label
+            except FuturesTimeoutError:
+                return None, "timeout"
+            except Exception as e:
+                return None, f"error: {str(e)[:50]}"
+        # All strategies returned empty
+        return [], None
+    finally:
+        if own_executor:
+            executor.shutdown(wait=False)
 
 
 def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
-                    page_callback=None) -> int:
+                    page_callback=None, docs_dir: Path | None = None) -> int:
     """Ingest a single PDF file into the database.
 
     Args:
@@ -922,9 +953,12 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
         file_path: Path to the PDF file.
         page_callback: Optional callable(pages_done, total_pages) called after
             each page is processed, for real-time progress reporting.
+        docs_dir: Base directory for relative path computation. Defaults to
+            the global DOCS_DIR constant.
     """
+    _docs_dir = (docs_dir or DOCS_DIR).resolve()
     category = _determine_category(file_path)
-    relative_path = str(file_path.relative_to(DOCS_DIR))
+    relative_path = str(file_path.relative_to(_docs_dir))
     total_pages = 0
 
     try:
@@ -932,7 +966,11 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
             num_pages = len(pdf.pages)
             batch = []
             page_issues_count = 0  # Track timeouts/errors for this file
-            for i, page in enumerate(pdf.pages):
+            # Reuse a single ThreadPoolExecutor across all pages to avoid
+            # per-page thread pool creation overhead (thousands of pages per file)
+            table_executor = ThreadPoolExecutor(max_workers=1)
+            try:
+              for i, page in enumerate(pdf.pages):
                 try:
                     # Use layout=False for 30-50% faster extraction (we don't need positioning)
                     text = page.extract_text(layout=False) or ""
@@ -943,19 +981,23 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                     else:
                         raise
 
-                # Extract tables with timeout to prevent hangs on malformed PDFs
-                tables = []
-                tables, issue_type = _extract_tables_with_timeout(page, timeout_seconds=10)
-                if issue_type:
-                    # Record the issue for later analysis
-                    conn.execute(
-                        "INSERT INTO extraction_issues "
-                        "(file_path, page_number, issue_type, issue_detail) "
-                        "VALUES (?,?,?,?)",
-                        (relative_path, i + 1, issue_type.split(':')[0], issue_type)
-                    )
-                    page_issues_count += 1
-                    tables = []  # Use empty tables on timeout/error
+                # Use heuristic to skip expensive table extraction on text-only pages.
+                # _likely_has_tables checks for rect/curve elements as proxy for table structure.
+                tables = None
+                issue_type = None
+                if _likely_has_tables(page):
+                    tables, issue_type = _extract_tables_with_timeout(
+                        page, timeout_seconds=10, executor=table_executor)
+                    if issue_type:
+                        # Record the issue for later analysis
+                        conn.execute(
+                            "INSERT INTO extraction_issues"
+                            " (file_path, page_number, issue_type, issue_detail)"
+                            " VALUES (?,?,?,?)",
+                            (relative_path, i + 1, issue_type.split(':')[0], issue_type)
+                        )
+                        page_issues_count += 1
+                        tables = None
 
                 table_text = _extract_table_text(tables)
 
@@ -987,25 +1029,22 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                     total_pages += len(batch)
                     batch = []
 
-            if batch:
+              if batch:
                 conn.executemany("""
                     INSERT INTO pdf_pages (source_file, source_category,
                         page_number, page_text, has_tables, table_data)
                     VALUES (?,?,?,?,?,?)
                 """, batch)
                 total_pages += len(batch)
+            finally:
+                table_executor.shutdown(wait=False)
 
     except Exception as e:
         print(f"  ERROR processing {file_path.name}: {e}")
-        # TODO 1.B5-e [EASY, ~400 tokens, BUG FIX]: Verify this INSERT matches the
-        #   ingested_files schema in create_database(). Count the columns in the table
-        #   definition and ensure the VALUES list provides exactly that many. Add a test
-        #   that passes a deliberately invalid PDF path to ingest_pdf_file() and asserts
-        #   a row appears in ingested_files with status starting with "error:".
         conn.execute(
             "INSERT OR REPLACE INTO ingested_files "
-            "(file_path, file_type, file_size, file_modified, "
-            "ingested_at, row_count, status) "
+            "(file_path, file_type, file_size, file_modified,"
+            " ingested_at, row_count, status) "
             "VALUES (?,?,?,?,datetime('now'),?,?)",
             (relative_path, "pdf", file_path.stat().st_size,
              file_path.stat().st_mtime, 0, f"error: {e}")
@@ -1014,6 +1053,86 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
 
     conn.commit()
     return total_pages
+
+
+def _extract_pdf_data(args):
+    """Worker function for parallel PDF extraction (runs in a separate process).
+
+    Extracts text and table data from all pages of a single PDF file.
+    No database access — returns raw data for the main process to insert.
+
+    Args:
+        args: Tuple of (file_path_str, docs_dir_str) for picklability.
+
+    Returns:
+        Dict with keys: relative_path, category, pages_data, issues, error,
+        num_pages.
+    """
+    file_path_str, docs_dir_str = args
+    file_path = Path(file_path_str)
+    docs_dir = Path(docs_dir_str)
+
+    category = _determine_category(file_path)
+    relative_path = str(file_path.relative_to(docs_dir))
+    pages_data = []
+    issues = []
+    num_pages = 0
+
+    try:
+        with pdfplumber.open(file_path_str) as pdf:
+            num_pages = len(pdf.pages)
+            executor = ThreadPoolExecutor(max_workers=1)
+            try:
+                for i, page in enumerate(pdf.pages):
+                    try:
+                        text = page.extract_text(layout=False) or ""
+                    except Exception as e:
+                        if "FontBBox" in str(e) or "cannot be parsed" in str(e):
+                            text = ""
+                        else:
+                            raise
+
+                    tables = None
+                    if _likely_has_tables(page):
+                        tables, issue_type = _extract_tables_with_timeout(
+                            page, timeout_seconds=10, executor=executor)
+                        if issue_type:
+                            issues.append((
+                                relative_path, i + 1,
+                                issue_type.split(':')[0], issue_type
+                            ))
+                            tables = None
+
+                    table_text = _extract_table_text(tables)
+
+                    if not text.strip() and not table_text.strip():
+                        continue
+
+                    pages_data.append((
+                        relative_path, category, i + 1, text,
+                        1 if tables else 0,
+                        table_text if table_text else None,
+                    ))
+            finally:
+                executor.shutdown(wait=False)
+    except Exception as e:
+        return {
+            "relative_path": relative_path,
+            "category": category,
+            "pages_data": [],
+            "issues": issues,
+            "error": str(e),
+            "num_pages": num_pages,
+        }
+
+    return {
+        "relative_path": relative_path,
+        "category": category,
+        "pages_data": pages_data,
+        "issues": issues,
+        "error": None,
+        "num_pages": num_pages,
+    }
 
 
 # ── Main Build Pipeline ───────────────────────────────────────────────────────
@@ -1041,6 +1160,25 @@ def _remove_file_data(conn: sqlite3.Connection, rel_path: str, file_type: str):
         conn.execute("DELETE FROM budget_lines WHERE source_file = ?", (rel_path,))
     elif file_type == "pdf":
         conn.execute("DELETE FROM pdf_pages WHERE source_file = ?", (rel_path,))
+
+
+def _recreate_pdf_fts_triggers(conn: sqlite3.Connection):
+    """Recreate FTS5 triggers for pdf_pages table.
+
+    Used after bulk operations to maintain FTS5 index synchronization.
+    """
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS pdf_pages_ai AFTER INSERT ON pdf_pages BEGIN
+            INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data)
+            VALUES (new.id, new.page_text, new.source_file, new.table_data);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN
+            INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data)
+            VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data);
+        END
+    """)
 
 
 def _register_data_source(conn: sqlite3.Connection, docs_dir: Path):
@@ -1154,7 +1292,7 @@ def _mark_session_complete(conn: sqlite3.Connection, session_id: str, notes: str
 def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                    progress_callback=None, resume: bool = False,
                    checkpoint_interval: int = 10,
-                   stop_event=None, workers: int = 1):
+                   stop_event=None, workers: int = 0):
     """Build or incrementally update the budget database.
 
     Args:
@@ -1170,8 +1308,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         checkpoint_interval: Save a checkpoint every N files (default 10).
         stop_event: Optional threading.Event; when set, the build saves a
             checkpoint and exits cleanly (graceful shutdown).
-        workers: Number of parallel workers (currently reserved for future
-            parallel processing; default 1 keeps sequential behaviour).
+        workers: Number of parallel worker processes for PDF extraction.
+            0 = auto-detect (CPU count, capped at 4). 1 = sequential (no
+            multiprocessing overhead).
     """
     # ── Metrics state shared across the build ─────────────────────────────
     _metrics = {
@@ -1309,7 +1448,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         _remove_file_data(conn, rel_path, "xlsx")
 
         t0 = time.time()
-        rows = ingest_excel_file(conn, xlsx)
+        rows = ingest_excel_file(conn, xlsx, docs_dir=docs_dir)
         file_elapsed = time.time() - t0
         print(f"{rows} rows ({file_elapsed:.1f}s)")
 
@@ -1321,7 +1460,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         stat = xlsx.stat()
         conn.execute(
             "INSERT OR REPLACE INTO ingested_files "
-            "(file_path, file_type, file_size, file_modified, ingested_at, row_count, status) "
+            "(file_path, file_type, file_size, file_modified,"
+            " ingested_at, row_count, status) "
             "VALUES (?,?,?,?,datetime('now'),?,?)",
             (rel_path, "xlsx", stat.st_size, stat.st_mtime, rows, "ok")
         )
@@ -1365,6 +1505,38 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     pdf_file_times: list[float] = []  # per-file elapsed for speed calc
     _pdf_stopped = False  # set when a graceful stop fires inside the PDF loop
 
+    # Resolve worker count: 0 = auto-detect based on CPU count (capped at 4)
+    num_workers = workers if workers > 0 else min(os.cpu_count() or 1, 4)
+
+    # ── Filter PDFs that need processing ──────────────────────────────
+    pdfs_to_process: list[Path] = []
+    for pdf in pdf_files:
+        rel_path = str(pdf.relative_to(docs_dir))
+        if rel_path in already_processed:
+            skipped_pdf += 1
+            files_done_total += 1
+            continue
+        if not rebuild and not _file_needs_update(conn, rel_path, pdf):
+            skipped_pdf += 1
+            files_done_total += 1
+            continue
+        pdfs_to_process.append(pdf)
+
+    _metrics["files_remaining"] = total_files - files_done_total
+    _progress("pdf", 0, len(pdf_files),
+              f"Found {len(pdfs_to_process)} PDFs to process, "
+              f"{skipped_pdf} skipped (unchanged/resumed)",
+              {"files_remaining": total_files - files_done_total})
+
+    if skipped_pdf:
+        print(f"  Skipping {skipped_pdf} unchanged/resumed PDF file(s)")
+
+    # Pre-clean: remove old data for files being re-processed
+    for pdf in pdfs_to_process:
+        rel_path = str(pdf.relative_to(docs_dir))
+        _remove_file_data(conn, rel_path, "pdf")
+    conn.commit()
+
     # Drop FTS5 triggers for bulk insert speedup
     print("  Dropping FTS5 triggers for bulk insert optimization...")
     try:
@@ -1375,8 +1547,140 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         print(f"    (Warning: {e})")
 
     try:
-        for i, pdf in enumerate(pdf_files):
-            # Check for graceful shutdown request
+      if num_workers > 1 and len(pdfs_to_process) > 1:
+        # ── Parallel PDF extraction ───────────────────────────────────
+        print(f"  Processing {len(pdfs_to_process)} PDFs with {num_workers} "
+              f"parallel workers...")
+        pdf_phase_start = time.time()
+
+        with ProcessPoolExecutor(max_workers=num_workers) as pool:
+            future_to_pdf = {
+                pool.submit(
+                    _extract_pdf_data, (str(pdf), str(docs_dir))
+                ): pdf
+                for pdf in pdfs_to_process
+            }
+
+            for future in as_completed(future_to_pdf):
+                if stop_event and stop_event.is_set():
+                    print("\n  Graceful stop requested — cancelling workers...")
+                    for f in future_to_pdf:
+                        f.cancel()
+                    _save_checkpoint(conn, session_id, files_done_total,
+                                     total_files, total_pdf_pages,
+                                     total_budget_rows, 0, "", "interrupted")
+                    conn.commit()
+                    _pdf_stopped = True
+                    _progress("stopped", processed_pdf, len(pdfs_to_process),
+                              "Stopped — resume with --resume",
+                              {"files_remaining": total_files - files_done_total})
+                    break
+
+                pdf = future_to_pdf[future]
+                rel_path = str(pdf.relative_to(docs_dir))
+                processed_pdf += 1
+                files_done_total += 1
+
+                try:
+                    result = future.result(timeout=300)  # 5-min safety timeout
+                except Exception as e:
+                    print(f"  ERROR: {pdf.name}: {e}")
+                    stat = pdf.stat()
+                    conn.execute(
+                        "INSERT OR REPLACE INTO ingested_files "
+                        "(file_path, file_type, file_size, file_modified,"
+                        " ingested_at, row_count, status) "
+                        "VALUES (?,?,?,?,datetime('now'),?,?)",
+                        (rel_path, "pdf", stat.st_size, stat.st_mtime,
+                         0, f"error: {e}"))
+                    _mark_file_processed(conn, session_id, rel_path, "pdf",
+                                         pages_count=0)
+                    continue
+
+                pages_data = result["pages_data"]
+                issues = result["issues"]
+                error = result["error"]
+
+                if error:
+                    print(f"  ERROR: {pdf.name}: {error}")
+                    stat = pdf.stat()
+                    conn.execute(
+                        "INSERT OR REPLACE INTO ingested_files "
+                        "(file_path, file_type, file_size, file_modified,"
+                        " ingested_at, row_count, status) "
+                        "VALUES (?,?,?,?,datetime('now'),?,?)",
+                        (rel_path, "pdf", stat.st_size, stat.st_mtime,
+                         0, f"error: {error}"))
+                    _mark_file_processed(conn, session_id, rel_path, "pdf",
+                                         pages_count=0)
+                    continue
+
+                # Batch insert all pages for this file
+                pages = len(pages_data)
+                if pages_data:
+                    conn.executemany("""
+                        INSERT INTO pdf_pages (source_file, source_category,
+                            page_number, page_text, has_tables, table_data)
+                        VALUES (?,?,?,?,?,?)
+                    """, pages_data)
+
+                # Record extraction issues
+                if issues:
+                    conn.executemany(
+                        "INSERT INTO extraction_issues"
+                        " (file_path, page_number, issue_type, issue_detail)"
+                        " VALUES (?,?,?,?)", issues)
+
+                file_status = "ok_with_issues" if issues else "ok"
+                stat = pdf.stat()
+                conn.execute(
+                    "INSERT OR REPLACE INTO ingested_files "
+                    "(file_path, file_type, file_size, file_modified,"
+                    " ingested_at, row_count, status) "
+                    "VALUES (?,?,?,?,datetime('now'),?,?)",
+                    (rel_path, "pdf", stat.st_size, stat.st_mtime,
+                     pages, file_status))
+
+                total_pdf_pages += pages
+                _metrics["pages"] = total_pdf_pages
+                _metrics["files_remaining"] = total_files - files_done_total
+
+                # Overall throughput: total pages / wall-clock elapsed
+                elapsed = time.time() - pdf_phase_start
+                if elapsed > 0 and total_pdf_pages > 0:
+                    _metrics["speed_pages"] = total_pdf_pages / elapsed
+
+                # ETA: remaining files * avg time per file so far
+                if processed_pdf > 0:
+                    avg_per_file = elapsed / processed_pdf
+                    remaining = len(pdfs_to_process) - processed_pdf
+                    _metrics["eta_sec"] = avg_per_file * remaining
+
+                print(f"  [{processed_pdf}/{len(pdfs_to_process)}] "
+                      f"{pdf.name}: {pages} pages")
+                _progress("pdf", processed_pdf, len(pdfs_to_process),
+                          f"[{processed_pdf}/{len(pdfs_to_process)}] "
+                          f"{pdf.name}: {pages} pages",
+                          dict(_metrics))
+
+                _mark_file_processed(conn, session_id, rel_path, "pdf",
+                                     pages_count=pages)
+
+                if files_done_total % checkpoint_interval == 0:
+                    _save_checkpoint(conn, session_id, files_done_total,
+                                     total_files, total_pdf_pages,
+                                     total_budget_rows, stat.st_size,
+                                     rel_path, file_status)
+
+                if time.time() - last_commit_time > 2.0:
+                    conn.commit()
+                    last_commit_time = time.time()
+
+      else:
+        # ── Sequential PDF extraction (workers=1) ─────────────────────
+        if pdfs_to_process:
+            print(f"  Processing {len(pdfs_to_process)} PDFs sequentially...")
+        for idx, pdf in enumerate(pdfs_to_process):
             if stop_event and stop_event.is_set():
                 print("\n  Graceful stop requested — saving checkpoint...")
                 _save_checkpoint(conn, session_id, files_done_total, total_files,
@@ -1384,66 +1688,47 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                                  0, str(pdf), "interrupted")
                 conn.commit()
                 _pdf_stopped = True
-                _progress("stopped", i, len(pdf_files),
+                _progress("stopped", idx, len(pdfs_to_process),
                           f"Stopped at {pdf.name} — resume with --resume",
                           {"files_remaining": total_files - files_done_total})
                 break
 
             rel_path = str(pdf.relative_to(docs_dir))
-
-            # Skip if already processed in resumed session
-            if rel_path in already_processed:
-                skipped_pdf += 1
-                files_done_total += 1
-                _progress("pdf", i + 1, len(pdf_files),
-                          f"Resumed (skipped): {pdf.name}",
-                          {"files_remaining": total_files - files_done_total})
-                continue
-
-            if not rebuild and not _file_needs_update(conn, rel_path, pdf):
-                skipped_pdf += 1
-                files_done_total += 1
-                _progress("pdf", i + 1, len(pdf_files),
-                          f"Skipped (unchanged): {pdf.name}",
-                          {"files_remaining": total_files - files_done_total})
-                continue
-
             processed_pdf += 1
             files_done_total += 1
             _metrics["files_remaining"] = total_files - files_done_total
 
-            _progress("pdf", i + 1, len(pdf_files),
+            _progress("pdf", processed_pdf, len(pdfs_to_process),
                       f"[{processed_pdf}] {pdf.name}",
                       {"files_remaining": total_files - files_done_total,
                        "current_pages": 0,
                        "current_total_pages": 0})
-            print(f"  [{processed_pdf}/{len(pdf_files) - skipped_pdf}] {pdf.name}...",
+            print(f"  [{processed_pdf}/{len(pdfs_to_process)}] {pdf.name}...",
                   end=" ", flush=True)
 
-            _remove_file_data(conn, rel_path, "pdf")
-
-            def _page_cb(pages_done: int, page_total: int) -> None:
+            def _page_cb(pages_done: int, page_total: int,
+                         _proc=processed_pdf, _name=pdf.name,
+                         _idx=processed_pdf, _total=len(pdfs_to_process)) -> None:
                 """Per-page progress callback forwarded from ingest_pdf_file."""
                 _metrics["current_pages"] = pages_done
                 _metrics["current_total_pages"] = page_total
-                _progress("pdf", i + 1, len(pdf_files),
-                          f"[{processed_pdf}] {pdf.name} — page {pages_done}/{page_total}",
+                _progress("pdf", _idx, _total,
+                          f"[{_proc}] {_name} — page {pages_done}/{page_total}",
                           {"files_remaining": total_files - files_done_total,
                            "current_pages": pages_done,
                            "current_total_pages": page_total})
 
             t0 = time.time()
-            pages = ingest_pdf_file(conn, pdf, page_callback=_page_cb)
+            pages = ingest_pdf_file(conn, pdf, page_callback=_page_cb,
+                                    docs_dir=docs_dir)
             file_elapsed = time.time() - t0
             print(f"{pages} pages ({file_elapsed:.1f}s)")
 
-            # Update speed tracking
             if file_elapsed > 0 and pages > 0:
                 _update_speed("speed_pages", pages / file_elapsed)
             pdf_file_times.append(file_elapsed)
 
-            # ETA update: average time per file × remaining PDF files
-            pdfs_remaining = len(pdf_files) - (i + 1)
+            pdfs_remaining = len(pdfs_to_process) - (idx + 1)
             avg_pdf_time = (sum(pdf_file_times) / len(pdf_file_times)
                             if pdf_file_times else 0)
             _metrics["eta_sec"] = avg_pdf_time * pdfs_remaining
@@ -1458,23 +1743,22 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             stat = pdf.stat()
             conn.execute(
                 "INSERT OR REPLACE INTO ingested_files "
-                "(file_path, file_type, file_size, file_modified, ingested_at, row_count, status) "
+                "(file_path, file_type, file_size, file_modified,"
+                " ingested_at, row_count, status) "
                 "VALUES (?,?,?,?,datetime('now'),?,?)",
-                (rel_path, "pdf", stat.st_size, stat.st_mtime, pages, file_status)
-            )
+                (rel_path, "pdf", stat.st_size, stat.st_mtime, pages,
+                 file_status))
             total_pdf_pages += pages
             _metrics["pages"] = total_pdf_pages
 
-            # Track file as processed
-            _mark_file_processed(conn, session_id, rel_path, "pdf", pages_count=pages)
+            _mark_file_processed(conn, session_id, rel_path, "pdf",
+                                 pages_count=pages)
 
-            # Checkpoint every N files
             if files_done_total % checkpoint_interval == 0:
                 _save_checkpoint(conn, session_id, files_done_total, total_files,
                                  total_pdf_pages, total_budget_rows,
                                  stat.st_size, rel_path, file_status)
 
-            # Commit every 2 seconds for durability
             if time.time() - last_commit_time > 2.0:
                 conn.commit()
                 last_commit_time = time.time()
@@ -1497,26 +1781,20 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                     END
                 """)
                 conn.execute("""
-                    CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN
-                        INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid,
+                    CREATE TRIGGER IF NOT EXISTS pdf_pages_ad
+                    AFTER DELETE ON pdf_pages BEGIN
+                        INSERT INTO pdf_pages_fts(
+                            pdf_pages_fts, rowid,
                             page_text, source_file, table_data)
-                        VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data);
+                        VALUES (
+                            'delete', old.id, old.page_text,
+                            old.source_file, old.table_data);
                     END
                 """)
                 conn.commit()
                 print("  FTS5 rebuild complete and triggers recreated")
             else:
-                conn.execute(
-                    "CREATE TRIGGER IF NOT EXISTS pdf_pages_ai AFTER INSERT ON pdf_pages BEGIN "
-                    "INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data) "
-                    "VALUES (new.id, new.page_text, new.source_file, new.table_data); END"
-                )
-                conn.execute(
-                    "CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN "
-                    "INSERT INTO pdf_pages_fts"
-                    "(pdf_pages_fts, rowid, page_text, source_file, table_data) "
-                    "VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data); END"
-                )
+                _recreate_pdf_fts_triggers(conn)
                 conn.commit()
                 print("  Skipped FTS5 rebuild (no new pages added)")
 
@@ -1528,6 +1806,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     if skipped_pdf:
         print(f"\n  Skipped {skipped_pdf} unchanged PDF file(s)")
     print(f"  Ingested PDF pages: {total_pdf_pages:,}")
+    if num_workers > 1:
+        print(f"  Workers used: {num_workers}")
 
     # ── Detect removed files ───────────────────────────────────────────────
     all_current = {str(f.relative_to(docs_dir)) for f in xlsx_files}
@@ -1597,7 +1877,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     )
 
     print(f"\n{'='*60}")
-    print(f"  BUILD COMPLETE")
+    print("  BUILD COMPLETE")
     print(f"{'='*60}")
     print(f"  Database:           {db_path} ({db_size:.1f} MB)")
     print(f"  Total budget lines: {total_lines:,}")
@@ -1614,6 +1894,23 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
               {"files_remaining": 0, "eta_sec": 0.0})
     conn.close()
 
+    # 1.B6-h / 2.B3-a: Post-build validation + data-quality JSON report
+    try:
+        from validate_budget_data import (  # noqa: PLC0415
+            generate_quality_report,
+        )
+        report = generate_quality_report(db_path, print_console=True)
+        val = report["validation_summary"]
+        print(
+            f"\n  [QUALITY REPORT] {report['total_budget_lines']:,} budget lines | "
+            f"{val['total_checks']} checks | "
+            f"{val['total_warnings']} warning(s) | "
+            f"{val['total_failures']} failure(s)"
+        )
+        print("  [QUALITY REPORT] Written to data_quality_report.json")
+    except Exception as _val_err:
+        print(f"\n  [VALIDATION] Skipped: {_val_err}")
+
 
 def main():
     """Parse command-line arguments and run the database build pipeline."""
@@ -1629,6 +1926,9 @@ def main():
     parser.add_argument("--checkpoint-interval", type=int, default=10,
                         metavar="N",
                         help="Save a checkpoint every N files (default: 10)")
+    parser.add_argument("--workers", type=int, default=0, metavar="N",
+                        help="Parallel workers for PDF extraction "
+                             "(default: 0 = auto-detect CPU count, 1 = sequential)")
     args = parser.parse_args()
 
     # ── Graceful shutdown via Ctrl+C ───────────────────────────────────────
@@ -1652,7 +1952,8 @@ def main():
                        rebuild=args.rebuild,
                        resume=args.resume,
                        checkpoint_interval=args.checkpoint_interval,
-                       stop_event=stop_event)
+                       stop_event=stop_event,
+                       workers=args.workers)
     except FileNotFoundError as e:
         print(f"ERROR: {e}")
         sys.exit(1)

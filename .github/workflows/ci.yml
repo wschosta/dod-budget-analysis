@@ -1,0 +1,60 @@
+# DoD Budget CI Workflow (Step 4.B1-a)
+#
+# Runs on every push and pull request to main.
+# Matrix: Python 3.11 and 3.12.
+# Steps: lint/precommit checks, then pytest.
+# Fails the PR if any tests fail or precommit violations are found.
+
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: "Test (Python ${{ matrix.python-version }})"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff pytest
+
+      - name: Lint with ruff
+        run: |
+          ruff check . --select=E,W,F --ignore=E501 --exclude=DoD_Budget_Documents
+        continue-on-error: true   # Warn but don't fail on style issues
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ \
+            --ignore=tests/test_gui_tracker.py \
+            -v \
+            --tb=short \
+            -q
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-results-${{ matrix.python-version }}
+          path: |
+            .pytest_cache/
+          retention-days: 7

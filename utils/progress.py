@@ -8,7 +8,6 @@ Provides abstract base class and concrete implementations for:
 
 import time
 from abc import ABC, abstractmethod
-from typing import Optional
 
 
 class ProgressTracker(ABC):

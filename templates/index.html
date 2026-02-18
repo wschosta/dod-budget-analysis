@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}Search — DoD Budget Explorer{% endblock %}
+
+{% block content %}
+<div class="search-layout">
+
+  {# ── Filter sidebar (3.A3-a) ─────────────────────────────────────────── #}
+  <aside class="filter-panel">
+    <h2>Filters</h2>
+    <form id="filter-form"
+          hx-get="/partials/results"
+          hx-target="#results-container"
+          hx-trigger="change, search"
+          hx-push-url="true"
+          hx-indicator="#loading-indicator">
+
+      <div class="filter-group">
+        <label for="q" data-tooltip="Search program names, line item titles, and PDF text using full-text search (FTS5). Use quotes for exact phrases: &quot;hypersonic missile&quot;">Keyword Search</label>
+        <input type="text" id="q" name="q"
+               value="{{ filters.q }}"
+               placeholder="missile, cyber, procurement…"
+               hx-get="/partials/results"
+               hx-trigger="keyup changed delay:400ms"
+               hx-target="#results-container"
+               hx-push-url="true"
+               hx-include="#filter-form">
+      </div>
+
+      <div class="filter-group">
+        <label for="fiscal_year" data-tooltip="DoD fiscal year runs Oct 1 – Sep 30. FY2026 = Oct 2025 – Sep 2026. Select multiple years with Ctrl+click (Windows) or Cmd+click (Mac).">Fiscal Year</label>
+        <select id="fiscal_year" name="fiscal_year" multiple>
+          {% for fy in fiscal_years %}
+          <option value="{{ fy.fiscal_year }}"
+                  {% if fy.fiscal_year in filters.fiscal_year %}selected{% endif %}>
+            {{ fy.fiscal_year }} ({{ "{:,}".format(fy.row_count) }} rows)
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="service" data-tooltip="Military service or defense agency submitting the budget justification. Includes Army, Navy, Air Force, Space Force, Marine Corps, and Defense-Wide agencies.">Service / Agency</label>
+        <select id="service" name="service" multiple>
+          {% for svc in services %}
+          <option value="{{ svc.code }}"
+                  {% if svc.code in filters.service %}selected{% endif %}>
+            {{ svc.code }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="exhibit_type" data-tooltip="Budget exhibit format. R-2: RDT&amp;E program details. P-5: procurement details. O-1: operation &amp; maintenance. P-1/R-1: summary rolls. C-1: construction. M-1: military personnel.">Exhibit Type</label>
+        <select id="exhibit_type" name="exhibit_type" multiple>
+          {% for et in exhibit_types %}
+          <option value="{{ et.code }}"
+                  {% if et.code in filters.exhibit_type %}selected{% endif %}>
+            {{ et.code }} — {{ et.display_name }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="filter-actions">
+        <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+        <a href="/" class="btn btn-secondary btn-sm">Reset</a>
+      </div>
+    </form>
+
+    {# Download modal trigger (3.A5-a) #}
+    <hr style="margin: 1rem 0; border-color: var(--clr-gray-200);">
+    <button class="btn btn-secondary btn-sm" style="width:100%"
+            onclick="document.getElementById('dl-modal').classList.add('open')">
+      ↓ Download Results
+    </button>
+  </aside>
+
+  {# ── Results area ─────────────────────────────────────────────────────── #}
+  <section>
+    <div id="loading-indicator" class="htmx-indicator" style="margin-bottom:.5rem">
+      <span class="spinner"></span> Loading…
+    </div>
+
+    <div id="results-container">
+      {% include "partials/results.html" %}
+    </div>
+  </section>
+
+</div>
+
+{# ── Detail panel (3.A6-a) ─────────────────────────────────────────────────── #}
+<div id="detail-container"></div>
+
+{# ── Download modal (3.A5-a) ───────────────────────────────────────────────── #}
+<div id="dl-modal" class="modal-backdrop"
+     onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal">
+    <h3>Download Budget Lines</h3>
+    <p style="font-size:.85rem;color:#555;margin-bottom:.75rem">
+      Downloads apply the current filters (up to 50,000 rows).
+    </p>
+    <div style="display:flex;gap:.5rem;flex-direction:column">
+      <a id="dl-csv" href="#" class="btn btn-primary" download>
+        ↓ Download CSV
+      </a>
+      <a id="dl-json" href="#" class="btn btn-secondary" download>
+        ↓ Download NDJSON
+      </a>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary btn-sm"
+              onclick="document.getElementById('dl-modal').classList.remove('open')">
+        Close
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/app.js"></script>
+{% endblock %}

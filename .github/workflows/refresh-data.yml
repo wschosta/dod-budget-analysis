@@ -1,0 +1,88 @@
+# DoD Budget Data Refresh Workflow (Step 4.B3-a)
+#
+# Scheduled: runs every Sunday at 06:00 UTC.
+# Manual: can be triggered via workflow_dispatch with optional year override.
+#
+# Steps:
+#   1. Install Playwright + dependencies
+#   2. Run dod_budget_downloader.py to fetch new/updated documents
+#   3. Run build_budget_db.py to rebuild the database
+#   4. Upload the new database as a workflow artifact
+#   5. Post summary to PR/commit comment
+
+name: Refresh Data
+
+on:
+  schedule:
+    # Every Sunday at 06:00 UTC
+    - cron: "0 6 * * 0"
+  workflow_dispatch:
+    inputs:
+      fiscal_year:
+        description: "Fiscal year to refresh (e.g. 2026)"
+        required: false
+        default: "2026"
+      dry_run:
+        description: "Dry run (preview without downloading)"
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  refresh:
+    name: Refresh DoD Budget Data
+    runs-on: ubuntu-latest
+    timeout-minutes: 120   # 2-hour safety timeout for downloads
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install playwright
+          playwright install chromium --with-deps
+
+      - name: Determine refresh year
+        id: year
+        run: |
+          YEAR="${{ github.event.inputs.fiscal_year || '2026' }}"
+          echo "year=$YEAR" >> $GITHUB_OUTPUT
+
+      - name: Run refresh workflow (dry run)
+        if: ${{ github.event.inputs.dry_run == 'true' }}
+        run: |
+          python refresh_data.py --dry-run --years ${{ steps.year.outputs.year }} -v
+
+      - name: Run refresh workflow
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          python refresh_data.py --years ${{ steps.year.outputs.year }} -v
+
+      - name: Upload database artifact
+        if: ${{ github.event.inputs.dry_run != 'true' && always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: dod-budget-db-${{ steps.year.outputs.year }}-${{ github.run_id }}
+          path: |
+            dod_budget.sqlite
+            data_quality_report.json
+            refresh_report.json
+          retention-days: 30
+
+      - name: Post refresh summary
+        if: always()
+        run: |
+          echo "## Refresh Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Fiscal Year: ${{ steps.year.outputs.year }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Run ID: ${{ github.run_id }}" >> $GITHUB_STEP_SUMMARY
+          if [ -f refresh_report.json ]; then
+            echo "- Budget lines: $(python -c "import json; d=json.load(open('refresh_report.json')); print(d.get('total_budget_lines', 'N/A'))")" >> $GITHUB_STEP_SUMMARY
+          fi

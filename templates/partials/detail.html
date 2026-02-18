@@ -1,0 +1,98 @@
+{# Detail panel partial — loaded on row click (3.A6-a) #}
+{% if item %}
+<div class="detail-panel" id="detail-panel">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem;flex-wrap:wrap">
+    <h3>{{ item.line_item_title or item.account_title or "Budget Line Detail" }}</h3>
+    <button class="btn btn-secondary btn-sm"
+            onclick="document.getElementById('detail-container').innerHTML=''"
+            style="flex-shrink:0">✕ Close</button>
+  </div>
+
+  <div class="detail-grid" style="margin-top:.75rem">
+    <div class="detail-field">
+      <label>Service / Organization</label>
+      <span>{{ item.organization_name or "—" }}</span>
+    </div>
+    <div class="detail-field">
+      <label>Fiscal Year</label>
+      <span>{{ item.fiscal_year or "—" }}</span>
+    </div>
+    <div class="detail-field">
+      <label>Exhibit Type</label>
+      <span>{% if item.exhibit_type %}<span class="badge">{{ item.exhibit_type | upper }}</span>{% else %}—{% endif %}</span>
+    </div>
+    <div class="detail-field">
+      <label>Account</label>
+      <span>{{ item.account or "—" }}</span>
+    </div>
+    <div class="detail-field">
+      <label>Account Title</label>
+      <span>{{ item.account_title or "—" }}</span>
+    </div>
+    <div class="detail-field">
+      <label>Appropriation</label>
+      <span>{{ item.appropriation_code or "—" }}{% if item.appropriation_title %} — {{ item.appropriation_title }}{% endif %}</span>
+    </div>
+    <div class="detail-field">
+      <label>Program Element</label>
+      <span style="font-family:monospace">{{ item.pe_number or "—" }}</span>
+    </div>
+    <div class="detail-field">
+      <label>Budget Activity</label>
+      <span>{{ item.budget_activity_title or "—" }}</span>
+    </div>
+    <div class="detail-field">
+      <label>Sub-Activity</label>
+      <span>{{ item.sub_activity_title or "—" }}</span>
+    </div>
+    <div class="detail-field">
+      <label>Line Item</label>
+      <span>{{ item.line_item or "—" }}</span>
+    </div>
+    <div class="detail-field">
+      <label>Amount Type</label>
+      <span>{{ item.amount_type or "budget_authority" }}</span>
+    </div>
+    <div class="detail-field">
+      <label>Currency Year</label>
+      <span>{{ item.currency_year or "then-year" }}</span>
+    </div>
+  </div>
+
+  <h4 style="margin-top:1rem;margin-bottom:.5rem;font-size:.85rem;color:var(--clr-gray-700)">
+    Funding ($K)
+  </h4>
+  <div class="detail-grid">
+    <div class="detail-field">
+      <label>FY2024 Actual</label>
+      <span>{{ item.amount_fy2024_actual | fmt_amount if item.amount_fy2024_actual is not none else "—" }}</span>
+    </div>
+    <div class="detail-field">
+      <label>FY2025 Enacted</label>
+      <span>{{ item.amount_fy2025_enacted | fmt_amount if item.amount_fy2025_enacted is not none else "—" }}</span>
+    </div>
+    <div class="detail-field">
+      <label>FY2025 Supplemental</label>
+      <span>{{ item.amount_fy2025_supplemental | fmt_amount if item.amount_fy2025_supplemental is not none else "—" }}</span>
+    </div>
+    <div class="detail-field">
+      <label>FY2026 Request</label>
+      <span>{{ item.amount_fy2026_request | fmt_amount if item.amount_fy2026_request is not none else "—" }}</span>
+    </div>
+    <div class="detail-field">
+      <label>FY2026 Reconciliation</label>
+      <span>{{ item.amount_fy2026_reconciliation | fmt_amount if item.amount_fy2026_reconciliation is not none else "—" }}</span>
+    </div>
+    <div class="detail-field">
+      <label>FY2026 Total</label>
+      <span>{{ item.amount_fy2026_total | fmt_amount if item.amount_fy2026_total is not none else "—" }}</span>
+    </div>
+  </div>
+
+  <p style="margin-top:.75rem;font-size:.78rem;color:var(--clr-gray-700)">
+    Source: <code>{{ item.source_file }}</code>
+    {% if item.sheet_name %} · Sheet: {{ item.sheet_name }}{% endif %}
+    {% if item.row_number %} · Row {{ item.row_number }}{% endif %}
+  </p>
+</div>
+{% endif %}

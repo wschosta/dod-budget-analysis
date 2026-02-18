@@ -8,7 +8,6 @@ Provides reusable functions for:
 """
 
 import json
-import time
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
@@ -335,7 +334,7 @@ def download_file(url: str, dest_path: Path, session: Optional[requests.Session]
 
         return True
 
-    except requests.RequestException as e:
+    except requests.RequestException:
         if dest_path.exists() and dest_path.stat().st_size == 0:
             dest_path.unlink()
         return False

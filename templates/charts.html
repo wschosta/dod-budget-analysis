@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block title %}Charts — DoD Budget Explorer{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom:1rem">Budget Visualizations</h2>
+
+<div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem">
+  <label style="font-size:.85rem">Fiscal Year:
+    <select id="chart-fy" onchange="loadCharts()" style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid #ddd">
+      {% for fy in fiscal_years %}
+      <option value="{{ fy.fiscal_year }}">{{ fy.fiscal_year }}</option>
+      {% endfor %}
+    </select>
+  </label>
+</div>
+
+<div class="charts-grid">
+
+  {# 3.B2-a: Service comparison bar chart #}
+  <div class="chart-card">
+    <h3>FY26 Request by Service ($K)</h3>
+    <canvas id="chart-service" height="200"></canvas>
+  </div>
+
+  {# 3.B1-a: Year-over-year trend #}
+  <div class="chart-card">
+    <h3>Year-over-Year Totals by Exhibit Type</h3>
+    <canvas id="chart-yoy" height="200"></canvas>
+  </div>
+
+  {# 3.B3-a: Top-N budget items #}
+  <div class="chart-card" style="grid-column: 1 / -1">
+    <h3>Top 10 Budget Line Items — FY26 Request ($K)</h3>
+    <canvas id="chart-topn" height="120"></canvas>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const API = '/api/v1';
+
+// Colour palette
+const COLORS = [
+  '#2563eb','#16a34a','#d97706','#dc2626','#7c3aed',
+  '#0891b2','#c2410c','#065f46','#92400e','#1e1b4b',
+];
+
+let chartService, chartYoY, chartTopN;
+
+async function loadCharts() {
+  const fy = document.getElementById('chart-fy').value;
+
+  // ── Service bar chart (3.B2-a) ──────────────────────────────────────────
+  const svcResp = await fetch(`${API}/aggregations?group_by=service&fiscal_year=${fy}`);
+  const svcData = await svcResp.json();
+  const svcRows = svcData.rows.filter(r => r.total_fy2026_request);
+  const svcLabels = svcRows.map(r => r.group_value || 'Unknown');
+  const svcAmts   = svcRows.map(r => (r.total_fy2026_request || 0) / 1000);  // $M
+
+  if (chartService) chartService.destroy();
+  chartService = new Chart(document.getElementById('chart-service'), {
+    type: 'bar',
+    data: {
+      labels: svcLabels,
+      datasets: [{
+        label: 'FY26 Request ($M)',
+        data: svcAmts,
+        backgroundColor: COLORS,
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { callback: v => '$' + v.toLocaleString() + 'M' } },
+      },
+    },
+  });
+
+  // ── Year-over-year chart (3.B1-a) ──────────────────────────────────────
+  const yoyResp = await fetch(`${API}/aggregations?group_by=fiscal_year`);
+  const yoyData = await yoyResp.json();
+  const yoyLabels = yoyData.rows.map(r => r.group_value || '?');
+  const yoyFy24   = yoyData.rows.map(r => (r.total_fy2024_actual  || 0) / 1000);
+  const yoyFy25   = yoyData.rows.map(r => (r.total_fy2025_enacted || 0) / 1000);
+  const yoyFy26   = yoyData.rows.map(r => (r.total_fy2026_request || 0) / 1000);
+
+  if (chartYoY) chartYoY.destroy();
+  chartYoY = new Chart(document.getElementById('chart-yoy'), {
+    type: 'bar',
+    data: {
+      labels: yoyLabels,
+      datasets: [
+        { label: 'FY24 Actual',   data: yoyFy24, backgroundColor: '#cbd5e1', borderRadius: 3 },
+        { label: 'FY25 Enacted',  data: yoyFy25, backgroundColor: '#2563eb', borderRadius: 3 },
+        { label: 'FY26 Request',  data: yoyFy26, backgroundColor: '#16a34a', borderRadius: 3 },
+      ],
+    },
+    options: {
+      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
+      scales: { x: { stacked: false }, y: { ticks: { callback: v => '$' + v.toLocaleString() + 'M' } } },
+    },
+  });
+
+  // ── Top-N chart (3.B3-a) ────────────────────────────────────────────────
+  const topResp = await fetch(
+    `${API}/budget-lines?sort_by=amount_fy2026_request&sort_dir=desc&limit=10&fiscal_year=${fy}`
+  );
+  const topData = await topResp.json();
+  const topLabels = topData.items.map(r => {
+    const title = r.line_item_title || r.account_title || 'Unknown';
+    const org   = r.organization_name ? ` (${r.organization_name})` : '';
+    return title.length > 40 ? title.slice(0, 38) + '…' + org : title + org;
+  });
+  const topAmts = topData.items.map(r => (r.amount_fy2026_request || 0) / 1000);
+
+  if (chartTopN) chartTopN.destroy();
+  chartTopN = new Chart(document.getElementById('chart-topn'), {
+    type: 'bar',
+    data: {
+      labels: topLabels,
+      datasets: [{
+        label: 'FY26 Request ($M)',
+        data: topAmts,
+        backgroundColor: COLORS,
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { callback: v => '$' + v.toLocaleString() + 'M' } },
+      },
+    },
+  });
+}
+
+// Initial load
+loadCharts();
+</script>
+{% endblock %}
