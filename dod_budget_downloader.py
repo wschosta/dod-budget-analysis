@@ -30,135 +30,127 @@ Usage Examples
 Roadmap TODOs for this file (Step 1.A)
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO 1.A1-a: Audit source coverage by running --list --years all --sources all.
-    Capture the output and compare against the known universe of DoD budget
-    document types.  Record: which sources produce files, how many files per
-    source/FY, and which file types (PDF, XLSX, ZIP, CSV) are found.
-    Token-efficient tip: pipe output to a file, then write a 20-line script
-    that parses the listing and produces a coverage matrix (source × FY).
-    This is an investigative task — run in a live environment with network.
+TODO 1.A1-a [Complexity: LOW] [Tokens: ~1500] [User: YES — needs network + live env]
+    Audit source coverage by running --list --years all --sources all.
+    Steps:
+      1. Run: python dod_budget_downloader.py --list --years all --sources all > coverage.txt
+      2. Write a 20-line script to parse coverage.txt into a matrix (source × FY)
+      3. Compare against known DoD budget document universe
+      4. Record gaps in DATA_SOURCES.md
+    Success: A coverage matrix showing files per source per FY.
 
-TODO 1.A1-b: Identify missing DoD component sources.
-    The following agencies are NOT currently covered and may publish their own
-    budget justification books:
-    - Defense Logistics Agency (DLA)
-    - Missile Defense Agency (MDA) — may have standalone exhibits on mda.mil
-    - SOCOM (Special Operations Command) — socom.mil
-    - Defense Health Agency (DHA)
-    - Defense Information Systems Agency (DISA)
-    - National Guard Bureau
-    For each: manually check whether they publish budget materials at a distinct
-    URL (separate from the Defense-Wide page on comptroller.war.gov).  If yes,
-    add to SERVICE_PAGE_TEMPLATES with url and label.
-    Token-efficient tip: this requires web browsing.  For each agency, try a
-    single search query like "site:mda.mil budget justification" and check
-    the top result.  Record findings in DATA_SOURCES.md.
+TODO 1.A1-b [Complexity: MEDIUM] [Tokens: ~2500] [User: YES — needs web browsing]
+    Identify missing DoD component sources. Agencies NOT currently covered:
+      - Defense Logistics Agency (DLA)
+      - Missile Defense Agency (MDA) — may have standalone exhibits on mda.mil
+      - SOCOM (Special Operations Command) — socom.mil
+      - Defense Health Agency (DHA)
+      - Defense Information Systems Agency (DISA)
+      - National Guard Bureau
+    Steps:
+      1. For each agency, search "site:<domain> budget justification"
+      2. Check if they publish distinct materials (not on comptroller.war.gov)
+      3. If yes, add discover function + entry in SERVICE_PAGE_TEMPLATES
+      4. Record findings in DATA_SOURCES.md
+    Success: Each agency is confirmed as covered or documented as gap.
 
-TODO 1.A1-c: Verify that defense-wide discovery captures all J-Books.
-    The Defense-Wide page at comptroller.war.gov/Budget-Materials/FY{fy}
-    BudgetJustification/ may contain links to individual agency justification
-    books.  Run discover_defense_wide_files() for a sample FY and compare the
-    file list against the known set of defense agency J-Books.
-    Token-efficient tip: run with --list --years 2026 --sources defense-wide
-    and inspect output.  ~5 minutes of manual review.
+TODO 1.A1-c [Complexity: LOW] [Tokens: ~1000] [User: YES — needs network]
+    Verify defense-wide discovery captures all J-Books.
+    Steps:
+      1. Run --list --years 2026 --sources defense-wide
+      2. Compare file list against known defense agency J-Books
+      3. Add missing URL patterns to discover_defense_wide_files() if needed
+    Success: All known J-Books appear in discovery output.
 
-TODO 1.A2-a: Test historical fiscal year reach.
-    Run discover_fiscal_years() and record all years returned.  Then attempt
-    discover_comptroller_files() for the oldest year found.  Goal: confirm
-    data is available back to at least FY2017.
-    Token-efficient tip: run --list --years 2017 2018 2019 --sources comptroller
-    and check for non-empty results.  If the comptroller site doesn't list
-    years before a certain point, check the Wayback Machine or alternate
-    archive URLs.  This is investigative — must run with network access.
+TODO 1.A2-a [Complexity: LOW] [Tokens: ~1000] [User: YES — needs network]
+    Test historical fiscal year reach back to FY2017.
+    Steps:
+      1. Run --list --years 2017 2018 2019 --sources comptroller
+      2. Check for non-empty results per year
+      3. If gaps found, check Wayback Machine / alternate archive URLs
+    Success: Documents available for FY2017+ confirmed and documented.
 
-TODO 1.A2-b: Handle alternate URL patterns for older fiscal years.
-    Older FYs may use different URL structures on comptroller.war.gov (e.g.,
-    different subdirectory naming, or documents hosted on a legacy domain).
-    If TODO 1.A2-a finds gaps, inspect the actual page HTML for those years
-    and add pattern variants to discover_comptroller_files().
-    Dependency: TODO 1.A2-a must be done first to identify which years fail.
+TODO 1.A2-b [Complexity: MEDIUM] [Tokens: ~2000] [User: YES — depends on 1.A2-a]
+    Handle alternate URL patterns for older fiscal years.
+    Dependency: TODO 1.A2-a must identify which years fail first.
+    Steps:
+      1. For each failing FY from 1.A2-a, inspect page HTML manually
+      2. Add URL pattern variants to discover_comptroller_files()
+      3. Test with --list --years <failing_year>
+    Success: All FY2017+ years return non-empty discovery results.
 
-TODO 1.A2-c: Handle service-specific historical URL changes.
-    Each service site (Army, Navy, Air Force) may have reorganized over the
-    years.  Test discover_army_files(), discover_navy_files(), and
-    discover_airforce_files() for FY2017–FY2020 and record which succeed.
-    For failures, inspect the site and add alternate URL patterns.
-    Token-efficient tip: run --list --years 2017 2018 --sources army navy
-    airforce and check output.  Fix one service at a time.
+TODO 1.A2-c [Complexity: MEDIUM] [Tokens: ~2500] [User: YES — needs network]
+    Handle service-specific historical URL changes for FY2017-2020.
+    Steps:
+      1. Run --list --years 2017 2018 --sources army navy airforce
+      2. For each failure, inspect site and add alternate URL patterns
+      3. Fix one service at a time; test after each
+    Success: All services return results for FY2017+.
 
-TODO 1.A3-a: Add download manifest generation.
-    After discovery (but before download), write a manifest.json to the output
-    directory listing every file to be downloaded: url, expected_filename,
-    source, fiscal_year, extension.  After download, update each entry with
-    status (ok/skip/fail), file_size, and file_hash (SHA-256).
-    Token-efficient tip: add ~30 lines to main() — serialize all_files to JSON
-    before the download loop, then update entries inside download_file().
+TODO 1.A3-a [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
+    Add download manifest generation (manifest.json).
+    Steps:
+      1. After discovery, write manifest.json with: url, expected_filename,
+         source, fiscal_year, extension for each file
+      2. After download, update each entry with status, file_size, file_hash
+      3. Use utils/manifest.py (already created) as the data model
+      4. ~30 lines added to main()
+    Success: manifest.json created in output dir with all download metadata.
 
-TODO 1.A3-b: Add SHA-256 checksum verification.
-    After downloading a file, compute its SHA-256 hash.  On subsequent runs,
-    compare the hash to the manifest.  If a file exists but its hash doesn't
-    match the manifest (corrupted), redownload it.
-    Modify _check_existing_file() to accept an optional expected_hash param.
-    Token-efficient tip: add hashlib.sha256() inside download_file() after
-    writing — ~10 lines.  Modify _check_existing_file() to read and compare.
+TODO 1.A3-b [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add SHA-256 checksum verification after download.
+    Steps:
+      1. Add hashlib.sha256() computation in download_file() after writing
+      2. Store hash in manifest (from 1.A3-a)
+      3. In _check_existing_file(), compare existing file hash vs manifest
+      4. Redownload if hash mismatch (corrupted file)
+    Success: Corrupted files detected and re-downloaded on subsequent runs.
 
-TODO 1.A3-c: Improve WAF/bot detection handling.
-    Currently, if a WAF blocks a request, the error is generic ("All browser
-    download strategies failed").  Detect common WAF block signatures:
-    - HTTP 403 with "Access Denied" body
-    - HTTP 200 with a CAPTCHA/challenge page (check for "captcha", "challenge",
-      "verify you are human" in response text)
-    - Cloudflare challenge (check for "cf-browser-verification")
-    When detected, log a specific warning and optionally pause to let the user
-    solve the CAPTCHA manually (in browser mode).
-    Token-efficient tip: add a 15-line _detect_waf_block(response) helper
-    called from download_file() and _browser_download_file().
+TODO 1.A3-c [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Improve WAF/bot detection handling.
+    Steps:
+      1. Add _detect_waf_block(response) helper (~15 lines)
+      2. Check for: HTTP 403 "Access Denied", CAPTCHA pages, Cloudflare
+      3. Call from download_file() and _browser_download_file()
+      4. Log specific warning when WAF detected
+    Success: WAF blocks produce clear error messages, not generic failures.
 
+TODO 1.A4-a [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Refactor download logic into a callable download_all() function.
+    Steps:
+      1. Extract core download loop from main() into:
+         download_all(years, sources, output_dir, **opts)
+      2. main() calls download_all() after parsing args
+      3. refresh_data.py can call download_all() directly (no subprocess)
+    Success: Download logic callable without CLI argument parsing.
 
-TODO 1.A4-a: Create a CLI-only download script (no GUI dependency).
-    Extract the core download logic into a function that can be called
-    programmatically: download_all(years, sources, output_dir, **opts).
-    This decouples the pipeline from the interactive/GUI code so it can be
-    called from cron, CI, or the refresh script (see TODO 2.B4-a).
-    Token-efficient tip: the logic already exists in main() — refactor by
-    pulling lines 1286–1406 into a download_all() function that takes args
-    as parameters instead of parsing sys.argv.  ~20 lines of refactoring.
-
-TODO 1.A4-b: Add a --since flag for incremental updates.
-    Accept --since YYYY-MM-DD.  During discovery, filter out files whose
-    page was last updated before that date (if the server provides
-    Last-Modified headers).  More practically: compare against the manifest
-    from the previous run — skip files already in the manifest with matching
-    hashes.
+TODO 1.A4-b [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
+    Add --since flag for incremental updates.
     Dependency: TODO 1.A3-a (manifest) should be done first.
+    Steps:
+      1. Add --since YYYY-MM-DD argument to argparse
+      2. During discovery, compare against manifest from previous run
+      3. Skip files already in manifest with matching hashes
+    Success: --since filters out already-downloaded unchanged files.
 
-TODO 1.A4-c: Create a GitHub Actions workflow for scheduled downloads.
-    Write .github/workflows/update-data.yml that:
-    1. Checks out the repo
-    2. Installs dependencies (including playwright)
-    3. Runs the download pipeline for the most recent 2 FYs
-    4. Runs build_budget_db.py
-    5. Commits and pushes updated data (or uploads as artifact)
-    Schedule: weekly or on workflow_dispatch.
-    Token-efficient tip: ~40 lines of YAML.  Use actions/cache for playwright
-    browsers.  Store the manifest as a committed file for diffing.
+TODO 1.A4-c [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Create GitHub Actions workflow for scheduled downloads.
+    Steps:
+      1. Write .github/workflows/update-data.yml (~40 lines YAML)
+      2. Schedule: weekly or workflow_dispatch
+      3. Steps: checkout, install deps+playwright, download 2 latest FYs,
+         build DB, upload manifest as artifact
+      4. Use actions/cache for playwright browsers
+    Success: Workflow runs weekly and produces updated data artifact.
 
-TODO 1.A5-a: Create DATA_SOURCES.md documenting all data sources.
-    For each source (comptroller, defense-wide, army, navy, airforce, plus
-    any new ones from TODO 1.A1-b): document the base URL, URL pattern per FY,
-    file types available, fiscal years confirmed available, any access
-    requirements (WAF, browser needed), and notes on site behavior.
-    See DATA_SOURCES.md for the skeleton.
-    Token-efficient tip: most of this information is already in this file's
-    SERVICE_PAGE_TEMPLATES and source-specific functions — extract and format
-    as markdown.  ~100 lines.
-Usage:
-    python dod_budget_downloader.py                              # Interactive
-    python dod_budget_downloader.py --years 2025                 # FY2025 comptroller only
-    python dod_budget_downloader.py --years 2025 --sources all   # FY2025 all sources
-    python dod_budget_downloader.py --years 2025 --sources army navy
-    python dod_budget_downloader.py --years 2025 --list          # List without downloading
-    python dod_budget_downloader.py --years all --sources all    # Everything
+TODO FIX-003 [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Fix line-length violations in this file (>100 chars).
+    Affected lines: ~824 (107ch), ~986 (138ch), ~995 (104ch), ~1446 (103ch).
+    Steps:
+      1. Find long lines: grep -n '.\{101,\}' dod_budget_downloader.py
+      2. Break using Python line continuation or local variables
+      3. Run pytest tests/test_precommit_checks.py::TestLineLength -v
+    Success: 0 line-length violations in this file.
 """
 
 import argparse
@@ -171,6 +163,7 @@ import sys
 import threading
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urljoin, urlparse, unquote
@@ -302,8 +295,48 @@ _timeout_mgr = TimeoutManager()
 _refresh_cache = False
 
 
+class DomainRateLimiter:
+    """Enforces per-domain minimum delay between requests (Option B).
+
+    Each domain gets its own lock so threads downloading from *different*
+    domains proceed in parallel, while requests to the *same* domain are
+    serialised with the configured delay.
+    """
+
+    def __init__(self, delay: float):
+        self._delay = delay
+        self._meta_lock = threading.Lock()
+        self._domain_locks: dict[str, threading.Lock] = {}
+        self._last_request: dict[str, float] = {}
+
+    def _get_domain_lock(self, domain: str) -> threading.Lock:
+        with self._meta_lock:
+            if domain not in self._domain_locks:
+                self._domain_locks[domain] = threading.Lock()
+            return self._domain_locks[domain]
+
+    def wait(self, url: str) -> None:
+        """Block until at least ``delay`` seconds have passed since the last
+        request to the same domain, then mark the current time."""
+        domain = urlparse(url).netloc
+        lock = self._get_domain_lock(domain)
+        with lock:
+            now = time.time()
+            last = self._last_request.get(domain, 0.0)
+            wait_time = self._delay - (now - last)
+            if wait_time > 0:
+                time.sleep(wait_time)
+            self._last_request[domain] = time.time()
+
+
 class ProgressTracker:
-    """Tracks overall download session progress and renders status bars."""
+    """Tracks overall download session progress and renders status bars.
+
+    Thread-safe: all counter mutations and print calls are protected by an
+    RLock so concurrent download workers can update progress safely.
+    Source/year context uses thread-local storage so each worker thread
+    records the correct metadata for failure entries.
+    """
 
     def __init__(self, total_files: int):
         """Initialize counters, timers, and terminal width for progress rendering.
@@ -324,6 +357,9 @@ class ProgressTracker:
         # Structured failure records for --retry-failures (TODO 1.A6-a)
         # Schema: {url, dest, filename, error, source, year, use_browser, timestamp}
         self._failed_files: list[dict] = []
+        # Thread-safety primitives
+        self._lock = threading.RLock()
+        self._tls = threading.local()
 
     @property
     def processed(self) -> int:
@@ -336,27 +372,35 @@ class ProgressTracker:
         return f"[{'#' * filled}{'-' * (width - filled)}]"
 
     def set_source(self, year: str, source: str):
-        """Update the current fiscal year and source label for display."""
+        """Update the current fiscal year and source label.
+
+        Uses thread-local storage so concurrent workers each track their own
+        context without overwriting each other.
+        """
+        self._tls.current_year = year
+        self._tls.current_source = source
+        # Also set instance attrs (last-writer-wins, used for display only)
         self.current_year = year
         self.current_source = source
 
     def print_overall(self):
         """Print the overall progress line."""
-        frac = self.processed / self.total_files if self.total_files else 0
-        pct = frac * 100
-        bar = self._bar(frac, 25)
-        dl = format_bytes(self.total_bytes)
-        elapsed_str = elapsed(self.start_time)
-        remaining = self.total_files - self.processed
-        line = (
-            f"\r  Overall: {bar} {pct:5.1f}%  "
-            f"{self.processed}/{self.total_files} files  "
-            f"{dl} downloaded  "
-            f"{elapsed_str} elapsed  "
-            f"({remaining} remaining)"
-        )
-        # Pad to terminal width to clear previous line
-        print(f"{line:<{self.term_width}}", end="", flush=True)
+        with self._lock:
+            frac = self.processed / self.total_files if self.total_files else 0
+            pct = frac * 100
+            bar = self._bar(frac, 25)
+            dl = format_bytes(self.total_bytes)
+            elapsed_str = elapsed(self.start_time)
+            remaining = self.total_files - self.processed
+            line = (
+                f"\r  Overall: {bar} {pct:5.1f}%  "
+                f"{self.processed}/{self.total_files} files  "
+                f"{dl} downloaded  "
+                f"{elapsed_str} elapsed  "
+                f"({remaining} remaining)"
+            )
+            # Pad to terminal width to clear previous line
+            print(f"{line:<{self.term_width}}", end="", flush=True)
 
     def print_file_progress(self, filename: str, downloaded: int, total: int,
                             file_start: float):
@@ -367,52 +411,54 @@ class ProgressTracker:
             return
         self._last_progress_time = now
 
-        if total <= 0:
-            print(f"\r    Downloading {filename}... {format_bytes(downloaded)}",
-                  end="", flush=True)
-            return
+        with self._lock:
+            if total <= 0:
+                print(f"\r    Downloading {filename}... {format_bytes(downloaded)}",
+                      end="", flush=True)
+                return
 
-        frac = downloaded / total
-        pct = frac * 100
-        bar = self._bar(frac, 20)
-        file_elapsed = time.time() - file_start
-        speed = downloaded / file_elapsed if file_elapsed > 0 else 0
-        speed_str = f"{format_bytes(int(speed))}/s"
-        eta = ""
-        if speed > 0:
-            remaining_bytes = total - downloaded
-            eta_secs = int(remaining_bytes / speed)
-            if eta_secs < 60:
-                eta = f"ETA {eta_secs}s"
-            else:
-                eta = f"ETA {eta_secs // 60}m {eta_secs % 60:02d}s"
+            frac = downloaded / total
+            pct = frac * 100
+            bar = self._bar(frac, 20)
+            file_elapsed = time.time() - file_start
+            speed = downloaded / file_elapsed if file_elapsed > 0 else 0
+            speed_str = f"{format_bytes(int(speed))}/s"
+            eta = ""
+            if speed > 0:
+                remaining_bytes = total - downloaded
+                eta_secs = int(remaining_bytes / speed)
+                if eta_secs < 60:
+                    eta = f"ETA {eta_secs}s"
+                else:
+                    eta = f"ETA {eta_secs // 60}m {eta_secs % 60:02d}s"
 
-        name = filename[:40] + "..." if len(filename) > 43 else filename
-        line = (
-            f"\r    {name}  {bar} {pct:5.1f}%  "
-            f"{format_bytes(downloaded)}/{format_bytes(total)}  "
-            f"{speed_str}  {eta}"
-        )
-        print(f"{line:<{self.term_width}}", end="", flush=True)
+            name = filename[:40] + "..." if len(filename) > 43 else filename
+            line = (
+                f"\r    {name}  {bar} {pct:5.1f}%  "
+                f"{format_bytes(downloaded)}/{format_bytes(total)}  "
+                f"{speed_str}  {eta}"
+            )
+            print(f"{line:<{self.term_width}}", end="", flush=True)
 
     def file_done(self, filename: str, size: int, status: str):
         """Record a completed file and print result."""
-        tag = {"ok": "OK", "skip": "SKIP", "redownload": "OK",
-               "fail": "FAIL"}.get(status, status.upper())
+        with self._lock:
+            tag = {"ok": "OK", "skip": "SKIP", "redownload": "OK",
+                   "fail": "FAIL"}.get(status, status.upper())
 
-        if status == "ok" or status == "redownload":
-            self.completed += 1
-            self.total_bytes += size
-        elif status == "skip":
-            self.skipped += 1
-            self.total_bytes += size
-        elif status == "fail":
-            self.failed += 1
+            if status == "ok" or status == "redownload":
+                self.completed += 1
+                self.total_bytes += size
+            elif status == "skip":
+                self.skipped += 1
+                self.total_bytes += size
+            elif status == "fail":
+                self.failed += 1
 
-        size_str = format_bytes(size) if size > 0 else ""
-        line = f"    [{tag}] {filename} ({size_str})" if size_str else f"    [{tag}] {filename}"
-        print(f"\r{line:<{self.term_width}}")
-        self.print_overall()
+            size_str = format_bytes(size) if size > 0 else ""
+            line = f"    [{tag}] {filename} ({size_str})" if size_str else f"    [{tag}] {filename}"
+            print(f"\r{line:<{self.term_width}}")
+            self.print_overall()
 
     def file_failed(self, url: str, dest: str, filename: str, error: str,
                     use_browser: bool = False) -> None:
@@ -420,14 +466,17 @@ class ProgressTracker:
 
         Stores the full metadata needed to retry the download later via
         ``--retry-failures``, then delegates to ``file_done`` for display.
+        Reads source/year from thread-local storage for correct concurrent context.
         """
+        source = getattr(self._tls, "current_source", self.current_source)
+        year = getattr(self._tls, "current_year", self.current_year)
         self._failed_files.append({
             "url": url,
             "dest": dest,
             "filename": filename,
             "error": str(error),
-            "source": self.current_source,
-            "year": self.current_year,
+            "source": source,
+            "year": year,
             "use_browser": use_browser,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
@@ -620,9 +669,33 @@ class GuiProgressTracker:
 
         self._root.after(150, self._poll)
 
+    def _cleanup_vars(self):
+        """Delete StringVar references on the GUI thread before destroying root.
+
+        StringVar.__del__ calls into the Tcl interpreter. If Python's garbage
+        collector runs these destructors from the main thread (e.g. at interpreter
+        shutdown) after the GUI thread has exited, tkinter raises:
+            RuntimeError: main thread is not in main loop
+        Explicitly deleting the attributes here and forcing a GC cycle ensures
+        the destructors run on the GUI thread while the Tcl interpreter is still
+        valid.
+        """
+        import gc
+        for attr in ('_src_var', '_overall_lbl', '_stats_var',
+                     '_file_lbl', '_file_stats_var', '_count_var'):
+            if hasattr(self, attr):
+                delattr(self, attr)
+        gc.collect()
+
     def _on_close(self):
         """Handle window close: set the closed flag and destroy the root widget."""
         self._closed = True
+        self._cleanup_vars()
+        self._root.destroy()
+
+    def _do_close(self):
+        """Destroy the root window on the GUI thread after cleaning up StringVars."""
+        self._cleanup_vars()
         self._root.destroy()
 
     def set_source(self, year: str, source: str):
@@ -754,7 +827,7 @@ class GuiProgressTracker:
         if not self._closed and hasattr(self, '_root'):
             self._closed = True
             try:
-                self._root.after(0, self._root.destroy)
+                self._root.after(0, self._do_close)
             except Exception:
                 pass
 
@@ -776,6 +849,7 @@ _global_session = None
 # In-memory manifest; written to disk by write_manifest() / update_manifest_entry()
 _manifest: dict = {}
 _manifest_path: Path | None = None
+_manifest_lock = threading.Lock()
 
 
 def _compute_sha256(file_path: Path) -> str:
@@ -821,7 +895,9 @@ def write_manifest(output_dir: Path, all_files: dict, manifest_path: Path) -> No
     _manifest = entries
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     with open(manifest_path, "w", encoding="utf-8") as fh:
-        json.dump({"generated_at": datetime.now(timezone.utc).isoformat(), "files": entries}, fh, indent=2)
+        json.dump(
+            {"generated_at": datetime.now(timezone.utc).isoformat(), "files": entries},
+            fh, indent=2)
 
 
 def update_manifest_entry(url: str, status: str, file_size: int,
@@ -829,26 +905,28 @@ def update_manifest_entry(url: str, status: str, file_size: int,
     """Update a manifest entry after a download attempt.
 
     Writes the updated manifest to disk immediately so it survives crashes.
+    Thread-safe: serialised via ``_manifest_lock``.
     Implements TODO 1.A3-a / 1.A3-b.
     """
     global _manifest, _manifest_path
-    if not _manifest_path or url not in _manifest:
-        return
-    _manifest[url].update({
-        "status": status,
-        "file_size": file_size,
-        "sha256": file_hash,
-        "downloaded_at": datetime.now(timezone.utc).isoformat(),
-    })
-    try:
-        with open(_manifest_path, "w", encoding="utf-8") as fh:
-            json.dump(
-                {"generated_at": _manifest.get("_meta_generated_at", ""),
-                 "files": _manifest},
-                fh, indent=2,
-            )
-    except OSError:
-        pass  # Non-fatal: manifest update failures don't block downloads
+    with _manifest_lock:
+        if not _manifest_path or url not in _manifest:
+            return
+        _manifest[url].update({
+            "status": status,
+            "file_size": file_size,
+            "sha256": file_hash,
+            "downloaded_at": datetime.now(timezone.utc).isoformat(),
+        })
+        try:
+            with open(_manifest_path, "w", encoding="utf-8") as fh:
+                json.dump(
+                    {"generated_at": _manifest.get("_meta_generated_at", ""),
+                     "files": _manifest},
+                    fh, indent=2,
+                )
+        except OSError:
+            pass  # Non-fatal: manifest update failures don't block downloads
 
 
 # ── Session ────────────────────────────────────────────────────────────────────
@@ -983,7 +1061,8 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
             for (const a of allLinks) {{
                 const href = a.href;
                 let path, host;
-                try {{ const u = new URL(href); path = u.pathname.toLowerCase(); host = u.hostname.toLowerCase(); }} catch {{ continue; }}
+                try {{ const u = new URL(href); path = u.pathname.toLowerCase();
+                    host = u.hostname.toLowerCase(); }} catch {{ continue; }}
                 if (ignoredHosts.has(host)) continue;
                 if (!exts.some(e => path.endsWith(e))) continue;
                 if (tf_arg && !href.toLowerCase().includes(tf_arg.toLowerCase())) continue;
@@ -992,7 +1071,8 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
                 const text = a.textContent.trim();
                 const filename = decodeURIComponent(path.split('/').pop());
                 const ext = '.' + filename.split('.').pop().toLowerCase();
-                files.push({{ name: text || filename, url: href, filename: filename, extension: ext }});
+                files.push({{ name: text || filename, url: href,
+                    filename: filename, extension: ext }});
             }}
             return files;
         }}""", [list(DOWNLOADABLE_EXTENSIONS), text_filter])
@@ -1443,7 +1523,8 @@ def discover_navy_archive_files(_session: requests.Session, year: str) -> list[d
 # ── Air Force (browser required) ─────────────────────────────────────────────
 
 def discover_airforce_files(_session: requests.Session, year: str) -> list[dict]:
-    """Discover US Air Force/Space Force budget files for a given fiscal year using a headless browser.
+    """Discover US Air Force/Space Force budget files for a given fiscal year
+    using a headless browser.
 
     Args:
         _session: Unused (browser handles HTTP); kept for interface consistency.
@@ -1835,10 +1916,11 @@ def download_all(
     browser_labels: set,
     *,
     overwrite: bool = False,
-    delay: float = 0.5,
+    delay: float = 0.1,
     extract_zips: bool = False,
     use_gui: bool = False,
     manifest_path: Path | None = None,
+    workers: int = 4,
 ) -> dict:
     """Download all discovered files and return a summary dict.
 
@@ -1846,17 +1928,26 @@ def download_all(
     can be called from cron jobs, CI pipelines, or the data-refresh script
     (TODO 2.B4-a) without depending on the interactive/GUI layer.
 
+    Uses concurrent downloads (Option A) with per-domain rate limiting
+    (Option B) for significant speed improvements over sequential downloading.
+    HTTP downloads run on ``workers`` threads in parallel; browser-based
+    downloads (Playwright, not thread-safe) run on a single dedicated thread
+    that overlaps with the HTTP pool.
+
     Args:
         all_files:      Nested dict {year: {source_label: [file_info, ...]}}
                         as returned by the discover_* functions.
         output_dir:     Root directory to write downloaded files into.
         browser_labels: Set of source labels that require Playwright.
         overwrite:      Re-download files that already exist locally.
-        delay:          Seconds to sleep between requests (rate-limit courtesy).
+        delay:          Per-domain minimum seconds between requests (rate-limit
+                        courtesy).  Default 0.1 (Option C).
         extract_zips:   Automatically extract .zip archives after downloading.
         use_gui:        Show a Tkinter GUI progress window (requires display).
         manifest_path:  Where to write/update the download manifest JSON.
                         Defaults to output_dir/manifest.json.
+        workers:        Number of concurrent HTTP download threads (default 4).
+                        Browser downloads always use a single dedicated thread.
 
     Returns:
         Summary dict with keys: downloaded, skipped, failed, total_bytes.
@@ -1874,7 +1965,8 @@ def download_all(
     total_files = sum(
         len(f) for yr in all_files.values() for f in yr.values()
     )
-    print(f"\nReady to download {total_files} file(s) to: {output_dir.resolve()}\n")
+    print(f"\nReady to download {total_files} file(s) to: {output_dir.resolve()}")
+    print(f"  Workers: {workers} HTTP + 1 browser  |  Per-domain delay: {delay}s\n")
 
     if use_gui:
         _tracker = GuiProgressTracker(total_files)
@@ -1882,6 +1974,10 @@ def download_all(
         _tracker = ProgressTracker(total_files)
         _tracker.print_overall()
         print()
+
+    # ── Phase 1: Flatten files into a task list, pre-filtering skips ──────
+    http_tasks: list[dict] = []
+    browser_tasks: list[dict] = []
 
     for year in sorted(all_files.keys(), reverse=True):
         sources = all_files[year]
@@ -1897,41 +1993,91 @@ def download_all(
             use_browser = source_label in browser_labels
             safe_label = source_label.replace(" ", "_")
             dest_dir = output_dir / f"FY{year}" / safe_label
-            print(f"\n{'='*70}")
             method = "browser" if use_browser else "direct"
             print(f"  FY{year} / {source_label} "
                   f"({len(files)} files, {method}) -> {dest_dir}")
-            print(f"{'='*70}")
-            _tracker.set_source(year, source_label)
 
             # Pre-filter: skip files that already exist locally (non-empty)
-            to_download = []
-            if not overwrite:
-                for file_info in files:
-                    dest = dest_dir / file_info["filename"]
-                    if dest.exists() and dest.stat().st_size > 0:
-                        size = dest.stat().st_size
-                        if _tracker:
-                            _tracker.file_done(dest.name, size, "skip")
-                        else:
-                            print(f"    [SKIP] Already exists: {dest.name}")
-                        update_manifest_entry(file_info["url"], "skip", size,
-                                              (_manifest.get(file_info["url"]) or {}).get("sha256"))
-                    else:
-                        to_download.append(file_info)
-            else:
-                to_download = files
-
-            for file_info in to_download:
+            _tracker.set_source(year, source_label)
+            for file_info in files:
                 dest = dest_dir / file_info["filename"]
-                ok = download_file(
-                    session, file_info["url"], dest,
-                    overwrite, use_browser=use_browser,
-                )
-                if ok and extract_zips and dest.suffix.lower() == ".zip":
-                    _extract_zip(dest, dest_dir)
-                time.sleep(delay)
+                if not overwrite and dest.exists() and dest.stat().st_size > 0:
+                    size = dest.stat().st_size
+                    _tracker.file_done(dest.name, size, "skip")
+                    update_manifest_entry(
+                        file_info["url"], "skip", size,
+                        (_manifest.get(file_info["url"]) or {}).get("sha256"),
+                    )
+                    continue
 
+                task = {
+                    "file_info": file_info,
+                    "dest": dest,
+                    "dest_dir": dest_dir,
+                    "use_browser": use_browser,
+                    "source_label": source_label,
+                    "year": year,
+                }
+                if use_browser:
+                    browser_tasks.append(task)
+                else:
+                    http_tasks.append(task)
+
+    pending = len(http_tasks) + len(browser_tasks)
+    if pending:
+        print(f"\n  Queued: {len(http_tasks)} HTTP + {len(browser_tasks)} browser "
+              f"({pending} total, {total_files - pending} skipped)")
+
+    # ── Phase 2: Concurrent download with per-domain rate limiting ────────
+    rate_limiter = DomainRateLimiter(delay)
+
+    def _download_worker(task: dict) -> bool:
+        """Download a single file (called from a thread-pool worker)."""
+        _tracker.set_source(task["year"], task["source_label"])
+        rate_limiter.wait(task["file_info"]["url"])
+        ok = download_file(
+            session,
+            task["file_info"]["url"],
+            task["dest"],
+            overwrite,
+            use_browser=task["use_browser"],
+        )
+        if ok and extract_zips and task["dest"].suffix.lower() == ".zip":
+            _extract_zip(task["dest"], task["dest_dir"])
+        return ok
+
+    futures: list = []
+
+    # HTTP pool: N worker threads
+    http_pool = None
+    if http_tasks:
+        n_http = min(workers, len(http_tasks))
+        http_pool = ThreadPoolExecutor(max_workers=n_http,
+                                       thread_name_prefix="http-dl")
+        for task in http_tasks:
+            futures.append(http_pool.submit(_download_worker, task))
+
+    # Browser pool: 1 dedicated thread (Playwright is not thread-safe)
+    browser_pool = None
+    if browser_tasks:
+        browser_pool = ThreadPoolExecutor(max_workers=1,
+                                          thread_name_prefix="browser-dl")
+        for task in browser_tasks:
+            futures.append(browser_pool.submit(_download_worker, task))
+
+    # Wait for all futures to complete
+    for future in as_completed(futures):
+        try:
+            future.result()
+        except Exception:
+            pass  # Individual failures already recorded by download_file
+
+    if http_pool:
+        http_pool.shutdown(wait=True)
+    if browser_pool:
+        browser_pool.shutdown(wait=True)
+
+    # ── Phase 3: Summary and cleanup ─────────────────────────────────────
     summary = {
         "downloaded": _tracker.completed,
         "skipped": _tracker.skipped,
@@ -2013,8 +2159,13 @@ def main():
         help="Disable GUI progress window (terminal-only output)",
     )
     parser.add_argument(
-        "--delay", type=float, default=0.5,
-        help="Seconds to wait between requests (default: 0.5)",
+        "--delay", type=float, default=0.1,
+        help="Per-domain seconds between requests (default: 0.1)",
+    )
+    parser.add_argument(
+        "--workers", type=int, default=4,
+        help="Number of concurrent HTTP download threads (default: 4). "
+             "Browser downloads always use 1 dedicated thread.",
     )
     parser.add_argument(
         "--extract-zips", action="store_true", dest="extract_zips",
@@ -2205,6 +2356,7 @@ def main():
         extract_zips=args.extract_zips,
         use_gui=not args.no_gui,
         manifest_path=args.output / "manifest.json",
+        workers=args.workers,
     )
 
     # ── Terminal summary (GUI summary is shown inside download_all) ──

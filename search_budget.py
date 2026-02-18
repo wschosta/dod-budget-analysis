@@ -13,6 +13,37 @@ Usage:
     python search_budget.py --summary
     python search_budget.py --sources
     python search_budget.py --interactive
+
+──────────────────────────────────────────────────────────────────────────────
+TODOs for this file
+──────────────────────────────────────────────────────────────────────────────
+
+TODO FIX-004 [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Fix line-length violations in this file (>100 chars).
+    Affected lines: ~88 (113ch), ~259 (107ch).
+    Steps:
+      1. Break long lines using Python line continuation
+      2. Run pytest tests/test_precommit_checks.py::TestLineLength -v
+    Success: 0 line-length violations in this file.
+
+TODO SEARCH-001 [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Refactor search functions into importable module for API reuse.
+    Steps:
+      1. Extract search_budget_lines() and search_pdf_pages() into
+         a search(conn, query, type, org, limit, offset) function
+      2. Return dicts instead of printing to stdout
+      3. Keep CLI interface as a thin wrapper calling the reusable function
+      4. This allows api/routes/search.py to import and reuse the logic
+    Success: `from search_budget import search` works from API code.
+
+TODO SEARCH-002 [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add --export csv|json flag for structured output.
+    Steps:
+      1. Add --export argument to argparse (choices: csv, json)
+      2. If csv: write results to stdout as CSV with headers
+      3. If json: write results as JSON array
+      4. Default (no flag): keep current human-readable format
+    Success: `python search_budget.py "cyber" --export csv > results.csv` works.
 """
 
 import argparse
@@ -85,7 +116,8 @@ def show_summary(conn: sqlite3.Connection) -> None:
     )
     if request_cols:
         latest_request_col = request_cols[0]
-        fy_label = latest_request_col.replace("amount_", "").replace("_request", "").upper().replace("FY", "FY ")
+        fy_label = (latest_request_col.replace("amount_", "")
+                    .replace("_request", "").upper().replace("FY", "FY "))
         print(f"\n  {'Top ' + fy_label + ' Request by Account':<45} {'$ Thousands':>15}")
         print(f"  {'-'*45} {'-'*15}")
         for r in conn.execute(f"""
@@ -256,7 +288,8 @@ def display_budget_results(results: list, query: str,
         org = r["organization_name"] or ""
 
         print(f"\n  [{org}] {title}")
-        print(f"    Account: {r['account']}  |  Exhibit: {r['exhibit_type']}  |  Sheet: {r['sheet_name']}")
+        print(f"    Account: {r['account']}  |  Exhibit: {r['exhibit_type']}"
+              f"  |  Sheet: {r['sheet_name']}")
         print(f"    FY2024 Actual: {_amt(r['amount_fy2024_actual']):>15}"
               f"    FY2025 Enacted: {_amt(r['amount_fy2025_enacted']):>15}"
               f"    FY2026 Request: {_amt(r['amount_fy2026_request']):>15}")

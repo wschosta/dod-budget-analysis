@@ -7,154 +7,190 @@ Plans and TODOs for the web UI, data visualizations, and user documentation.
 TODOs — Step 3.A (UI Design & Core Features)
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO 3.A1-a: Choose front-end technology and document the decision.
-    Evaluate options for a budget data explorer:
-    1. React + Vite — most ecosystem support, many table/chart libraries
-    2. Svelte/SvelteKit — smaller bundle, simpler reactivity model
-    3. HTMX + Jinja2 templates — no JS build step, server-rendered, simplest
-       deployment (single Python process serves everything)
-    4. Vue 3 — middle ground between React and Svelte
+TODO 3.A1-a [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    DONE — FRONTEND_TECHNOLOGY.md already documents HTMX+Jinja2 decision.
+    Steps:
+      1. Verify FRONTEND_TECHNOLOGY.md is complete
+      2. Add jinja2 + python-multipart to requirements.txt if not present
+    Success: Decision documented; deps in requirements.txt.
 
-    Decision factors: this is a data-heavy CRUD/search app, not a complex SPA.
-    HTMX + Jinja2 is likely sufficient and drastically simplifies deployment
-    (no separate frontend build/serve).  Write a decision record with rationale.
-    Token-efficient tip: ~30 lines of prose.  If choosing HTMX, add
-    jinja2 + python-multipart to requirements.txt.
+TODO 3.A0-a [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
+    Create Flask app that serves HTMX templates alongside the FastAPI API.
+    This is a prerequisite for all 3.A2-* through 3.A7-* TODOs.
+    Steps:
+      1. Create templates/ and static/ directories
+      2. Add Flask or Starlette template serving to the FastAPI app
+         (FastAPI supports Jinja2Templates natively)
+      3. Create templates/base.html with: nav, CSS reset, HTMX CDN include
+      4. Create GET / route that renders templates/index.html
+      5. Add `jinja2` to requirements.txt
+    Success: GET / returns HTML page; HTMX loaded and functional.
 
-TODO 3.A2-a: Design wireframes as ASCII art or simple HTML.
-    Pages needed:
-    1. Landing/search page — search bar, filter sidebar, results area
-    2. Results table — sortable columns, pagination controls
-    3. Detail view — full line item info, source document link, related items
-    4. Download modal — format selection (CSV/JSON), filter summary
-    Token-efficient tip: if using HTMX, the wireframes ARE the templates —
-    write them as Jinja2 HTML directly.  ~4 files, ~50 lines each.
+TODO 3.A2-a [Complexity: MEDIUM] [Tokens: ~3000] [User: NO]
+    Create wireframe templates as Jinja2 HTML (4 files).
+    Dependency: TODO 3.A0-a (Flask/template structure) must exist.
+    Steps:
+      1. templates/index.html — landing page with search bar + filter sidebar
+      2. templates/partials/results.html — table partial for HTMX swap
+      3. templates/partials/detail.html — line item detail panel
+      4. templates/partials/filters.html — filter sidebar partial
+      5. Each ~50 lines of HTML/Jinja2
+    Success: Pages render with placeholder data and correct layout.
 
-TODO 3.A3-a: Build the search/filter form.
-    Filters: fiscal year (multi-select), service/agency (multi-select),
-    appropriation (multi-select), program element (text input),
-    exhibit type (multi-select), free-text search (text input).
-    Each filter populates from the /reference API endpoints.
-    If HTMX: use hx-get to fetch updated results on filter change.
-    ~60 lines of HTML/Jinja2.
+TODO 3.A3-a [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
+    Build the search/filter form with HTMX.
+    Steps:
+      1. In templates/partials/filters.html, create form with:
+         fiscal year multi-select, service multi-select, appropriation
+         multi-select, PE text input, exhibit type multi-select, free text
+      2. Populate each dropdown from /api/v1/reference/* endpoints
+      3. Add hx-get on filter change to reload results partial
+    Success: Changing any filter updates the results table live.
 
-TODO 3.A3-b: Wire filter state to URL query parameters.
-    Ensure that the current filter state is reflected in the URL so users
-    can bookmark and share filtered views.  On page load, read filters from
-    URL params and pre-populate the form.
-    Token-efficient tip: if HTMX, use hx-push-url="true" on the results
-    container; on load, parse window.location.search in a <script> block.
-    ~20 lines of JS.
+TODO 3.A3-b [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Wire filter state to URL query parameters.
+    Steps:
+      1. Add hx-push-url="true" to results container
+      2. On page load, parse window.location.search in <script> block
+      3. Pre-populate form fields from URL params (~20 lines JS)
+    Success: Users can bookmark and share filtered views via URL.
 
-TODO 3.A4-a: Build the results table component.
-    Sortable columns: Service, FY, Appropriation, Program, Amount, Exhibit Type.
-    Pagination: previous/next + page number display.
-    If HTMX: server renders the <tbody> partial; sorting and pagination are
-    hx-get requests that swap the table body.
-    ~80 lines of HTML/Jinja2.
+TODO 3.A4-a [Complexity: MEDIUM] [Tokens: ~3000] [User: NO]
+    Build the results table with server-rendered sorting + pagination.
+    Steps:
+      1. In templates/partials/results.html, render <table> with columns:
+         Service, FY, Appropriation, Program, Amount, Exhibit Type
+      2. Sortable column headers: hx-get with sort param swaps <tbody>
+      3. Pagination: previous/next + page number display
+      4. ~80 lines HTML/Jinja2
+    Success: Click column header → sorted results; click next → page 2.
 
-TODO 3.A4-b: Add column toggling.
-    Let users show/hide columns.  Store preference in localStorage.
-    Token-efficient tip: a small JS function that toggles CSS classes on
-    <th>/<td> elements.  ~25 lines of JS.
+TODO 3.A4-b [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add column toggling (show/hide columns).
+    Steps:
+      1. Add toggle checkboxes above table
+      2. JS function toggles CSS classes on <th>/<td> (~25 lines)
+      3. Store preference in localStorage
+    Success: Hidden columns persist across page reloads.
 
-TODO 3.A5-a: Build the download button/modal.
-    "Download" button triggers a modal showing: current filters summary,
-    estimated row count, format selector (CSV/JSON), and a download link
-    pointing to /api/v1/download with the current filters.
-    ~40 lines of HTML + 10 lines of JS.
+TODO 3.A5-a [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Build the download button/modal.
+    Steps:
+      1. "Download" button opens modal showing: current filters summary,
+         estimated row count, format selector (CSV/JSON)
+      2. Download link points to /api/v1/download with current filters
+      3. ~40 lines HTML + 10 lines JS
+    Success: User can download filtered data as CSV or JSON.
 
-TODO 3.A6-a: Build the detail/drill-down view.
-    When a user clicks a row in the results table, show a detail page/panel:
-    all fields for that line item, link to the source PDF on the DoD
-    Comptroller site, and a "related items" section showing the same program
-    across fiscal years.
-    If HTMX: hx-get="/detail/{id}" swaps a detail panel below the table.
-    ~60 lines of HTML/Jinja2.
+TODO 3.A6-a [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
+    Build the detail/drill-down view.
+    Steps:
+      1. Click row in results table → hx-get="/detail/{id}"
+      2. Detail panel shows: all fields, source PDF link, related items
+         (same program across fiscal years)
+      3. ~60 lines HTML/Jinja2
+    Success: Clicking any row shows full detail below table.
 
-TODO 3.A7-a: Responsive design pass.
-    After the core UI is built, add responsive CSS: stack filters above results
-    on mobile, make the table horizontally scrollable, ensure touch targets
-    are ≥44px.
-    Token-efficient tip: use CSS media queries.  ~30 lines of CSS.
+TODO 3.A7-a [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Responsive design pass.
+    Steps:
+      1. CSS media queries: stack filters above results on mobile
+      2. Table: horizontal scroll on small screens
+      3. Touch targets >= 44px
+      4. ~30 lines of CSS additions
+    Success: UI usable on mobile (320px+ viewport).
 
-TODO 3.A7-b: Accessibility audit.
-    Run axe-core or Lighthouse accessibility audit.  Fix: missing labels,
-    insufficient contrast, missing ARIA attributes, keyboard navigation gaps.
-    Token-efficient tip: this is investigative — run the tool first, then
-    create follow-up TODOs for each finding.  Save for a future session after
-    the UI exists.
+TODO 3.A7-b [Complexity: LOW] [Tokens: ~1000] [User: YES — needs running UI]
+    Accessibility audit.
+    Steps:
+      1. Run Lighthouse or axe-core on the running UI
+      2. Fix: missing labels, contrast, ARIA attrs, keyboard nav
+      3. Create follow-up TODOs for each finding
+    Dependency: All 3.A2-3.A6 must be implemented first.
+    Success: Lighthouse accessibility score >= 90.
 
 
 ──────────────────────────────────────────────────────────────────────────────
-TODOs — Step 3.B (Data Visualization — Stretch)
+TODOs — Step 3.B (Data Visualization — Stretch Goals)
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO 3.B1-a: Year-over-year trend chart.
-    Given a PE number or appropriation, fetch /api/v1/aggregations?group_by=
-    fiscal_year&pe=<pe> and render a line/bar chart.
-    Library options: Chart.js (simple, no build step), Observable Plot (modern,
-    lightweight), D3 (most flexible, most complex).
-    Token-efficient tip: Chart.js via CDN is ~5 lines of config.  Use a
-    <canvas> element and a small <script> block.  ~30 lines total.
+TODO 3.B1-a [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Year-over-year trend chart (Chart.js via CDN).
+    Steps:
+      1. Fetch /api/v1/aggregations?group_by=fiscal_year&pe=<pe>
+      2. Render line/bar chart in <canvas> element
+      3. ~30 lines total (5 lines Chart.js config + HTML)
+    Success: Selecting a PE shows a multi-year budget trend line.
 
-TODO 3.B2-a: Service comparison chart.
-    Bar chart comparing budget amounts across services for a selected FY.
-    Fetch /api/v1/aggregations?group_by=service&fiscal_year=<fy>.
-    Same library as TODO 3.B1-a for consistency.  ~25 lines.
+TODO 3.B2-a [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Service comparison bar chart.
+    Steps:
+      1. Fetch /api/v1/aggregations?group_by=service&fiscal_year=<fy>
+      2. Render horizontal bar chart comparing service budgets
+      3. Same Chart.js library as 3.B1-a
+    Success: Bar chart shows relative budget sizes per service.
 
-TODO 3.B3-a: Top-N dashboard panel.
-    Show top 10 budget line items by amount for the current filter set.
-    Horizontal bar chart.  Fetch from /api/v1/budget-lines?sort=-amount&limit=10.
-    ~25 lines.
+TODO 3.B3-a [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Top-N dashboard panel (top 10 budget lines).
+    Steps:
+      1. Fetch /api/v1/budget-lines?sort=-amount&limit=10
+      2. Render horizontal bar chart
+    Success: Dashboard shows largest budget items for current filters.
 
 
 ──────────────────────────────────────────────────────────────────────────────
 TODOs — Step 3.C (User Documentation)
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO 3.C1-a: Write Getting Started guide (docs/getting_started.md).
-    Sections: What is this tool?, What data is included?, How to search,
-    How to filter, How to download.  Plain language, no jargon.
-    Target audience: Congressional staffers, journalists, policy researchers.
-    ~150 lines of markdown.
+TODO 3.C1-a [Complexity: LOW] [Tokens: ~3000] [User: NO]
+    Write Getting Started guide (docs/getting_started.md).
+    Steps:
+      1. Sections: What is this?, Data included, How to search/filter/download
+      2. Plain language for: Congressional staffers, journalists, researchers
+      3. ~150 lines of markdown
+    Success: Non-technical users can use the tool after reading this.
 
-TODO 3.C2-a: Write data dictionary (docs/data_dictionary.md).
-    For every field visible in the UI and API: field name, type, description,
-    source (which exhibit/column it comes from), caveats.
-    Token-efficient tip: generate a skeleton from the schema DDL, then add
-    prose descriptions.  ~200 lines.
+TODO 3.C2-a [Complexity: MEDIUM] [Tokens: ~4000] [User: NO]
+    Write data dictionary (docs/data_dictionary.md).
+    Steps:
+      1. Generate skeleton from schema DDL (one entry per field)
+      2. For each: field name, type, description, source exhibit, caveats
+      3. ~200 lines of markdown
+    Success: Every field in UI/API is documented with provenance.
 
-TODO 3.C3-a: Write FAQ (docs/faq.md).
-    Questions to answer:
-    - How current is the data?
-    - Why are some years missing?
-    - What does "thousands of dollars" mean?
-    - What's the difference between PB and enacted?
-    - Why don't service totals match the DoD total exactly?
-    - Can I cite this tool in a report?
-    ~100 lines.
+TODO 3.C3-a [Complexity: LOW] [Tokens: ~2000] [User: NO]
+    Write FAQ (docs/faq.md).
+    Steps:
+      1. Answer: data currency, missing years, "thousands" meaning,
+         PB vs enacted, service total discrepancies, citation guidance
+      2. ~100 lines of markdown
+    Success: Common user questions answered.
 
-TODO 3.C4-a: Generate OpenAPI documentation.
-    If using FastAPI, this is automatic at /docs.  Customize: add descriptions
-    to each endpoint, add example requests/responses to Pydantic models,
-    add a top-level API description with usage guide.
-    Token-efficient tip: this is all done via docstrings and Pydantic Field()
-    descriptions — no separate doc to write.  ~30 lines of additions to the
-    existing route/model code.
+TODO 3.C4-a [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Customize OpenAPI documentation.
+    Steps:
+      1. Add rich descriptions to each FastAPI endpoint docstring
+      2. Add example requests/responses to Pydantic Field() definitions
+      3. Add top-level API description in create_app()
+    Dependency: Requires API endpoints to exist (Phase 2).
+    Success: /docs page has complete, useful API documentation.
 
-TODO 3.C5-a: Add contextual help to the UI.
-    For each filter and table column, add a tooltip (title attribute or a
-    small info icon with a popover) explaining what it means.  Derive text
-    from the data dictionary.
-    Token-efficient tip: a CSS-only tooltip using ::after pseudo-element and
-    data-tooltip attributes.  ~20 lines of CSS + HTML attributes.
+TODO 3.C5-a [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add contextual help tooltips to the UI.
+    Steps:
+      1. Add data-tooltip attributes to filter labels + table headers
+      2. CSS-only tooltip using ::after pseudo-element (~20 lines)
+      3. Derive tooltip text from data dictionary
+    Success: Hovering any filter/column shows explanatory tooltip.
 
-TODO 3.C6-a: Write methodology & limitations page (docs/methodology.md).
-    Explain: data sources (URLs), collection process, parsing approach,
-    known limitations (PDF extraction accuracy, coverage gaps per FY/service),
-    how to report errors.
-    ~120 lines.
+TODO 3.C6-a [Complexity: LOW] [Tokens: ~2500] [User: NO]
+    Write methodology & limitations page (docs/methodology.md).
+    Steps:
+      1. Explain: data sources, collection process, parsing approach
+      2. Document: known limitations (PDF accuracy, coverage gaps)
+      3. Include: how to report errors
+      4. ~120 lines of markdown
+    Success: Transparency about data quality and collection methods.
 """
 
 # Placeholder — front-end structure will be created when implementation begins.
