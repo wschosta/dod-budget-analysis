@@ -213,13 +213,14 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             budget_type TEXT
         );
 
-        -- Full-text search index for budget lines
+        -- Full-text search index for budget lines (Step 1.B4-a: pe_number added)
         CREATE VIRTUAL TABLE IF NOT EXISTS budget_lines_fts USING fts5(
             account_title,
             budget_activity_title,
             sub_activity_title,
             line_item_title,
             organization_name,
+            pe_number,
             content='budget_lines',
             content_rowid='id'
         );
@@ -227,16 +228,19 @@ def create_database(db_path: Path) -> sqlite3.Connection:
         -- Triggers to keep FTS in sync
         CREATE TRIGGER IF NOT EXISTS budget_lines_ai AFTER INSERT ON budget_lines BEGIN
             INSERT INTO budget_lines_fts(rowid, account_title, budget_activity_title,
-                sub_activity_title, line_item_title, organization_name)
+                sub_activity_title, line_item_title, organization_name, pe_number)
             VALUES (new.id, new.account_title, new.budget_activity_title,
-                new.sub_activity_title, new.line_item_title, new.organization_name);
+                new.sub_activity_title, new.line_item_title, new.organization_name,
+                new.pe_number);
         END;
 
         CREATE TRIGGER IF NOT EXISTS budget_lines_ad AFTER DELETE ON budget_lines BEGIN
             INSERT INTO budget_lines_fts(budget_lines_fts, rowid, account_title,
-                budget_activity_title, sub_activity_title, line_item_title, organization_name)
+                budget_activity_title, sub_activity_title, line_item_title,
+                organization_name, pe_number)
             VALUES ('delete', old.id, old.account_title, old.budget_activity_title,
-                old.sub_activity_title, old.line_item_title, old.organization_name);
+                old.sub_activity_title, old.line_item_title, old.organization_name,
+                old.pe_number);
         END;
 
         -- PDF document pages

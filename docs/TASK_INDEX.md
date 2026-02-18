@@ -44,7 +44,7 @@ otherwise noted.
 | 1.B1 | Catalog all exhibit types | DATA PROCESSING | [TODO](TODO_1B1_catalog_exhibit_types.md) | `docs/wiki/Exhibit-Types.md` |
 | 1.B2 | Standardize column mappings | AI-agent + DATA PROCESSING | [TODO](TODO_1B2_standardize_column_mappings.md) | — |
 | 1.B3 | Normalize monetary values | AI-agent ✅ **Complete** | [TODO](TODO_1B3_normalize_monetary_values.md) | `build_budget_db.py`, `search_budget.py`, `validate_budget_db.py` |
-| 1.B4 | Extract PE/line-item metadata | AI-agent + DATA PROCESSING | [TODO](TODO_1B4_extract_pe_metadata.md) | — |
+| 1.B4 | Extract PE metadata | AI-agent ✅ **Complete** | [TODO](TODO_1B4_extract_pe_metadata.md) | `build_budget_db.py`, `docs/wiki/Data-Dictionary.md` |
 | 1.B5 | PDF extraction quality audit | ENVIRONMENT TESTING | [TODO](TODO_1B5_pdf_extraction_audit.md) | — |
 | 1.B6 | Build validation suite | AI-agent ✅ **Complete** | [TODO](TODO_1B6_build_validation_suite.md) | `validate_budget_db.py` |
 
