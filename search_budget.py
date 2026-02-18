@@ -437,6 +437,7 @@ def export_results(budget_results: list, pdf_results: list, query: str, fmt: str
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
+    """Parse CLI arguments and execute the requested search, summary, or interactive mode."""
     parser = argparse.ArgumentParser(
         description="Search the DoD budget database",
         formatter_class=argparse.RawDescriptionHelpFormatter,

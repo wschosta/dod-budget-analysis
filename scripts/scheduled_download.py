@@ -89,6 +89,7 @@ def run_scheduled_download(output_dir: Path, log_file: Path | None = None) -> in
 
 
 def main():
+    """Parse CLI arguments and run the scheduled (unattended) download pipeline."""
     parser = argparse.ArgumentParser(
         description="Unattended scheduled download of DoD budget documents"
     )
