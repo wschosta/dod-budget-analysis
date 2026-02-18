@@ -702,6 +702,7 @@ def _get_browser_context():
 
 
 def _close_browser():
+    """Clean up and close the Playwright browser instance."""
     global _pw_instance, _pw_browser, _pw_context
     if _pw_browser:
         _pw_browser.close()
