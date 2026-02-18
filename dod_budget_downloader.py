@@ -5,11 +5,12 @@ Downloads budget documents (PDFs, Excel files, ZIPs) from the DoD Comptroller
 website and service-specific budget pages for selected fiscal years.
 
 Sources:
-  - comptroller : Main DoD summary budget documents (comptroller.war.gov)
-  - defense-wide: Defense Wide budget justification books (comptroller.war.gov)
-  - army        : US Army budget materials (asafm.army.mil)
-  - navy        : US Navy/Marine Corps budget materials (secnav.navy.mil)
-  - airforce    : US Air Force & Space Force budget materials (saffm.hq.af.mil)
+  - comptroller  : Main DoD summary budget documents (comptroller.war.gov)
+  - defense-wide : Defense Wide budget justification books (comptroller.war.gov)
+  - army         : US Army budget materials (asafm.army.mil)
+  - navy         : US Navy/Marine Corps budget materials (secnav.navy.mil)
+  - navy-archive : US Navy archive alternate source (secnav.navy.mil/fmc/fmb)
+  - airforce     : US Air Force & Space Force budget materials (saffm.hq.af.mil)
 
 Requirements:
   pip install requests beautifulsoup4 playwright
@@ -183,10 +184,10 @@ DOWNLOADABLE_EXTENSIONS = {".pdf", ".xlsx", ".xls", ".zip", ".csv"}
 IGNORED_HOSTS = {"dam.defense.gov"}
 DEFAULT_OUTPUT_DIR = Path("DoD_Budget_Documents")
 
-ALL_SOURCES = ["comptroller", "defense-wide", "army", "navy", "airforce"]
+ALL_SOURCES = ["comptroller", "defense-wide", "army", "navy", "navy-archive", "airforce"]
 
 # Sources that require a real browser due to WAF/bot protection
-BROWSER_REQUIRED_SOURCES = {"army", "navy", "airforce"}
+BROWSER_REQUIRED_SOURCES = {"army", "navy", "navy-archive", "airforce"}
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -217,14 +218,34 @@ SERVICE_PAGE_TEMPLATES = {
         "url": "https://www.saffm.hq.af.mil/FM-Resources/Budget/Air-Force-Presidents-Budget-FY{fy2}/",
         "label": "US Air Force",
     },
-} # TODO: add alternate navy source: https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx
+    "navy-archive": {
+        "url": "https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx",
+        "label": "US Navy Archive",
+    },
+}
 
 
 # ── Progress Tracker ──────────────────────────────────────────────────────────
 
-# TODO: Extract shared helper methods (_format_bytes, _elapsed) from ProgressTracker
-# and GuiProgressTracker into a base class or module-level utilities to eliminate
-# the duplicated implementations in both classes.
+def _format_bytes(b: int) -> str:
+    """Format bytes into human-readable size string."""
+    if b < 1024 * 1024:
+        return f"{b / 1024:.0f} KB"
+    if b < 1024 * 1024 * 1024:
+        return f"{b / (1024 * 1024):.1f} MB"
+    return f"{b / (1024 * 1024 * 1024):.2f} GB"
+
+
+def _elapsed(start_time: float) -> str:
+    """Format elapsed time from start_time to now as human-readable string."""
+    secs = int(time.time() - start_time)
+    m, s = divmod(secs, 60)
+    h, m = divmod(m, 60)
+    if h:
+        return f"{h}h {m:02d}m {s:02d}s"
+    return f"{m}m {s:02d}s"
+
+
 class ProgressTracker:
     """Tracks overall download session progress and renders status bars."""
 
@@ -244,21 +265,6 @@ class ProgressTracker:
     def processed(self) -> int:
         return self.completed + self.skipped + self.failed
 
-    def _elapsed(self) -> str:
-        secs = int(time.time() - self.start_time)
-        m, s = divmod(secs, 60)
-        h, m = divmod(m, 60)
-        if h:
-            return f"{h}h {m:02d}m {s:02d}s"
-        return f"{m}m {s:02d}s"
-
-    def _format_bytes(self, b: int) -> str:
-        if b < 1024 * 1024:
-            return f"{b / 1024:.0f} KB"
-        if b < 1024 * 1024 * 1024:
-            return f"{b / (1024 * 1024):.1f} MB"
-        return f"{b / (1024 * 1024 * 1024):.2f} GB"
-
     def _bar(self, fraction: float, width: int = 30) -> str:
         filled = int(width * fraction)
         return f"[{'#' * filled}{'-' * (width - filled)}]"
@@ -272,8 +278,8 @@ class ProgressTracker:
         frac = self.processed / self.total_files if self.total_files else 0
         pct = frac * 100
         bar = self._bar(frac, 25)
-        dl = self._format_bytes(self.total_bytes)
-        elapsed = self._elapsed()
+        dl = _format_bytes(self.total_bytes)
+        elapsed = _elapsed(self.start_time)
         remaining = self.total_files - self.processed
         line = (
             f"\r  Overall: {bar} {pct:5.1f}%  "
@@ -295,7 +301,7 @@ class ProgressTracker:
         self._last_progress_time = now
 
         if total <= 0:
-            print(f"\r    Downloading {filename}... {self._format_bytes(downloaded)}",
+            print(f"\r    Downloading {filename}... {_format_bytes(downloaded)}",
                   end="", flush=True)
             return
 
@@ -304,7 +310,7 @@ class ProgressTracker:
         bar = self._bar(frac, 20)
         elapsed = time.time() - file_start
         speed = downloaded / elapsed if elapsed > 0 else 0
-        speed_str = f"{self._format_bytes(int(speed))}/s"
+        speed_str = f"{_format_bytes(int(speed))}/s"
         eta = ""
         if speed > 0:
             remaining_bytes = total - downloaded
@@ -317,7 +323,7 @@ class ProgressTracker:
         name = filename[:40] + "..." if len(filename) > 43 else filename
         line = (
             f"\r    {name}  {bar} {pct:5.1f}%  "
-            f"{self._format_bytes(downloaded)}/{self._format_bytes(total)}  "
+            f"{_format_bytes(downloaded)}/{_format_bytes(total)}  "
             f"{speed_str}  {eta}"
         )
         print(f"{line:<{self.term_width}}", end="", flush=True)
@@ -336,7 +342,7 @@ class ProgressTracker:
         elif status == "fail":
             self.failed += 1
 
-        size_str = self._format_bytes(size) if size > 0 else ""
+        size_str = _format_bytes(size) if size > 0 else ""
         line = f"    [{tag}] {filename} ({size_str})" if size_str else f"    [{tag}] {filename}"
         print(f"\r{line:<{self.term_width}}")
         self.print_overall()
@@ -375,21 +381,6 @@ class GuiProgressTracker:
     @property
     def processed(self) -> int:
         return self.completed + self.skipped + self.failed
-
-    def _format_bytes(self, b: int) -> str:
-        if b < 1024 * 1024:
-            return f"{b / 1024:.0f} KB"
-        if b < 1024 * 1024 * 1024:
-            return f"{b / (1024 * 1024):.1f} MB"
-        return f"{b / (1024 * 1024 * 1024):.2f} GB"
-
-    def _elapsed(self) -> str:
-        secs = int(time.time() - self.start_time)
-        m, s = divmod(secs, 60)
-        h, m = divmod(m, 60)
-        if h:
-            return f"{h}h {m:02d}m {s:02d}s"
-        return f"{m}m {s:02d}s"
 
     def _run_gui(self):
         import tkinter as tk
@@ -490,8 +481,8 @@ class GuiProgressTracker:
         self._overall_lbl.set(
             f"{frac*100:.1f}%  -  {self.processed} / {self.total_files} files")
         self._stats_var.set(
-            f"{self._format_bytes(self.total_bytes)} downloaded  |  "
-            f"{self._elapsed()} elapsed  |  "
+            f"{_format_bytes(self.total_bytes)} downloaded  |  "
+            f"{_elapsed(self.start_time)} elapsed  |  "
             f"{self.total_files - self.processed} remaining")
         self._count_var.set(
             f"Downloaded: {self.completed}    "
@@ -512,14 +503,14 @@ class GuiProgressTracker:
                 self._file_bar["value"] = file_frac * 100
                 elapsed = time.time() - self._file_start
                 speed = dl / elapsed if elapsed > 0 else 0
-                speed_str = f"{self._format_bytes(int(speed))}/s"
+                speed_str = f"{_format_bytes(int(speed))}/s"
                 self._file_lbl.set(fname)
                 self._file_stats_var.set(
-                    f"{self._format_bytes(dl)} / {self._format_bytes(total)}  "
+                    f"{_format_bytes(dl)} / {_format_bytes(total)}  "
                     f"  {speed_str}")
             else:
                 self._file_bar["value"] = 0
-                self._file_lbl.set(f"{fname}  ({self._format_bytes(dl)})")
+                self._file_lbl.set(f"{fname}  ({_format_bytes(dl)})")
                 self._file_stats_var.set("")
 
         # Log lines
@@ -565,7 +556,7 @@ class GuiProgressTracker:
         elif status == "fail":
             self.failed += 1
 
-        size_str = f" ({self._format_bytes(size)})" if size > 0 else ""
+        size_str = f" ({_format_bytes(size)})" if size > 0 else ""
         log_entry = f"[{tag}] {filename}{size_str}"
         self._log_lines.append(log_entry)
         if status == "fail":
@@ -711,6 +702,7 @@ def _get_browser_context():
 
 
 def _close_browser():
+    """Clean up and close the Playwright browser instance."""
     global _pw_instance, _pw_browser, _pw_context
     if _pw_browser:
         _pw_browser.close()
@@ -737,15 +729,10 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
                 btn.click()
                 page.wait_for_timeout(1500)
 
-        # TODO: The downloadable extensions list is duplicated between the Python
-        # constant DOWNLOADABLE_EXTENSIONS and the JavaScript array below. If one
-        # is updated without the other, file discovery will be inconsistent.
-        # Consider injecting the Python set into the JS via page.evaluate args.
-
         # Extract links via JavaScript in the browser
         js_filter = f"'{text_filter}'" if text_filter else "null"
-        raw = page.evaluate(f"""() => {{
-            const tf = {js_filter};
+        raw = page.evaluate(f"""(exts, tf) => {{
+            const tf_arg = tf;
             const allLinks = Array.from(document.querySelectorAll('a[href]'));
             const files = [];
             const seen = new Set();
@@ -755,9 +742,8 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
                 let path, host;
                 try {{ const u = new URL(href); path = u.pathname.toLowerCase(); host = u.hostname.toLowerCase(); }} catch {{ continue; }}
                 if (ignoredHosts.has(host)) continue;
-                const exts = ['.pdf', '.xlsx', '.xls', '.zip', '.csv'];
                 if (!exts.some(e => path.endsWith(e))) continue;
-                if (tf && !href.toLowerCase().includes(tf.toLowerCase())) continue;
+                if (tf_arg && !href.toLowerCase().includes(tf_arg.toLowerCase())) continue;
                 if (seen.has(path)) continue;
                 seen.add(path);
                 const text = a.textContent.trim();
@@ -766,7 +752,7 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
                 files.push({{ name: text || filename, url: href, filename: filename, extension: ext }});
             }}
             return files;
-        }}""")
+        }}""", list(DOWNLOADABLE_EXTENSIONS), text_filter)
 
         return [_clean_file_entry(f) for f in raw]
 
@@ -774,10 +760,25 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
         page.close()
 
 
-# TODO: The three download strategies below share identical page setup boilerplate
-# (new_page, add_init_script, goto origin, wait). Extract a _new_browser_page(url)
-# helper that returns a page already navigated to the file's origin, reducing the
-# ~50 lines of repeated setup/teardown to a single call per strategy.
+def _new_browser_page(ctx, url: str):
+    """Create and initialize a new browser page navigated to the URL's origin.
+
+    Sets up anti-bot/webdriver detection bypass and navigates to the origin
+    to establish cookies/session before strategy-specific actions.
+
+    Returns the page object. Caller is responsible for closing it.
+    """
+    page = ctx.new_page()
+    page.add_init_script(
+        'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+    )
+    parsed = urlparse(url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    page.goto(origin, timeout=15000, wait_until="domcontentloaded")
+    page.wait_for_timeout(500)
+    return page
+
+
 def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -> bool:
     """Download a file using Playwright's browser context to bypass WAF.
 
@@ -795,16 +796,7 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
 
     # Strategy 1: Use page.request API (fetch with browser session/cookies, no UI)
     try:
-        page = ctx.new_page()
-        page.add_init_script(
-            'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-        )
-        # First navigate to the domain so cookies/session are established
-        parsed = urlparse(url)
-        origin = f"{parsed.scheme}://{parsed.netloc}"
-        page.goto(origin, timeout=15000, wait_until="domcontentloaded")
-        page.wait_for_timeout(500)
-
+        page = _new_browser_page(ctx, url)
         resp = page.request.get(url, timeout=120000)
         if resp.ok and len(resp.body()) > 0:
             dest_path.write_bytes(resp.body())
@@ -819,16 +811,7 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
 
     # Strategy 2: Trigger download via injected anchor element
     try:
-        page = ctx.new_page()
-        page.add_init_script(
-            'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-        )
-        # Navigate to file's origin first
-        parsed = urlparse(url)
-        origin = f"{parsed.scheme}://{parsed.netloc}"
-        page.goto(origin, timeout=15000, wait_until="domcontentloaded")
-        page.wait_for_timeout(500)
-
+        page = _new_browser_page(ctx, url)
         # Escape the URL for JS
         safe_url = url.replace("'", "\\'")
         with page.expect_download(timeout=120000) as download_info:
@@ -859,6 +842,7 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
         page.add_init_script(
             'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
         )
+        # Navigate directly to the URL (bypasses origin setup for simpler direct fetch)
         resp = page.goto(url, timeout=120000, wait_until="load")
         if resp and resp.ok:
             body = resp.body()
@@ -929,6 +913,7 @@ def _extract_downloadable_links(soup: BeautifulSoup, page_url: str,
 
 
 def _sanitize_filename(name: str) -> str:
+    """Remove invalid filesystem characters and URL query parameters from filename."""
     if "?" in name:
         name = name.split("?")[0]
     for ch in '<>:"/\\|?*':
@@ -937,6 +922,7 @@ def _sanitize_filename(name: str) -> str:
 
 
 def _is_browser_source(source: str) -> bool:
+    """Check if a source requires browser access to work around WAF protection."""
     return source in BROWSER_REQUIRED_SOURCES
 
 
@@ -1000,6 +986,15 @@ def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
     return files
 
 
+# ── Navy Archive (browser required) ────────────────────────────────────────────
+
+def discover_navy_archive_files(_session: requests.Session, year: str) -> list[dict]:
+    url = SERVICE_PAGE_TEMPLATES["navy-archive"]["url"]
+    print(f"  [Navy Archive] Scanning FY{year} (browser)...")
+    files = _browser_extract_links(url, text_filter=f"/{year}/")
+    return files
+
+
 # ── Air Force (browser required) ─────────────────────────────────────────────
 
 def discover_airforce_files(_session: requests.Session, year: str) -> list[dict]:
@@ -1016,6 +1011,7 @@ SOURCE_DISCOVERERS = {
     "defense-wide": discover_defense_wide_files,
     "army": discover_army_files,
     "navy": discover_navy_files,
+    "navy-archive": discover_navy_archive_files,
     "airforce": discover_airforce_files,
 }
 
@@ -1166,16 +1162,27 @@ def list_files(all_files: dict[str, dict[str, list[dict]]]) -> None:
 
 # ── Interactive ───────────────────────────────────────────────────────────────
 
-# TODO: interactive_select_years and interactive_select_sources have nearly
-# identical structure (display numbered list, parse comma-separated input, validate).
-# Refactor into a generic _interactive_select(title, items, all_label) helper.
-def interactive_select_years(available: dict[str, str]) -> list[str]:
-    years = list(available.keys())
-    print("\nAvailable Fiscal Years:")
-    print("-" * 40)
-    for i, year in enumerate(years, 1):
-        print(f"  {i:2d}. FY{year}")
-    print(f"  {len(years)+1:2d}. All fiscal years")
+def _interactive_select(title: str, items: list[str], item_labels: dict[str, str] | None = None,
+                        all_label: str = "All") -> list[str]:
+    """Generic interactive selection menu for numbered list input.
+
+    Args:
+        title: Header to display above the menu
+        items: List of items to choose from
+        item_labels: Optional dict mapping items to display labels (defaults to items themselves)
+        all_label: Label for the "All items" option
+
+    Returns:
+        List of selected items
+    """
+    if item_labels is None:
+        item_labels = {item: item for item in items}
+
+    print(f"\n{title}")
+    print("-" * 50)
+    for i, item in enumerate(items, 1):
+        print(f"  {i}. {item_labels.get(item, item)}")
+    print(f"  {len(items)+1}. All {all_label.lower()}")
     print()
 
     while True:
@@ -1190,20 +1197,27 @@ def interactive_select_years(available: dict[str, str]) -> list[str]:
             print("Invalid input. Please enter numbers separated by commas.")
             continue
 
-        if len(years) + 1 in choices:
-            return years
+        # Check if "all" was selected
+        if len(items) + 1 in choices:
+            return items
 
         selected = []
         valid = True
         for c in choices:
-            if 1 <= c <= len(years):
-                selected.append(years[c - 1])
+            if 1 <= c <= len(items):
+                selected.append(items[c - 1])
             else:
                 print(f"Invalid choice: {c}")
                 valid = False
                 break
         if valid and selected:
             return selected
+
+
+def interactive_select_years(available: dict[str, str]) -> list[str]:
+    years = list(available.keys())
+    year_labels = {year: f"FY{year}" for year in years}
+    return _interactive_select("Available Fiscal Years:", years, year_labels, "fiscal years")
 
 
 def interactive_select_sources() -> list[str]:
@@ -1212,41 +1226,10 @@ def interactive_select_sources() -> list[str]:
         "defense-wide": "Defense Wide (budget justification books)",
         "army": "US Army",
         "navy": "US Navy / Marine Corps",
+        "navy-archive": "US Navy Archive",
         "airforce": "US Air Force / Space Force",
     }
-    print("\nAvailable Sources:")
-    print("-" * 50)
-    for i, src in enumerate(ALL_SOURCES, 1):
-        print(f"  {i}. {labels[src]}")
-    print(f"  {len(ALL_SOURCES)+1}. All sources")
-    print()
-
-    while True:
-        raw = input(
-            "Enter numbers separated by commas (e.g. 1,2,3) or 'q' to quit: "
-        ).strip()
-        if raw.lower() == "q":
-            sys.exit(0)
-        try:
-            choices = [int(x.strip()) for x in raw.split(",")]
-        except ValueError:
-            print("Invalid input.")
-            continue
-
-        if len(ALL_SOURCES) + 1 in choices:
-            return list(ALL_SOURCES)
-
-        selected = []
-        valid = True
-        for c in choices:
-            if 1 <= c <= len(ALL_SOURCES):
-                selected.append(ALL_SOURCES[c - 1])
-            else:
-                print(f"Invalid choice: {c}")
-                valid = False
-                break
-        if valid and selected:
-            return selected
+    return _interactive_select("Available Sources:", list(ALL_SOURCES), labels, "sources")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────

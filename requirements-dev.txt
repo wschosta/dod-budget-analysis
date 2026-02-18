@@ -2,3 +2,5 @@
 -r requirements.txt
 pytest>=7.0
 pytest-cov>=4.0
+fpdf2>=2.7  # For PDF fixture generation (test fixtures)
+black>=23.0  # Code formatting
