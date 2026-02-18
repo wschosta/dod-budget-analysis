@@ -316,6 +316,30 @@ def main():
     else:
         checker.skip("Database schema check", "Database not created yet")
 
+    # ── Checkpoint System Tests ──
+    print("\nCheckpoint System Tests...")
+
+    def check_checkpoint_system():
+        """Verify checkpoint functions exist and work."""
+        try:
+            from build_budget_db import (
+                _create_session_id,
+                _save_checkpoint,
+                _mark_file_processed,
+                _get_last_checkpoint,
+                _get_processed_files,
+                _mark_session_complete,
+            )
+
+            # Test session ID creation
+            sid = _create_session_id()
+            assert sid.startswith("sess-"), "Invalid session ID format"
+
+        except ImportError as e:
+            raise AssertionError(f"Checkpoint functions not available: {e}")
+
+    checker.check("Checkpoint system functions available", check_checkpoint_system)
+
     # ── Optimization Tests ──
     print("\nOptimization Tests...")
 

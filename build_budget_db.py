@@ -280,6 +280,41 @@ def create_database(db_path: Path) -> sqlite3.Connection:
         );
         CREATE INDEX IF NOT EXISTS idx_extraction_issues_file
             ON extraction_issues(file_path);
+
+        -- Build progress tracking (supports resume capability)
+        CREATE TABLE IF NOT EXISTS build_progress (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL UNIQUE,
+            checkpoint_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+            files_processed INTEGER DEFAULT 0,
+            total_files INTEGER,
+            pages_processed INTEGER DEFAULT 0,
+            rows_inserted INTEGER DEFAULT 0,
+            bytes_processed INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'in_progress',
+            last_file TEXT,
+            last_file_status TEXT,
+            notes TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_build_progress_session
+            ON build_progress(session_id);
+        CREATE INDEX IF NOT EXISTS idx_build_progress_status
+            ON build_progress(status);
+
+        -- Processed files list (for resume detection)
+        CREATE TABLE IF NOT EXISTS processed_files (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            file_type TEXT,
+            rows_count INTEGER,
+            pages_count INTEGER,
+            processed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(session_id, file_path),
+            FOREIGN KEY(session_id) REFERENCES build_progress(session_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_processed_files_session
+            ON processed_files(session_id);
     """)
 
     conn.commit()
@@ -816,8 +851,96 @@ def _register_data_source(conn: sqlite3.Connection, docs_dir: Path):
     conn.commit()
 
 
+# ── Checkpoint Management ────────────────────────────────────────────────────
+
+def _create_session_id() -> str:
+    """Create a unique session ID for this build session."""
+    from datetime import datetime
+    import uuid
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    unique_id = str(uuid.uuid4())[:8]  # Use first 8 chars of UUID
+    return f"sess-{timestamp}-{unique_id}"
+
+
+def _save_checkpoint(conn: sqlite3.Connection, session_id: str, files_processed: int,
+                     total_files: int, pages_processed: int, rows_inserted: int,
+                     bytes_processed: int, last_file: str = None,
+                     last_file_status: str = None, notes: str = None) -> None:
+    """Save current build progress as a checkpoint.
+
+    This allows resuming from a checkpoint without reprocessing files.
+    """
+    conn.execute("""
+        INSERT INTO build_progress
+        (session_id, files_processed, total_files, pages_processed, rows_inserted,
+         bytes_processed, status, last_file, last_file_status, notes, checkpoint_time)
+        VALUES (?, ?, ?, ?, ?, ?, 'in_progress', ?, ?, ?, datetime('now'))
+        ON CONFLICT(session_id) DO UPDATE SET
+            files_processed = excluded.files_processed,
+            total_files = excluded.total_files,
+            pages_processed = excluded.pages_processed,
+            rows_inserted = excluded.rows_inserted,
+            bytes_processed = excluded.bytes_processed,
+            last_file = excluded.last_file,
+            last_file_status = excluded.last_file_status,
+            notes = excluded.notes,
+            checkpoint_time = datetime('now')
+    """, (session_id, files_processed, total_files, pages_processed, rows_inserted,
+          bytes_processed, last_file, last_file_status, notes))
+    conn.commit()
+
+
+def _mark_file_processed(conn: sqlite3.Connection, session_id: str, file_path: str,
+                         file_type: str, rows_count: int = 0, pages_count: int = 0) -> None:
+    """Mark a file as processed in the current session."""
+    conn.execute("""
+        INSERT INTO processed_files
+        (session_id, file_path, file_type, rows_count, pages_count, processed_at)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))
+    """, (session_id, str(file_path), file_type, rows_count, pages_count))
+    conn.commit()
+
+
+def _get_last_checkpoint(conn: sqlite3.Connection) -> dict | None:
+    """Get the last checkpoint for resuming.
+
+    Returns dict with session info or None if no checkpoint found.
+    """
+    cursor = conn.execute("""
+        SELECT * FROM build_progress
+        WHERE status = 'in_progress'
+        ORDER BY checkpoint_time DESC
+        LIMIT 1
+    """)
+    row = cursor.fetchone()
+    if not row:
+        return None
+
+    # Convert to dict
+    cols = [desc[0] for desc in cursor.description]
+    return dict(zip(cols, row))
+
+
+def _get_processed_files(conn: sqlite3.Connection, session_id: str) -> set:
+    """Get set of file paths already processed in session."""
+    cursor = conn.execute("""
+        SELECT file_path FROM processed_files WHERE session_id = ?
+    """, (session_id,))
+    return {row[0] for row in cursor.fetchall()}
+
+
+def _mark_session_complete(conn: sqlite3.Connection, session_id: str, notes: str = None) -> None:
+    """Mark a session as completed."""
+    conn.execute("""
+        UPDATE build_progress
+        SET status = 'completed', notes = ?
+        WHERE session_id = ?
+    """, (notes, session_id))
+    conn.commit()
+
+
 def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
-                   progress_callback=None):
+                   progress_callback=None, resume: bool = False):
     """Build or incrementally update the budget database.
 
     Args:
@@ -827,6 +950,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         progress_callback: Optional callable(phase, current, total, detail)
             where phase is 'scan', 'excel', 'pdf', 'index', or 'done',
             current/total are progress counts, and detail is a status string.
+        resume: If True, attempt to resume from last checkpoint.
     """
     def _progress(phase, current, total, detail=""):
         if progress_callback:
