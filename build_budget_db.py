@@ -118,15 +118,21 @@ ORG_MAP = {
     "D": "Defense-Wide", "M": "Marine Corps", "J": "Joint Staff",
 }
 
-# Map exhibit type prefixes to readable names
+# Map exhibit type prefixes to readable names (Step 1.B1-g)
 EXHIBIT_TYPES = {
-    "m1": "Military Personnel (M-1)",
-    "o1": "Operation & Maintenance (O-1)",
-    "p1": "Procurement (P-1)",
+    # Summary exhibits
+    "m1":  "Military Personnel (M-1)",
+    "o1":  "Operation & Maintenance (O-1)",
+    "p1":  "Procurement (P-1)",
     "p1r": "Procurement (P-1R Reserves)",
-    "r1": "RDT&E (R-1)",
+    "r1":  "RDT&E (R-1)",
     "rf1": "Revolving Funds (RF-1)",
-    "c1": "Military Construction (C-1)",
+    "c1":  "Military Construction (C-1)",
+    # Detail exhibits
+    "p5":  "Procurement Detail (P-5)",
+    "r2":  "RDT&E PE Detail (R-2)",
+    "r3":  "RDT&E Project Schedule (R-3)",
+    "r4":  "RDT&E Budget Item Justification (R-4)",
 }
 
 
@@ -348,12 +354,6 @@ def create_database(db_path: Path) -> sqlite3.Connection:
 _safe_float = safe_float
 
 
-# TODO 1.B1-g [EASY, ~800 tokens]: Extend _detect_exhibit_type() to recognise
-#   detail exhibit types that exist in EXHIBIT_CATALOG but are not yet in EXHIBIT_TYPES:
-#   p5 (files like "p5_display.xlsx"), r2/r3/r4 (files like "r2_display.xlsx").
-#   Add keys to EXHIBIT_TYPES dict (around line 129) and verify with a test in
-#   tests/test_parsing.py (parametrize existing test_detect_exhibit_type).
-#   No external data needed — just string pattern matching.
 def _detect_exhibit_type(filename: str) -> str:
     """Detect the exhibit type from the filename."""
     name = filename.lower().replace("_display", "").replace(".xlsx", "")
@@ -969,13 +969,10 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
 
     except Exception as e:
         print(f"  ERROR processing {file_path.name}: {e}")
-        # TODO 1.B5-e [EASY, ~400 tokens, BUG FIX]: Verify this INSERT matches the
-        #   ingested_files schema in create_database(). Count the columns in the table
-        #   definition and ensure the VALUES list provides exactly that many. Add a test
-        #   that passes a deliberately invalid PDF path to ingest_pdf_file() and asserts
-        #   a row appears in ingested_files with status starting with "error:".
         conn.execute(
-            "INSERT OR REPLACE INTO ingested_files (file_path, file_type, file_size, file_modified, ingested_at, row_count, status) VALUES (?,?,?,?,datetime('now'),?,?)",
+            "INSERT OR REPLACE INTO ingested_files "
+            "(file_path, file_type, file_size, file_modified, ingested_at, row_count, status) "
+            "VALUES (?,?,?,?,datetime('now'),?,?)",
             (relative_path, "pdf", file_path.stat().st_size, file_path.stat().st_mtime, 0, f"error: {e}")
         )
         return 0

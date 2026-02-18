@@ -49,6 +49,11 @@ from utils.common import sanitize_filename
     ("P1_DISPLAY.xlsx", "p1"),           # case insensitive
     ("army_p1r_fy2026.xlsx", "p1r"),     # p1r matched before p1
     ("budget_summary.xlsx", "unknown"),
+    # Step 1.B1-g: detail exhibit types
+    ("p5_display.xlsx", "p5"),
+    ("r2_display.xlsx", "r2"),
+    ("r3_display.xlsx", "r3"),
+    ("r4_display.xlsx", "r4"),
 ])
 def test_detect_exhibit_type(filename, expected):
     assert _detect_exhibit_type(filename) == expected

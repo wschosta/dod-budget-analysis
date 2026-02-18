@@ -20,14 +20,10 @@ from utils import get_connection
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 
-# Known exhibit types (from build_budget_db.py)
-# TODO 1.B1-g-validator [EASY, ~400 tokens, DEPENDS ON 1.B1-g]: Sync KNOWN_EXHIBIT_TYPES
-#   from exhibit_catalog instead of hardcoding. After 1.B1-g adds p5/r2/r3/r4 to
-#   EXHIBIT_TYPES in build_budget_db.py, this set becomes stale. Replace with:
-#     from exhibit_catalog import list_all_exhibit_types
-#     KNOWN_EXHIBIT_TYPES = set(list_all_exhibit_types())
-#   No external data needed.
-KNOWN_EXHIBIT_TYPES = {"m1", "o1", "p1", "p1r", "r1", "rf1", "c1"}
+# Known exhibit types — imported from exhibit_catalog so it stays in sync
+# with the canonical catalog (Step 1.B1-g-validator).
+from exhibit_catalog import list_all_exhibit_types  # noqa: E402
+KNOWN_EXHIBIT_TYPES = set(list_all_exhibit_types())
 
 # Known organizations (from build_budget_db.py ORG_MAP values)
 KNOWN_ORGS = {"Army", "Navy", "Air Force", "Space Force",

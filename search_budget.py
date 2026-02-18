@@ -74,29 +74,28 @@ def show_summary(conn: sqlite3.Connection) -> None:
     """):
         print(f"  {r['source_category'] or 'unknown':<25} {r['c']:>10,}")
 
-    # FY2026 totals by major account
-    print(f"\n  {'Top FY2026 Request by Account':<45} {'$ Thousands':>15}")
-    print(f"  {'-'*45} {'-'*15}")
-    for r in conn.execute("""
-        SELECT account_title,
-               SUM(amount_fy2026_request) as total
-        FROM budget_lines
-        WHERE amount_fy2026_request IS NOT NULL
-          AND (sheet_name LIKE '%Exhibit%' OR sheet_name LIKE '%Title%' OR sheet_name LIKE '%FY 2026%')
-        GROUP BY account_title
-        HAVING total > 0
-        ORDER BY total DESC
-        LIMIT 15
-    """):
-        print(f"  {(r['account_title'] or '')[:45]:<45} {r['total']:>15,.0f}")
-
-
-# TODO 1.B2-a-search [EASY, ~600 tokens, DEPENDS ON 1.B2-a]: Update show_summary() to
-#   detect the most recent fiscal year column dynamically from the DB schema instead of
-#   hardcoding "amount_fy2026_request" (lines ~80-91).  Use PRAGMA table_info(budget_lines)
-#   to find all amount_fy* columns and pick the max year's _request column.  Also update
-#   display_budget_results() which hardcodes "FY2024", "FY2025", "FY2026" column names
-#   in its print statement (lines ~232-236).  No external data needed.
+    # Detect the most recent request column dynamically (Step 1.B2-a-search)
+    all_cols = [row[1] for row in conn.execute("PRAGMA table_info(budget_lines)").fetchall()]
+    request_cols = sorted(
+        [c for c in all_cols if c.startswith("amount_fy") and c.endswith("_request")],
+        reverse=True,
+    )
+    if request_cols:
+        latest_request_col = request_cols[0]
+        fy_label = latest_request_col.replace("amount_", "").replace("_request", "").upper().replace("FY", "FY ")
+        print(f"\n  {'Top ' + fy_label + ' Request by Account':<45} {'$ Thousands':>15}")
+        print(f"  {'-'*45} {'-'*15}")
+        for r in conn.execute(f"""
+            SELECT account_title,
+                   SUM({latest_request_col}) as total
+            FROM budget_lines
+            WHERE {latest_request_col} IS NOT NULL
+            GROUP BY account_title
+            HAVING total > 0
+            ORDER BY total DESC
+            LIMIT 15
+        """):
+            print(f"  {(r['account_title'] or '')[:45]:<45} {r['total']:>15,.0f}")
 
 
 def show_sources(conn: sqlite3.Connection) -> None:
