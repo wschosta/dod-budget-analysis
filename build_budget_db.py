@@ -60,7 +60,7 @@ from datetime import datetime
 from pathlib import Path
 from concurrent.futures import (
     ThreadPoolExecutor, ProcessPoolExecutor, TimeoutError as FuturesTimeoutError,
-    as_completed,
+    wait, FIRST_COMPLETED,
 )
 import os
 
@@ -132,8 +132,9 @@ def create_database(db_path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA synchronous=NORMAL")
     # Additional performance pragmas for bulk operations
     conn.execute("PRAGMA temp_store=MEMORY")           # Use RAM for temp tables
-    conn.execute("PRAGMA cache_size=-64000")           # 64MB cache
-    conn.execute("PRAGMA mmap_size=30000000")          # Memory-mapped I/O
+    conn.execute("PRAGMA cache_size=-262144")          # 256MB cache (was 64MB)
+    conn.execute("PRAGMA mmap_size=536870912")         # 512MB memory-mapped I/O (was 30MB)
+    conn.execute("PRAGMA wal_autocheckpoint=0")        # Disable auto-checkpoint; manual at end
 
     conn.executescript("""
         -- Structured budget line items from Excel files
@@ -939,7 +940,7 @@ def _extract_tables_with_timeout(page, timeout_seconds=10, executor=None):
 
 
 def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
-                    page_callback=None, docs_dir: Path | None = None) -> int:
+                    page_callback=None, docs_dir: Path | None = None) -> tuple[int, int]:
     """Ingest a single PDF file into the database.
 
     Args:
@@ -947,8 +948,12 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
         file_path: Path to the PDF file.
         page_callback: Optional callable(pages_done, total_pages) called after
             each page is processed, for real-time progress reporting.
+            Throttled internally to every 10 pages to reduce overhead.
         docs_dir: Base directory for relative path computation. Defaults to
             the global DOCS_DIR constant.
+
+    Returns:
+        Tuple of (total_pages_inserted, issue_count).
     """
     _docs_dir = (docs_dir or DOCS_DIR).resolve()
     category = _determine_category(file_path)
@@ -959,7 +964,7 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
         with pdfplumber.open(str(file_path)) as pdf:
             num_pages = len(pdf.pages)
             batch = []
-            page_issues_count = 0  # Track timeouts/errors for this file
+            issues_batch = []  # Accumulate issues; insert once at end
             # Reuse a single ThreadPoolExecutor across all pages to avoid
             # per-page thread pool creation overhead (thousands of pages per file)
             table_executor = ThreadPoolExecutor(max_workers=1)
@@ -983,21 +988,16 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                     tables, issue_type = _extract_tables_with_timeout(
                         page, timeout_seconds=10, executor=table_executor)
                     if issue_type:
-                        # Record the issue for later analysis
-                        conn.execute(
-                            "INSERT INTO extraction_issues"
-                            " (file_path, page_number, issue_type, issue_detail)"
-                            " VALUES (?,?,?,?)",
+                        issues_batch.append(
                             (relative_path, i + 1, issue_type.split(':')[0], issue_type)
                         )
-                        page_issues_count += 1
                         tables = None
 
                 table_text = _extract_table_text(tables)
 
                 # Skip truly empty pages
                 if not text.strip() and not table_text.strip():
-                    if page_callback:
+                    if page_callback and (i % 10 == 0 or i == num_pages - 1):
                         page_callback(i + 1, num_pages)
                     continue
 
@@ -1010,7 +1010,8 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                     table_text if table_text else None,
                 ))
 
-                if page_callback:
+                # Throttle callback: fire every 10 pages instead of every page
+                if page_callback and (i % 10 == 0 or i == num_pages - 1):
                     page_callback(i + 1, num_pages)
 
                 # Batch insert every 1000 pages (larger batch = fewer executemany calls)
@@ -1030,6 +1031,14 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                     VALUES (?,?,?,?,?,?)
                 """, batch)
                 total_pages += len(batch)
+
+              # Batch insert all issues at once (avoids per-issue execute overhead)
+              if issues_batch:
+                conn.executemany(
+                    "INSERT INTO extraction_issues"
+                    " (file_path, page_number, issue_type, issue_detail)"
+                    " VALUES (?,?,?,?)",
+                    issues_batch)
             finally:
                 table_executor.shutdown(wait=False)
 
@@ -1043,10 +1052,10 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
             (relative_path, "pdf", file_path.stat().st_size,
              file_path.stat().st_mtime, 0, f"error: {e}")
         )
-        return 0
+        return 0, 0
 
-    conn.commit()
-    return total_pages
+    # Caller handles commit; do not commit here to allow larger transaction batches
+    return total_pages, len(issues_batch)
 
 
 def _extract_pdf_data(args):
@@ -1525,13 +1534,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     if skipped_pdf:
         print(f"  Skipping {skipped_pdf} unchanged/resumed PDF file(s)")
 
-    # Pre-clean: remove old data for files being re-processed
-    for pdf in pdfs_to_process:
-        rel_path = str(pdf.relative_to(docs_dir))
-        _remove_file_data(conn, rel_path, "pdf")
-    conn.commit()
-
-    # Drop FTS5 triggers for bulk insert speedup
+    # Drop FTS5 triggers before pre-clean to avoid per-row FTS5 updates on DELETE
     print("  Dropping FTS5 triggers for bulk insert optimization...")
     try:
         conn.execute("DROP TRIGGER IF EXISTS pdf_pages_ai")
@@ -1540,6 +1543,20 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     except Exception as e:
         print(f"    (Warning: {e})")
 
+    # Pre-clean: remove old data for files being re-processed (triggers already dropped)
+    # Use a single batched DELETE via a temp table to avoid 4000+ individual statements
+    if pdfs_to_process:
+        print(f"  Pre-cleaning {len(pdfs_to_process)} PDF(s) from DB...")
+        rel_paths = [str(pdf.relative_to(docs_dir)) for pdf in pdfs_to_process]
+        conn.execute("CREATE TEMP TABLE IF NOT EXISTS _pdf_preclean (path TEXT PRIMARY KEY)")
+        conn.executemany("INSERT OR IGNORE INTO _pdf_preclean VALUES (?)",
+                         [(p,) for p in rel_paths])
+        conn.execute(
+            "DELETE FROM pdf_pages WHERE source_file IN (SELECT path FROM _pdf_preclean)"
+        )
+        conn.execute("DROP TABLE _pdf_preclean")
+        conn.commit()
+
     try:
       if num_workers > 1 and len(pdfs_to_process) > 1:
         # ── Parallel PDF extraction ───────────────────────────────────
@@ -1547,18 +1564,30 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
               f"parallel workers...")
         pdf_phase_start = time.time()
 
-        with ProcessPoolExecutor(max_workers=num_workers) as pool:
-            future_to_pdf = {
-                pool.submit(
-                    _extract_pdf_data, (str(pdf), str(docs_dir))
-                ): pdf
-                for pdf in pdfs_to_process
-            }
+        # Sliding window: keep at most (num_workers * 2) futures in-flight at once.
+        # Submitting all tasks upfront would hold every completed result in memory
+        # simultaneously — potentially GBs of page text across thousands of PDFs.
+        window_size = num_workers * 2
+        pdf_iter = iter(pdfs_to_process)
+        active: dict = {}  # future -> pdf
 
-            for future in as_completed(future_to_pdf):
+        def _submit_next():
+            """Submit the next PDF from the iterator into the pool."""
+            pdf = next(pdf_iter, None)
+            if pdf is None:
+                return
+            f = pool.submit(_extract_pdf_data, (str(pdf), str(docs_dir)))
+            active[f] = pdf
+
+        with ProcessPoolExecutor(max_workers=num_workers) as pool:
+            # Seed the window
+            for _ in range(window_size):
+                _submit_next()
+
+            while active:
                 if stop_event and stop_event.is_set():
                     print("\n  Graceful stop requested — cancelling workers...")
-                    for f in future_to_pdf:
+                    for f in active:
                         f.cancel()
                     _save_checkpoint(conn, session_id, files_done_total,
                                      total_files, total_pdf_pages,
@@ -1570,15 +1599,68 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                               {"files_remaining": total_files - files_done_total})
                     break
 
-                pdf = future_to_pdf[future]
-                rel_path = str(pdf.relative_to(docs_dir))
-                processed_pdf += 1
-                files_done_total += 1
+                # Wait for the next completed future
+                done, _ = wait(active, return_when=FIRST_COMPLETED)
+                for future in done:
+                    pdf = active.pop(future)
+                    rel_path = str(pdf.relative_to(docs_dir))
+                    processed_pdf += 1
+                    files_done_total += 1
 
-                try:
-                    result = future.result(timeout=300)  # 5-min safety timeout
-                except Exception as e:
-                    print(f"  ERROR: {pdf.name}: {e}")
+                    # Immediately submit a replacement to keep window full
+                    _submit_next()
+
+                    try:
+                        result = future.result(timeout=300)  # 5-min safety timeout
+                    except Exception as e:
+                        print(f"  ERROR: {pdf.name}: {e}")
+                        stat = pdf.stat()
+                        conn.execute(
+                            "INSERT OR REPLACE INTO ingested_files "
+                            "(file_path, file_type, file_size, file_modified,"
+                            " ingested_at, row_count, status) "
+                            "VALUES (?,?,?,?,datetime('now'),?,?)",
+                            (rel_path, "pdf", stat.st_size, stat.st_mtime,
+                             0, f"error: {e}"))
+                        _mark_file_processed(conn, session_id, rel_path, "pdf",
+                                             pages_count=0)
+                        continue
+
+                    pages_data = result["pages_data"]
+                    issues = result["issues"]
+                    error = result["error"]
+
+                    if error:
+                        print(f"  ERROR: {pdf.name}: {error}")
+                        stat = pdf.stat()
+                        conn.execute(
+                            "INSERT OR REPLACE INTO ingested_files "
+                            "(file_path, file_type, file_size, file_modified,"
+                            " ingested_at, row_count, status) "
+                            "VALUES (?,?,?,?,datetime('now'),?,?)",
+                            (rel_path, "pdf", stat.st_size, stat.st_mtime,
+                             0, f"error: {error}"))
+                        _mark_file_processed(conn, session_id, rel_path, "pdf",
+                                             pages_count=0)
+                        continue
+
+                    # Batch insert all pages for this file
+                    pages = len(pages_data)
+                    if pages_data:
+                        conn.executemany("""
+                            INSERT INTO pdf_pages (source_file, source_category,
+                                page_number, page_text, has_tables, table_data)
+                            VALUES (?,?,?,?,?,?)
+                        """, pages_data)
+
+                    # Record extraction issues
+                    if issues:
+                        conn.executemany(
+                            "INSERT INTO extraction_issues"
+                            " (file_path, page_number, issue_type, issue_detail)"
+                            " VALUES (?,?,?,?)", issues)
+
+                    file_status = "ok_with_issues" if issues else "ok"
                     stat = pdf.stat()
                     conn.execute(
                         "INSERT OR REPLACE INTO ingested_files "
@@ -1586,89 +1668,42 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                         " ingested_at, row_count, status) "
                         "VALUES (?,?,?,?,datetime('now'),?,?)",
                         (rel_path, "pdf", stat.st_size, stat.st_mtime,
-                         0, f"error: {e}"))
+                         pages, file_status))
+
+                    total_pdf_pages += pages
+                    _metrics["pages"] = total_pdf_pages
+                    _metrics["files_remaining"] = total_files - files_done_total
+
+                    # Overall throughput: total pages / wall-clock elapsed
+                    elapsed = time.time() - pdf_phase_start
+                    if elapsed > 0 and total_pdf_pages > 0:
+                        _metrics["speed_pages"] = total_pdf_pages / elapsed
+
+                    # ETA: remaining files * avg time per file so far
+                    if processed_pdf > 0:
+                        avg_per_file = elapsed / processed_pdf
+                        remaining = len(pdfs_to_process) - processed_pdf
+                        _metrics["eta_sec"] = avg_per_file * remaining
+
+                    print(f"  [{processed_pdf}/{len(pdfs_to_process)}] "
+                          f"{pdf.name}: {pages} pages")
+                    _progress("pdf", processed_pdf, len(pdfs_to_process),
+                              f"[{processed_pdf}/{len(pdfs_to_process)}] "
+                              f"{pdf.name}: {pages} pages",
+                              dict(_metrics))
+
                     _mark_file_processed(conn, session_id, rel_path, "pdf",
-                                         pages_count=0)
-                    continue
+                                         pages_count=pages)
 
-                pages_data = result["pages_data"]
-                issues = result["issues"]
-                error = result["error"]
+                    if files_done_total % checkpoint_interval == 0:
+                        _save_checkpoint(conn, session_id, files_done_total,
+                                         total_files, total_pdf_pages,
+                                         total_budget_rows, stat.st_size,
+                                         rel_path, file_status)
 
-                if error:
-                    print(f"  ERROR: {pdf.name}: {error}")
-                    stat = pdf.stat()
-                    conn.execute(
-                        "INSERT OR REPLACE INTO ingested_files "
-                        "(file_path, file_type, file_size, file_modified,"
-                        " ingested_at, row_count, status) "
-                        "VALUES (?,?,?,?,datetime('now'),?,?)",
-                        (rel_path, "pdf", stat.st_size, stat.st_mtime,
-                         0, f"error: {error}"))
-                    _mark_file_processed(conn, session_id, rel_path, "pdf",
-                                         pages_count=0)
-                    continue
-
-                # Batch insert all pages for this file
-                pages = len(pages_data)
-                if pages_data:
-                    conn.executemany("""
-                        INSERT INTO pdf_pages (source_file, source_category,
-                            page_number, page_text, has_tables, table_data)
-                        VALUES (?,?,?,?,?,?)
-                    """, pages_data)
-
-                # Record extraction issues
-                if issues:
-                    conn.executemany(
-                        "INSERT INTO extraction_issues"
-                        " (file_path, page_number, issue_type, issue_detail)"
-                        " VALUES (?,?,?,?)", issues)
-
-                file_status = "ok_with_issues" if issues else "ok"
-                stat = pdf.stat()
-                conn.execute(
-                    "INSERT OR REPLACE INTO ingested_files "
-                    "(file_path, file_type, file_size, file_modified,"
-                    " ingested_at, row_count, status) "
-                    "VALUES (?,?,?,?,datetime('now'),?,?)",
-                    (rel_path, "pdf", stat.st_size, stat.st_mtime,
-                     pages, file_status))
-
-                total_pdf_pages += pages
-                _metrics["pages"] = total_pdf_pages
-                _metrics["files_remaining"] = total_files - files_done_total
-
-                # Overall throughput: total pages / wall-clock elapsed
-                elapsed = time.time() - pdf_phase_start
-                if elapsed > 0 and total_pdf_pages > 0:
-                    _metrics["speed_pages"] = total_pdf_pages / elapsed
-
-                # ETA: remaining files * avg time per file so far
-                if processed_pdf > 0:
-                    avg_per_file = elapsed / processed_pdf
-                    remaining = len(pdfs_to_process) - processed_pdf
-                    _metrics["eta_sec"] = avg_per_file * remaining
-
-                print(f"  [{processed_pdf}/{len(pdfs_to_process)}] "
-                      f"{pdf.name}: {pages} pages")
-                _progress("pdf", processed_pdf, len(pdfs_to_process),
-                          f"[{processed_pdf}/{len(pdfs_to_process)}] "
-                          f"{pdf.name}: {pages} pages",
-                          dict(_metrics))
-
-                _mark_file_processed(conn, session_id, rel_path, "pdf",
-                                     pages_count=pages)
-
-                if files_done_total % checkpoint_interval == 0:
-                    _save_checkpoint(conn, session_id, files_done_total,
-                                     total_files, total_pdf_pages,
-                                     total_budget_rows, stat.st_size,
-                                     rel_path, file_status)
-
-                if time.time() - last_commit_time > 2.0:
-                    conn.commit()
-                    last_commit_time = time.time()
+                    if time.time() - last_commit_time > 2.0:
+                        conn.commit()
+                        last_commit_time = time.time()
 
       else:
         # ── Sequential PDF extraction (workers=1) ─────────────────────
@@ -1713,8 +1748,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                            "current_total_pages": page_total})
 
             t0 = time.time()
-            pages = ingest_pdf_file(conn, pdf, page_callback=_page_cb,
-                                    docs_dir=docs_dir)
+            pages, issue_count = ingest_pdf_file(conn, pdf, page_callback=_page_cb,
+                                                 docs_dir=docs_dir)
             file_elapsed = time.time() - t0
             print(f"{pages} pages ({file_elapsed:.1f}s)")
 
@@ -1728,10 +1763,6 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             _metrics["eta_sec"] = avg_pdf_time * pdfs_remaining
             _metrics["pages"] = total_pdf_pages + pages
 
-            issue_count = conn.execute(
-                "SELECT COUNT(*) FROM extraction_issues WHERE file_path = ?",
-                (rel_path,)
-            ).fetchone()[0]
             file_status = "ok_with_issues" if issue_count > 0 else "ok"
 
             stat = pdf.stat()
@@ -1794,6 +1825,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
     # If stopped gracefully during PDF loop, close and exit cleanly
     if _pdf_stopped:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         conn.close()
         return
 
@@ -1886,6 +1918,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
     _progress("done", total_files, total_files, summary,
               {"files_remaining": 0, "eta_sec": 0.0})
+    # Final WAL checkpoint: flush all accumulated WAL pages to the main DB file
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     conn.close()
 
     # 1.B6-h / 2.B3-a: Post-build validation + data-quality JSON report
