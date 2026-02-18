@@ -658,15 +658,15 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
             if header_idx is not None:
                 break
 
-        if header_idx is None or len(first_rows) < 3:
+        if header_idx is None:
             continue
 
-        headers = rows[header_idx]
+        headers = first_rows[header_idx]
         # Detect and merge two-row headers (Step 1.B2-c): some exhibits split
         # "FY 2026" and "Request Amount" across consecutive rows.
         data_start = header_idx + 1
-        if header_idx + 1 < len(rows):
-            merged = _merge_header_rows(headers, rows[header_idx + 1])
+        if header_idx + 1 < len(first_rows):
+            merged = _merge_header_rows(headers, first_rows[header_idx + 1])
             if merged != list(headers):
                 headers = merged
                 data_start = header_idx + 2  # sub-header row consumed
@@ -682,10 +682,8 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
         # Detect currency year for this sheet (TODO 1.B3-b)
         currency_year = _detect_currency_year(sheet_name, file_path.name)
 
-        data_rows = rows[data_start:]
-
         # Detect source unit and compute normalisation multiplier (Step 1.B3-a/c)
-        amount_unit = _detect_amount_unit(rows, header_idx)
+        amount_unit = _detect_amount_unit(first_rows, header_idx)
         # All stored amounts must be in thousands; multiply millions-denominated
         # values by 1000 before inserting (Step 1.B3-c)
         unit_multiplier = 1000.0 if amount_unit == "millions" else 1.0
