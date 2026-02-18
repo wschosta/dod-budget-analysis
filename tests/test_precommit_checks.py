@@ -166,11 +166,27 @@ class TestCodeQuality:
         assert not errors, f"Potential secrets found:\n" + "\n".join(errors)
 
     def test_no_excessive_debugging_prints(self):
-        """Library modules should not have debug print statements."""
+        """Library modules should not have debug/temporary print statements.
+
+        Flags prints that look like raw debug dumps:
+          print(variable)         <- bare variable with no formatting
+          print(f"debug: ...")    <- explicit debug label
+          print(repr(...))        <- repr() dump
+        Does NOT flag intentional CLI output (formatted headers, status lines,
+        progress messages) which are the expected user-visible output of these
+        CLI tools.
+        """
         library_modules = [
             "build_budget_db.py",
             "search_budget.py",
             "validate_budget_db.py",
+        ]
+
+        # Patterns that indicate accidental debug prints (not user-facing output)
+        debug_patterns = [
+            re.compile(r'^\s*print\(\s*[a-zA-Z_][a-zA-Z0-9_.]*\s*\)'),  # print(var)
+            re.compile(r'^\s*print\(.*\bdebug\b', re.IGNORECASE),         # "debug" label
+            re.compile(r'^\s*print\(repr\('),                              # repr() dump
         ]
 
         errors = []
@@ -181,16 +197,15 @@ class TestCodeQuality:
 
             with open(py_file) as f:
                 for i, line in enumerate(f, 1):
-                    # Skip comments and docstrings
                     stripped = line.strip()
                     if stripped.startswith("#"):
                         continue
-                    # Flag standalone print statements (not in strings)
-                    if re.search(r"^\s*print\(", line) and "f\"" not in line:
-                        errors.append(f"{py_file}:{i}: debug print statement")
+                    for pat in debug_patterns:
+                        if pat.search(line):
+                            errors.append(f"{py_file}:{i}: debug print statement")
+                            break
 
-        # Note: Some prints are acceptable (for CLI tools), so be lenient
-        assert len(errors) < 5, f"Excessive debug prints found:\n" + "\n".join(errors[:5])
+        assert len(errors) < 5, f"Debug prints found:\n" + "\n".join(errors[:5])
 
 
 class TestNamingShadowing:

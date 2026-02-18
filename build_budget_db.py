@@ -687,7 +687,12 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
             if not acct:
                 continue
 
-            org_code = str(row[col_map["organization"]]).strip() if col_map.get("organization") is not None and col_map["organization"] < len(row) and row[col_map["organization"]] else ""
+            _org_idx = col_map.get("organization")
+            org_code = (
+                str(row[_org_idx]).strip()
+                if _org_idx is not None and _org_idx < len(row) and row[_org_idx]
+                else ""
+            )
             # Lookup by exact code first, then by uppercase match (Step 1.B4-b)
             org_name = ORG_MAP.get(org_code) or ORG_MAP.get(org_code.upper(), org_code)
 
