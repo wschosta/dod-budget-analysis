@@ -50,38 +50,11 @@ TODO FIX-006 [Complexity: LOW] [Tokens: ~500] [User: NO]
     Dependency: TODO FIX-001 must be fixed first.
     Success: test_rows_metric_increases_with_excel passes.
 
-TODO TEST-001 [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add Excel fixtures for detail exhibit types (P-5, R-2).
-    Steps:
-      1. Add _P5_ROWS and _R2_ROWS sample data tuples here
-      2. Create "p5" and "r2" header patterns in _create_exhibit_xlsx()
-      3. Generate p5_display.xlsx and r2_display.xlsx in fixtures_dir
-    Success: Detail exhibit fixtures available for pipeline tests.
-
-TODO TEST-002 [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add fixture for API integration tests (FastAPI TestClient).
-    Dependency: Requires api/app.py to exist (TODO 2.C7-a).
-    Steps:
-      1. Add app_client fixture using FastAPI TestClient
-      2. Wire it to test_db database path
-      3. Yield the client; tests/test_api.py can use it
-    Success: test_api.py can import and use app_client fixture.
-
-TODO TEST-003 [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    Expand PDF fixtures to cover more layout variations.
-    Steps:
-      1. Create PDFs with: multi-page tables, landscape orientation,
-         tables without gridlines, mixed text+table pages
-      2. Add parametrized tests in test_parsing.py
-    Success: PDF extraction tested across 5+ layout variations.
-
-TODO TEST-004 [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Fix test functions that return values (pytest warnings).
-    Steps:
-      1. Search: grep -rn 'return ' tests/ in test_ functions
-      2. Replace return with assert or remove dead returns
-      3. Run: pytest -W error::pytest.PytestReturnNotNoneWarning
-    Success: Zero PytestReturnNotNoneWarning warnings.
+DONE TEST-001: _P5_ROWS, _R2_ROWS, and header patterns added; p5_display.xlsx
+    and r2_display.xlsx generated in fixtures_dir.
+NOTE TEST-002: Blocked — requires api/app.py (TODO 2.C7-a not yet started).
+NOTE TEST-003: Low priority until PDF extraction improvements are stable.
+NOTE TEST-004: No actual test functions return values (inner helpers only).
 """
 
 import sys
@@ -165,6 +138,22 @@ def _create_exhibit_xlsx(path: Path, exhibit_type: str, rows: list[tuple]) -> Pa
             "Budget Line Item", "Budget Line Item (BLI) Title",
             "FY2024 Actual\nAmount", "FY2025 Enacted\nAmount",
             "FY2026 Request\nAmount",
+        ]
+    elif exhibit_type == "p5":
+        # P-5 Procurement Detail: line items with quantities and unit costs
+        headers = [
+            "Account", "Program Element", "Line Item", "Item Title",
+            "Unit of Measure",
+            "Prior Year Quantity", "Current Year Quantity", "Estimate Quantity",
+            "Prior Year Unit Cost", "Current Year Unit Cost", "Estimate Unit Cost",
+            "Justification",
+        ]
+    elif exhibit_type == "r2":
+        # R-2 RDT&E Detail Schedule
+        headers = [
+            "Account", "PE", "Sub-Element", "Title",
+            "Prior Year", "Current Year", "Estimate",
+            "Metric", "Planned Achievement",
         ]
     else:
         headers = [
@@ -266,6 +255,30 @@ _C1_ROWS = [
      "P-2345", "Barracks Replacement, Fort Bragg", 45_000.0, 30_000.0),
 ]
 
+# TODO TEST-001: P-5 Procurement Detail fixtures (columns match p5 header above)
+_P5_ROWS = [
+    # account, pe, line_item, title, unit, py_qty, cy_qty, est_qty,
+    # py_unit_cost, cy_unit_cost, est_unit_cost, justification
+    ("2035", "0205231A", "LIN-001", "AH-64 Apache Block III",
+     "Each", 12, 14, 15,
+     55_000.0, 56_500.0, 58_000.0, "Full-rate production continues."),
+    ("2035", "0205231B", "LIN-002", "UH-60 Blackhawk M-Model",
+     "Each", 8, 10, 11,
+     18_000.0, 18_500.0, 19_000.0, "Replaces aging L-model fleet."),
+]
+
+# TODO TEST-001: R-2 RDT&E Detail Schedule fixtures
+_R2_ROWS = [
+    # account, pe, sub_element, title, prior_year, current_year, estimate,
+    # metric, planned_achievement
+    ("1300", "0602702E", "A", "Advanced Materials Research",
+     12_000.0, 13_500.0, 14_000.0,
+     "TRL Level", "Achieve TRL-4 for candidate materials"),
+    ("1300", "0602702E", "B", "Computational Modeling",
+     5_000.0, 5_500.0, 5_800.0,
+     "Simulation Fidelity", "High-fidelity model validated vs. test data"),
+]
+
 
 @pytest.fixture(scope="session")
 def fixtures_dir(tmp_path_factory):
@@ -276,13 +289,16 @@ def fixtures_dir(tmp_path_factory):
     """
     d = tmp_path_factory.mktemp("budget_fixtures")
 
-    # TODO 1.C1-a: Excel fixtures
+    # TODO 1.C1-a: Excel fixtures (summary exhibits)
     _create_exhibit_xlsx(d / "p1_display.xlsx", "p1", _P1_ROWS)
     _create_exhibit_xlsx(d / "r1_display.xlsx", "r1", _R1_ROWS)
     _create_exhibit_xlsx(d / "c1_display.xlsx", "c1", _C1_ROWS)
     _create_exhibit_xlsx(d / "o1_display.xlsx", "o1", _P1_ROWS[:2])
     _create_exhibit_xlsx(d / "m1_display.xlsx", "m1", _P1_ROWS[:2])
     _create_exhibit_xlsx(d / "rf1_display.xlsx", "rf1", _P1_ROWS[:1])
+    # TEST-001: Detail exhibit fixtures (P-5, R-2)
+    _create_exhibit_xlsx(d / "p5_display.xlsx", "p5", _P5_ROWS)
+    _create_exhibit_xlsx(d / "r2_display.xlsx", "r2", _R2_ROWS)
 
     # TODO 1.C1-b: PDF fixtures
     _create_sample_pdf(d / "text_only.pdf", title="Budget Overview FY2026",

@@ -19,24 +19,11 @@ Usage:
 TODOs for this file
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO REFRESH-001 [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Use Python imports instead of subprocess for internal scripts.
-    Steps:
-      1. Import build_database from build_budget_db directly
-      2. Import validate_all from validate_budget_data directly
-      3. Replace subprocess.run() calls with direct function calls
-      4. Keep subprocess only for dod_budget_downloader.py (or use download_all()
-         once TODO 1.A4-a refactor is done)
-    Benefit: Better error handling, no subprocess overhead, testable.
-    Success: Stages 2-4 call Python functions directly.
-
-TODO REFRESH-002 [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Add --notify flag for email/Slack notification on completion/failure.
-    Steps:
-      1. Add --notify argument (optional webhook URL or email)
-      2. After workflow, POST summary JSON to webhook or send email
-      3. Include: stages completed, row counts, any errors
-    Success: Unattended refreshes send status notifications.
+DONE REFRESH-001: Stages 2 (build) and 3 (validate) now call Python functions
+  directly instead of subprocess. Stage 1 (download) still uses subprocess
+  since the downloader has heavy optional deps (Playwright, GUI).
+DONE REFRESH-002: --notify flag added; POSTs summary JSON to webhook URL on
+  completion or failure.
 """
 
 import argparse
@@ -44,6 +31,7 @@ import json
 import subprocess
 import sys
 import time
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -51,17 +39,23 @@ from pathlib import Path
 class RefreshWorkflow:
     """Orchestrates the complete data refresh pipeline."""
 
-    def __init__(self, verbose=False, dry_run=False, workers=4):
+    def __init__(self, verbose=False, dry_run=False, workers=4, notify_url=None,
+                 db_path=None):
         """Initialize workflow state.
 
         Args:
-            verbose: If True, emit detailed stage output.
-            dry_run: If True, log commands without executing them.
-            workers: Number of concurrent HTTP download threads.
+            verbose:    If True, emit detailed stage output.
+            dry_run:    If True, log commands without executing them.
+            workers:    Number of concurrent HTTP download threads.
+            notify_url: Optional webhook URL; if set, a JSON summary is POSTed
+                        there after the workflow completes (REFRESH-002).
+            db_path:    Path to the SQLite database (default: dod_budget.sqlite).
         """
         self.verbose = verbose
         self.dry_run = dry_run
         self.workers = workers
+        self.notify_url = notify_url
+        self.db_path = Path(db_path) if db_path else Path("dod_budget.sqlite")
         self.start_time = None
         self.results = {}
 
@@ -126,33 +120,51 @@ class RefreshWorkflow:
         return success
 
     def stage_2_build(self) -> bool:
-        """Stage 2: Build or update the database."""
+        """Stage 2: Build or update the database (REFRESH-001: direct import)."""
         self.log("=" * 60)
         self.log("STAGE 2: BUILD DATABASE")
         self.log("=" * 60)
 
-        # Use incremental mode (no --rebuild) to preserve existing data
-        cmd = ["python", "build_budget_db.py"]
-        if self.verbose:
-            cmd.append("--verbose")
+        if self.dry_run:
+            self.log("[DRY RUN] Would call build_database()", "detail")
+            self.results["build"] = "completed"
+            return True
 
-        success = self.run_command(cmd, "Database build/update")
-        self.results["build"] = "completed" if success else "failed"
-        return success
+        try:
+            from build_budget_db import build_database  # noqa: PLC0415
+            docs_dir = Path("DoD_Budget_Documents")
+            build_database(docs_dir, self.db_path)
+            self.log("Completed: Database build/update", "ok")
+            self.results["build"] = "completed"
+            return True
+        except Exception as e:
+            self.log(f"Exception during Database build/update: {e}", "error")
+            self.results["build"] = "failed"
+            return False
 
     def stage_3_validate(self) -> bool:
-        """Stage 3: Run validation checks."""
+        """Stage 3: Run validation checks (REFRESH-001: direct import)."""
         self.log("=" * 60)
         self.log("STAGE 3: VALIDATE DATABASE")
         self.log("=" * 60)
 
-        cmd = ["python", "validate_budget_data.py"]
-        if self.verbose:
-            cmd.append("--verbose")
+        if self.dry_run:
+            self.log("[DRY RUN] Would call validate_all()", "detail")
+            self.results["validate"] = "completed"
+            return True
 
-        success = self.run_command(cmd, "Data validation")
-        self.results["validate"] = "completed" if success else "failed"
-        return success
+        try:
+            from validate_budget_data import validate_all, print_report  # noqa: PLC0415
+            summary = validate_all(self.db_path)
+            print_report(summary)
+            success = summary["total_failures"] == 0
+            self.log("Completed: Data validation", "ok" if success else "warn")
+            self.results["validate"] = "completed" if success else "failed"
+            return success
+        except Exception as e:
+            self.log(f"Exception during Data validation: {e}", "error")
+            self.results["validate"] = "failed"
+            return False
 
     def stage_4_report(self) -> bool:
         """Stage 4: Generate quality report."""
@@ -161,17 +173,14 @@ class RefreshWorkflow:
         self.log("=" * 60)
 
         try:
-            # Gather stats from the database
-            from pathlib import Path
             import sqlite3
 
-            db_path = Path("dod_budget.sqlite")
-            if not db_path.exists():
+            if not self.db_path.exists():
                 self.log("Database not found; skipping report generation", "warn")
                 self.results["report"] = "skipped"
                 return False
 
-            conn = sqlite3.connect(str(db_path))
+            conn = sqlite3.connect(str(self.db_path))
             conn.row_factory = sqlite3.Row
 
             budget_count = conn.execute(
@@ -187,8 +196,8 @@ class RefreshWorkflow:
             # Generate report
             report = {
                 "timestamp": datetime.now().isoformat(),
-                "database_file": str(db_path),
-                "database_size_mb": db_path.stat().st_size / (1024 * 1024),
+                "database_file": str(self.db_path),
+                "database_size_mb": self.db_path.stat().st_size / (1024 * 1024),
                 "statistics": {
                     "budget_lines": budget_count,
                     "pdf_pages": pdf_count,
@@ -247,7 +256,41 @@ class RefreshWorkflow:
         self.log(f"Total time: {elapsed:.1f}s")
         self.log("")
 
+        # REFRESH-002: Send webhook notification if --notify was supplied
+        if self.notify_url:
+            self._send_notification(success, elapsed)
+
         return 0 if success else 1
+
+    def _send_notification(self, success: bool, elapsed: float) -> None:
+        """POST a JSON summary to the configured webhook URL (REFRESH-002).
+
+        Silently ignores failures so a broken webhook never stops the workflow.
+        The payload shape is compatible with Slack incoming-webhook format as
+        well as generic HTTP webhook receivers.
+        """
+        payload = {
+            "text": (
+                f"DoD Budget Refresh {'succeeded' if success else 'failed'} "
+                f"in {elapsed:.0f}s"
+            ),
+            "workflow_success": success,
+            "elapsed_seconds": round(elapsed, 1),
+            "stages": self.results,
+        }
+        try:
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                self.notify_url,
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=10):
+                pass
+            self.log(f"Notification sent to {self.notify_url}", "ok")
+        except Exception as e:
+            self.log(f"Notification failed (non-fatal): {e}", "warn")
 
 
 def main():
@@ -293,11 +336,28 @@ Examples:
         default=4,
         help="Number of concurrent HTTP download threads (default: 4)",
     )
+    parser.add_argument(
+        "--db",
+        type=Path,
+        default=None,
+        help="Path to SQLite database (default: dod_budget.sqlite)",
+    )
+    parser.add_argument(
+        "--notify",
+        metavar="WEBHOOK_URL",
+        default=None,
+        help="Webhook URL to POST a JSON summary on completion/failure (REFRESH-002)",
+    )
 
     args = parser.parse_args()
 
-    workflow = RefreshWorkflow(verbose=args.verbose, dry_run=args.dry_run,
-                              workers=args.workers)
+    workflow = RefreshWorkflow(
+        verbose=args.verbose,
+        dry_run=args.dry_run,
+        workers=args.workers,
+        notify_url=args.notify,
+        db_path=args.db,
+    )
     exit_code = workflow.run(args.years or [2026], args.sources or ["all"])
     sys.exit(exit_code)
 

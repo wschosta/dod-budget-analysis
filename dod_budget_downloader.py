@@ -92,17 +92,10 @@ Step 1.A implementation status:
   DONE 1.A3-b: SHA-256 computed inline while streaming; corrupted files re-downloaded
   DONE 1.A3-c: _detect_waf_block() helper added; called from download_file()
   DONE 1.A4-a: download_all() callable function extracted from main()
+  DONE 1.A4-b: --since YYYY-MM-DD flag added; load_manifest_ok_urls() filters
+               discovered files to skip those already current in the manifest.
   DONE 1.A4-c: .github/workflows/download.yml + scripts/scheduled_download.py
   DONE FIX-003: Line-length violations fixed
-
-TODO 1.A4-b [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    Add --since flag for incremental updates.
-    Dependency: 1.A3-a (manifest) is now complete.
-    Steps:
-      1. Add --since YYYY-MM-DD argument to argparse
-      2. During discovery, compare against manifest from previous run
-      3. Skip files already in manifest with matching hashes
-    Success: --since filters out already-downloaded unchanged files.
 """
 
 import argparse
@@ -818,6 +811,57 @@ def _compute_sha256(file_path: Path) -> str:
         for chunk in iter(lambda: fh.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def load_manifest_ok_urls(manifest_path: Path, since_date: str | None = None) -> set[str]:
+    """Return the set of URLs that were successfully downloaded and are up-to-date.
+
+    Used by --since to skip files that don't need re-downloading.
+
+    Args:
+        manifest_path: Path to an existing manifest.json.
+        since_date:    ISO date string "YYYY-MM-DD".  If given, only entries
+                       downloaded *on or after* that date are considered current.
+                       If None, all entries with status='ok' are considered current.
+
+    Returns:
+        Set of URL strings that should be skipped (already current).
+    """
+    if not manifest_path.exists():
+        return set()
+    try:
+        with open(manifest_path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        files = data.get("files", {})
+    except (json.JSONDecodeError, OSError):
+        return set()
+
+    cutoff = None
+    if since_date:
+        try:
+            from datetime import date as _date
+            cutoff = _date.fromisoformat(since_date)
+        except ValueError:
+            pass
+
+    ok_urls: set[str] = set()
+    for url, entry in files.items():
+        if entry.get("status") != "ok":
+            continue
+        if cutoff is not None:
+            downloaded_at = entry.get("downloaded_at")
+            if not downloaded_at:
+                continue  # No timestamp — treat as stale
+            try:
+                from datetime import date as _date
+                dl_date = _date.fromisoformat(downloaded_at[:10])
+                if dl_date < cutoff:
+                    continue  # Downloaded before the cutoff — re-download
+            except ValueError:
+                continue
+        ok_urls.add(url)
+
+    return ok_urls
 
 
 def write_manifest(output_dir: Path, all_files: dict, manifest_path: Path) -> None:
@@ -2182,6 +2226,14 @@ def main():
             "or from PATH if specified. Skips discovery. (TODO 1.A6-b)"
         ),
     )
+    parser.add_argument(
+        "--since", metavar="YYYY-MM-DD", default=None,
+        help=(
+            "Skip files already in the manifest with status=ok and "
+            "downloaded on or after YYYY-MM-DD. Enables fast incremental "
+            "updates without re-downloading unchanged files. (1.A4-b)"
+        ),
+    )
     args = parser.parse_args()
 
     # Optimization: Set global flag for cache refresh
@@ -2343,7 +2395,25 @@ def main():
         _close_browser()
         return
 
-    # ── Download via download_all() (TODO 1.A4-a) ──
+    # ── --since incremental filter (1.A4-b) ──
+    if args.since:
+        manifest_path = args.output / "manifest.json"
+        ok_urls = load_manifest_ok_urls(manifest_path, args.since)
+        if ok_urls:
+            skipped_count = 0
+            for year in all_files:
+                for label in all_files[year]:
+                    before = len(all_files[year][label])
+                    all_files[year][label] = [
+                        f for f in all_files[year][label]
+                        if f["url"] not in ok_urls
+                    ]
+                    skipped_count += before - len(all_files[year][label])
+            if skipped_count:
+                print(f"\n  [--since {args.since}] Skipping {skipped_count} "
+                      f"already-current file(s) from manifest.")
+
+    # ── Download via download_all() ──
     summary = download_all(
         all_files,
         args.output,
