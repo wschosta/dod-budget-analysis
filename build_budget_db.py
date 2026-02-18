@@ -98,6 +98,11 @@ import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
+# ── PE Number Pattern (TODO 1.B4-a) ──────────────────────────────────────────
+# Program Element numbers follow the pattern: 7 digits followed by one uppercase letter
+# e.g. "0602702E", "0305116BB" (some have two-letter suffixes)
+_PE_PATTERN = re.compile(r'\b\d{7}[A-Z]{1,2}\b')
+
 import openpyxl
 import pdfplumber
 
@@ -171,7 +176,14 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             quantity_fy2025 REAL,
             quantity_fy2026_request REAL,
             quantity_fy2026_total REAL,
-            extra_fields TEXT
+            extra_fields TEXT,
+            -- TODO 1.B4-a: PE number extracted from line_item/account fields
+            pe_number TEXT,
+            -- TODO 1.B3-b: Currency year (then-year or constant dollars)
+            currency_year TEXT,
+            -- TODO 1.B4-c: Appropriation code and title split from account_title
+            appropriation_code TEXT,
+            appropriation_title TEXT
         );
 
         -- Full-text search index for budget lines
@@ -292,6 +304,56 @@ def _detect_exhibit_type(filename: str) -> str:
     return "unknown"
 
 
+def _extract_pe_number(text: str | None) -> str | None:
+    """Extract a Program Element (PE) number from a text field.
+
+    PE numbers follow a pattern like '0602702E' or '0305116BB':
+    seven digits followed by one or two uppercase letters.
+    Implements TODO 1.B4-a.
+    """
+    if not text:
+        return None
+    m = _PE_PATTERN.search(str(text))
+    return m.group() if m else None
+
+
+def _parse_appropriation(account_title: str | None) -> tuple[str | None, str | None]:
+    """Split a combined account_title into (appropriation_code, appropriation_title).
+
+    Many account_title values contain a leading numeric appropriation code
+    followed by the title, e.g. "2035 Aircraft Procurement, Army".
+    Returns (code, title) where code may be None if the field has no numeric prefix.
+    Implements TODO 1.B4-c.
+    """
+    if not account_title:
+        return None, None
+    s = str(account_title).strip()
+    parts = s.split(None, 1)
+    if len(parts) == 2 and parts[0].isdigit():
+        return parts[0], parts[1]
+    return None, s if s else None
+
+
+def _detect_currency_year(sheet_name: str, filename: str) -> str:
+    """Detect whether amounts are in then-year or constant dollars.
+
+    Checks the sheet name and filename for keywords.  DoD budget exhibits
+    default to then-year (nominal) dollars unless explicitly labeled constant.
+    Implements TODO 1.B3-b.
+    """
+    combined = f"{sheet_name} {filename}".lower()
+    if "constant" in combined:
+        return "constant"
+    if "then-year" in combined or "then year" in combined:
+        return "then-year"
+    # Default: DoD appropriations exhibits are published in then-year dollars
+    return "then-year"
+
+
+# TODO: This function is ~110 lines with three large loops over h_lower doing
+# related but distinct work (common fields, sub-activity/line-item, amounts).
+# Consider splitting into _map_common_fields, _map_line_item_fields, and
+# _map_amount_fields for readability and easier per-exhibit customization.
 def _map_columns(headers: list, exhibit_type: str) -> dict:
     """Map column headers to standardized field names.
 
@@ -427,6 +489,10 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
         fy_match = re.search(r"(FY\s*)?20\d{2}", sheet_name, re.IGNORECASE)
         fiscal_year = fy_match.group().replace("FY ", "FY").replace("FY", "FY ") if fy_match else sheet_name
 
+        # Detect currency year for this sheet (TODO 1.B3-b)
+        currency_year = _detect_currency_year(sheet_name, file_path.name)
+
+        data_rows = rows[header_idx + 1:]
         batch = []
 
         def get_val(row, field):
@@ -455,20 +521,29 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
 
             org_name = get_org_name(row)
 
+            # TODO 1.B4-a: extract PE number from line_item or account fields
+            line_item_val = get_str(row, "line_item")
+            account_val = str(acct).strip()
+            pe_number = _extract_pe_number(line_item_val) or _extract_pe_number(account_val)
+
+            # TODO 1.B4-c: split appropriation code and title from account_title
+            acct_title_val = get_str(row, "account_title")
+            approp_code, approp_title = _parse_appropriation(acct_title_val)
+
             batch.append((
                 str(file_path.relative_to(DOCS_DIR)),
                 exhibit_type,
                 sheet_name,
                 fiscal_year,
-                str(acct).strip(),
-                get_str(row, "account_title"),
+                account_val,
+                acct_title_val,
                 org_code,
                 org_name,
                 get_str(row, "budget_activity"),
                 get_str(row, "budget_activity_title"),
                 get_str(row, "sub_activity"),
                 get_str(row, "sub_activity_title"),
-                get_str(row, "line_item"),
+                line_item_val,
                 get_str(row, "line_item_title"),
                 get_str(row, "classification"),
                 _safe_float(get_val(row, "amount_fy2024_actual")),
@@ -482,7 +557,11 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
                 _safe_float(get_val(row, "quantity_fy2025")),
                 _safe_float(get_val(row, "quantity_fy2026_request")),
                 _safe_float(get_val(row, "quantity_fy2026_total")),
-                None,  # extra_fields
+                None,         # extra_fields
+                pe_number,    # TODO 1.B4-a
+                currency_year,  # TODO 1.B3-b
+                approp_code,  # TODO 1.B4-c
+                approp_title, # TODO 1.B4-c
             ))
 
         if batch:
@@ -499,8 +578,10 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
                     amount_fy2026_total,
                     quantity_fy2024, quantity_fy2025,
                     quantity_fy2026_request, quantity_fy2026_total,
-                    extra_fields
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    extra_fields,
+                    pe_number, currency_year,
+                    appropriation_code, appropriation_title
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, batch)
             total_rows += len(batch)
 
@@ -951,6 +1032,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         CREATE INDEX IF NOT EXISTS idx_bl_fy ON budget_lines(fiscal_year);
         CREATE INDEX IF NOT EXISTS idx_bl_sheet ON budget_lines(sheet_name);
         CREATE INDEX IF NOT EXISTS idx_bl_source ON budget_lines(source_file);
+        CREATE INDEX IF NOT EXISTS idx_bl_pe ON budget_lines(pe_number);
         CREATE INDEX IF NOT EXISTS idx_pp_source ON pdf_pages(source_file);
         CREATE INDEX IF NOT EXISTS idx_pp_category ON pdf_pages(source_category);
     """)

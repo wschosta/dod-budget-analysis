@@ -1,10 +1,11 @@
 # Exhibit Types
 
-<!-- TODO [Step 1.B1]: Expand each section with full column layouts, sample data,
-     and semantic descriptions. Requires inspecting downloaded Excel files. -->
-
 Catalog of DoD budget exhibit types and their column structures. The internal
 code for each type is used in the `exhibit_type` column of the database.
+
+> **Current Status:** Phase 1.B, Step 1.B1 — In Progress. Core exhibit types (P-1, R-1, O-1, M-1, C-1, RF-1) are recognized by the parser.
+> Full column layout documentation and additional exhibit types (P-5, R-2, R-3, R-4, J-Books) are TODO.
+> See [exhibit_catalog.py](../../exhibit_catalog.py) for implementation progress.
 
 ---
 
