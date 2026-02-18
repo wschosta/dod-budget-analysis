@@ -34,10 +34,12 @@ DONE 2.A4-b  pdf_content table DDL with FTS5 plan.
 DONE 2.A5-a  Migration framework: schema_version table + migrate() function.
 DONE 2.A5-b  002_fts5_indexes migration SQL.
 
-TODO 2.B1-a [Complexity: HIGH] [Tokens: ~4000] [User: NO]
-    Refactor build_budget_db.py to target the new normalized schema.
-    Dependency: All 2.A* DDL is now written (schema_design.py).
-    Steps: see schema_design.py notes above for column mappings.
+DEFERRED 2.B1-a  Refactor build_budget_db.py to target the new normalized schema.
+    This is a HIGH-complexity migration affecting the entire build pipeline,
+    API routes, and 545 tests. Deferred until a dedicated migration phase.
+    The normalized schema tables (budget_line_items, services_agencies, etc.)
+    exist and are seeded; backfill_reference_tables.py can populate reference
+    tables from existing flat data as a bridge solution.
 
 DONE 2.B3-a  generate_quality_report() added to validate_budget_data.py;
     called from build_budget_db.py post-build step and refresh_data.stage_4_report().
@@ -49,16 +51,11 @@ DONE 2.B3-a  generate_quality_report() added to validate_budget_data.py;
 TODOs — Step 2.B (Data Loading & Quality)
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO 2.B1-a [Complexity: HIGH] [Tokens: ~4000] [User: NO]
-    Refactor build_budget_db.py to target the new normalized schema.
-    Dependency: TODO 2.A1-a and 2.A2-* must be done first.
-    Steps:
-      1. In ingest_excel_file(), replace flat INSERT into budget_lines
-         with get-or-create lookups into reference tables
-      2. INSERT into normalized budget_line_items table
-      3. Keep rest of pipeline (discovery, PDF, FTS) unchanged
-      4. Run test_pipeline.py to verify no regressions
-    Success: Database uses normalized schema; all existing tests pass.
+DEFERRED 2.B1-a  Refactor build_budget_db.py to target normalized schema.
+    HIGH complexity — affects entire build pipeline, API routes, and 545 tests.
+    Deferred until a dedicated migration phase. Normalized schema tables exist
+    (budget_line_items, services_agencies, exhibit_types, etc.); backfill_reference_tables.py
+    bridges existing flat data into reference tables.
 
 DONE 2.B1-b  backfill_reference_tables.py: reads distinct organization_name,
     exhibit_type, (account, account_title) from budget_lines; INSERT OR IGNORE
