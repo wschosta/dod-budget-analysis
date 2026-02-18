@@ -173,25 +173,23 @@ def check_value_ranges(conn: sqlite3.Connection) -> dict:
 
 def check_row_count_consistency(conn: sqlite3.Connection) -> dict:
     """1.B6-g: Cross-check ingested_files.row_count against actual counts."""
+    # Use GROUP BY aggregates instead of correlated subqueries to avoid
+    # one COUNT(*) per file (which is extremely slow on thousands of PDFs).
     cur = conn.execute("""
-        SELECT i.file_path, i.row_count, i.file_type,
-               CASE i.file_type
-                   WHEN 'excel' THEN (SELECT COUNT(*) FROM budget_lines
-                                      WHERE source_file = i.file_path)
-                   WHEN 'pdf'   THEN (SELECT COUNT(*) FROM pdf_pages
-                                      WHERE source_file = i.file_path)
-               END as actual_count
+        SELECT i.file_path, i.row_count, i.file_type, actual.cnt
         FROM ingested_files i
+        JOIN (
+            SELECT source_file, COUNT(*) AS cnt FROM budget_lines GROUP BY source_file
+            UNION ALL
+            SELECT source_file, COUNT(*) AS cnt FROM pdf_pages GROUP BY source_file
+        ) actual ON actual.source_file = i.file_path
         WHERE i.row_count IS NOT NULL
+          AND i.row_count != actual.cnt
     """)
-    mismatches = []
-    for row in cur.fetchall():
-        file_path, expected, file_type, actual = row
-        if actual is not None and expected != actual:
-            mismatches.append({
-                "file_path": file_path, "file_type": file_type,
-                "expected": expected, "actual": actual,
-            })
+    mismatches = [
+        {"file_path": row[0], "expected": row[1], "file_type": row[2], "actual": row[3]}
+        for row in cur.fetchall()
+    ]
     return {
         "name": "row_count_consistency",
         "status": "warn" if mismatches else "pass",
@@ -300,7 +298,9 @@ def validate_all(db_path: Path = DEFAULT_DB_PATH, strict: bool = False) -> dict:
     conn = get_connection(db_path)
     results = []
     for check_fn in ALL_CHECKS:
+        print(f"  Checking {check_fn.__name__}...", end=" ", flush=True)
         result = check_fn(conn)
+        print(result["status"].upper())
         results.append(result)
     conn.close()
 

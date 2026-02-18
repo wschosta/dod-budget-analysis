@@ -335,6 +335,63 @@ def create_database(db_path: Path) -> sqlite3.Connection:
         );
         CREATE INDEX IF NOT EXISTS idx_processed_files_session
             ON processed_files(session_id);
+
+        -- ── Enrichment tables (populated by enrich_budget_db.py) ──────────────
+
+        -- Canonical record per unique PE number, aggregating across years/exhibits
+        CREATE TABLE IF NOT EXISTS pe_index (
+            pe_number         TEXT PRIMARY KEY,
+            display_title     TEXT,
+            organization_name TEXT,
+            budget_type       TEXT,
+            fiscal_years      TEXT,   -- JSON array e.g. ["2024","2025","2026"]
+            exhibit_types     TEXT,   -- JSON array e.g. ["r1","r2"]
+            updated_at        TEXT DEFAULT (datetime('now'))
+        );
+
+        -- Links PE numbers to their narrative PDF pages (via text scanning)
+        CREATE TABLE IF NOT EXISTS pe_descriptions (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            pe_number        TEXT NOT NULL,
+            fiscal_year      TEXT,
+            source_file      TEXT,
+            page_start       INTEGER,
+            page_end         INTEGER,
+            section_header   TEXT,
+            description_text TEXT,
+            FOREIGN KEY (pe_number) REFERENCES pe_index(pe_number)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pe_desc_pe ON pe_descriptions(pe_number);
+        CREATE INDEX IF NOT EXISTS idx_pe_desc_fy ON pe_descriptions(fiscal_year);
+        CREATE INDEX IF NOT EXISTS idx_pe_desc_src ON pe_descriptions(source_file);
+
+        -- Tags per PE from multiple sources (structured fields, keywords, LLM)
+        CREATE TABLE IF NOT EXISTS pe_tags (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            pe_number  TEXT NOT NULL,
+            tag        TEXT NOT NULL,
+            tag_source TEXT NOT NULL,   -- "structured" | "keyword" | "taxonomy" | "llm"
+            confidence REAL DEFAULT 1.0,
+            UNIQUE(pe_number, tag, tag_source),
+            FOREIGN KEY (pe_number) REFERENCES pe_index(pe_number)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pe_tags_pe  ON pe_tags(pe_number);
+        CREATE INDEX IF NOT EXISTS idx_pe_tags_tag ON pe_tags(tag);
+
+        -- Detected cross-PE references (project movement / lineage)
+        CREATE TABLE IF NOT EXISTS pe_lineage (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_pe       TEXT NOT NULL,
+            referenced_pe   TEXT NOT NULL,
+            fiscal_year     TEXT,
+            source_file     TEXT,
+            page_number     INTEGER,
+            context_snippet TEXT,
+            link_type       TEXT,   -- "explicit_pe_ref" | "name_match"
+            confidence      REAL DEFAULT 1.0
+        );
+        CREATE INDEX IF NOT EXISTS idx_lineage_source ON pe_lineage(source_pe);
+        CREATE INDEX IF NOT EXISTS idx_lineage_ref    ON pe_lineage(referenced_pe);
     """)
 
     conn.commit()

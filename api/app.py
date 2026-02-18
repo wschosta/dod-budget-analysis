@@ -34,7 +34,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from api.database import get_db_path
-from api.routes import aggregations, budget_lines, download, reference, search
+from api.routes import aggregations, budget_lines, download, pe, reference, search
 from api.routes import frontend as frontend_routes
 
 # ── Request logging (4.C3-a) ─────────────────────────────────────────────────
@@ -144,6 +144,13 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 "description": "Bulk export of filtered budget lines as CSV or NDJSON.",
             },
             {
+                "name": "pe",
+                "description": (
+                    "PE-centric views: funding by year, sub-elements, narrative descriptions, "
+                    "related PE lineage, tag browsing, and Spruill-style CSV/ZIP export."
+                ),
+            },
+            {
                 "name": "meta",
                 "description": "Health check and API metadata.",
             },
@@ -243,6 +250,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     app.include_router(aggregations.router, prefix=prefix)
     app.include_router(reference.router,    prefix=prefix)
     app.include_router(download.router,     prefix=prefix)
+    app.include_router(pe.router,           prefix=prefix)
 
     # ── Static files + Jinja2 templates (3.A0-a) ──────────────────────────────
     _here = Path(__file__).parent.parent  # project root
