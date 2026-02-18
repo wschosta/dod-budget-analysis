@@ -27,6 +27,9 @@ from pathlib import Path
 # Shared utilities: Import from utils package for consistency across codebase
 from utils import get_connection, sanitize_fts5_query, format_amount
 
+# Private alias used by tests (test_search.py imports _sanitize_fts5_query)
+_sanitize_fts5_query = sanitize_fts5_query
+
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 
 
