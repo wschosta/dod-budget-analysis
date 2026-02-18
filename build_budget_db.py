@@ -518,14 +518,19 @@ def _merge_header_rows(header_row: list, next_row: list) -> list[str | None]:
 def _map_columns(headers: list, exhibit_type: str) -> dict:
     """Map column headers to standardized field names.
 
+    Returns a dict mapping our field names to column indices.
+    Optimized to use a single pass over headers with fallback logic.
     Returns a dict mapping our field names to column indices. Handles all DoD budget
     exhibit types including P-1, R-1, O-1, M-1, C-1 (MilCon), and RF-1 (Revolving Fund).
     """
     mapping = {}
     h_lower = [str(h).lower().replace("\n", " ").strip() if h else "" for h in headers]
 
-    # Common fields present in all exhibits
+    # Single-pass column mapping with normalized field matching
     for i, h in enumerate(h_lower):
+        h_normalized = h.replace(" ", "")
+
+        # Common fields
         if h == "account":
             mapping["account"] = i
         elif h == "account title":
@@ -539,9 +544,8 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
         elif h == "classification":
             mapping["classification"] = i
 
-    # Sub-activity / line item fields (varies by exhibit)
-    for i, h in enumerate(h_lower):
-        if h in ("bsa", "ag/bsa"):
+        # Sub-activity / line item fields
+        elif h in ("bsa", "ag/bsa"):
             mapping["sub_activity"] = i
         elif "budget subactivity" in h and "title" in h:
             mapping["sub_activity_title"] = i
@@ -554,11 +558,9 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
             mapping["line_item_title"] = i
         elif h == "pe/bli":
             mapping["line_item"] = i
-        elif h == "program element/budget line item (bli) title":
-            mapping["line_item_title"] = i
         elif h in ("sag/bli",):
             mapping["line_item"] = i
-        elif h in ("sag/budget line item (bli) title",):
+        elif h == "sag/budget line item (bli) title":
             mapping["line_item_title"] = i
         elif h == "construction project title":
             mapping["line_item_title"] = i
@@ -640,13 +642,15 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
-        rows = list(ws.iter_rows(values_only=True))
-        if len(rows) < 3:
-            continue
+        rows_iter = ws.iter_rows(values_only=True)
 
-        # Find the header row (row with "Account" in first meaningful position)
+        # Find the header row in the first 5 rows (buffer to avoid full materialization)
         header_idx = None
-        for i, row in enumerate(rows[:5]):
+        first_rows = []
+        for i, row in enumerate(rows_iter):
+            first_rows.append(row)
+            if i >= 4:
+                break
             for val in row:
                 if val and str(val).strip().lower() == "account":
                     header_idx = i
@@ -654,7 +658,7 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
             if header_idx is not None:
                 break
 
-        if header_idx is None:
+        if header_idx is None or len(first_rows) < 3:
             continue
 
         headers = rows[header_idx]
@@ -694,16 +698,20 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
         def get_val(row, field):
             """Return the raw cell value for a named field, or None if unmapped/out-of-range."""
             idx = col_map.get(field)
-            if idx is not None and idx < len(row):
-                return row[idx]
-            return None
+            return row[idx] if idx is not None and idx < len(row) else None
 
         def get_str(row, field):
             """Return the stripped string value for a named field, or None if absent."""
             v = get_val(row, field)
             return str(v).strip() if v is not None else None
 
-        for row in data_rows:
+        def get_org_name(row):
+            """Get organization name, defaulting to code if not in map."""
+            org_code = get_str(row, "organization") or ""
+            return ORG_MAP.get(org_code, org_code)
+
+        # Process rows after header
+        for row in rows_iter:
             if not row or all(v is None for v in row):
                 continue
 
@@ -1018,6 +1026,25 @@ def _remove_file_data(conn: sqlite3.Connection, rel_path: str, file_type: str):
         conn.execute("DELETE FROM budget_lines WHERE source_file = ?", (rel_path,))
     elif file_type == "pdf":
         conn.execute("DELETE FROM pdf_pages WHERE source_file = ?", (rel_path,))
+
+
+def _recreate_pdf_fts_triggers(conn: sqlite3.Connection):
+    """Recreate FTS5 triggers for pdf_pages table.
+
+    Used after bulk operations to maintain FTS5 index synchronization.
+    """
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS pdf_pages_ai AFTER INSERT ON pdf_pages BEGIN
+            INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data)
+            VALUES (new.id, new.page_text, new.source_file, new.table_data);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN
+            INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data)
+            VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data);
+        END
+    """)
 
 
 def _register_data_source(conn: sqlite3.Connection, docs_dir: Path):
