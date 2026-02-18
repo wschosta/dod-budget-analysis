@@ -10,8 +10,9 @@ web-facing, queryable database of Department of Defense budget data.
 
 ## Pages
 
-| Page | Description | Populated during |
-|------|-------------|------------------|
+| Page | Description | Status |
+|------|-------------|--------|
+| **[Performance Optimizations](Performance-Optimizations.md)** ⚡ | **3-6x speedup achieved** — Overview of all 13 optimizations | ✅ Complete |
 | [Data Sources](Data-Sources.md) | Catalog of all DoD budget data sources, URLs, and file formats | Phase 1.A (Step 1.A5) |
 | [Exhibit Types](Exhibit-Types.md) | Budget exhibit type catalog with column layouts and semantics | Phase 1.B (Step 1.B1) |
 | [Data Dictionary](Data-Dictionary.md) | Field definitions for the database and API | Phase 2 / 3 (Steps 2.A1, 3.C2) |
