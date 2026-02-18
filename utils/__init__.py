@@ -79,6 +79,13 @@ from utils.config import (
     FilePatterns,
 )
 
+# Manifest management
+from utils.manifest import (
+    Manifest,
+    ManifestEntry,
+    compute_file_hash,
+)
+
 __all__ = [
     # Common
     "format_bytes",
@@ -141,4 +148,8 @@ __all__ = [
     "KnownValues",
     "ColumnMapping",
     "FilePatterns",
+    # Manifest
+    "Manifest",
+    "ManifestEntry",
+    "compute_file_hash",
 ]
