@@ -69,8 +69,10 @@ by category and priority.
 | `tests/test_schema_design.py` | 13 | `schema_design.py` — _current_version, migrate (idempotent, seeds, indexes), create_normalized_db |
 | `tests/test_precommit_hook.py` | 16 | `.pre-commit-hook.py` — check_syntax, check_code_quality, check_security, check_database_schema |
 | `tests/test_http_utils.py` (additions) | 6 | `utils/http.py` — download_file() success, error handling, cleanup, streaming |
+| `tests/test_budget_lines_endpoint.py` | 15 | `api/routes/budget_lines.py` — list_budget_lines filters, pagination, sorting, get_budget_line |
+| `tests/test_search_endpoint.py` | 8 | `api/routes/search.py` — FTS5 search across budget lines + PDF pages, type filtering |
 | optimization_validation fixes | 0 | Fixed PytestReturnNotNoneWarning + _safe_float expectations in existing tests |
-| **Total** | **423** | Test count: 561 → 1152 (+591 new tests across all sessions) |
+| **Total** | **446** | Test count: 561 → 1175 (+614 new tests across all sessions) |
 
 ---
 
