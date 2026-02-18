@@ -55,7 +55,12 @@ by category and priority.
 | `tests/test_build_where.py` | 11 | `api/routes/budget_lines.py` — _build_where() SQL WHERE clause builder |
 | `tests/test_gui_eta.py` | 10 | `build_budget_gui.py` — _fmt_eta() ETA formatting |
 | `tests/test_api_database.py` | 5 | `api/database.py` — get_db() FastAPI dependency, connection lifecycle |
-| **Total** | **142** | Test count: 561 → 844 (+283 new tests across both sessions) |
+| `tests/test_api_search_snippet.py` | 9 | `api/routes/search.py` — _snippet() text extraction and edge cases |
+| `tests/test_api_models.py` | 20 | `api/models.py` — all 11 Pydantic models validation and serialization |
+| `tests/test_frontend_helpers.py` | 17 | `api/routes/frontend.py` — _get_services, _get_exhibit_types, _parse_filters, _query_results |
+| `tests/test_download_route.py` | 7 | `api/routes/download.py` — _iter_rows streaming, column list, allowed sorts |
+| `tests/test_app_factory.py` | 5 | `api/app.py` — create_app() factory, health endpoint (200 + 503) |
+| **Total** | **200** | Test count: 561 → 929 (+368 new tests across both sessions) |
 
 ---
 
