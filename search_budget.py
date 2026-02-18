@@ -91,6 +91,14 @@ def show_summary(conn: sqlite3.Connection) -> None:
         print(f"  {(r['account_title'] or '')[:45]:<45} {r['total']:>15,.0f}")
 
 
+# TODO 1.B2-a-search [EASY, ~600 tokens, DEPENDS ON 1.B2-a]: Update show_summary() to
+#   detect the most recent fiscal year column dynamically from the DB schema instead of
+#   hardcoding "amount_fy2026_request" (lines ~80-91).  Use PRAGMA table_info(budget_lines)
+#   to find all amount_fy* columns and pick the max year's _request column.  Also update
+#   display_budget_results() which hardcodes "FY2024", "FY2025", "FY2026" column names
+#   in its print statement (lines ~232-236).  No external data needed.
+
+
 def show_sources(conn: sqlite3.Connection) -> None:
     """Show data source tracking information."""
     print("=" * 80)

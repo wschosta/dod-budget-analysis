@@ -346,6 +346,12 @@ def create_database(db_path: Path) -> sqlite3.Connection:
 _safe_float = safe_float
 
 
+# TODO 1.B1-g [EASY, ~800 tokens]: Extend _detect_exhibit_type() to recognise
+#   detail exhibit types that exist in EXHIBIT_CATALOG but are not yet in EXHIBIT_TYPES:
+#   p5 (files like "p5_display.xlsx"), r2/r3/r4 (files like "r2_display.xlsx").
+#   Add keys to EXHIBIT_TYPES dict (around line 129) and verify with a test in
+#   tests/test_parsing.py (parametrize existing test_detect_exhibit_type).
+#   No external data needed — just string pattern matching.
 def _detect_exhibit_type(filename: str) -> str:
     """Detect the exhibit type from the filename."""
     name = filename.lower().replace("_display", "").replace(".xlsx", "")
@@ -462,6 +468,13 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
         elif h == "facility category title":
             mapping.setdefault("sub_activity", i)
 
+    # TODO 1.B2-a [MEDIUM, ~2000 tokens]: Make amount-column detection year-agnostic.
+    #   Replace the three hardcoded "fy2024/fy2025/fy2026" blocks below with a regex
+    #   loop over any "FY20XX" pattern found in headers. Use FISCAL_YEAR from
+    #   utils/patterns.py. Canonical column names: amount_fyYYYY_<type>. Update
+    #   validate_budget_db.py AMOUNT_COLUMNS (currently hardcoded) to query actual
+    #   column names from the DB schema instead. No external data needed.
+
     # Amount columns — match by pattern
     for i, h in enumerate(h_lower):
         if "fy2024" in h.replace(" ", "") or "fy 2024" in h:
@@ -520,6 +533,14 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
         elif "total obligation authority" in h:
             mapping.setdefault("amount_fy2026_total", i)
 
+    # TODO 1.B2-c [MEDIUM, ~1500 tokens]: Handle multi-row headers.
+    #   Some exhibit sheets split header text across two rows (e.g., row N has "FY2026"
+    #   and row N+1 has "Request Amount" in the same column). In ingest_excel_file(),
+    #   after finding header_idx, check if rows[header_idx+1] contains only blank or
+    #   continuation words; if so, merge each cell with " ".join() before passing to
+    #   _map_columns(). Add a test in test_parsing.py with a two-row header fixture.
+    #   No external data needed.
+
     return mapping
 
 
@@ -557,11 +578,25 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
         # Detect fiscal year from sheet name
         fy_match = re.search(r"(FY\s*)?20\d{2}", sheet_name, re.IGNORECASE)
         fiscal_year = fy_match.group().replace("FY ", "FY").replace("FY", "FY ") if fy_match else sheet_name
+        # TODO 1.B2-d [EASY, ~600 tokens]: Normalise fiscal_year to canonical "FY YYYY".
+        #   The regex match above may return "2026", "FY2026", or "FY 2026" depending on
+        #   the sheet name, which breaks GROUP BY queries. Add a helper function
+        #   _normalise_fiscal_year(raw: str) -> str that always returns "FY YYYY" format
+        #   (e.g. "FY 2026"). Replace the assignment above with it. Add parametrized
+        #   tests in test_parsing.py covering all three input variants.
 
         # Detect currency year for this sheet (TODO 1.B3-b)
         currency_year = _detect_currency_year(sheet_name, file_path.name)
 
         data_rows = rows[header_idx + 1:]
+        # TODO 1.B3-a [MEDIUM, ~2000 tokens]: Add _detect_amount_unit(rows, header_idx) -> str.
+        #   Scan rows[0:header_idx] (title rows above the header) and the headers themselves
+        #   for keywords: "in thousands", "$ thousands", "$ millions", "in millions".
+        #   Returns "thousands" (default) or "millions". Store as amount_unit TEXT in
+        #   budget_lines (add column to CREATE TABLE in create_database() and to the INSERT
+        #   column list). If amount_unit == "millions", multiply all _safe_float amounts
+        #   by 1000 before inserting. Add parametrized tests in test_parsing.py.
+        #   ⚠️ Schema change required — coordinate with 1.B2-a if done in same session.
         batch = []
 
         def get_val(row, field):
@@ -584,6 +619,11 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
 
             org_code = str(row[col_map["organization"]]).strip() if col_map.get("organization") is not None and col_map["organization"] < len(row) and row[col_map["organization"]] else ""
             org_name = ORG_MAP.get(org_code, org_code)
+            # TODO 1.B4-b [EASY, ~800 tokens]: Extend ORG_MAP (defined around line 140)
+            #   to cover additional DoD organizations: SOCOM, DISA, DLA, MDA, DHA, NGB.
+            #   Also add a fallback: if org_code is a case-insensitive substring of any
+            #   known org name, map it. Unknown codes currently land in the DB unlabelled,
+            #   showing up as unknown in validate_budget_db.py. No external data needed.
 
             # Extract PE number from line_item or account fields (Step 1.B4-a implementation)
             line_item_val = get_str(row, "line_item")
@@ -742,6 +782,14 @@ def _extract_tables_with_timeout(page, timeout_seconds=10):
         return None, "timeout"
     except Exception as e:
         return None, f"error: {str(e)[:50]}"
+    # TODO 1.B5-c [MEDIUM, ~1500 tokens]: Add fallback table extraction strategies.
+    #   When the "lines" strategy returns empty tables or errors, retry with:
+    #     1. {"vertical_strategy": "text", "horizontal_strategy": "lines"}
+    #     2. {"vertical_strategy": "text", "horizontal_strategy": "text"}
+    #   Each with its own timeout. Return tables from the first strategy that succeeds
+    #   and returns non-empty results. Log the strategy used as issue_type
+    #   "fallback_text_lines" or "fallback_text_text". Use the same ThreadPoolExecutor
+    #   pattern. No external data needed.
 
 
 def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
@@ -826,6 +874,11 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
 
     except Exception as e:
         print(f"  ERROR processing {file_path.name}: {e}")
+        # TODO 1.B5-e [EASY, ~400 tokens, BUG FIX]: Verify this INSERT matches the
+        #   ingested_files schema in create_database(). Count the columns in the table
+        #   definition and ensure the VALUES list provides exactly that many. Add a test
+        #   that passes a deliberately invalid PDF path to ingest_pdf_file() and asserts
+        #   a row appears in ingested_files with status starting with "error:".
         conn.execute(
             "INSERT OR REPLACE INTO ingested_files (file_path, file_type, file_size, file_modified, ingested_at, row_count, status) VALUES (?,?,?,?,datetime('now'),?,?)",
             (relative_path, "pdf", file_path.stat().st_size, file_path.stat().st_mtime, 0, f"error: {e}")

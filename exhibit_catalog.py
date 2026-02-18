@@ -48,6 +48,14 @@ TODO 1.B1-f: Build EXHIBIT_CATALOG dict mapping exhibit_type_key →
     Export it so build_budget_db.py can import and use it in _map_columns().
 """
 
+# TODO 1.B2-b [HARD, ~4000 tokens]: Connect EXHIBIT_CATALOG to _map_columns() in
+#   build_budget_db.py. Recommended approach (Option A — least risk):
+#     1. In build_budget_db.py add: from exhibit_catalog import find_matching_columns
+#     2. At the END of _map_columns(), call find_matching_columns(exhibit_type, headers)
+#        and merge: catalog wins for unset fields, existing mapping wins for set ones.
+#     3. Add tests for p5/r2/r3/r4 exhibit column detection in test_parsing.py.
+#   ⚠️ Full correctness verification requires real downloaded xlsx files (user to run).
+
 EXHIBIT_CATALOG = {
     "p1": {
         "name": "Procurement (P-1)",
@@ -421,3 +429,19 @@ def describe_catalog():
         lines.append("")
 
     return "\n".join(lines)
+
+
+# TODO 1.B1-a [REQUIRES USER INTERVENTION — needs downloaded corpus]:
+#   Write and run an audit script against DoD_Budget_Documents/ to inventory actual
+#   header rows from every .xlsx file and compare against catalog entries above.
+#   Script outline (~50 lines):
+#     from pathlib import Path
+#     import openpyxl
+#     for xlsx in Path("DoD_Budget_Documents").rglob("*.xlsx"):
+#         wb = openpyxl.load_workbook(str(xlsx), read_only=True, data_only=True)
+#         for sheet_name in wb.sheetnames:
+#             ws = wb[sheet_name]
+#             rows = [r for r in ws.iter_rows(max_row=5, values_only=True)]
+#             # find header row (contains "Account"), print signature
+#   Save output to exhibit_audit_report.txt and review for catalog gaps.
+#   ⚠️ Cannot run without the multi-GB downloaded corpus. User must execute manually.
