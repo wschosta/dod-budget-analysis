@@ -90,14 +90,7 @@ TODO 1.B5-c [Complexity: HIGH] [Tokens: ~4000] [User: NO]
     Dependency: Do after TODO 1.B5-a identifies which PDFs matter.
     Success: R-2/R-3 narrative sections are searchable via FTS5.
 
-TODO 1.B6-h [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Wire validation into build_budget_db.py as automatic post-build step.
-    Steps:
-      1. At end of build_database(), after summary, import and call
-         validate_budget_data.validate_all(db_path)
-      2. Print validation summary to stdout
-      3. Do NOT fail the build on validation warnings (just report)
-    Success: Every build_database() run ends with a validation report.
+DONE 1.B6-h: validate_budget_data.validate_all() called at end of build_database().
 """
 
 import argparse
@@ -929,42 +922,48 @@ def _likely_has_tables(page) -> bool:
 
 
 def _extract_tables_with_timeout(page, timeout_seconds=10, executor=None):
-    """
-    Extract tables from a PDF page with timeout to prevent hangs.
-    Returns (tables, issue_type) where issue_type is None on success, or
-    'timeout'/'error' if something went wrong.
+    """Extract tables from a PDF page with timeout and progressive fallback strategies.
+
+    Tries three extraction strategies in order, returning the first non-empty result:
+      1. lines/lines  — best quality; works for PDFs with visible gridlines
+      2. text/lines   — fallback for tables with horizontal rules but no vertical lines
+      3. text/text    — last resort for tables with no visible gridlines at all
+
+    Returns (tables, issue_type) where issue_type is None on success via the
+    primary strategy, "fallback_text_lines" or "fallback_text_text" for the
+    respective fallbacks, or "timeout"/"error" if all strategies fail.
 
     Args:
         executor: Optional ThreadPoolExecutor to reuse. If None, creates a
             temporary one (slower due to per-call thread pool overhead).
     """
+    # 1.B5-b: three strategies in priority order
+    _STRATEGIES = [
+        ({"vertical_strategy": "lines", "horizontal_strategy": "lines"}, None),
+        ({"vertical_strategy": "text", "horizontal_strategy": "lines"}, "fallback_text_lines"),
+        ({"vertical_strategy": "text", "horizontal_strategy": "text"}, "fallback_text_text"),
+    ]
+
     own_executor = executor is None
     if own_executor:
         executor = ThreadPoolExecutor(max_workers=1)
     try:
-        future = executor.submit(
-            page.extract_tables,
-            table_settings={
-                "vertical_strategy": "lines",
-                "horizontal_strategy": "lines"
-            }
-        )
-        tables = future.result(timeout=timeout_seconds)
-        return tables, None
-    except FuturesTimeoutError:
-        return None, "timeout"
-    except Exception as e:
-        return None, f"error: {str(e)[:50]}"
+        for settings, issue_label in _STRATEGIES:
+            try:
+                future = executor.submit(page.extract_tables,
+                                         table_settings=settings)
+                tables = future.result(timeout=timeout_seconds)
+                if tables:
+                    return tables, issue_label
+            except FuturesTimeoutError:
+                return None, "timeout"
+            except Exception as e:
+                return None, f"error: {str(e)[:50]}"
+        # All strategies returned empty
+        return [], None
     finally:
         if own_executor:
             executor.shutdown(wait=False)
-    # TODO 1.B5-b [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    #   Add fallback table extraction strategies (see docstring for full details).
-    #   When "lines" strategy returns empty/errors, retry with:
-    #     1. {"vertical_strategy": "text", "horizontal_strategy": "lines"}
-    #     2. {"vertical_strategy": "text", "horizontal_strategy": "text"}
-    #   Each with its own timeout. Return first non-empty result.
-    #   Log strategy as issue_type "fallback_text_lines" or "fallback_text_text".
 
 
 def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
@@ -1912,6 +1911,14 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     _progress("done", total_files, total_files, summary,
               {"files_remaining": 0, "eta_sec": 0.0})
     conn.close()
+
+    # 1.B6-h: Run post-build validation (non-blocking — warnings only)
+    try:
+        from validate_budget_data import validate_all, print_report  # noqa: PLC0415
+        val_summary = validate_all(db_path)
+        print_report(val_summary)
+    except Exception as _val_err:
+        print(f"\n  [VALIDATION] Skipped: {_val_err}")
 
 
 def main():

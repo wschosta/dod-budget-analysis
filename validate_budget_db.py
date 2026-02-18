@@ -13,34 +13,11 @@ Usage:
 TODOs for this file
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO VALDB-001 [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add PE number format validation check.
-    Steps:
-      1. Add check_pe_number_format(conn) function
-      2. Query pe_number column; validate against regex [0-9]{7}[A-Z]{1,2}
-      3. Flag rows where pe_number is populated but malformed
-      4. Add to ALL_CHECKS list
-    Success: Malformed PE numbers flagged (e.g., "0602702" missing suffix).
-
-TODO VALDB-002 [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Add negative amount detection check.
-    Steps:
-      1. Add check_negative_amounts(conn) function
-      2. Query amount_fy* columns for values < 0
-      3. Flag as info (negative amounts are valid for reductions but unusual)
-      4. Add to ALL_CHECKS list
-    Success: Negative amounts surfaced for review.
-
-TODO VALDB-003 [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Add --json output flag for machine-readable reports.
-    Steps:
-      1. Add --json argument to argparse
-      2. If set, output generate_report results as JSON instead of text
-      3. Support piping to data_quality_report.json
-    Success: `python validate_budget_db.py --json > report.json` works.
 """
 
 import argparse
+import json
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -302,6 +279,99 @@ def check_empty_files(conn: sqlite3.Connection) -> list[dict]:
     return issues
 
 
+# VALDB-001: PE number format validation
+_PE_PATTERN = re.compile(r"^[0-9]{7}[A-Z]{1,2}$")
+
+
+def check_pe_number_format(conn: sqlite3.Connection) -> list[dict]:
+    """Flag populated pe_number values that do not match the DoD PE format.
+
+    Valid PE numbers follow the pattern: 7 digits followed by 1-2 uppercase
+    letters (e.g., 0602702E, 0305116BB).  Rows where pe_number is set but
+    does not match are likely parsing artefacts or data entry errors.
+    """
+    issues = []
+    try:
+        rows = conn.execute("""
+            SELECT pe_number, source_file, exhibit_type, COUNT(*) AS cnt
+            FROM budget_lines
+            WHERE pe_number IS NOT NULL AND pe_number != ''
+            GROUP BY pe_number, source_file, exhibit_type
+            ORDER BY cnt DESC
+        """).fetchall()
+    except Exception:
+        return []
+
+    malformed = [r for r in rows if not _PE_PATTERN.match(str(r["pe_number"]))]
+    if malformed:
+        total_rows = sum(r["cnt"] for r in malformed)
+        issues.append({
+            "check": "pe_number_format",
+            "severity": "warning",
+            "detail": (
+                f"{total_rows} row(s) have malformed PE numbers "
+                f"(expected 7 digits + 1-2 uppercase letters)"
+            ),
+            "total": total_rows,
+            "samples": [
+                f"'{r['pe_number']}' in {r['source_file']} ({r['cnt']} rows)"
+                for r in malformed[:10]
+            ],
+        })
+
+    return issues
+
+
+# VALDB-002: Negative amount detection
+def check_negative_amounts(conn: sqlite3.Connection) -> list[dict]:
+    """Surface line items with negative dollar amounts for review.
+
+    Negative amounts can be legitimate (e.g., rescissions, reductions), but
+    are unusual enough that they warrant explicit review.  Flagged as *info*
+    rather than warning so they don't inflate the warning count.
+    """
+    issues = []
+    amount_cols = _get_amount_columns(conn)
+    if not amount_cols:
+        return issues
+
+    for col in amount_cols:
+        try:
+            rows = conn.execute(f"""
+                SELECT source_file, exhibit_type, account_title,
+                       organization_name, fiscal_year, {col}
+                FROM budget_lines
+                WHERE {col} < 0
+                ORDER BY {col}
+                LIMIT 50
+            """).fetchall()
+        except Exception:
+            continue
+
+        if rows:
+            total = conn.execute(
+                f"SELECT COUNT(*) AS cnt FROM budget_lines WHERE {col} < 0"
+            ).fetchone()["cnt"]
+            issues.append({
+                "check": "negative_amounts",
+                "severity": "info",
+                "detail": (
+                    f"{total} row(s) have negative {col} "
+                    "(may be valid rescissions — review recommended)"
+                ),
+                "column": col,
+                "total": total,
+                "samples": [
+                    f"{r['source_file']} / "
+                    f"{r['account_title'] or '?'} ({r['organization_name']}): "
+                    f"{r[col]:,.0f}"
+                    for r in rows[:5]
+                ],
+            })
+
+    return issues
+
+
 # ── Report generation ────────────────────────────────────────────────────────
 
 ALL_CHECKS = [
@@ -313,7 +383,56 @@ ALL_CHECKS = [
     ("Ingestion Errors", check_ingestion_errors),
     ("Empty Files", check_empty_files),
     ("Unit Consistency", check_unit_consistency),      # Step 1.B3-f
+    ("PE Number Format", check_pe_number_format),      # VALDB-001
+    ("Negative Amounts", check_negative_amounts),      # VALDB-002
 ]
+
+
+def generate_json_report(conn: sqlite3.Connection) -> dict:
+    """Run all checks and return results as a JSON-serialisable dict.
+
+    Intended for machine-readable output via ``--json``.  The returned dict
+    contains a ``checks`` list (one entry per check) plus top-level counts.
+    """
+    total_lines = conn.execute("SELECT COUNT(*) AS c FROM budget_lines").fetchone()["c"]
+    total_pages = conn.execute("SELECT COUNT(*) AS c FROM pdf_pages").fetchone()["c"]
+    total_files = conn.execute("SELECT COUNT(*) AS c FROM ingested_files").fetchone()["c"]
+
+    checks_output = []
+    total_issues = 0
+    severity_counts = {"error": 0, "warning": 0, "info": 0}
+
+    for check_name, check_fn in ALL_CHECKS:
+        issues = check_fn(conn)
+        count = len(issues)
+        total_issues += count
+        for issue in issues:
+            severity_counts[issue["severity"]] += 1
+        severities = list({i["severity"] for i in issues})
+        status = "pass"
+        if issues:
+            status = "fail" if "error" in severities else "warn"
+        checks_output.append({
+            "name": check_name,
+            "status": status,
+            "issue_count": count,
+            "issues": issues,
+        })
+
+    return {
+        "database": {
+            "budget_lines": total_lines,
+            "pdf_pages": total_pages,
+            "files_ingested": total_files,
+        },
+        "summary": {
+            "total_issues": total_issues,
+            "errors": severity_counts["error"],
+            "warnings": severity_counts["warning"],
+            "info": severity_counts["info"],
+        },
+        "checks": checks_output,
+    }
 
 
 def generate_report(conn: sqlite3.Connection, verbose: bool = False) -> int:
@@ -382,12 +501,20 @@ def main():
                         help=f"Database path (default: {DEFAULT_DB_PATH})")
     parser.add_argument("--verbose", "-v", action="store_true",
                         help="Show details for each issue found")
+    parser.add_argument("--json", action="store_true",
+                        help="Output results as JSON (VALDB-003)")
     args = parser.parse_args()
 
     conn = get_connection(args.db)
-    issue_count = generate_report(conn, verbose=args.verbose)
-    conn.close()
 
+    if args.json:
+        report = generate_json_report(conn)
+        print(json.dumps(report, indent=2))
+        issue_count = report["summary"]["total_issues"]
+    else:
+        issue_count = generate_report(conn, verbose=args.verbose)
+
+    conn.close()
     sys.exit(1 if issue_count > 0 else 0)
 
 
