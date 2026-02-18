@@ -5,11 +5,12 @@ Downloads budget documents (PDFs, Excel files, ZIPs) from the DoD Comptroller
 website and service-specific budget pages for selected fiscal years.
 
 Sources:
-  - comptroller : Main DoD summary budget documents (comptroller.war.gov)
-  - defense-wide: Defense Wide budget justification books (comptroller.war.gov)
-  - army        : US Army budget materials (asafm.army.mil)
-  - navy        : US Navy/Marine Corps budget materials (secnav.navy.mil)
-  - airforce    : US Air Force & Space Force budget materials (saffm.hq.af.mil)
+  - comptroller  : Main DoD summary budget documents (comptroller.war.gov)
+  - defense-wide : Defense Wide budget justification books (comptroller.war.gov)
+  - army         : US Army budget materials (asafm.army.mil)
+  - navy         : US Navy/Marine Corps budget materials (secnav.navy.mil)
+  - navy-archive : US Navy archive alternate source (secnav.navy.mil/fmc/fmb)
+  - airforce     : US Air Force & Space Force budget materials (saffm.hq.af.mil)
 
 Requirements:
   pip install requests beautifulsoup4 playwright
@@ -162,14 +163,12 @@ Usage:
 
 import argparse
 import os
-import queue
 import re
 import shutil
 import sys
 import threading
 import time
 import zipfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urljoin, urlparse, unquote
 
@@ -179,19 +178,16 @@ from bs4 import BeautifulSoup
 # ── Configuration ──────────────────────────────────────────────────────────────
 global tracker
 
-# Pre-compiled regex patterns for performance
-YEAR_PATTERN = re.compile(r"(19|20)\d{2}")
-
 BASE_URL = "https://comptroller.war.gov"
 BUDGET_MATERIALS_URL = f"{BASE_URL}/Budget-Materials/"
 DOWNLOADABLE_EXTENSIONS = {".pdf", ".xlsx", ".xls", ".zip", ".csv"}
 IGNORED_HOSTS = {"dam.defense.gov"}
 DEFAULT_OUTPUT_DIR = Path("DoD_Budget_Documents")
 
-ALL_SOURCES = ["comptroller", "defense-wide", "army", "navy", "airforce"]
+ALL_SOURCES = ["comptroller", "defense-wide", "army", "navy", "navy-archive", "airforce"]
 
 # Sources that require a real browser due to WAF/bot protection
-BROWSER_REQUIRED_SOURCES = {"army", "navy", "airforce"}
+BROWSER_REQUIRED_SOURCES = {"army", "navy", "navy-archive", "airforce"}
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -222,13 +218,17 @@ SERVICE_PAGE_TEMPLATES = {
         "url": "https://www.saffm.hq.af.mil/FM-Resources/Budget/Air-Force-Presidents-Budget-FY{fy2}/",
         "label": "US Air Force",
     },
-} # TODO: add alternate navy source: https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx
+    "navy-archive": {
+        "url": "https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx",
+        "label": "US Navy Archive",
+    },
+}
 
 
-# ── Utility Functions ─────────────────────────────────────────────────────────
+# ── Progress Tracker ──────────────────────────────────────────────────────────
 
 def _format_bytes(b: int) -> str:
-    """Format bytes as human-readable size."""
+    """Format bytes into human-readable size string."""
     if b < 1024 * 1024:
         return f"{b / 1024:.0f} KB"
     if b < 1024 * 1024 * 1024:
@@ -237,7 +237,7 @@ def _format_bytes(b: int) -> str:
 
 
 def _elapsed(start_time: float) -> str:
-    """Format elapsed time from start_time to now."""
+    """Format elapsed time from start_time to now as human-readable string."""
     secs = int(time.time() - start_time)
     m, s = divmod(secs, 60)
     h, m = divmod(m, 60)
@@ -245,8 +245,6 @@ def _elapsed(start_time: float) -> str:
         return f"{h}h {m:02d}m {s:02d}s"
     return f"{m}m {s:02d}s"
 
-
-# ── Progress Tracker ──────────────────────────────────────────────────────────
 
 class ProgressTracker:
     """Tracks overall download session progress and renders status bars."""
@@ -344,7 +342,7 @@ class ProgressTracker:
         elif status == "fail":
             self.failed += 1
 
-        size_str = self._format_bytes(size) if size > 0 else ""
+        size_str = _format_bytes(size) if size > 0 else ""
         line = f"    [{tag}] {filename} ({size_str})" if size_str else f"    [{tag}] {filename}"
         print(f"\r{line:<{self.term_width}}")
         self.print_overall()
@@ -558,7 +556,7 @@ class GuiProgressTracker:
         elif status == "fail":
             self.failed += 1
 
-        size_str = f" ({self._format_bytes(size)})" if size > 0 else ""
+        size_str = f" ({_format_bytes(size)})" if size > 0 else ""
         log_entry = f"[{tag}] {filename}{size_str}"
         self._log_lines.append(log_entry)
         if status == "fail":
@@ -642,51 +640,6 @@ class GuiProgressTracker:
 # Global tracker, set during main()
 _tracker: ProgressTracker | GuiProgressTracker | None = None
 
-# ZIP extraction queue and background thread
-_extraction_queue: queue.Queue | None = None
-_extractor_thread: threading.Thread | None = None
-_extractor_stop = False
-
-
-def _zip_extractor_worker():
-    """Background worker thread that processes ZIP extractions from queue."""
-    global _extraction_queue, _extractor_stop
-    while not _extractor_stop:
-        try:
-            zip_path, dest_dir = _extraction_queue.get(timeout=1)
-            if zip_path is None:  # Sentinel value for shutdown
-                break
-            _extract_zip(zip_path, dest_dir)
-            _extraction_queue.task_done()
-        except queue.Empty:
-            continue
-        except Exception as e:
-            print(f"    [ERROR] ZIP extraction failed: {e}")
-
-
-def _start_extraction_worker():
-    """Start the background ZIP extraction worker thread."""
-    global _extraction_queue, _extractor_thread, _extractor_stop
-    if _extraction_queue is not None:
-        return  # Already running
-    _extraction_queue = queue.Queue()
-    _extractor_stop = False
-    _extractor_thread = threading.Thread(target=_zip_extractor_worker, daemon=True)
-    _extractor_thread.start()
-
-
-def _stop_extraction_worker():
-    """Stop the background ZIP extraction worker thread and wait for completion."""
-    global _extraction_queue, _extractor_thread, _extractor_stop
-    if _extraction_queue is None:
-        return
-    _extraction_queue.put((None, None))  # Sentinel to stop worker
-    _extractor_stop = True
-    if _extractor_thread:
-        _extractor_thread.join(timeout=5)
-    _extraction_queue = None
-    _extractor_thread = None
-
 
 # ── Session ────────────────────────────────────────────────────────────────────
 
@@ -694,8 +647,6 @@ def get_session() -> requests.Session:
     session = requests.Session()
     session.headers.update(HEADERS)
     adapter = requests.adapters.HTTPAdapter(
-        pool_connections=20,  # Increased for concurrent connections
-        pool_maxsize=20,      # Increased for connection reuse
         max_retries=requests.adapters.Retry(
             total=3,
             backoff_factor=1,
@@ -751,6 +702,7 @@ def _get_browser_context():
 
 
 def _close_browser():
+    """Clean up and close the Playwright browser instance."""
     global _pw_instance, _pw_browser, _pw_context
     if _pw_browser:
         _pw_browser.close()
@@ -759,24 +711,14 @@ def _close_browser():
     _pw_instance = _pw_browser = _pw_context = None
 
 
-def _new_browser_page(url: str, timeout: int = 15000, wait_until: str = "domcontentloaded"):
-    """Create and navigate a page with webdriver spoofing and origin setup."""
+def _browser_extract_links(url: str, text_filter: str | None = None,
+                           expand_all: bool = False) -> list[dict]:
+    """Use Playwright to load a page and extract downloadable file links."""
     ctx = _get_browser_context()
     page = ctx.new_page()
     page.add_init_script(
         'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
     )
-    parsed = urlparse(url)
-    origin = f"{parsed.scheme}://{parsed.netloc}"
-    page.goto(origin, timeout=timeout, wait_until=wait_until)
-    page.wait_for_timeout(500)
-    return page
-
-
-def _browser_extract_links(url: str, text_filter: str | None = None,
-                           expand_all: bool = False) -> list[dict]:
-    """Use Playwright to load a page and extract downloadable file links."""
-    page = _new_browser_page(url, timeout=30000, wait_until="networkidle")
 
     try:
         page.goto(url, timeout=30000, wait_until="networkidle")
@@ -788,24 +730,20 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
                 page.wait_for_timeout(1500)
 
         # Extract links via JavaScript in the browser
-        # Inject DOWNLOADABLE_EXTENSIONS and IGNORED_HOSTS from Python
         js_filter = f"'{text_filter}'" if text_filter else "null"
-        ext_list = ', '.join(f"'{e}'" for e in DOWNLOADABLE_EXTENSIONS)
-        ignored_list = ', '.join(f"'{h}'" for h in IGNORED_HOSTS)
-        raw = page.evaluate(f"""() => {{
-            const tf = {js_filter};
+        raw = page.evaluate(f"""(exts, tf) => {{
+            const tf_arg = tf;
             const allLinks = Array.from(document.querySelectorAll('a[href]'));
             const files = [];
             const seen = new Set();
-            const exts = [{ext_list}];
-            const ignoredHosts = new Set([{ignored_list}]);
+            const ignoredHosts = new Set(['dam.defense.gov']);
             for (const a of allLinks) {{
                 const href = a.href;
                 let path, host;
                 try {{ const u = new URL(href); path = u.pathname.toLowerCase(); host = u.hostname.toLowerCase(); }} catch {{ continue; }}
                 if (ignoredHosts.has(host)) continue;
                 if (!exts.some(e => path.endsWith(e))) continue;
-                if (tf && !href.toLowerCase().includes(tf.toLowerCase())) continue;
+                if (tf_arg && !href.toLowerCase().includes(tf_arg.toLowerCase())) continue;
                 if (seen.has(path)) continue;
                 seen.add(path);
                 const text = a.textContent.trim();
@@ -814,7 +752,7 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
                 files.push({{ name: text || filename, url: href, filename: filename, extension: ext }});
             }}
             return files;
-        }}""")
+        }}""", list(DOWNLOADABLE_EXTENSIONS), text_filter)
 
         return [_clean_file_entry(f) for f in raw]
 
@@ -822,10 +760,25 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
         page.close()
 
 
-# TODO: The three download strategies below share identical page setup boilerplate
-# (new_page, add_init_script, goto origin, wait). Extract a _new_browser_page(url)
-# helper that returns a page already navigated to the file's origin, reducing the
-# ~50 lines of repeated setup/teardown to a single call per strategy.
+def _new_browser_page(ctx, url: str):
+    """Create and initialize a new browser page navigated to the URL's origin.
+
+    Sets up anti-bot/webdriver detection bypass and navigates to the origin
+    to establish cookies/session before strategy-specific actions.
+
+    Returns the page object. Caller is responsible for closing it.
+    """
+    page = ctx.new_page()
+    page.add_init_script(
+        'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+    )
+    parsed = urlparse(url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    page.goto(origin, timeout=15000, wait_until="domcontentloaded")
+    page.wait_for_timeout(500)
+    return page
+
+
 def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -> bool:
     """Download a file using Playwright's browser context to bypass WAF.
 
@@ -838,11 +791,12 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
         print(f"    [SKIP] Already exists: {dest_path.name}")
         return True
 
+    ctx = _get_browser_context()
     dest_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Strategy 1: Use page.request API (fetch with browser session/cookies, no UI)
     try:
-        page = _new_browser_page(url)
+        page = _new_browser_page(ctx, url)
         resp = page.request.get(url, timeout=120000)
         if resp.ok and len(resp.body()) > 0:
             dest_path.write_bytes(resp.body())
@@ -857,7 +811,7 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
 
     # Strategy 2: Trigger download via injected anchor element
     try:
-        page = _new_browser_page(url)
+        page = _new_browser_page(ctx, url)
         # Escape the URL for JS
         safe_url = url.replace("'", "\\'")
         with page.expect_download(timeout=120000) as download_info:
@@ -884,12 +838,18 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
 
     # Strategy 3: Direct navigation (may open PDF viewer, but content still loads)
     try:
-        page = _new_browser_page(url, timeout=120000, wait_until="load")
-        body = page.content()
-        if body:
-            dest_path.write_bytes(body.encode('utf-8'))
-            page.close()
-            return True
+        page = ctx.new_page()
+        page.add_init_script(
+            'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+        )
+        # Navigate directly to the URL (bypasses origin setup for simpler direct fetch)
+        resp = page.goto(url, timeout=120000, wait_until="load")
+        if resp and resp.ok:
+            body = resp.body()
+            if body and len(body) > 0:
+                dest_path.write_bytes(body)
+                page.close()
+                return True
         page.close()
     except Exception:
         try:
@@ -934,8 +894,7 @@ def _extract_downloadable_links(soup: BeautifulSoup, page_url: str,
         if text_filter and text_filter.lower() not in full_url.lower():
             continue
 
-        # Normalize URL for deduplication (case-insensitive domain + path)
-        dedup_key = f"{parsed.scheme.lower()}://{parsed.hostname.lower()}{parsed.path}"
+        dedup_key = parsed._replace(query="", fragment="").geturl()
         if dedup_key in seen_urls:
             continue
         seen_urls.add(dedup_key)
@@ -954,6 +913,7 @@ def _extract_downloadable_links(soup: BeautifulSoup, page_url: str,
 
 
 def _sanitize_filename(name: str) -> str:
+    """Remove invalid filesystem characters and URL query parameters from filename."""
     if "?" in name:
         name = name.split("?")[0]
     for ch in '<>:"/\\|?*':
@@ -962,6 +922,7 @@ def _sanitize_filename(name: str) -> str:
 
 
 def _is_browser_source(source: str) -> bool:
+    """Check if a source requires browser access to work around WAF protection."""
     return source in BROWSER_REQUIRED_SOURCES
 
 
@@ -976,7 +937,7 @@ def discover_fiscal_years(session: requests.Session) -> dict[str, str]:
     fy_links = {}
     for link in soup.find_all("a", href=True):
         text = link.get_text(strip=True)
-        if YEAR_PATTERN.fullmatch(text):
+        if re.fullmatch(r"(19|20)\d{2}", text):
             href = urljoin(BUDGET_MATERIALS_URL, link["href"])
             fy_links[text] = href
 
@@ -1025,6 +986,15 @@ def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
     return files
 
 
+# ── Navy Archive (browser required) ────────────────────────────────────────────
+
+def discover_navy_archive_files(_session: requests.Session, year: str) -> list[dict]:
+    url = SERVICE_PAGE_TEMPLATES["navy-archive"]["url"]
+    print(f"  [Navy Archive] Scanning FY{year} (browser)...")
+    files = _browser_extract_links(url, text_filter=f"/{year}/")
+    return files
+
+
 # ── Air Force (browser required) ─────────────────────────────────────────────
 
 def discover_airforce_files(_session: requests.Session, year: str) -> list[dict]:
@@ -1037,54 +1007,18 @@ def discover_airforce_files(_session: requests.Session, year: str) -> list[dict]
 
 # ── Discovery router ─────────────────────────────────────────────────────────
 
-def _make_comptroller_discoverer(available_years_dict):
-    """Create a comptroller discoverer closure that captures available_years."""
-    def discoverer(session, year):
-        url = available_years_dict[year]
-        return discover_comptroller_files(session, year, url)
-    return discoverer
-
-
 SOURCE_DISCOVERERS = {
     "defense-wide": discover_defense_wide_files,
     "army": discover_army_files,
     "navy": discover_navy_files,
+    "navy-archive": discover_navy_archive_files,
     "airforce": discover_airforce_files,
 }
 
 
 # ── Download ──────────────────────────────────────────────────────────────────
-def _prefetch_remote_sizes(session: requests.Session, files: list[dict], use_browser: bool = False) -> dict:
-    """Prefetch remote file sizes for all files in parallel.
-
-    Returns: {url: size} dict. Missing URLs have unknown size.
-    """
-    if use_browser or not files:
-        return {}  # Can't HEAD with browser, skip prefetch
-
-    remote_sizes = {}
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = {
-            executor.submit(session.head, f["url"], timeout=3, allow_redirects=True): f["url"]
-            for f in files
-        }
-
-        for future in as_completed(futures):
-            url = futures[future]
-            try:
-                resp = future.result()
-                if resp.status_code < 400:
-                    cl = resp.headers.get("content-length")
-                    if cl and cl.isdigit():
-                        remote_sizes[url] = int(cl)
-            except requests.RequestException:
-                pass
-
-    return remote_sizes
-
-
 def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
-                         use_browser: bool = False, remote_sizes: dict | None = None) -> str:
+                         use_browser: bool = False) -> str:
     """Check if a local file matches the remote.
 
     Returns:
@@ -1095,27 +1029,24 @@ def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
     if not dest_path.exists():
         return "download"
 
-    try:
-        local_size = dest_path.stat().st_size
-    except (FileNotFoundError, OSError):
-        return "download"
-
+    local_size = dest_path.stat().st_size
     if local_size == 0:
         return "redownload"
 
-    # Try to get remote size (from prefetch cache or fallback HEAD)
+    # Try to get remote size via HEAD request
     remote_size = None
-    if remote_sizes is not None and url in remote_sizes:
-        remote_size = remote_sizes[url]
-    elif not use_browser:
-        try:
-            head = session.head(url, timeout=5, allow_redirects=True)
-            if head.status_code < 400:
-                cl = head.headers.get("content-length")
-                if cl and cl.isdigit():
-                    remote_size = int(cl)
-        except requests.RequestException:
-            pass
+    try:
+        if use_browser:
+            # For browser sources we can't easily HEAD, so trust local file
+            # if it's non-empty
+            return "skip"
+        head = session.head(url, timeout=15, allow_redirects=True)
+        if head.status_code < 400:
+            cl = head.headers.get("content-length")
+            if cl and cl.isdigit():
+                remote_size = int(cl)
+    except requests.RequestException:
+        pass
 
     if remote_size is None:
         # Can't determine remote size — trust the local file
@@ -1128,12 +1059,12 @@ def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
 
 
 def download_file(session: requests.Session, url: str, dest_path: Path,
-                  overwrite: bool = False, use_browser: bool = False, remote_sizes: dict | None = None) -> bool:
+                  overwrite: bool = False, use_browser: bool = False) -> bool:
     global _tracker
     fname = dest_path.name
 
     if not overwrite and dest_path.exists():
-        status = _check_existing_file(session, url, dest_path, use_browser, remote_sizes)
+        status = _check_existing_file(session, url, dest_path, use_browser)
         if status == "skip":
             size = dest_path.stat().st_size
             if _tracker:
@@ -1198,25 +1129,6 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
     return False
 
 
-def _download_file_wrapper(args_tuple):
-    """Wrapper for parallel download execution.
-
-    Returns: (file_info, dest, ok, size)
-    """
-    session, url, dest, overwrite, use_browser, delay, remote_sizes = args_tuple
-    start_time = time.time()
-    ok = download_file(session, url, dest, overwrite, use_browser, remote_sizes=remote_sizes)
-    size = dest.stat().st_size if dest.exists() else 0
-
-    # Respect delay timing
-    elapsed = time.time() - start_time
-    remaining_delay = max(0, delay - elapsed)
-    if remaining_delay > 0:
-        time.sleep(remaining_delay)
-
-    return (url, dest, ok, size)
-
-
 def _extract_zip(zip_path: Path, dest_dir: Path):
     """Extract a ZIP archive into dest_dir and log the result."""
     try:
@@ -1250,16 +1162,27 @@ def list_files(all_files: dict[str, dict[str, list[dict]]]) -> None:
 
 # ── Interactive ───────────────────────────────────────────────────────────────
 
-# TODO: interactive_select_years and interactive_select_sources have nearly
-# identical structure (display numbered list, parse comma-separated input, validate).
-# Refactor into a generic _interactive_select(title, items, all_label) helper.
-def interactive_select_years(available: dict[str, str]) -> list[str]:
-    years = list(available.keys())
-    print("\nAvailable Fiscal Years:")
-    print("-" * 40)
-    for i, year in enumerate(years, 1):
-        print(f"  {i:2d}. FY{year}")
-    print(f"  {len(years)+1:2d}. All fiscal years")
+def _interactive_select(title: str, items: list[str], item_labels: dict[str, str] | None = None,
+                        all_label: str = "All") -> list[str]:
+    """Generic interactive selection menu for numbered list input.
+
+    Args:
+        title: Header to display above the menu
+        items: List of items to choose from
+        item_labels: Optional dict mapping items to display labels (defaults to items themselves)
+        all_label: Label for the "All items" option
+
+    Returns:
+        List of selected items
+    """
+    if item_labels is None:
+        item_labels = {item: item for item in items}
+
+    print(f"\n{title}")
+    print("-" * 50)
+    for i, item in enumerate(items, 1):
+        print(f"  {i}. {item_labels.get(item, item)}")
+    print(f"  {len(items)+1}. All {all_label.lower()}")
     print()
 
     while True:
@@ -1274,20 +1197,27 @@ def interactive_select_years(available: dict[str, str]) -> list[str]:
             print("Invalid input. Please enter numbers separated by commas.")
             continue
 
-        if len(years) + 1 in choices:
-            return years
+        # Check if "all" was selected
+        if len(items) + 1 in choices:
+            return items
 
         selected = []
         valid = True
         for c in choices:
-            if 1 <= c <= len(years):
-                selected.append(years[c - 1])
+            if 1 <= c <= len(items):
+                selected.append(items[c - 1])
             else:
                 print(f"Invalid choice: {c}")
                 valid = False
                 break
         if valid and selected:
             return selected
+
+
+def interactive_select_years(available: dict[str, str]) -> list[str]:
+    years = list(available.keys())
+    year_labels = {year: f"FY{year}" for year in years}
+    return _interactive_select("Available Fiscal Years:", years, year_labels, "fiscal years")
 
 
 def interactive_select_sources() -> list[str]:
@@ -1296,41 +1226,10 @@ def interactive_select_sources() -> list[str]:
         "defense-wide": "Defense Wide (budget justification books)",
         "army": "US Army",
         "navy": "US Navy / Marine Corps",
+        "navy-archive": "US Navy Archive",
         "airforce": "US Air Force / Space Force",
     }
-    print("\nAvailable Sources:")
-    print("-" * 50)
-    for i, src in enumerate(ALL_SOURCES, 1):
-        print(f"  {i}. {labels[src]}")
-    print(f"  {len(ALL_SOURCES)+1}. All sources")
-    print()
-
-    while True:
-        raw = input(
-            "Enter numbers separated by commas (e.g. 1,2,3) or 'q' to quit: "
-        ).strip()
-        if raw.lower() == "q":
-            sys.exit(0)
-        try:
-            choices = [int(x.strip()) for x in raw.split(",")]
-        except ValueError:
-            print("Invalid input.")
-            continue
-
-        if len(ALL_SOURCES) + 1 in choices:
-            return list(ALL_SOURCES)
-
-        selected = []
-        valid = True
-        for c in choices:
-            if 1 <= c <= len(ALL_SOURCES):
-                selected.append(ALL_SOURCES[c - 1])
-            else:
-                print(f"Invalid choice: {c}")
-                valid = False
-                break
-        if valid and selected:
-            return selected
+    return _interactive_select("Available Sources:", list(ALL_SOURCES), labels, "sources")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -1438,68 +1337,42 @@ def main():
     # Track which sources need browser for download
     needs_browser = any(s in BROWSER_REQUIRED_SOURCES for s in selected_sources)
 
-    # Pre-start browser if needed (before discovery, so startup time is amortized)
-    if needs_browser:
-        print("Pre-starting browser for WAF-protected sources...")
-        _get_browser_context()
-
     # ── File type filter ──
     type_filter = None
     if args.types:
         type_filter = {f".{t.lower().strip('.')}" for t in args.types}
         print(f"File type filter: {', '.join(type_filter)}")
 
-    # ── Discover files (parallel) ──
+    # ── Discover files ──
     all_files: dict[str, dict[str, list[dict]]] = {}
     # Track which source labels need browser downloads
     browser_labels: set[str] = set()
 
-    # Register comptroller discoverer with available_years closure
-    comptroller_discoverer = _make_comptroller_discoverer(available_years)
-    SOURCE_DISCOVERERS["comptroller"] = comptroller_discoverer
-
-    # Build discovery tasks: (year, source) tuples
-    discovery_tasks = []
     for year in selected_years:
         all_files[year] = {}
+
         for source in selected_sources:
-            discovery_tasks.append((year, source))
+            if source == "comptroller":
+                url = available_years[year]
+                files = discover_comptroller_files(session, year, url)
+            else:
+                discoverer = SOURCE_DISCOVERERS[source]
+                files = discoverer(session, year)
 
-    # Execute discovery in parallel
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {
-            executor.submit(SOURCE_DISCOVERERS[source], session, year): (year, source)
-            for year, source in discovery_tasks
-        }
+            if type_filter:
+                files = [f for f in files if f["extension"] in type_filter]
 
-        for future in as_completed(futures):
-            year, source = futures[future]
-            try:
-                start_discovery = time.time()
-                files = future.result()
-                elapsed = time.time() - start_discovery
+            label = (SERVICE_PAGE_TEMPLATES[source]["label"]
+                     if source != "comptroller" else "Comptroller")
+            all_files[year][label] = files
 
-                if type_filter:
-                    files = [f for f in files if f["extension"] in type_filter]
+            if _is_browser_source(source):
+                browser_labels.add(label)
 
-                label = (SERVICE_PAGE_TEMPLATES[source]["label"]
-                         if source != "comptroller" else "Comptroller")
-                all_files[year][label] = files
+            #if use_gui:
+            #    _tracker.discovery_step(step_label, len(files))
 
-                if _is_browser_source(source):
-                    browser_labels.add(label)
-
-                # Smart delay: only sleep the remaining time
-                remaining_delay = max(0, args.delay - elapsed)
-                if remaining_delay > 0:
-                    time.sleep(remaining_delay)
-
-            except Exception as e:
-                year_label = f"FY{year}"
-                label = (SERVICE_PAGE_TEMPLATES[source]["label"]
-                         if source != "comptroller" else "Comptroller")
-                print(f"ERROR discovering {source} for {year_label}: {e}")
-                all_files[year][label] = []
+            time.sleep(args.delay)
 
     # ── List mode ──
     if args.list_only:
@@ -1512,10 +1385,6 @@ def main():
         len(f) for yr in all_files.values() for f in yr.values()
     )
     print(f"\nReady to download {total_files} file(s) to: {args.output.resolve()}\n")
-
-    # Start background ZIP extraction worker if extracting
-    if args.extract_zips:
-        _start_extraction_worker()
 
     if args.no_gui:
         _tracker = ProgressTracker(total_files)
@@ -1546,95 +1415,38 @@ def main():
             _tracker.set_source(year, source_label)
 
             # Pre-filter: skip files that already exist locally (non-empty)
-            # Prefetch remote sizes for direct sources to avoid per-file HEAD requests
-            remote_sizes = {}
-            if not args.overwrite and not use_browser and len(files) > 1:
-                remote_sizes = _prefetch_remote_sizes(session, files, use_browser=False)
-
+            # to avoid per-file HEAD requests when not overwriting.
             to_download = []
             if not args.overwrite:
                 for file_info in files:
                     dest = dest_dir / file_info["filename"]
-                    try:
+                    if dest.exists() and dest.stat().st_size > 0:
                         size = dest.stat().st_size
-                        if size > 0:
-                            if _tracker:
-                                _tracker.file_done(dest.name, size, "skip")
-                            else:
-                                print(f"    [SKIP] Already exists: {dest.name}")
+                        if _tracker:
+                            _tracker.file_done(dest.name, size, "skip")
                         else:
-                            to_download.append(file_info)
-                    except FileNotFoundError:
+                            print(f"    [SKIP] Already exists: {dest.name}")
+                    else:
                         to_download.append(file_info)
             else:
                 to_download = files
 
-            # For browser downloads, use sequential (WAF-safe)
-            # For direct downloads, use parallel (4 workers)
-            if use_browser:
-                # Sequential: browser sources can't be parallelized (WAF-protected)
-                for file_info in to_download:
-                    dest = dest_dir / file_info["filename"]
-                    ok = download_file(
-                        session, file_info["url"], dest,
-                        args.overwrite, use_browser=use_browser, remote_sizes=remote_sizes,
-                    )
-                    if ok and args.extract_zips and dest.suffix.lower() == ".zip":
-                        if _extraction_queue is not None:
-                            _extraction_queue.put((dest, dest_dir))
-                        else:
-                            _extract_zip(dest, dest_dir)
-                    time.sleep(args.delay)
-            else:
-                # Parallel: direct downloads can be parallelized
-                if len(to_download) > 1:
-                    # Prepare download tasks: (session, url, dest, overwrite, use_browser, delay, remote_sizes)
-                    download_tasks = [
-                        (session, fi["url"], dest_dir / fi["filename"],
-                         args.overwrite, use_browser, args.delay, remote_sizes)
-                        for fi in to_download
-                    ]
-
-                    with ThreadPoolExecutor(max_workers=4) as executor:
-                        futures = [executor.submit(_download_file_wrapper, task)
-                                   for task in download_tasks]
-
-                        for future in as_completed(futures):
-                            try:
-                                url, dest, ok, size = future.result()
-                                status = "ok" if ok else "fail"
-                                if _tracker:
-                                    _tracker.file_done(dest.name, size, status)
-
-                                if ok and args.extract_zips and dest.suffix.lower() == ".zip":
-                                    if _extraction_queue is not None:
-                                        _extraction_queue.put((dest, dest_dir))
-                                    else:
-                                        _extract_zip(dest, dest_dir)
-                            except Exception as e:
-                                print(f"    [ERROR] Download failed: {e}")
-                else:
-                    # Single file: no benefit from parallelization
-                    for file_info in to_download:
-                        dest = dest_dir / file_info["filename"]
-                        ok = download_file(
-                            session, file_info["url"], dest,
-                            args.overwrite, use_browser=use_browser, remote_sizes=remote_sizes,
-                        )
-                        if ok and args.extract_zips and dest.suffix.lower() == ".zip":
-                            if _extraction_queue is not None:
-                                _extraction_queue.put((dest, dest_dir))
-                            else:
-                                _extract_zip(dest, dest_dir)
-                        time.sleep(args.delay)
+            for file_info in to_download:
+                dest = dest_dir / file_info["filename"]
+                ok = download_file(
+                    session, file_info["url"], dest,
+                    args.overwrite, use_browser=use_browser,
+                )
+                if ok and args.extract_zips and dest.suffix.lower() == ".zip":
+                    _extract_zip(dest, dest_dir)
+                time.sleep(args.delay)
 
     # ── Cleanup ──
-    _stop_extraction_worker()  # Wait for all ZIPs to finish extracting
     _close_browser()
 
     # ── Summary ──
-    elapsed = _elapsed(_tracker.start_time)
-    total_dl = _format_bytes(_tracker.total_bytes)
+    elapsed = _tracker._elapsed()
+    total_dl = _tracker._format_bytes(_tracker.total_bytes)
     print(f"\n\n{'='*70}")
     print(f"  Download Complete")
     print(f"{'='*70}")

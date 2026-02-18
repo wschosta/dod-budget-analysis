@@ -53,8 +53,8 @@
 | **URL pattern per FY** | Replace `{fy}` with 4-digit year |
 | **File types** | PDF, XLSX |
 | **FY coverage confirmed** | <!-- TODO: fill from 1.A2-c results --> |
-| **Access method** | HTTP (requests) |
-| **Notes** | Separate page per FY. |
+| **Access method** | Browser required (Playwright) — WAF/bot protection |
+| **Notes** | Separate page per FY. Alternate archive: `https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx` |
 
 ### 5. US Air Force / Space Force
 
@@ -66,6 +66,17 @@
 | **FY coverage confirmed** | <!-- TODO: fill from 1.A2-c results --> |
 | **Access method** | Browser required (Playwright) — WAF/bot protection |
 | **Notes** | Uses "Expand All" button on page. Filters by `FY{fy2}` in link URL. |
+
+### 6. US Navy Archive (Alternate)
+
+| Field | Value |
+|-------|-------|
+| **Base URL** | `https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx` |
+| **URL pattern per FY** | Static archive page; filtered by year in discovery |
+| **File types** | PDF, XLSX |
+| **FY coverage confirmed** | <!-- TODO: fill from 1.A2-c results --> |
+| **Access method** | Browser required (Playwright) — WAF/bot protection |
+| **Notes** | Alternate source for Navy budget documents. Useful for historical data or when primary Navy source is unavailable. |
 
 ---
 
