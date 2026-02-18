@@ -165,11 +165,25 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             line_item TEXT,
             line_item_title TEXT,
             classification TEXT,
-            -- TODO: Fiscal year columns are hardcoded to FY2024-2026. When new
-            -- budget years are released, the schema, column mapping, and all INSERT
-            -- statements must be updated in lockstep. Consider a normalized design
-            -- (separate fiscal_year_amounts table with year/type/amount columns) or
-            -- storing amounts as JSON in extra_fields for forward compatibility.
+            -- DESIGN NOTE: Fiscal year columns are denormalized (FY2024-2026 hardcoded).
+            -- When new budget years are released, update:
+            --   1. This CREATE TABLE schema
+            --   2. Column mapping in build_budget_db.py (_map_columns, _extract_amount_for_fy)
+            --   3. Excel ingestion logic (ingest_excel_file)
+            --   4. All INSERT/SELECT statements below
+            --
+            -- Future refactoring options:
+            --   A. Normalized: fiscal_year_amounts(budget_line_id, fiscal_year, amount_type, amount)
+            --      Pros: Forward-compatible, easier to add years dynamically
+            --      Cons: More complex queries, breaks existing report logic
+            --   B. JSON: Store all years as {"2024": {types...}, "2025": {...}}
+            --      Pros: Self-documenting, flexible
+            --      Cons: Harder to query/filter, less efficient
+            --   C. Current (denormalized): Easiest for queries, safest for reports
+            --      Trade-off: Manual schema updates needed for new fiscal years
+            --
+            -- Recommended: Keep denormalized approach until 2027 when FY2027 data arrives.
+            -- At that point, evaluate performance vs. flexibility and consider migration.
             amount_fy2024_actual REAL,
             amount_fy2025_enacted REAL,
             amount_fy2025_supplemental REAL,
