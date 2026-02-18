@@ -71,6 +71,7 @@ _PE_PATTERN = PE_NUMBER
 
 import openpyxl
 import pdfplumber
+from exhibit_catalog import find_matching_columns as _catalog_find_matching_columns
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -608,6 +609,26 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
         elif "total obligation authority" in h:
             mapping.setdefault("amount_fy2026_total", i)
 
+    # TODO 1.B2-c [MEDIUM, ~1500 tokens]: Handle multi-row headers.
+    #   Some exhibit sheets split header text across two rows (e.g., row N has "FY2026"
+    #   and row N+1 has "Request Amount" in the same column). In ingest_excel_file(),
+    #   after finding header_idx, check if rows[header_idx+1] contains only blank or
+    #   continuation words; if so, merge each cell with " ".join() before passing to
+    #   _map_columns(). Add a test in test_parsing.py with a two-row header fixture.
+    #   No external data needed.
+
+    # Merge catalog-based column detection (Step 1.B2-b).
+    # For fields not yet set by heuristic matching above, consult EXHIBIT_CATALOG.
+    # The heuristic mapping wins for any field it already identified; the catalog
+    # fills in gaps for exhibit types with well-defined column specs (p5, r2, r3, r4,
+    # and the summary exhibits already handled above).
+    catalog_mapping = _catalog_find_matching_columns(exhibit_type, list(headers))
+    # catalog_mapping: col_index → field_name; invert to field_name → col_index
+    already_mapped_fields = set(mapping.values())
+    for col_idx, field_name in catalog_mapping.items():
+        if field_name not in already_mapped_fields:
+            mapping.setdefault(field_name, col_idx)
+
     return mapping
 
 
@@ -671,12 +692,14 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
         batch = []
 
         def get_val(row, field):
+            """Return the raw cell value for a named field, or None if unmapped/out-of-range."""
             idx = col_map.get(field)
             if idx is not None and idx < len(row):
                 return row[idx]
             return None
 
         def get_str(row, field):
+            """Return the stripped string value for a named field, or None if absent."""
             v = get_val(row, field)
             return str(v).strip() if v is not None else None
 
@@ -1138,6 +1161,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     }
 
     def _progress(phase, current, total, detail="", metrics_update=None):
+        """Update shared metrics and invoke the caller-supplied progress callback."""
         if metrics_update:
             _metrics.update(metrics_update)
         if progress_callback:
@@ -1375,6 +1399,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             _remove_file_data(conn, rel_path, "pdf")
 
             def _page_cb(pages_done: int, page_total: int) -> None:
+                """Per-page progress callback forwarded from ingest_pdf_file."""
                 _metrics["current_pages"] = pages_done
                 _metrics["current_total_pages"] = page_total
                 _progress("pdf", i + 1, len(pdf_files),
@@ -1564,6 +1589,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
 
 def main():
+    """Parse command-line arguments and run the database build pipeline."""
     parser = argparse.ArgumentParser(description="Build DoD budget search database")
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH,
                         help=f"Database path (default: {DEFAULT_DB_PATH})")
@@ -1583,6 +1609,7 @@ def main():
     stop_event = threading.Event()
 
     def _sigint_handler(sig, frame):
+        """Handle SIGINT (Ctrl+C): request graceful stop on first press, force-quit on second."""
         if not stop_event.is_set():
             print("\n\nKeyboard interrupt — finishing current file and saving checkpoint...")
             print("Resume later with: python build_budget_db.py --resume")

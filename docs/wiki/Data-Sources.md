@@ -98,3 +98,28 @@ Catalog of all DoD budget data sources configured in `dod_budget_downloader.py`.
 - **Browser-required sources:** `army`, `navy`, `navy-archive`, `airforce` (government WAF blocks plain HTTP)
 - **File integrity:** `_verify_download()` checks magic bytes after every download; corrupt files are deleted and retried
 - **Failure log:** `failed_downloads.json` written to output dir; use `--retry-failures` to re-attempt
+- **Browser-required sources:** Army, Navy, Air Force (government WAF blocks plain HTTP)
+
+---
+
+## Notes on Coverage
+
+- **Coverage matrix:** The matrix above shows nominal coverage. Actual file counts depend
+  on network access to each source. Run `python dod_budget_downloader.py --list --years all
+  --sources all` to populate actual counts.
+
+- **Historical years:** Comptroller and Defense-Wide tend to have documents back to
+  FY2017 or earlier. Service sites (Army, Navy, Air Force) may have different historical
+  depth. Older years may use different URL patterns.
+
+- **Missing agencies:** The following agencies publish budget materials but are not
+  yet directly sourced (they may appear under Defense-Wide):
+  - Defense Logistics Agency (DLA)
+  - Missile Defense Agency (MDA)
+  - Defense Health Agency (DHA)
+  - Defense Information Systems Agency (DISA)
+  - Special Operations Command (SOCOM)
+
+- **File types:** Most exhibits are published as `.xlsx`. PDFs are typically budget
+  justification narratives. ZIP files may contain batches of exhibits that are
+  automatically extracted after download.

@@ -181,7 +181,8 @@ def run_scheduled_download(
     return exit_code
 
 
-def main() -> None:
+def main():
+    """Parse CLI arguments and run the scheduled (unattended) download pipeline."""
     parser = argparse.ArgumentParser(
         description="Unattended scheduled download of DoD budget documents",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -29,6 +29,12 @@ class RefreshWorkflow:
     """Orchestrates the complete data refresh pipeline."""
 
     def __init__(self, verbose=False, dry_run=False):
+        """Initialize workflow state.
+
+        Args:
+            verbose: If True, emit detailed stage output.
+            dry_run: If True, log commands without executing them.
+        """
         self.verbose = verbose
         self.dry_run = dry_run
         self.start_time = None
@@ -219,6 +225,7 @@ class RefreshWorkflow:
 
 
 def main():
+    """Parse CLI arguments and run the four-stage data refresh workflow."""
     parser = argparse.ArgumentParser(
         description="Refresh DoD Budget Database with latest data",
         formatter_class=argparse.RawDescriptionHelpFormatter,

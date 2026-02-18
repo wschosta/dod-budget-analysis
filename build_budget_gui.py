@@ -52,6 +52,7 @@ class BuildProgressWindow:
     """Tkinter window that shows database build progress."""
 
     def __init__(self):
+        """Initialize the window, set up internal state variables, and build the UI."""
         self.root = tk.Tk()
         self.root.title("DoD Budget Database Builder")
         self.root.configure(bg=BG)
@@ -77,6 +78,7 @@ class BuildProgressWindow:
     # ── UI construction ───────────────────────────────────────────────────
 
     def _build_ui(self):
+        """Create and lay out all Tkinter widgets: header, path selectors, options, progress card, and buttons."""
         # Style
         style = ttk.Style(self.root)
         style.theme_use("clam")
@@ -249,12 +251,14 @@ class BuildProgressWindow:
     # ── Path browsing ─────────────────────────────────────────────────────
 
     def _browse_docs(self):
+        """Open a directory chooser dialog and update the documents directory field."""
         d = filedialog.askdirectory(title="Select Documents Directory",
                                     initialdir=self.docs_var.get())
         if d:
             self.docs_var.set(d)
 
     def _browse_db(self):
+        """Open a save-file dialog and update the database output path field."""
         f = filedialog.asksaveasfilename(
             title="Database File", defaultextension=".sqlite",
             filetypes=[("SQLite", "*.sqlite"), ("All", "*.*")],
@@ -265,6 +269,7 @@ class BuildProgressWindow:
     # ── Build control ─────────────────────────────────────────────────────
 
     def _start_build(self):
+        """Validate paths, update button states, and launch the build in a background thread."""
         docs = Path(self.docs_var.get())
         db = Path(self.db_var.get())
 
@@ -310,6 +315,10 @@ class BuildProgressWindow:
     # ── Queue polling (runs on the main / UI thread) ──────────────────────
 
     def _poll_queue(self):
+        """Drain the thread-safe message queue and dispatch each message to _handle_progress.
+
+        Reschedules itself every 80ms via root.after so it runs on the main (UI) thread.
+        """
         try:
             while True:
                 msg = self.msg_queue.get_nowait()
@@ -326,6 +335,17 @@ class BuildProgressWindow:
 
     def _handle_progress(self, phase: str, current: int, total: int,
                          detail: str, metrics: dict):
+        """Update all UI widgets for a single progress event.
+
+        Args:
+            phase: Build phase identifier ('scan', 'excel', 'pdf', 'index', 'done',
+                   'stopped', or 'error').
+            current: Number of items completed in the current phase.
+            total: Total items in the current phase (0 if unknown).
+            detail: Human-readable description of the current item.
+            metrics: Dict with optional keys: eta_sec, files_remaining, pages,
+                     current_pages, current_total_pages, speed_rows, speed_pages.
+        """
         phase_labels = {
             "scan":    "Scanning files...",
             "excel":   "Ingesting Excel files",
@@ -413,6 +433,12 @@ class BuildProgressWindow:
     # ── Log text widget helpers ───────────────────────────────────────────
 
     def _log(self, msg: str, tag: str | None = None):
+        """Append a message to the read-only log text widget, optionally coloured by tag.
+
+        Args:
+            msg: Text to append (should end with '\\n').
+            tag: Optional colour tag ('phase', 'ok', 'err', 'dim').
+        """
         self.stats_text.configure(state="normal")
         if tag:
             self.stats_text.insert("end", msg, tag)
@@ -422,6 +448,7 @@ class BuildProgressWindow:
         self.stats_text.configure(state="disabled")
 
     def _clear_log(self):
+        """Clear all text from the log widget."""
         self.stats_text.configure(state="normal")
         self.stats_text.delete("1.0", "end")
         self.stats_text.configure(state="disabled")
@@ -429,6 +456,7 @@ class BuildProgressWindow:
     # ── Close handling ────────────────────────────────────────────────────
 
     def _on_close(self):
+        """Handle window close event, prompting for confirmation when a build is active."""
         if self.running:
             if not messagebox.askyesno("Build in progress",
                                        "A build is in progress. Close anyway?"):
@@ -436,11 +464,13 @@ class BuildProgressWindow:
         self.root.destroy()
 
     def run(self):
+        """Register the close handler and start the Tkinter main event loop."""
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.mainloop()
 
 
 def main():
+    """Create and run the build progress window."""
     app = BuildProgressWindow()
     app.run()
 
