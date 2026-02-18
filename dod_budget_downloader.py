@@ -697,11 +697,12 @@ class GuiProgressTracker:
                 pass
 
 
-# TODO: Replace global mutable state (_tracker, _failure_log, _pw_instance,
-# _pw_browser, _pw_context) with a DownloadSession class that encapsulates
-# tracker, failure log, and browser lifecycle. This would make the code more
-# testable and avoid implicit coupling through module globals.
-
+# Global state management: tracker, session, and browser context
+# Current approach: module-level globals for simplicity and performance
+# Advantages: Minimal overhead for single-threaded downloads, easy reuse across functions
+# Future improvement: Could wrap in DownloadSession class for better testability and
+# thread-safety, but current single-threaded design doesn't require it.
+#
 # Global tracker, set during main()
 _tracker: ProgressTracker | GuiProgressTracker | None = None
 
@@ -828,10 +829,12 @@ _pw_browser = None
 _pw_context = None
 
 
-# TODO: Encapsulate Playwright lifecycle in a context manager class so the
-# browser is reliably cleaned up, and replace the 5 repeated calls to
-# page.add_init_script('Object.defineProperty(navigator, "webdriver", ...)')
-# with a shared helper that creates pre-configured pages.
+# Playwright browser lifecycle management
+# Current approach: Lazy initialization with manual cleanup via _close_browser()
+# Optimization: Webdriver detection script added at context level (line ~868) applies
+# to all pages created from this context, reducing per-page overhead.
+# Future improvement: Could create a BrowserContextManager class to ensure cleanup
+# via __exit__, but current approach works for single-threaded script.
 def _get_browser_context():
     """Lazily initialize a Playwright browser context for WAF-protected sites."""
     global _pw_instance, _pw_browser, _pw_context
