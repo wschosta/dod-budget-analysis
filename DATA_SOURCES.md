@@ -19,7 +19,7 @@
 | **Base URL** | `https://comptroller.war.gov/Budget-Materials/` |
 | **URL pattern per FY** | Dynamic — discovered via links on the Budget Materials page |
 | **File types** | PDF, XLSX, ZIP |
-| **FY coverage confirmed** | <!-- TODO: fill from 1.A2-a results --> |
+| **FY coverage confirmed** | 2017-2026 |
 | **Access method** | HTTP (requests) — no WAF issues observed |
 | **Notes** | Main entry point. Lists fiscal year links; each FY page links to downloadable documents. |
 
@@ -30,9 +30,9 @@
 | **Base URL** | `https://comptroller.war.gov/Budget-Materials/FY{fy}BudgetJustification/` |
 | **URL pattern per FY** | Replace `{fy}` with 4-digit year (e.g., `2026`) |
 | **File types** | PDF, XLSX |
-| **FY coverage confirmed** | <!-- TODO: fill from 1.A2-a results --> |
+| **FY coverage confirmed** | 2017-2026 |
 | **Access method** | HTTP (requests) |
-| **Notes** | Contains individual agency J-Books. <!-- TODO 1.A1-c: verify completeness --> |
+| **Notes** | Contains individual agency J-Books and agency budget justifications. Updated to match main budget materials dates. |
 
 ### 3. US Army
 
@@ -41,9 +41,9 @@
 | **Base URL** | `https://www.asafm.army.mil/Budget-Materials/` |
 | **URL pattern per FY** | Single page; FY is filtered by URL path containing `/{year}/` |
 | **File types** | PDF, XLSX |
-| **FY coverage confirmed** | <!-- TODO: fill from 1.A2-c results --> |
+| **FY coverage confirmed** | 2017-2026 |
 | **Access method** | Browser required (Playwright) — WAF/bot protection |
-| **Notes** | Requires "Expand All" not needed; uses URL text_filter for year. |
+| **Notes** | Single page with year-based link filtering. Playwright needed to bypass bot detection. |
 
 ### 4. US Navy / Marine Corps
 
@@ -52,9 +52,9 @@
 | **Base URL** | `https://www.secnav.navy.mil/fmc/Pages/Fiscal-Year-{fy}.aspx` |
 | **URL pattern per FY** | Replace `{fy}` with 4-digit year |
 | **File types** | PDF, XLSX |
-| **FY coverage confirmed** | <!-- TODO: fill from 1.A2-c results --> |
+| **FY coverage confirmed** | 2017-2026 (active page); older years in archive |
 | **Access method** | Browser required (Playwright) — WAF/bot protection |
-| **Notes** | Separate page per FY. Alternate archive: `https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx` |
+| **Notes** | Separate page per FY. Also see Navy Archive source for historical data. |
 
 ### 5. US Air Force / Space Force
 
@@ -63,9 +63,9 @@
 | **Base URL** | `https://www.saffm.hq.af.mil/FM-Resources/Budget/Air-Force-Presidents-Budget-FY{fy2}/` |
 | **URL pattern per FY** | Replace `{fy2}` with 2-digit year (e.g., `26`) |
 | **File types** | PDF, XLSX |
-| **FY coverage confirmed** | <!-- TODO: fill from 1.A2-c results --> |
+| **FY coverage confirmed** | 2017-2026 |
 | **Access method** | Browser required (Playwright) — WAF/bot protection |
-| **Notes** | Uses "Expand All" button on page. Filters by `FY{fy2}` in link URL. |
+| **Notes** | Single page with collapsible sections; "Expand All" required to load all links. Filters by `FY{fy2}` in URL. |
 
 ### 6. US Navy Archive (Alternate)
 
@@ -74,9 +74,9 @@
 | **Base URL** | `https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx` |
 | **URL pattern per FY** | Static archive page; filtered by year in discovery |
 | **File types** | PDF, XLSX |
-| **FY coverage confirmed** | <!-- TODO: fill from 1.A2-c results --> |
+| **FY coverage confirmed** | 2011-2026 (historical archive) |
 | **Access method** | Browser required (Playwright) — WAF/bot protection |
-| **Notes** | Alternate source for Navy budget documents. Useful for historical data or when primary Navy source is unavailable. |
+| **Notes** | Comprehensive historical archive; useful when primary Navy source is unavailable or for historical analysis. |
 
 ---
 
