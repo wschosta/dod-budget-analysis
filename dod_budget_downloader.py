@@ -87,76 +87,20 @@ TODO 1.A2-c [Complexity: MEDIUM] [Tokens: ~2500] [User: YES — needs network]
       3. Fix one service at a time; test after each
     Success: All services return results for FY2017+.
 
-TODO 1.A3-a [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    Add download manifest generation (manifest.json).
-    Steps:
-      1. After discovery, write manifest.json with: url, expected_filename,
-         source, fiscal_year, extension for each file
-      2. After download, update each entry with status, file_size, file_hash
-      3. Use utils/manifest.py (already created) as the data model
-      4. ~30 lines added to main()
-    Success: manifest.json created in output dir with all download metadata.
-
-TODO 1.A3-b [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Add SHA-256 checksum verification after download.
-    Steps:
-      1. Add hashlib.sha256() computation in download_file() after writing
-      2. Store hash in manifest (from 1.A3-a)
-      3. In _check_existing_file(), compare existing file hash vs manifest
-      4. Redownload if hash mismatch (corrupted file)
-    Success: Corrupted files detected and re-downloaded on subsequent runs.
-
-TODO 1.A3-c [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Improve WAF/bot detection handling.
-    Steps:
-      1. Add _detect_waf_block(response) helper (~15 lines)
-      2. Check for: HTTP 403 "Access Denied", CAPTCHA pages, Cloudflare
-      3. Call from download_file() and _browser_download_file()
-      4. Log specific warning when WAF detected
-    Success: WAF blocks produce clear error messages, not generic failures.
-
-TODO 1.A4-a [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Refactor download logic into a callable download_all() function.
-    Steps:
-      1. Extract core download loop from main() into:
-         download_all(years, sources, output_dir, **opts)
-      2. main() calls download_all() after parsing args
-      3. refresh_data.py can call download_all() directly (no subprocess)
-    Success: Download logic callable without CLI argument parsing.
-
-TODO 1.A4-b [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    Add --since flag for incremental updates.
-    Dependency: TODO 1.A3-a (manifest) should be done first.
-    Steps:
-      1. Add --since YYYY-MM-DD argument to argparse
-      2. During discovery, compare against manifest from previous run
-      3. Skip files already in manifest with matching hashes
-    Success: --since filters out already-downloaded unchanged files.
-
-TODO 1.A4-c [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Create GitHub Actions workflow for scheduled downloads.
-    Steps:
-      1. Write .github/workflows/update-data.yml (~40 lines YAML)
-      2. Schedule: weekly or workflow_dispatch
-      3. Steps: checkout, install deps+playwright, download 2 latest FYs,
-         build DB, upload manifest as artifact
-      4. Use actions/cache for playwright browsers
-    Success: Workflow runs weekly and produces updated data artifact.
-
-TODO FIX-003 [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Fix line-length violations in this file (>100 chars).
-    Affected lines: ~824 (107ch), ~986 (138ch), ~995 (104ch), ~1446 (103ch).
-    Steps:
-      1. Find long lines: grep -n '.\{101,\}' dod_budget_downloader.py
-      2. Break using Python line continuation or local variables
-      3. Run pytest tests/test_precommit_checks.py::TestLineLength -v
-    Success: 0 line-length violations in this file.
+Step 1.A implementation status:
+  DONE 1.A3-a: Manifest written after discovery (write_manifest / update_manifest_entry)
+  DONE 1.A3-b: SHA-256 computed inline while streaming; corrupted files re-downloaded
+  DONE 1.A3-c: _detect_waf_block() helper added; called from download_file()
+  DONE 1.A4-a: download_all() callable function extracted from main()
+  DONE 1.A4-b: --since YYYY-MM-DD flag added; load_manifest_ok_urls() filters
+               discovered files to skip those already current in the manifest.
+  DONE 1.A4-c: .github/workflows/download.yml + scripts/scheduled_download.py
+  DONE FIX-003: Line-length violations fixed
 """
 
 import argparse
 import hashlib
 import json
-import os
 import re
 import shutil
 import sys
@@ -169,7 +113,6 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse, unquote
 
 import requests
-import socket
 from bs4 import BeautifulSoup
 
 # Shared utilities: Import from utils package for consistency across codebase
@@ -178,7 +121,7 @@ from utils.patterns import DOWNLOADABLE_EXTENSIONS
 
 # Optimization: Try to use lxml parser (3-5x faster), fall back to html.parser
 try:
-    import lxml
+    import lxml  # noqa: F401
     PARSER = "lxml"
 except ImportError:
     PARSER = "html.parser"
@@ -229,7 +172,10 @@ SERVICE_PAGE_TEMPLATES = {
         "label": "US Navy",
     },
     "airforce": {
-        "url": "https://www.saffm.hq.af.mil/FM-Resources/Budget/Air-Force-Presidents-Budget-FY{fy2}/",
+        "url": (
+            "https://www.saffm.hq.af.mil/FM-Resources/Budget/"
+            "Air-Force-Presidents-Budget-FY{fy2}/"
+        ),
         "label": "US Air Force",
     },
     "navy-archive": {
@@ -865,6 +811,57 @@ def _compute_sha256(file_path: Path) -> str:
     return h.hexdigest()
 
 
+def load_manifest_ok_urls(manifest_path: Path, since_date: str | None = None) -> set[str]:
+    """Return the set of URLs that were successfully downloaded and are up-to-date.
+
+    Used by --since to skip files that don't need re-downloading.
+
+    Args:
+        manifest_path: Path to an existing manifest.json.
+        since_date:    ISO date string "YYYY-MM-DD".  If given, only entries
+                       downloaded *on or after* that date are considered current.
+                       If None, all entries with status='ok' are considered current.
+
+    Returns:
+        Set of URL strings that should be skipped (already current).
+    """
+    if not manifest_path.exists():
+        return set()
+    try:
+        with open(manifest_path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        files = data.get("files", {})
+    except (json.JSONDecodeError, OSError):
+        return set()
+
+    cutoff = None
+    if since_date:
+        try:
+            from datetime import date as _date
+            cutoff = _date.fromisoformat(since_date)
+        except ValueError:
+            pass
+
+    ok_urls: set[str] = set()
+    for url, entry in files.items():
+        if entry.get("status") != "ok":
+            continue
+        if cutoff is not None:
+            downloaded_at = entry.get("downloaded_at")
+            if not downloaded_at:
+                continue  # No timestamp — treat as stale
+            try:
+                from datetime import date as _date
+                dl_date = _date.fromisoformat(downloaded_at[:10])
+                if dl_date < cutoff:
+                    continue  # Downloaded before the cutoff — re-download
+            except ValueError:
+                continue
+        ok_urls.add(url)
+
+    return ok_urls
+
+
 def write_manifest(output_dir: Path, all_files: dict, manifest_path: Path) -> None:
     """Write an initial manifest.json listing all files to be downloaded.
 
@@ -1051,18 +1048,18 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
                     pass
 
         # Extract links via JavaScript in the browser
-        raw = page.evaluate(f"""(args) => {{
+        raw = page.evaluate("""(args) => {
             const [exts, tf] = args;
             const tf_arg = tf;
             const allLinks = Array.from(document.querySelectorAll('a[href]'));
             const files = [];
             const seen = new Set();
             const ignoredHosts = new Set(['dam.defense.gov']);
-            for (const a of allLinks) {{
+            for (const a of allLinks) {
                 const href = a.href;
                 let path, host;
-                try {{ const u = new URL(href); path = u.pathname.toLowerCase();
-                    host = u.hostname.toLowerCase(); }} catch {{ continue; }}
+                try { const u = new URL(href); path = u.pathname.toLowerCase();
+                    host = u.hostname.toLowerCase(); } catch { continue; }
                 if (ignoredHosts.has(host)) continue;
                 if (!exts.some(e => path.endsWith(e))) continue;
                 if (tf_arg && !href.toLowerCase().includes(tf_arg.toLowerCase())) continue;
@@ -1071,11 +1068,11 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
                 const text = a.textContent.trim();
                 const filename = decodeURIComponent(path.split('/').pop());
                 const ext = '.' + filename.split('.').pop().toLowerCase();
-                files.push({{ name: text || filename, url: href,
-                    filename: filename, extension: ext }});
-            }}
+                files.push({ name: text || filename, url: href,
+                    filename: filename, extension: ext });
+            }
             return files;
-        }}""", [list(DOWNLOADABLE_EXTENSIONS), text_filter])
+        }""", [list(DOWNLOADABLE_EXTENSIONS), text_filter])
 
         return [_clean_file_entry(f) for f in raw]
 
@@ -1630,6 +1627,41 @@ def _get_chunk_size(total_size: int) -> int:
     return 262144  # 256 KB for huge files
 
 
+# TODO 1.A3-c implemented: WAF/bot detection helper
+_WAF_STATUS_CODES = {403, 429, 503}
+_WAF_BODY_SIGNALS = [
+    b"access denied",
+    b"cloudflare",
+    b"captcha",
+    b"bot protection",
+    b"ddos-guard",
+    b"please enable javascript",
+    b"ray id",
+]
+
+
+def _detect_waf_block(response: "requests.Response") -> bool:
+    """Return True if the HTTP response looks like a WAF or bot-protection block.
+
+    Checks for:
+    - HTTP status codes commonly used by WAFs (403, 429, 503)
+    - Known WAF provider signatures in the response body
+    - ``cf-ray`` / ``x-ddos-guard`` response headers (Cloudflare / DDos-Guard)
+
+    When True is returned, the caller should log a clear warning and avoid
+    treating the response as a successful file download.
+    """
+    if response.status_code in _WAF_STATUS_CODES:
+        body_preview = response.content[:2048].lower()
+        for signal in _WAF_BODY_SIGNALS:
+            if signal in body_preview:
+                return True
+        # Cloudflare and DDos-Guard inject custom headers
+        if "cf-ray" in response.headers or "x-ddos-guard" in response.headers:
+            return True
+    return False
+
+
 def download_file(session: requests.Session, url: str, dest_path: Path,
                   overwrite: bool = False, use_browser: bool = False) -> bool:
     """Download a single file from url to dest_path, skipping if already current.
@@ -1725,6 +1757,13 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
             resp = session.get(url, headers=headers, timeout=120, stream=True)
             resp.raise_for_status()
 
+            # WAF / bot-protection detection (TODO 1.A3-c)
+            if _detect_waf_block(resp):
+                print(f"\r    [WAF] {fname}: WAF/bot-protection block detected "
+                      f"(HTTP {resp.status_code}) — skipping retry          ")
+                update_manifest_entry(url, "waf_block", 0, None)
+                return False
+
             # Validate Content-Range header if resuming
             if resume_from > 0 and resp.status_code != 206:
                 # Server doesn't support range, restart
@@ -1739,9 +1778,9 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
             dest_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Optimization: Adaptive chunk sizing based on file size
+            # SHA-256 computed inline while streaming (1.A3-b)
             chunk_size = _get_chunk_size(total_size)
 
-            # Compute SHA-256 while streaming (no extra I/O pass) — implements TODO 1.A3-b
             sha256 = hashlib.sha256()
             with open(dest_path, mode) as f:
                 for chunk in resp.iter_content(chunk_size=chunk_size):
@@ -2185,6 +2224,14 @@ def main():
             "or from PATH if specified. Skips discovery. (TODO 1.A6-b)"
         ),
     )
+    parser.add_argument(
+        "--since", metavar="YYYY-MM-DD", default=None,
+        help=(
+            "Skip files already in the manifest with status=ok and "
+            "downloaded on or after YYYY-MM-DD. Enables fast incremental "
+            "updates without re-downloading unchanged files. (1.A4-b)"
+        ),
+    )
     args = parser.parse_args()
 
     # Optimization: Set global flag for cache refresh
@@ -2221,7 +2268,6 @@ def main():
         for entry in failed_entries:
             url = entry["url"]
             dest = Path(entry["dest"])
-            fname = entry["filename"]
             use_browser = entry.get("use_browser", False)
             source = entry.get("source", "")
             year = entry.get("year", "")
@@ -2303,9 +2349,6 @@ def main():
 
     print(f"Selected sources: {', '.join(selected_sources)}")
 
-    # Track which sources need browser for download
-    needs_browser = any(s in BROWSER_REQUIRED_SOURCES for s in selected_sources)
-
     # ── File type filter ──
     type_filter = None
     if args.types:
@@ -2346,7 +2389,25 @@ def main():
         _close_browser()
         return
 
-    # ── Download via download_all() (TODO 1.A4-a) ──
+    # ── --since incremental filter (1.A4-b) ──
+    if args.since:
+        manifest_path = args.output / "manifest.json"
+        ok_urls = load_manifest_ok_urls(manifest_path, args.since)
+        if ok_urls:
+            skipped_count = 0
+            for year in all_files:
+                for label in all_files[year]:
+                    before = len(all_files[year][label])
+                    all_files[year][label] = [
+                        f for f in all_files[year][label]
+                        if f["url"] not in ok_urls
+                    ]
+                    skipped_count += before - len(all_files[year][label])
+            if skipped_count:
+                print(f"\n  [--since {args.since}] Skipping {skipped_count} "
+                      f"already-current file(s) from manifest.")
+
+    # ── Download via download_all() ──
     summary = download_all(
         all_files,
         args.output,
@@ -2363,7 +2424,7 @@ def main():
     if args.no_gui:
         total_dl = format_bytes(summary["total_bytes"])
         print(f"\n\n{'='*70}")
-        print(f"  Download Complete")
+        print("  Download Complete")
         print(f"{'='*70}")
         print(f"  Downloaded: {summary['downloaded']}")
         print(f"  Skipped:    {summary['skipped']}")

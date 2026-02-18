@@ -1,0 +1,46 @@
+# DoD Budget — docker-compose.yml (Step 4.A1-b)
+#
+# Development compose configuration with hot-reload and database volume.
+#
+# Usage:
+#   docker-compose up              # Start API server
+#   docker-compose up --build      # Rebuild image first
+#   docker-compose down            # Stop and remove containers
+
+version: "3.9"
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount the local database for persistence (created by build_budget_db.py)
+      - ./dod_budget.sqlite:/app/dod_budget.sqlite:ro
+      # Hot-reload for API source in development
+      - ./api:/app/api:ro
+      - ./utils:/app/utils:ro
+    environment:
+      APP_DB_PATH: /app/dod_budget.sqlite
+    command: >
+      uvicorn api.app:app
+        --host 0.0.0.0
+        --port 8000
+        --reload
+        --reload-dir /app/api
+        --reload-dir /app/utils
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - |
+          import urllib.request
+          urllib.request.urlopen('http://localhost:8000/health', timeout=3)
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    restart: unless-stopped

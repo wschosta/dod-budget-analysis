@@ -1,0 +1,116 @@
+{
+  "timestamp": "2026-02-18T21:20:49.926621",
+  "database": "/tmp/pytest-of-root/pytest-1/test_stop_event_not_set_comple0/test.sqlite",
+  "total_budget_lines": 4,
+  "row_counts_by_service_fy_exhibit": [
+    {
+      "service": "",
+      "fiscal_year": "Sheet",
+      "exhibit_type": "p1",
+      "row_count": 4
+    }
+  ],
+  "amount_column_stats": {
+    "amount_fy2024_actual": {
+      "null_count": 0,
+      "null_pct": 0.0,
+      "zero_count": 0,
+      "zero_pct": 0.0
+    },
+    "amount_fy2025_enacted": {
+      "null_count": 0,
+      "null_pct": 0.0,
+      "zero_count": 0,
+      "zero_pct": 0.0
+    },
+    "amount_fy2025_supplemental": {
+      "null_count": 0,
+      "null_pct": 0.0,
+      "zero_count": 4,
+      "zero_pct": 100.0
+    },
+    "amount_fy2025_total": {
+      "null_count": 0,
+      "null_pct": 0.0,
+      "zero_count": 4,
+      "zero_pct": 100.0
+    },
+    "amount_fy2026_request": {
+      "null_count": 0,
+      "null_pct": 0.0,
+      "zero_count": 0,
+      "zero_pct": 0.0
+    },
+    "amount_fy2026_reconciliation": {
+      "null_count": 0,
+      "null_pct": 0.0,
+      "zero_count": 4,
+      "zero_pct": 100.0
+    },
+    "amount_fy2026_total": {
+      "null_count": 0,
+      "null_pct": 0.0,
+      "zero_count": 4,
+      "zero_pct": 100.0
+    }
+  },
+  "validation_summary": {
+    "total_checks": 8,
+    "total_warnings": 0,
+    "total_failures": 0,
+    "checks": [
+      {
+        "name": "database_stats",
+        "status": "pass",
+        "message": "4 budget lines, 0 PDF pages, 1 files",
+        "details": {
+          "budget_lines": 4,
+          "pdf_pages": 0,
+          "ingested_files": 1
+        }
+      },
+      {
+        "name": "duplicate_rows",
+        "status": "pass",
+        "message": "No duplicates found",
+        "details": []
+      },
+      {
+        "name": "null_heavy_rows",
+        "status": "pass",
+        "message": "0 row(s) (0.0%) have all-null/zero amounts",
+        "details": []
+      },
+      {
+        "name": "unknown_exhibit_types",
+        "status": "pass",
+        "message": "All exhibit types are known",
+        "details": []
+      },
+      {
+        "name": "value_ranges",
+        "status": "pass",
+        "message": "All values within expected range",
+        "details": []
+      },
+      {
+        "name": "row_count_consistency",
+        "status": "pass",
+        "message": "All row counts consistent",
+        "details": []
+      },
+      {
+        "name": "fiscal_year_coverage",
+        "status": "pass",
+        "message": "No organization data to compare",
+        "details": []
+      },
+      {
+        "name": "column_types",
+        "status": "pass",
+        "message": "All amount columns contain numeric values",
+        "details": []
+      }
+    ]
+  }
+}

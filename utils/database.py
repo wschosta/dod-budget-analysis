@@ -9,7 +9,7 @@ Provides reusable functions for:
 
 import sqlite3
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import List, Dict, Any
 
 
 def init_pragmas(conn: sqlite3.Connection) -> None:

@@ -8,7 +8,7 @@ Provides reusable functions for:
 """
 
 from pathlib import Path
-from typing import Dict, List, Set, Optional, Any
+from typing import Dict, Optional, Any
 import json
 
 
@@ -158,7 +158,7 @@ class KnownValues:
         "2010": "Operation and Maintenance, Army",
         "2040": "Operation and Maintenance, Navy",
         "2080": "Operation and Maintenance, Marine Corps",
-        "2010": "Operation and Maintenance, Air Force",
+        "2020": "Operation and Maintenance, Air Force",
         "3110": "Aircraft Procurement, Air Force",
         "3450": "Missile Procurement, Air Force",
     }

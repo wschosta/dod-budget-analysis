@@ -59,7 +59,7 @@ def test_empty_db_schema_integrity(tmp_db):
     for col in ("id", "source_file", "account", "account_title",
                 "budget_activity", "line_item", "organization_name", "exhibit_type",
                 "amount_fy2024_actual", "amount_fy2026_request",
-                "amount_unit", "budget_type", "pe_number"):
+                "amount_unit", "budget_type", "pe_number", "amount_type"):
         assert col in cols, f"Column '{col}' missing from budget_lines"
 
     # FTS virtual tables
@@ -71,15 +71,17 @@ def test_empty_db_schema_integrity(tmp_db):
 
 # ── 1.C3-a: Test full Excel ingestion pipeline ────────────────────────────────
 
-def test_full_excel_ingestion_pipeline(test_db):
+def test_full_excel_ingestion_pipeline(test_db_excel_only):
     """Verify that Excel files are ingested correctly into budget_lines table.
+
+    Uses test_db_excel_only (FIX-005): no PDFs → no pyo3 PanicException.
 
     Checks:
     - ingested_files table has one row per fixture file
     - budget_lines table has the expected total row count
     - Each row in budget_lines has non-null source_file and exhibit_type
     """
-    conn = sqlite3.connect(test_db)
+    conn = sqlite3.connect(test_db_excel_only)
 
     # Check ingested_files table
     ingested_rows = conn.execute(
@@ -198,8 +200,6 @@ def test_incremental_update_behavior(fixtures_dir, tmp_path):
     touched_file = xlsx_files[0]
 
     # Update the file's modification time to trigger re-ingestion
-    old_mtime = touched_file.stat().st_mtime
-    new_mtime = old_mtime + 10  # 10 seconds in the future
     touched_file.touch()
 
     time.sleep(0.5)
@@ -289,7 +289,7 @@ def test_search_budget_functions(test_db):
     """
     # Import search functions
     try:
-        from search_budget import search_budget_lines, filter_by_organization, filter_by_exhibit_type  # type: ignore
+        from search_budget import search_budget_lines, filter_by_organization, filter_by_exhibit_type  # type: ignore  # noqa: F401
     except ImportError:
         pytest.skip("search_budget module not available")
 

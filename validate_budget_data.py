@@ -17,40 +17,18 @@ Status: Core validation checks implemented (1.B6-b, 1.B6-c, 1.B6-e, 1.B6-f, 1.B6
 Remaining TODOs
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO 1.B6-a [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    Add check for missing fiscal-year coverage per service.
-    Steps:
-      1. Add check_fiscal_year_coverage(conn) function
-      2. Query: SELECT organization, GROUP_CONCAT(DISTINCT fiscal_year)
-         FROM budget_lines GROUP BY organization
-      3. For each org, check against set of all FYs in database
-      4. Flag orgs missing expected years as warnings
-      5. Add to ALL_CHECKS list
-    Success: Missing FY coverage flagged (e.g., "Navy missing FY2018").
-
-TODO 1.B6-d [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    Detect column misalignment (text in numeric columns or vice versa).
-    Steps:
-      1. Add check_column_types(conn) function
-      2. For each amount_fy* column, query for rows where TYPEOF(col) != 'real'
-         AND col IS NOT NULL
-      3. Flag misaligned rows as warnings with source_file context
-      4. Add to ALL_CHECKS list
-    Success: Text-in-numeric-column errors detected and reported.
-
-TODO 1.B6-h [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Wire validation into build_budget_db.py as post-build auto-check.
-    (See also build_budget_db.py TODO 1.B6-h for the integration side.)
-    Steps:
-      1. Ensure validate_all() can be imported and called from build_budget_db
-      2. Return summary dict (not sys.exit) when called programmatically
-      3. Print compact summary after build completes
-    Success: Every build run ends with validation report.
+DONE 1.B6-a: check_fiscal_year_coverage() added — flags orgs missing expected FYs.
+DONE 1.B6-d: check_column_types() added — detects text in numeric amount columns.
+DONE 1.B6-h: validate_all() wired into build_budget_db.py post-build step.
+DONE 2.B3-a: generate_quality_report() writes data_quality_report.json with
+    row counts by (service, fiscal_year, exhibit_type), null/zero percentages
+    for each amount column, and full validation check results.
 """
 
 import json
 import sqlite3
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # Shared utilities: Import from utils package for consistency across codebase
@@ -223,6 +201,81 @@ def check_row_count_consistency(conn: sqlite3.Connection) -> dict:
     }
 
 
+def check_fiscal_year_coverage(conn: sqlite3.Connection) -> dict:
+    """1.B6-a: Flag orgs that are missing fiscal years present in other orgs."""
+    cur = conn.execute("""
+        SELECT organization_name,
+               GROUP_CONCAT(DISTINCT fiscal_year) AS years
+        FROM budget_lines
+        WHERE organization_name IS NOT NULL AND organization_name != ''
+        GROUP BY organization_name
+    """)
+    rows = cur.fetchall()
+    if not rows:
+        return {
+            "name": "fiscal_year_coverage",
+            "status": "pass",
+            "message": "No organization data to compare",
+            "details": [],
+        }
+
+    all_years: set = set()
+    org_years: dict = {}
+    for r in rows:
+        years = set(r[1].split(",")) if r[1] else set()
+        org_years[r[0]] = years
+        all_years.update(years)
+
+    missing = []
+    for org, years in org_years.items():
+        gap = sorted(all_years - years)
+        if gap:
+            missing.append({"organization": org, "missing_years": gap})
+
+    return {
+        "name": "fiscal_year_coverage",
+        "status": "warn" if missing else "pass",
+        "message": (
+            f"{len(missing)} org(s) missing fiscal years present in others"
+            if missing else "All orgs have consistent fiscal year coverage"
+        ),
+        "details": missing,
+    }
+
+
+def check_column_types(conn: sqlite3.Connection) -> dict:
+    """1.B6-d: Detect text values stored in numeric amount columns."""
+    misaligned = []
+    for col in AMOUNT_COLUMNS:
+        try:
+            cur = conn.execute(f"""
+                SELECT source_file, exhibit_type, {col}
+                FROM budget_lines
+                WHERE {col} IS NOT NULL
+                  AND TYPEOF({col}) NOT IN ('real', 'integer')
+                LIMIT 10
+            """)
+            for row in cur.fetchall():
+                misaligned.append({
+                    "source_file": row[0],
+                    "exhibit_type": row[1],
+                    "column": col,
+                    "value": row[2],
+                })
+        except Exception:
+            continue
+
+    return {
+        "name": "column_types",
+        "status": "warn" if misaligned else "pass",
+        "message": (
+            f"{len(misaligned)} row(s) have text in numeric amount columns"
+            if misaligned else "All amount columns contain numeric values"
+        ),
+        "details": misaligned,
+    }
+
+
 # ── Orchestrator ──────────────────────────────────────────────────────────────
 
 ALL_CHECKS = [
@@ -232,6 +285,8 @@ ALL_CHECKS = [
     check_unknown_exhibit_types,
     check_value_ranges,
     check_row_count_consistency,
+    check_fiscal_year_coverage,   # 1.B6-a
+    check_column_types,           # 1.B6-d
 ]
 
 
@@ -266,7 +321,7 @@ def validate_all(db_path: Path = DEFAULT_DB_PATH, strict: bool = False) -> dict:
 def print_report(summary: dict) -> None:
     """Print a human-readable validation report."""
     print(f"\n{'='*60}")
-    print(f"  Budget Database Validation Report")
+    print("  Budget Database Validation Report")
     print(f"  Database: {summary['database']}")
     print(f"{'='*60}\n")
 
@@ -284,6 +339,98 @@ def print_report(summary: dict) -> None:
     print(f"\n  Summary: {summary['total_checks']} checks, "
           f"{summary['total_warnings']} warning(s), "
           f"{summary['total_failures']} failure(s)\n")
+
+
+def generate_quality_report(
+    db_path: Path = DEFAULT_DB_PATH,
+    output_path: Path = Path("data_quality_report.json"),
+    print_console: bool = True,
+) -> dict:
+    """Generate a JSON data-quality report after a build (2.B3-a).
+
+    Extends the basic validation summary with:
+      - Row counts broken down by (service/org, fiscal_year, exhibit_type)
+      - Null/zero percentages for each amount column
+      - Full validation check results from validate_all()
+
+    Writes the report to output_path and returns the report dict.
+
+    Args:
+        db_path:       Path to the SQLite database.
+        output_path:   JSON file to write (default: data_quality_report.json).
+        print_console: If True, also print the human-readable validation report.
+
+    Returns:
+        Report dict with keys: timestamp, database, total_budget_lines,
+        row_counts_by_service_fy_exhibit, amount_column_stats,
+        validation_summary.
+    """
+    conn = get_connection(db_path)
+
+    # 1. Row counts by (organization_name, fiscal_year, exhibit_type)
+    cur = conn.execute("""
+        SELECT organization_name, fiscal_year, exhibit_type, COUNT(*) AS row_count
+        FROM budget_lines
+        WHERE organization_name IS NOT NULL
+        GROUP BY organization_name, fiscal_year, exhibit_type
+        ORDER BY organization_name, fiscal_year, exhibit_type
+    """)
+    row_counts = [
+        {
+            "service": r[0],
+            "fiscal_year": r[1],
+            "exhibit_type": r[2],
+            "row_count": r[3],
+        }
+        for r in cur.fetchall()
+    ]
+
+    # 2. Null/zero percentages for each amount column
+    total_rows = conn.execute("SELECT COUNT(*) FROM budget_lines").fetchone()[0]
+    amount_stats: dict = {}
+    for col in AMOUNT_COLUMNS:
+        if total_rows:
+            null_ct = conn.execute(
+                f"SELECT COUNT(*) FROM budget_lines WHERE {col} IS NULL"
+            ).fetchone()[0]
+            zero_ct = conn.execute(
+                f"SELECT COUNT(*) FROM budget_lines WHERE {col} = 0"
+            ).fetchone()[0]
+            amount_stats[col] = {
+                "null_count": null_ct,
+                "null_pct": round(null_ct / total_rows * 100, 1),
+                "zero_count": zero_ct,
+                "zero_pct": round(zero_ct / total_rows * 100, 1),
+            }
+        else:
+            amount_stats[col] = {
+                "null_count": 0, "null_pct": 0.0,
+                "zero_count": 0, "zero_pct": 0.0,
+            }
+
+    conn.close()
+
+    # 3. Run validation checks
+    val_summary = validate_all(db_path)
+    if print_console:
+        print_report(val_summary)
+
+    report = {
+        "timestamp": datetime.now().isoformat(),
+        "database": str(db_path),
+        "total_budget_lines": total_rows,
+        "row_counts_by_service_fy_exhibit": row_counts,
+        "amount_column_stats": amount_stats,
+        "validation_summary": {
+            "total_checks": val_summary["total_checks"],
+            "total_warnings": val_summary["total_warnings"],
+            "total_failures": val_summary["total_failures"],
+            "checks": val_summary["checks"],
+        },
+    }
+
+    output_path.write_text(json.dumps(report, indent=2))
+    return report
 
 
 if __name__ == "__main__":
