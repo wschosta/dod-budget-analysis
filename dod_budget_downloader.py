@@ -1165,16 +1165,27 @@ def list_files(all_files: dict[str, dict[str, list[dict]]]) -> None:
 
 # ── Interactive ───────────────────────────────────────────────────────────────
 
-# TODO: interactive_select_years and interactive_select_sources have nearly
-# identical structure (display numbered list, parse comma-separated input, validate).
-# Refactor into a generic _interactive_select(title, items, all_label) helper.
-def interactive_select_years(available: dict[str, str]) -> list[str]:
-    years = list(available.keys())
-    print("\nAvailable Fiscal Years:")
-    print("-" * 40)
-    for i, year in enumerate(years, 1):
-        print(f"  {i:2d}. FY{year}")
-    print(f"  {len(years)+1:2d}. All fiscal years")
+def _interactive_select(title: str, items: list[str], item_labels: dict[str, str] | None = None,
+                        all_label: str = "All") -> list[str]:
+    """Generic interactive selection menu for numbered list input.
+
+    Args:
+        title: Header to display above the menu
+        items: List of items to choose from
+        item_labels: Optional dict mapping items to display labels (defaults to items themselves)
+        all_label: Label for the "All items" option
+
+    Returns:
+        List of selected items
+    """
+    if item_labels is None:
+        item_labels = {item: item for item in items}
+
+    print(f"\n{title}")
+    print("-" * 50)
+    for i, item in enumerate(items, 1):
+        print(f"  {i}. {item_labels.get(item, item)}")
+    print(f"  {len(items)+1}. All {all_label.lower()}")
     print()
 
     while True:
@@ -1189,20 +1200,27 @@ def interactive_select_years(available: dict[str, str]) -> list[str]:
             print("Invalid input. Please enter numbers separated by commas.")
             continue
 
-        if len(years) + 1 in choices:
-            return years
+        # Check if "all" was selected
+        if len(items) + 1 in choices:
+            return items
 
         selected = []
         valid = True
         for c in choices:
-            if 1 <= c <= len(years):
-                selected.append(years[c - 1])
+            if 1 <= c <= len(items):
+                selected.append(items[c - 1])
             else:
                 print(f"Invalid choice: {c}")
                 valid = False
                 break
         if valid and selected:
             return selected
+
+
+def interactive_select_years(available: dict[str, str]) -> list[str]:
+    years = list(available.keys())
+    year_labels = {year: f"FY{year}" for year in years}
+    return _interactive_select("Available Fiscal Years:", years, year_labels, "fiscal years")
 
 
 def interactive_select_sources() -> list[str]:
@@ -1214,39 +1232,7 @@ def interactive_select_sources() -> list[str]:
         "navy-archive": "US Navy Archive",
         "airforce": "US Air Force / Space Force",
     }
-    print("\nAvailable Sources:")
-    print("-" * 50)
-    for i, src in enumerate(ALL_SOURCES, 1):
-        print(f"  {i}. {labels[src]}")
-    print(f"  {len(ALL_SOURCES)+1}. All sources")
-    print()
-
-    while True:
-        raw = input(
-            "Enter numbers separated by commas (e.g. 1,2,3) or 'q' to quit: "
-        ).strip()
-        if raw.lower() == "q":
-            sys.exit(0)
-        try:
-            choices = [int(x.strip()) for x in raw.split(",")]
-        except ValueError:
-            print("Invalid input.")
-            continue
-
-        if len(ALL_SOURCES) + 1 in choices:
-            return list(ALL_SOURCES)
-
-        selected = []
-        valid = True
-        for c in choices:
-            if 1 <= c <= len(ALL_SOURCES):
-                selected.append(ALL_SOURCES[c - 1])
-            else:
-                print(f"Invalid choice: {c}")
-                valid = False
-                break
-        if valid and selected:
-            return selected
+    return _interactive_select("Available Sources:", list(ALL_SOURCES), labels, "sources")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
