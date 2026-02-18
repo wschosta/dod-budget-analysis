@@ -178,6 +178,9 @@ from bs4 import BeautifulSoup
 # ── Configuration ──────────────────────────────────────────────────────────────
 global tracker
 
+# Pre-compiled regex patterns for performance
+YEAR_PATTERN = re.compile(r"(19|20)\d{2}")
+
 BASE_URL = "https://comptroller.war.gov"
 BUDGET_MATERIALS_URL = f"{BASE_URL}/Budget-Materials/"
 DOWNLOADABLE_EXTENSIONS = {".pdf", ".xlsx", ".xls", ".zip", ".csv"}
@@ -645,6 +648,8 @@ def get_session() -> requests.Session:
     session = requests.Session()
     session.headers.update(HEADERS)
     adapter = requests.adapters.HTTPAdapter(
+        pool_connections=20,  # Increased for concurrent connections
+        pool_maxsize=20,      # Increased for connection reuse
         max_retries=requests.adapters.Retry(
             total=3,
             backoff_factor=1,
@@ -883,7 +888,8 @@ def _extract_downloadable_links(soup: BeautifulSoup, page_url: str,
         if text_filter and text_filter.lower() not in full_url.lower():
             continue
 
-        dedup_key = parsed._replace(query="", fragment="").geturl()
+        # Normalize URL for deduplication (case-insensitive domain + path)
+        dedup_key = f"{parsed.scheme.lower()}://{parsed.hostname.lower()}{parsed.path}"
         if dedup_key in seen_urls:
             continue
         seen_urls.add(dedup_key)
@@ -924,7 +930,7 @@ def discover_fiscal_years(session: requests.Session) -> dict[str, str]:
     fy_links = {}
     for link in soup.find_all("a", href=True):
         text = link.get_text(strip=True)
-        if re.fullmatch(r"(19|20)\d{2}", text):
+        if YEAR_PATTERN.fullmatch(text):
             href = urljoin(BUDGET_MATERIALS_URL, link["href"])
             fy_links[text] = href
 
@@ -1116,6 +1122,25 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
     else:
         print(f"\r    [FAIL] {fname}: {last_exc}          ")
     return False
+
+
+def _download_file_wrapper(args_tuple):
+    """Wrapper for parallel download execution.
+
+    Returns: (file_info, dest, ok, size)
+    """
+    session, url, dest, overwrite, use_browser, delay = args_tuple
+    start_time = time.time()
+    ok = download_file(session, url, dest, overwrite, use_browser)
+    size = dest.stat().st_size if dest.exists() else 0
+
+    # Respect delay timing
+    elapsed = time.time() - start_time
+    remaining_delay = max(0, delay - elapsed)
+    if remaining_delay > 0:
+        time.sleep(remaining_delay)
+
+    return (url, dest, ok, size)
 
 
 def _extract_zip(zip_path: Path, dest_dir: Path):
@@ -1462,15 +1487,55 @@ def main():
             else:
                 to_download = files
 
-            for file_info in to_download:
-                dest = dest_dir / file_info["filename"]
-                ok = download_file(
-                    session, file_info["url"], dest,
-                    args.overwrite, use_browser=use_browser,
-                )
-                if ok and args.extract_zips and dest.suffix.lower() == ".zip":
-                    _extract_zip(dest, dest_dir)
-                time.sleep(args.delay)
+            # For browser downloads, use sequential (WAF-safe)
+            # For direct downloads, use parallel (4 workers)
+            if use_browser:
+                # Sequential: browser sources can't be parallelized (WAF-protected)
+                for file_info in to_download:
+                    dest = dest_dir / file_info["filename"]
+                    ok = download_file(
+                        session, file_info["url"], dest,
+                        args.overwrite, use_browser=use_browser,
+                    )
+                    if ok and args.extract_zips and dest.suffix.lower() == ".zip":
+                        _extract_zip(dest, dest_dir)
+                    time.sleep(args.delay)
+            else:
+                # Parallel: direct downloads can be parallelized
+                if len(to_download) > 1:
+                    # Prepare download tasks: (session, url, dest, overwrite, use_browser, delay)
+                    download_tasks = [
+                        (session, fi["url"], dest_dir / fi["filename"],
+                         args.overwrite, use_browser, args.delay)
+                        for fi in to_download
+                    ]
+
+                    with ThreadPoolExecutor(max_workers=4) as executor:
+                        futures = [executor.submit(_download_file_wrapper, task)
+                                   for task in download_tasks]
+
+                        for future in as_completed(futures):
+                            try:
+                                url, dest, ok, size = future.result()
+                                status = "ok" if ok else "fail"
+                                if _tracker:
+                                    _tracker.file_done(dest.name, size, status)
+
+                                if ok and args.extract_zips and dest.suffix.lower() == ".zip":
+                                    _extract_zip(dest, dest_dir)
+                            except Exception as e:
+                                print(f"    [ERROR] Download failed: {e}")
+                else:
+                    # Single file: no benefit from parallelization
+                    for file_info in to_download:
+                        dest = dest_dir / file_info["filename"]
+                        ok = download_file(
+                            session, file_info["url"], dest,
+                            args.overwrite, use_browser=use_browser,
+                        )
+                        if ok and args.extract_zips and dest.suffix.lower() == ".zip":
+                            _extract_zip(dest, dest_dir)
+                        time.sleep(args.delay)
 
     # ── Cleanup ──
     _close_browser()
