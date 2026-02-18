@@ -229,7 +229,7 @@ class BuildProgressWindow:
             btn_frame, text="Build Database", width=18,
             bg=ACCENT, fg="#1e1e2e", activebackground=GREEN,
             font=("Segoe UI", 11, "bold"), relief="flat",
-            command=self._on_build_btn_click)
+            command=self._start_build)
         self.build_btn.pack(side="left", padx=(0, 10))
 
         self.stop_btn = tk.Button(
