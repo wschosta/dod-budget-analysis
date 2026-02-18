@@ -16,36 +16,63 @@ Current state:
 TODOs — each is an independent task unless noted otherwise
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO 1.B1-a: Inventory all exhibit types found in downloaded files.
-    Approach: Write a script that walks DoD_Budget_Documents/, opens every .xlsx
-    file, reads sheet names and header rows, and emits a report of unique
-    (filename_pattern, sheet_name, header_signature) tuples.  Output to
-    exhibit_audit_report.txt.  This tells us exactly what we have to parse.
-    Token-efficient tip: A standalone 40-line script; no external state needed.
+TODO 1.B1-a [Complexity: LOW] [Tokens: ~1500] [User: YES — needs downloaded corpus]
+    Inventory all exhibit types found in downloaded files.
+    Steps:
+      1. Write a 40-line script: walk DoD_Budget_Documents/, open every .xlsx
+      2. Read sheet names + header rows (first 5 rows)
+      3. Emit report of unique (filename_pattern, sheet_name, header_signature)
+      4. Output to exhibit_audit_report.txt
+    Note: scripts/exhibit_audit.py already exists — run it against real data.
+    Success: A complete list of exhibit types and header patterns in corpus.
 
-TODO 1.B1-b: Document column layouts for summary exhibits (P-1, R-1, O-1, M-1).
-    For each, record: column header text, column position, data type (text,
-    currency, quantity), fiscal-year association, and notes on known variations
-    across services.  Store as a dict-of-dicts in this file so other modules
-    can import it.
+TODO 1.B1-b [Complexity: MEDIUM] [Tokens: ~3000] [User: NO]
+    Document column layouts for summary exhibits (P-1, R-1, O-1, M-1).
+    Steps:
+      1. For each exhibit, examine EXHIBIT_CATALOG entry above
+      2. Cross-reference with actual header rows from TODO 1.B1-a output
+      3. Record: header text, position, dtype, FY association, variations
+      4. Update column_spec entries in EXHIBIT_CATALOG dict above
+    Dependency: Best done after TODO 1.B1-a provides real header data.
+    Success: column_spec for P-1/R-1/O-1/M-1 matches real spreadsheets.
 
-TODO 1.B1-c: Document column layouts for detail exhibits (P-5, R-2, R-3, R-4).
-    Same structure as TODO 1.B1-b.  These exhibits have deeper line-item
-    breakdowns and narrative justification columns.
-    Dependency: requires TODO 1.B1-a output to know which detail exhibits exist
-    in the downloaded corpus.
+TODO 1.B1-c [Complexity: MEDIUM] [Tokens: ~3000] [User: NO]
+    Document column layouts for detail exhibits (P-5, R-2, R-3, R-4).
+    Steps:
+      1. From TODO 1.B1-a output, identify which detail exhibits exist
+      2. Open sample files, record header patterns and data types
+      3. Update/expand column_spec entries for p5, r2, r3, r4 above
+    Dependency: requires TODO 1.B1-a output.
+    Success: column_spec for detail exhibits matches real spreadsheets.
 
-TODO 1.B1-d: Document column layouts for C-1 (MilCon) and RF-1 (Revolving Fund).
-    C-1 has authorization/appropriation amount columns instead of the standard
-    request/enacted pattern.  RF-1 has unique revenue/expense columns.
+TODO 1.B1-d [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Verify column layouts for C-1 (MilCon) and RF-1 (Revolving Fund).
+    Steps:
+      1. Cross-reference c1 and rf1 entries above with real data
+      2. C-1 uses authorization/appropriation instead of request/enacted
+      3. RF-1 has revenue/expense columns — verify these match
+      4. Update column_spec if discrepancies found
+    Success: c1 and rf1 column_spec entries are validated.
 
-TODO 1.B1-e: Document column layouts for any remaining/unusual exhibit types
-    found by the audit in TODO 1.B1-a (e.g., J-Books, budget amendments,
-    supplemental request exhibits).
+TODO 1.B1-e [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Document column layouts for unusual exhibit types found by 1.B1-a.
+    Steps:
+      1. Check audit output for types not in EXHIBIT_CATALOG (J-Books,
+         budget amendments, supplemental request exhibits)
+      2. Add new entries to EXHIBIT_CATALOG for each new type
+      3. Provide column_spec with header_patterns and dtypes
+    Dependency: requires TODO 1.B1-a output.
+    Success: All exhibit types found in corpus have catalog entries.
 
-TODO 1.B1-f: Build EXHIBIT_CATALOG dict mapping exhibit_type_key →
-    { "name", "description", "column_spec": [...], "known_variations": [...] }.
-    Export it so build_budget_db.py can import and use it in _map_columns().
+TODO 1.B1-f [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Ensure EXHIBIT_CATALOG is fully integrated with build_budget_db.py.
+    Steps:
+      1. Verify find_matching_columns() is called from _map_columns()
+         (already done — see build_budget_db.py line ~627)
+      2. Add unit test that each catalog exhibit type returns non-empty
+         column mapping for a realistic header row
+      3. Test in test_exhibit_catalog.py
+    Success: All catalog entries produce valid column mappings.
 """
 
 EXHIBIT_CATALOG = {
@@ -423,17 +450,8 @@ def describe_catalog():
     return "\n".join(lines)
 
 
-# TODO 1.B1-a [REQUIRES USER INTERVENTION — needs downloaded corpus]:
-#   Write and run an audit script against DoD_Budget_Documents/ to inventory actual
-#   header rows from every .xlsx file and compare against catalog entries above.
-#   Script outline (~50 lines):
-#     from pathlib import Path
-#     import openpyxl
-#     for xlsx in Path("DoD_Budget_Documents").rglob("*.xlsx"):
-#         wb = openpyxl.load_workbook(str(xlsx), read_only=True, data_only=True)
-#         for sheet_name in wb.sheetnames:
-#             ws = wb[sheet_name]
-#             rows = [r for r in ws.iter_rows(max_row=5, values_only=True)]
-#             # find header row (contains "Account"), print signature
+# TODO 1.B1-a [Complexity: LOW] [Tokens: ~1500] [User: YES — needs downloaded corpus]
+#   Run scripts/exhibit_audit.py against DoD_Budget_Documents/ to inventory
+#   actual header rows from every .xlsx file. Compare against catalog entries.
 #   Save output to exhibit_audit_report.txt and review for catalog gaps.
-#   ⚠️ Cannot run without the multi-GB downloaded corpus. User must execute manually.
+#   Cannot run without the multi-GB downloaded corpus — user must execute.

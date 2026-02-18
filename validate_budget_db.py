@@ -8,6 +8,36 @@ Usage:
     python validate_budget_db.py                     # Default database
     python validate_budget_db.py --db mydb.sqlite    # Custom path
     python validate_budget_db.py --verbose            # Show all issue details
+
+──────────────────────────────────────────────────────────────────────────────
+TODOs for this file
+──────────────────────────────────────────────────────────────────────────────
+
+TODO VALDB-001 [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add PE number format validation check.
+    Steps:
+      1. Add check_pe_number_format(conn) function
+      2. Query pe_number column; validate against regex [0-9]{7}[A-Z]{1,2}
+      3. Flag rows where pe_number is populated but malformed
+      4. Add to ALL_CHECKS list
+    Success: Malformed PE numbers flagged (e.g., "0602702" missing suffix).
+
+TODO VALDB-002 [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add negative amount detection check.
+    Steps:
+      1. Add check_negative_amounts(conn) function
+      2. Query amount_fy* columns for values < 0
+      3. Flag as info (negative amounts are valid for reductions but unusual)
+      4. Add to ALL_CHECKS list
+    Success: Negative amounts surfaced for review.
+
+TODO VALDB-003 [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add --json output flag for machine-readable reports.
+    Steps:
+      1. Add --json argument to argparse
+      2. If set, output generate_report results as JSON instead of text
+      3. Support piping to data_quality_report.json
+    Success: `python validate_budget_db.py --json > report.json` works.
 """
 
 import argparse

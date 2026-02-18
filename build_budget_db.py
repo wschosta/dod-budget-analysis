@@ -20,34 +20,84 @@ column mapping, 1.B2-c multi-row headers, 1.B2-d FY normalization,
 1.B4-b ORG_MAP expansion, 1.B4-c appropriation parsing complete).
 Remaining tasks below.
 
-TODO 1.B3-c: Distinguish Budget Authority, Appropriations, and Outlays.
-    Add an 'amount_type' column (or separate columns) to budget_lines.  C-1
-    already has authorization vs. appropriation; other exhibits may have TOA
-    (Total Obligation Authority) vs. BA.  Map these distinctions during
-    ingestion.
+TODO FIX-001 [Complexity: HIGH] [Tokens: ~3000] [User: NO]
+    CRITICAL BUG: ingest_excel_file() references undefined variable `rows`.
+    Lines ~664, ~668, ~669, ~685 use `rows[header_idx]` etc., but the local
+    variable is `first_rows` (collected from `rows_iter`).  This causes
+    NameError at runtime and breaks ALL Excel ingestion + pipeline tests.
+    Steps:
+      1. In ingest_excel_file(), replace `rows[header_idx]` → `first_rows[header_idx]`
+      2. Replace `len(rows)` → `len(first_rows)`
+      3. Replace `rows[header_idx + 1]` → `first_rows[header_idx + 1]`
+      4. Remove `data_rows = rows[data_start:]` — dead code, data comes
+         from `rows_iter` which is the live openpyxl iterator
+      5. Fix `_detect_amount_unit(rows, header_idx)` → pass `first_rows`
+      6. Run `pytest tests/test_pipeline.py tests/test_build_integration.py -v`
+    Success: test_full_excel_ingestion_pipeline and related tests pass.
 
-TODO 1.B5-a: Audit PDF extraction quality for common layouts.
-    Run build_budget_db.py on a sample of PDFs from each service and manually
-    inspect the extracted text in the database.  Record which source/layout
-    combinations produce garbled output.
-    Token-efficient tip: write a 30-line script that queries pdf_pages for pages
-    with high ratios of non-ASCII or whitespace-only lines and flags them.
+TODO FIX-002 [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Fix line-length violations (>100 chars) that fail precommit check.
+    Affected lines in this file: ~996 (105ch), ~1505 (107ch), ~1519 (106ch),
+    ~1575 (120ch).
+    Steps:
+      1. Find all lines over 100 chars with: grep -n '.\{101,\}' build_budget_db.py
+      2. Break each long line using Python line continuation or local vars
+      3. Run `pytest tests/test_precommit_checks.py::TestLineLength -v`
+    Success: test_line_length passes with 0 violations in this file.
 
-TODO 1.B5-b: Implement table-aware PDF extraction.
-    For PDF pages where pdfplumber's extract_tables() fails or produces poor
-    results, try alternative strategies: (1) explicit table settings with
-    custom line tolerance, (2) camelot as a fallback, (3) tabula-py for
-    stream-mode extraction.  Gate fallback behind a config flag.
-    Token-efficient tip: start with pdfplumber's table_settings parameter —
-    try {"vertical_strategy": "text", "horizontal_strategy": "text"} for
-    tables without visible lines.
+TODO 1.B3-c [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
+    Distinguish Budget Authority, Appropriations, and Outlays.
+    Add an 'amount_type' column to budget_lines.  C-1 already has
+    authorization vs. appropriation; other exhibits may have TOA.
+    Steps:
+      1. Add `amount_type TEXT` column to CREATE TABLE budget_lines
+      2. In _map_columns(), detect "authorization" vs "appropriation" vs
+         "enacted" keywords → set amount_type accordingly
+      3. Pass amount_type through ingest_excel_file() into the INSERT batch
+      4. Add test in test_parsing.py with C-1 fixture verifying amount_type
+    Success: C-1 rows have amount_type='authorization' or 'appropriation';
+    other exhibits default to 'budget_authority'.
 
-TODO 1.B5-c: Extract structured data from narrative PDF sections.
-    R-2/R-3 exhibits contain program descriptions, schedule tables, and
-    milestone information in PDF form.  Design a lightweight extraction that
-    captures section headers and associated text blocks so they are searchable.
-    This is lower priority — only do after TODO 1.B5-a identifies which PDFs
-    matter most.
+TODO 1.B5-a [Complexity: MEDIUM] [Tokens: ~2000] [User: YES — needs downloaded corpus]
+    Audit PDF extraction quality for common layouts.
+    Steps:
+      1. Write a 30-line script that queries pdf_pages for pages with high
+         ratios of non-ASCII chars or whitespace-only lines
+      2. Run against a real database built from downloaded documents
+      3. Record findings in docs/pdf_quality_audit.md
+    Success: A report listing which PDF layouts extract poorly.
+
+TODO 1.B5-b [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
+    Implement table-aware PDF extraction with fallback strategies.
+    Steps:
+      1. In _extract_tables_with_timeout(), after "lines" strategy returns
+         empty/error, retry with {"vertical_strategy": "text",
+         "horizontal_strategy": "lines"}
+      2. If still empty, try {"vertical_strategy": "text",
+         "horizontal_strategy": "text"}
+      3. Each fallback gets its own timeout; return first non-empty result
+      4. Log strategy used as issue_type "fallback_text_lines" etc.
+      5. Add test with PDF fixture that needs text strategy
+    Success: More tables extracted from PDFs lacking visible gridlines.
+
+TODO 1.B5-c [Complexity: HIGH] [Tokens: ~4000] [User: NO]
+    Extract structured data from narrative PDF sections (R-2/R-3).
+    Steps:
+      1. Design section-header detection regex for R-2/R-3 narrative blocks
+      2. After text extraction in ingest_pdf_file(), parse sections
+      3. Store section_header + text_block pairs in new column or table
+      4. Index extracted sections in FTS5 for searchability
+    Dependency: Do after TODO 1.B5-a identifies which PDFs matter.
+    Success: R-2/R-3 narrative sections are searchable via FTS5.
+
+TODO 1.B6-h [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Wire validation into build_budget_db.py as automatic post-build step.
+    Steps:
+      1. At end of build_database(), after summary, import and call
+         validate_budget_data.validate_all(db_path)
+      2. Print validation summary to stdout
+      3. Do NOT fail the build on validation warnings (just report)
+    Success: Every build_database() run ends with a validation report.
 """
 
 import argparse
@@ -661,6 +711,8 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
         if header_idx is None or len(first_rows) < 3:
             continue
 
+        # TODO FIX-001: `rows` is undefined here — should be `first_rows`.
+        # See docstring TODO FIX-001 for full fix instructions.
         headers = rows[header_idx]
         # Detect and merge two-row headers (Step 1.B2-c): some exhibits split
         # "FY 2026" and "Request Amount" across consecutive rows.
@@ -894,14 +946,13 @@ def _extract_tables_with_timeout(page, timeout_seconds=10):
         return None, "timeout"
     except Exception as e:
         return None, f"error: {str(e)[:50]}"
-    # TODO 1.B5-c [MEDIUM, ~1500 tokens]: Add fallback table extraction strategies.
-    #   When the "lines" strategy returns empty tables or errors, retry with:
+    # TODO 1.B5-b [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
+    #   Add fallback table extraction strategies (see docstring for full details).
+    #   When "lines" strategy returns empty/errors, retry with:
     #     1. {"vertical_strategy": "text", "horizontal_strategy": "lines"}
     #     2. {"vertical_strategy": "text", "horizontal_strategy": "text"}
-    #   Each with its own timeout. Return tables from the first strategy that succeeds
-    #   and returns non-empty results. Log the strategy used as issue_type
-    #   "fallback_text_lines" or "fallback_text_text". Use the same ThreadPoolExecutor
-    #   pattern. No external data needed.
+    #   Each with its own timeout. Return first non-empty result.
+    #   Log strategy as issue_type "fallback_text_lines" or "fallback_text_text".
 
 
 def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,

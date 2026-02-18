@@ -13,6 +13,37 @@ Usage:
     python search_budget.py --summary
     python search_budget.py --sources
     python search_budget.py --interactive
+
+──────────────────────────────────────────────────────────────────────────────
+TODOs for this file
+──────────────────────────────────────────────────────────────────────────────
+
+TODO FIX-004 [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Fix line-length violations in this file (>100 chars).
+    Affected lines: ~88 (113ch), ~259 (107ch).
+    Steps:
+      1. Break long lines using Python line continuation
+      2. Run pytest tests/test_precommit_checks.py::TestLineLength -v
+    Success: 0 line-length violations in this file.
+
+TODO SEARCH-001 [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Refactor search functions into importable module for API reuse.
+    Steps:
+      1. Extract search_budget_lines() and search_pdf_pages() into
+         a search(conn, query, type, org, limit, offset) function
+      2. Return dicts instead of printing to stdout
+      3. Keep CLI interface as a thin wrapper calling the reusable function
+      4. This allows api/routes/search.py to import and reuse the logic
+    Success: `from search_budget import search` works from API code.
+
+TODO SEARCH-002 [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add --export csv|json flag for structured output.
+    Steps:
+      1. Add --export argument to argparse (choices: csv, json)
+      2. If csv: write results to stdout as CSV with headers
+      3. If json: write results as JSON array
+      4. Default (no flag): keep current human-readable format
+    Success: `python search_budget.py "cyber" --export csv > results.csv` works.
 """
 
 import argparse
