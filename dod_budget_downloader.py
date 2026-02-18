@@ -162,6 +162,7 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -169,11 +170,23 @@ import sys
 import threading
 import time
 import zipfile
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlparse, unquote
 
 import requests
+import socket
 from bs4 import BeautifulSoup
+
+# Optimization: Try to use lxml parser (3-5x faster), fall back to html.parser
+try:
+    import lxml
+    PARSER = "lxml"
+except ImportError:
+    PARSER = "html.parser"
+
+# Optimization: Pre-compile extension regex pattern
+DOWNLOADABLE_PATTERN = re.compile(r'\.(pdf|xlsx?|xls|zip|csv)$', re.IGNORECASE)
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 global tracker
@@ -183,6 +196,9 @@ BUDGET_MATERIALS_URL = f"{BASE_URL}/Budget-Materials/"
 DOWNLOADABLE_EXTENSIONS = {".pdf", ".xlsx", ".xls", ".zip", ".csv"}
 IGNORED_HOSTS = {"dam.defense.gov"}
 DEFAULT_OUTPUT_DIR = Path("DoD_Budget_Documents")
+
+# Optimization: Cache directory for discovery results
+DISCOVERY_CACHE_DIR = Path("discovery_cache")
 
 ALL_SOURCES = ["comptroller", "defense-wide", "army", "navy", "navy-archive", "airforce"]
 
@@ -244,6 +260,54 @@ def _elapsed(start_time: float) -> str:
     if h:
         return f"{h}h {m:02d}m {s:02d}s"
     return f"{m}m {s:02d}s"
+
+
+# Optimization: Adaptive timeout management based on response history
+class TimeoutManager:
+    """Manages adaptive timeouts based on response history."""
+    def __init__(self):
+        self.response_times = {}  # domain -> list of response times (in ms)
+
+    def get_timeout(self, url: str, is_download: bool = False) -> int:
+        """Get adaptive timeout in milliseconds."""
+        domain = urlparse(url).netloc
+
+        if domain not in self.response_times:
+            self.response_times[domain] = []
+
+        times = self.response_times[domain]
+        if not times:
+            return 120000 if is_download else 15000
+
+        avg_time = sum(times) / len(times)
+        percentile_95 = sorted(times)[-1] if len(times) > 0 else avg_time
+
+        # Use 95th percentile + 50% buffer
+        adaptive = int(percentile_95 * 1.5)
+
+        if is_download:
+            # Downloads get longer timeout (up to 120s)
+            return min(adaptive, 120000)
+        else:
+            # Page loads get shorter timeout (up to 30s)
+            return min(adaptive, 30000)
+
+    def record_time(self, url: str, elapsed_ms: int):
+        """Record response time for timeout learning."""
+        domain = urlparse(url).netloc
+        if domain not in self.response_times:
+            self.response_times[domain] = []
+        self.response_times[domain].append(elapsed_ms)
+        # Keep only last 20 samples to avoid memory bloat
+        if len(self.response_times[domain]) > 20:
+            self.response_times[domain].pop(0)
+
+
+# Global timeout manager
+_timeout_mgr = TimeoutManager()
+
+# Global flag for cache refresh
+_refresh_cache = False
 
 
 class ProgressTracker:
@@ -640,22 +704,41 @@ class GuiProgressTracker:
 # Global tracker, set during main()
 _tracker: ProgressTracker | GuiProgressTracker | None = None
 
+# Optimization: Global session reuse for connection pooling
+_global_session = None
+
 
 # ── Session ────────────────────────────────────────────────────────────────────
 
 def get_session() -> requests.Session:
-    session = requests.Session()
-    session.headers.update(HEADERS)
+    """Get or create global HTTP session with retry/pooling config."""
+    global _global_session
+    if _global_session is not None:
+        return _global_session
+
+    _global_session = requests.Session()
+    _global_session.headers.update(HEADERS)
+    # Optimization: Enhanced connection pool configuration
     adapter = requests.adapters.HTTPAdapter(
+        pool_connections=20,      # Increased from default 10
+        pool_maxsize=30,          # Increased from default 10
         max_retries=requests.adapters.Retry(
             total=3,
             backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504],
-        )
+        ),
     )
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    return session
+    _global_session.mount("https://", adapter)
+    _global_session.mount("http://", adapter)
+    return _global_session
+
+
+def _close_session():
+    """Close global session and cleanup."""
+    global _global_session
+    if _global_session:
+        _global_session.close()
+    _global_session = None
 
 
 # ── Playwright browser context (lazy init) ─────────────────────────────────────
@@ -698,6 +781,10 @@ def _get_browser_context():
         viewport={"width": 1920, "height": 1080},
         accept_downloads=True,
     )
+    # Optimization: Move webdriver detection script to context level (executed for all pages)
+    _pw_context.add_init_script(
+        'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+    )
     return _pw_context
 
 
@@ -716,22 +803,33 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
     """Use Playwright to load a page and extract downloadable file links."""
     ctx = _get_browser_context()
     page = ctx.new_page()
-    page.add_init_script(
-        'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-    )
 
     try:
-        page.goto(url, timeout=30000, wait_until="networkidle")
+        # Optimization: Use adaptive timeout based on domain history
+        timeout = _timeout_mgr.get_timeout(url, is_download=False)
+        start = time.time()
+        try:
+            page.goto(url, timeout=timeout, wait_until="domcontentloaded")
+        except Exception:
+            # If page load times out, proceed with what we have
+            pass
+        elapsed = int((time.time() - start) * 1000)
+        _timeout_mgr.record_time(url, elapsed)
 
         if expand_all:
             btn = page.query_selector("text=Expand All")
             if btn:
                 btn.click()
-                page.wait_for_timeout(1500)
+                # Optimization: Dynamic wait instead of fixed timeout
+                try:
+                    page.wait_for_selector("a[href]", timeout=5000)
+                except Exception:
+                    # If wait times out, proceed with current content
+                    pass
 
         # Extract links via JavaScript in the browser
-        js_filter = f"'{text_filter}'" if text_filter else "null"
-        raw = page.evaluate(f"""(exts, tf) => {{
+        raw = page.evaluate(f"""(args) => {{
+            const [exts, tf] = args;
             const tf_arg = tf;
             const allLinks = Array.from(document.querySelectorAll('a[href]'));
             const files = [];
@@ -752,7 +850,7 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
                 files.push({{ name: text || filename, url: href, filename: filename, extension: ext }});
             }}
             return files;
-        }}""", list(DOWNLOADABLE_EXTENSIONS), text_filter)
+        }}""", [list(DOWNLOADABLE_EXTENSIONS), text_filter])
 
         return [_clean_file_entry(f) for f in raw]
 
@@ -769,9 +867,6 @@ def _new_browser_page(ctx, url: str):
     Returns the page object. Caller is responsible for closing it.
     """
     page = ctx.new_page()
-    page.add_init_script(
-        'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-    )
     parsed = urlparse(url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
     page.goto(origin, timeout=15000, wait_until="domcontentloaded")
@@ -839,9 +934,6 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
     # Strategy 3: Direct navigation (may open PDF viewer, but content still loads)
     try:
         page = ctx.new_page()
-        page.add_init_script(
-            'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-        )
         # Navigate directly to the URL (bypasses origin setup for simpler direct fetch)
         resp = page.goto(url, timeout=120000, wait_until="load")
         if resp and resp.ok:
@@ -877,30 +969,40 @@ def _extract_downloadable_links(soup: BeautifulSoup, page_url: str,
     files = []
     seen_urls = set()
 
+    # Optimization: Pre-compile filter if needed
+    text_filter_lower = text_filter.lower() if text_filter else None
+
     for link in soup.find_all("a", href=True):
         href = link["href"]
         full_url = urljoin(page_url, href)
 
         parsed = urlparse(full_url)
+
+        # Optimization: Predicate reordering - cheap checks first
+        # Check #1: hostname (O(1) set lookup)
         if parsed.hostname and parsed.hostname.lower() in IGNORED_HOSTS:
             continue
 
         clean_path = parsed.path.lower()
 
-        ext = Path(clean_path).suffix
-        if ext not in DOWNLOADABLE_EXTENSIONS:
+        # Check #2: extension using compiled regex (O(1))
+        if not DOWNLOADABLE_PATTERN.search(clean_path):
             continue
 
-        if text_filter and text_filter.lower() not in full_url.lower():
+        # Check #3: text filter (O(n) substring search) - expensive, so check last
+        if text_filter_lower and text_filter_lower not in full_url.lower():
             continue
 
+        # Check #4: dedup (O(1) set lookup)
         dedup_key = parsed._replace(query="", fragment="").geturl()
         if dedup_key in seen_urls:
             continue
         seen_urls.add(dedup_key)
 
+        # Only now extract text/filename
         link_text = link.get_text(strip=True)
         filename = unquote(Path(parsed.path).name)
+        ext = Path(clean_path).suffix
 
         files.append({
             "name": link_text if link_text else filename,
@@ -928,11 +1030,62 @@ def _is_browser_source(source: str) -> bool:
 
 # ── Comptroller (main page) ───────────────────────────────────────────────────
 
+# Cache fiscal years to avoid repeated discovery
+_fiscal_years_cache = None
+
+
+# Optimization: Discovery results caching
+def _get_cache_key(source: str, year: str) -> str:
+    """Generate cache key for discovery results."""
+    return f"{source}_{year}"
+
+
+def _load_cache(cache_key: str) -> list[dict] | None:
+    """Load cached discovery results if still fresh (24 hours)."""
+    cache_file = DISCOVERY_CACHE_DIR / f"{cache_key}.json"
+    if not cache_file.exists():
+        return None
+
+    try:
+        with open(cache_file, "r") as f:
+            data = json.load(f)
+
+        # Cache valid for 24 hours
+        cached_time = datetime.fromisoformat(data.get("timestamp", ""))
+        if (datetime.now() - cached_time).days < 1:
+            return data.get("files", [])
+    except (json.JSONDecodeError, OSError, ValueError):
+        pass
+
+    return None
+
+
+def _save_cache(cache_key: str, files: list[dict]):
+    """Save discovery results to cache."""
+    try:
+        DISCOVERY_CACHE_DIR.mkdir(exist_ok=True)
+        cache_file = DISCOVERY_CACHE_DIR / f"{cache_key}.json"
+
+        with open(cache_file, "w") as f:
+            json.dump({
+                "timestamp": datetime.now().isoformat(),
+                "files": files
+            }, f, indent=2)
+    except Exception:
+        # Silently fail if caching doesn't work
+        pass
+
+
 def discover_fiscal_years(session: requests.Session) -> dict[str, str]:
+    global _fiscal_years_cache
+    # Optimization: Cache fiscal years discovery
+    if _fiscal_years_cache is not None:
+        return _fiscal_years_cache
+
     print("Discovering available fiscal years...")
     resp = session.get(BUDGET_MATERIALS_URL, timeout=30)
     resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(resp.text, PARSER)
 
     fy_links = {}
     for link in soup.find_all("a", href=True):
@@ -941,21 +1094,42 @@ def discover_fiscal_years(session: requests.Session) -> dict[str, str]:
             href = urljoin(BUDGET_MATERIALS_URL, link["href"])
             fy_links[text] = href
 
-    return dict(sorted(fy_links.items(), key=lambda x: x[0], reverse=True))
+    _fiscal_years_cache = dict(sorted(fy_links.items(), key=lambda x: x[0], reverse=True))
+    return _fiscal_years_cache
 
 
 def discover_comptroller_files(session: requests.Session, year: str,
                                page_url: str) -> list[dict]:
+    global _refresh_cache
+    # Optimization: Check cache before fetching
+    cache_key = _get_cache_key("comptroller", year)
+    if not _refresh_cache:
+        cached = _load_cache(cache_key)
+        if cached is not None:
+            print(f"  [Comptroller] Using cached results for FY{year}")
+            return cached
+
     print(f"  [Comptroller] Scanning FY{year}...")
     resp = session.get(page_url, timeout=30)
     resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "html.parser")
-    return _extract_downloadable_links(soup, page_url)
+    soup = BeautifulSoup(resp.text, PARSER)
+    files = _extract_downloadable_links(soup, page_url)
+    _save_cache(cache_key, files)
+    return files
 
 
 # ── Defense Wide ──────────────────────────────────────────────────────────────
 
 def discover_defense_wide_files(session: requests.Session, year: str) -> list[dict]:
+    global _refresh_cache
+    # Optimization: Check cache before fetching
+    cache_key = _get_cache_key("defense-wide", year)
+    if not _refresh_cache:
+        cached = _load_cache(cache_key)
+        if cached is not None:
+            print(f"  [Defense Wide] Using cached results for FY{year}")
+            return cached
+
     url = SERVICE_PAGE_TEMPLATES["defense-wide"]["url"].format(fy=year)
     print(f"  [Defense Wide] Scanning FY{year}...")
     try:
@@ -964,44 +1138,86 @@ def discover_defense_wide_files(session: requests.Session, year: str) -> list[di
     except requests.RequestException as e:
         print(f"    WARNING: Could not fetch Defense Wide page for FY{year}: {e}")
         return []
-    soup = BeautifulSoup(resp.text, "html.parser")
-    return _extract_downloadable_links(soup, url)
+    soup = BeautifulSoup(resp.text, PARSER)
+    files = _extract_downloadable_links(soup, url)
+    _save_cache(cache_key, files)
+    return files
 
 
 # ── Army (browser required) ──────────────────────────────────────────────────
 
 def discover_army_files(_session: requests.Session, year: str) -> list[dict]:
+    global _refresh_cache
+    # Optimization: Check cache before fetching
+    cache_key = _get_cache_key("army", year)
+    if not _refresh_cache:
+        cached = _load_cache(cache_key)
+        if cached is not None:
+            print(f"  [Army] Using cached results for FY{year}")
+            return cached
+
     url = SERVICE_PAGE_TEMPLATES["army"]["url"]
     print(f"  [Army] Scanning FY{year} (browser)...")
     files = _browser_extract_links(url, text_filter=f"/{year}/")
+    _save_cache(cache_key, files)
     return files
 
 
 # ── Navy (browser required) ──────────────────────────────────────────────────
 
 def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
+    global _refresh_cache
+    # Optimization: Check cache before fetching
+    cache_key = _get_cache_key("navy", year)
+    if not _refresh_cache:
+        cached = _load_cache(cache_key)
+        if cached is not None:
+            print(f"  [Navy] Using cached results for FY{year}")
+            return cached
+
     url = SERVICE_PAGE_TEMPLATES["navy"]["url"].format(fy=year)
     print(f"  [Navy] Scanning FY{year} (browser)...")
     files = _browser_extract_links(url)
+    _save_cache(cache_key, files)
     return files
 
 
 # ── Navy Archive (browser required) ────────────────────────────────────────────
 
 def discover_navy_archive_files(_session: requests.Session, year: str) -> list[dict]:
+    global _refresh_cache
+    # Optimization: Check cache before fetching
+    cache_key = _get_cache_key("navy-archive", year)
+    if not _refresh_cache:
+        cached = _load_cache(cache_key)
+        if cached is not None:
+            print(f"  [Navy Archive] Using cached results for FY{year}")
+            return cached
+
     url = SERVICE_PAGE_TEMPLATES["navy-archive"]["url"]
     print(f"  [Navy Archive] Scanning FY{year} (browser)...")
     files = _browser_extract_links(url, text_filter=f"/{year}/")
+    _save_cache(cache_key, files)
     return files
 
 
 # ── Air Force (browser required) ─────────────────────────────────────────────
 
 def discover_airforce_files(_session: requests.Session, year: str) -> list[dict]:
+    global _refresh_cache
+    # Optimization: Check cache before fetching
+    cache_key = _get_cache_key("airforce", year)
+    if not _refresh_cache:
+        cached = _load_cache(cache_key)
+        if cached is not None:
+            print(f"  [Air Force] Using cached results for FY{year}")
+            return cached
+
     fy2 = year[-2:]
     url = SERVICE_PAGE_TEMPLATES["airforce"]["url"].format(fy2=fy2)
     print(f"  [Air Force] Scanning FY{year} (browser)...")
     files = _browser_extract_links(url, text_filter=f"FY{fy2}", expand_all=True)
+    _save_cache(cache_key, files)
     return files
 
 
@@ -1058,6 +1274,20 @@ def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
     return "redownload"
 
 
+# Optimization: Adaptive chunk sizing based on file size
+def _get_chunk_size(total_size: int) -> int:
+    """Determine optimal chunk size based on file size."""
+    if total_size <= 0:
+        return 8192  # Default for unknown size
+    if total_size < 5 * 1024 * 1024:  # < 5 MB
+        return 4096   # Small chunks for small files
+    if total_size < 100 * 1024 * 1024:  # < 100 MB
+        return 8192   # Default
+    if total_size < 1024 * 1024 * 1024:  # < 1 GB
+        return 65536  # 64 KB chunks for large files
+    return 262144  # 256 KB for huge files
+
+
 def download_file(session: requests.Session, url: str, dest_path: Path,
                   overwrite: bool = False, use_browser: bool = False) -> bool:
     global _tracker
@@ -1094,15 +1324,49 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
                   f"retrying in {delay}s...          ")
             time.sleep(delay)
         try:
-            resp = session.get(url, timeout=120, stream=True)
+            # Optimization: Check if we can resume from partial download
+            resume_from = 0
+            if dest_path.exists() and dest_path.stat().st_size > 0:
+                resume_from = dest_path.stat().st_size
+                # Verify server supports range requests
+                try:
+                    head_resp = session.head(url, timeout=15)
+                    accept_ranges = head_resp.headers.get("accept-ranges", "none").lower()
+                    if accept_ranges == "none":
+                        # Server doesn't support resume, delete and restart
+                        dest_path.unlink()
+                        resume_from = 0
+                except Exception:
+                    # If HEAD fails, just restart
+                    dest_path.unlink()
+                    resume_from = 0
+
+            headers = {}
+            mode = "ab" if resume_from > 0 else "wb"
+            if resume_from > 0:
+                headers["Range"] = f"bytes={resume_from}-"
+
+            resp = session.get(url, headers=headers, timeout=120, stream=True)
             resp.raise_for_status()
 
-            total_size = int(resp.headers.get("content-length", 0))
-            downloaded = 0
+            # Validate Content-Range header if resuming
+            if resume_from > 0 and resp.status_code != 206:
+                # Server doesn't support range, restart
+                dest_path.unlink()
+                resp = session.get(url, timeout=120, stream=True)
+                resp.raise_for_status()
+                mode = "wb"
+                resume_from = 0
+
+            total_size = int(resp.headers.get("content-length", 0)) + resume_from
+            downloaded = resume_from
             dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-            with open(dest_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=8192):
+            # Optimization: Adaptive chunk sizing based on file size
+            chunk_size = _get_chunk_size(total_size)
+
+            with open(dest_path, mode) as f:
+                for chunk in resp.iter_content(chunk_size=chunk_size):
                     f.write(chunk)
                     downloaded += len(chunk)
                     if _tracker:
@@ -1119,7 +1383,8 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
 
         except requests.RequestException as e:
             last_exc = e
-            if dest_path.exists():
+            # Don't delete file on error - we'll try to resume next attempt
+            if dest_path.exists() and dest_path.stat().st_size == 0:
                 dest_path.unlink()
 
     if _tracker:
@@ -1277,7 +1542,15 @@ def main():
         "--extract-zips", action="store_true", dest="extract_zips",
         help="Extract ZIP archives after downloading them",
     )
+    parser.add_argument(
+        "--refresh-cache", action="store_true", dest="refresh_cache",
+        help="Ignore cache and refresh discovery from source",
+    )
     args = parser.parse_args()
+
+    # Optimization: Set global flag for cache refresh
+    global _refresh_cache
+    _refresh_cache = args.refresh_cache
 
     session = get_session()
 
@@ -1470,6 +1743,10 @@ def main():
                    f"Total size: {total_dl}   Elapsed: {elapsed}")
         _tracker.show_completion_dialog(summary)
     _tracker = None
+
+    # Optimization: Cleanup browser and session
+    _close_browser()
+    _close_session()
 
 
 if __name__ == "__main__":
