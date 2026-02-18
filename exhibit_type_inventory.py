@@ -30,6 +30,12 @@ class ExhibitInventory:
     """Scans Excel files and inventories exhibit types."""
 
     def __init__(self, docs_dir: Path, verbose=False):
+        """Initialize the scanner with a documents directory path and verbosity flag.
+
+        Args:
+            docs_dir: Path to the directory containing Excel budget documents.
+            verbose: If True, print each sheet as it is scanned.
+        """
         self.docs_dir = Path(docs_dir)
         self.verbose = verbose
         self.exhibits = defaultdict(lambda: {"files": [], "sheets": set(), "headers": set()})
@@ -179,6 +185,7 @@ class ExhibitInventory:
 
 
 def main():
+    """Parse CLI arguments and run the exhibit type inventory scan."""
     parser = argparse.ArgumentParser(
         description="Inventory exhibit types in Excel files",
         formatter_class=argparse.RawDescriptionHelpFormatter,

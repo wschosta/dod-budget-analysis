@@ -613,12 +613,14 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
         batch = []
 
         def get_val(row, field):
+            """Return the raw cell value for a named field, or None if unmapped/out-of-range."""
             idx = col_map.get(field)
             if idx is not None and idx < len(row):
                 return row[idx]
             return None
 
         def get_str(row, field):
+            """Return the stripped string value for a named field, or None if absent."""
             v = get_val(row, field)
             return str(v).strip() if v is not None else None
 
@@ -1070,6 +1072,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     }
 
     def _progress(phase, current, total, detail="", metrics_update=None):
+        """Update shared metrics and invoke the caller-supplied progress callback."""
         if metrics_update:
             _metrics.update(metrics_update)
         if progress_callback:
@@ -1306,6 +1309,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             _remove_file_data(conn, rel_path, "pdf")
 
             def _page_cb(pages_done: int, page_total: int) -> None:
+                """Per-page progress callback forwarded from ingest_pdf_file."""
                 _metrics["current_pages"] = pages_done
                 _metrics["current_total_pages"] = page_total
                 _progress("pdf", i + 1, len(pdf_files),
@@ -1494,6 +1498,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
 
 def main():
+    """Parse command-line arguments and run the database build pipeline."""
     parser = argparse.ArgumentParser(description="Build DoD budget search database")
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH,
                         help=f"Database path (default: {DEFAULT_DB_PATH})")
@@ -1513,6 +1518,7 @@ def main():
     stop_event = threading.Event()
 
     def _sigint_handler(sig, frame):
+        """Handle SIGINT (Ctrl+C): request graceful stop on first press, force-quit on second."""
         if not stop_event.is_set():
             print("\n\nKeyboard interrupt — finishing current file and saving checkpoint...")
             print("Resume later with: python build_budget_db.py --resume")
