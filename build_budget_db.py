@@ -993,7 +993,8 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
             "(file_path, file_type, file_size, file_modified,"
             " ingested_at, row_count, status) "
             "VALUES (?,?,?,?,datetime('now'),?,?)",
-            (relative_path, "pdf", file_path.stat().st_size, file_path.stat().st_mtime, 0, f"error: {e}")
+            (relative_path, "pdf", file_path.stat().st_size,
+             file_path.stat().st_mtime, 0, f"error: {e}")
         )
         return 0
 
@@ -1502,7 +1503,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 """)
                 conn.execute("""
                     CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN
-                        INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data)
+                        INSERT INTO pdf_pages_fts(
+                            pdf_pages_fts, rowid, page_text, source_file, table_data)
                         VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data);
                     END
                 """)
@@ -1516,7 +1518,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 )
                 conn.execute(
                     "CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN "
-                    "INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data) "
+                    "INSERT INTO pdf_pages_fts("
+                    "pdf_pages_fts, rowid, page_text, source_file, table_data) "
                     "VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data); END"
                 )
                 conn.commit()
@@ -1572,7 +1575,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         UPDATE data_sources SET last_updated = datetime('now')
         WHERE source_id IN (
             SELECT DISTINCT
-                substr(file_path, 1, instr(substr(file_path, 1+instr(file_path, '/')), '/') + instr(file_path, '/') - 1)
+                substr(file_path, 1,
+                    instr(substr(file_path, 1+instr(file_path, '/')), '/')
+                    + instr(file_path, '/') - 1)
             FROM ingested_files
         )
     """)
