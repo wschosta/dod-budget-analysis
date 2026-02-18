@@ -318,6 +318,7 @@ def generate_report(conn: sqlite3.Connection, verbose: bool = False) -> int:
 
 
 def main():
+    """Parse CLI arguments, run all validation checks, and exit with status code."""
     parser = argparse.ArgumentParser(
         description="Validate the DoD budget database for data quality issues")
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH,

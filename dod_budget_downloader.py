@@ -257,6 +257,7 @@ SERVICE_PAGE_TEMPLATES = {
 class TimeoutManager:
     """Manages adaptive timeouts based on response history."""
     def __init__(self):
+        """Initialize with an empty per-domain response-time history."""
         self.response_times = {}  # domain -> list of response times (in ms)
 
     def get_timeout(self, url: str, is_download: bool = False) -> int:
@@ -305,6 +306,11 @@ class ProgressTracker:
     """Tracks overall download session progress and renders status bars."""
 
     def __init__(self, total_files: int):
+        """Initialize counters, timers, and terminal width for progress rendering.
+
+        Args:
+            total_files: Total number of files expected in this download session.
+        """
         self.total_files = total_files
         self.completed = 0
         self.skipped = 0
@@ -318,13 +324,16 @@ class ProgressTracker:
 
     @property
     def processed(self) -> int:
+        """Total files handled so far (completed + skipped + failed)."""
         return self.completed + self.skipped + self.failed
 
     def _bar(self, fraction: float, width: int = 30) -> str:
+        """Render an ASCII progress bar of the given width for the given fraction."""
         filled = int(width * fraction)
         return f"[{'#' * filled}{'-' * (width - filled)}]"
 
     def set_source(self, year: str, source: str):
+        """Update the current fiscal year and source label for display."""
         self.current_year = year
         self.current_source = source
 
@@ -409,6 +418,11 @@ class GuiProgressTracker:
     """Tkinter GUI window that displays download progress."""
 
     def __init__(self, total_files: int):
+        """Launch the Tkinter GUI in a background daemon thread and wait for it to be ready.
+
+        Args:
+            total_files: Total number of files expected in this download session.
+        """
         self.total_files = total_files
         self.completed = 0
         self.skipped = 0
@@ -435,9 +449,11 @@ class GuiProgressTracker:
 
     @property
     def processed(self) -> int:
+        """Total files handled so far (completed + skipped + failed)."""
         return self.completed + self.skipped + self.failed
 
     def _run_gui(self):
+        """Build and run the Tkinter progress window (called on the GUI daemon thread)."""
         import tkinter as tk
         from tkinter import ttk
 
@@ -581,18 +597,22 @@ class GuiProgressTracker:
         self._root.after(150, self._poll)
 
     def _on_close(self):
+        """Handle window close: set the closed flag and destroy the root widget."""
         self._closed = True
         self._root.destroy()
 
     def set_source(self, year: str, source: str):
+        """Update the current fiscal year and source for the GUI source label."""
         self.current_year = year
         self.current_source = source
 
     def print_overall(self):
+        """No-op: overall progress is updated by the polling loop."""
         pass  # GUI updates via _poll
 
     def print_file_progress(self, filename: str, downloaded: int, total: int,
                             file_start: float):
+        """Update per-file download state; the GUI polling loop reads these values."""
         self._file_name = filename
         self._file_downloaded = downloaded
         self._file_total = total
@@ -654,6 +674,7 @@ class GuiProgressTracker:
         btn_frame.pack(pady=(0, 14))
 
         def _view_failures():
+            """Open a scrollable text window listing all failed downloads."""
             win = tk.Toplevel(dlg)
             win.title("Failed Downloads")
             win.geometry("560x320")
@@ -1145,6 +1166,12 @@ def _save_cache(cache_key: str, files: list[dict]):
 
 
 def discover_fiscal_years(session: requests.Session) -> dict[str, str]:
+    """Scrape available fiscal years from the DoD Comptroller budget materials page.
+
+    Returns:
+        Dict mapping year strings (e.g. '2026') to their budget materials URLs,
+        sorted newest-first. Cached after the first call.
+    """
     global _fiscal_years_cache
     # Optimization: Cache fiscal years discovery
     if _fiscal_years_cache is not None:
@@ -1168,6 +1195,16 @@ def discover_fiscal_years(session: requests.Session) -> dict[str, str]:
 
 def discover_comptroller_files(session: requests.Session, year: str,
                                page_url: str) -> list[dict]:
+    """Discover downloadable budget files on the DoD Comptroller page for a given fiscal year.
+
+    Args:
+        session: Active requests.Session for HTTP requests.
+        year: Four-digit fiscal year string (e.g. '2026').
+        page_url: URL of the comptroller budget materials page for this year.
+
+    Returns:
+        List of file dicts with keys: url, name, extension, source.
+    """
     global _refresh_cache
     # Optimization: Check cache before fetching
     cache_key = _get_cache_key("comptroller", year)
@@ -1189,6 +1226,15 @@ def discover_comptroller_files(session: requests.Session, year: str,
 # ── Defense Wide ──────────────────────────────────────────────────────────────
 
 def discover_defense_wide_files(session: requests.Session, year: str) -> list[dict]:
+    """Discover Defense-Wide budget justification files for a given fiscal year.
+
+    Args:
+        session: Active requests.Session.
+        year: Four-digit fiscal year string.
+
+    Returns:
+        List of file dicts (url, name, extension, source).
+    """
     global _refresh_cache
     # Optimization: Check cache before fetching
     cache_key = _get_cache_key("defense-wide", year)
@@ -1215,6 +1261,17 @@ def discover_defense_wide_files(session: requests.Session, year: str) -> list[di
 # ── Army (browser required) ──────────────────────────────────────────────────
 
 def discover_army_files(_session: requests.Session, year: str) -> list[dict]:
+    """Discover US Army budget files for a given fiscal year using a headless browser.
+
+    The Army website requires browser automation due to WAF protections on plain HTTP.
+
+    Args:
+        _session: Unused (browser handles HTTP); kept for interface consistency.
+        year: Four-digit fiscal year string.
+
+    Returns:
+        List of file dicts (url, name, extension, source).
+    """
     global _refresh_cache
     # Optimization: Check cache before fetching
     cache_key = _get_cache_key("army", year)
@@ -1234,6 +1291,15 @@ def discover_army_files(_session: requests.Session, year: str) -> list[dict]:
 # ── Navy (browser required) ──────────────────────────────────────────────────
 
 def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
+    """Discover US Navy/Marine Corps budget files for a given fiscal year using a headless browser.
+
+    Args:
+        _session: Unused (browser handles HTTP); kept for interface consistency.
+        year: Four-digit fiscal year string.
+
+    Returns:
+        List of file dicts (url, name, extension, source).
+    """
     global _refresh_cache
     # Optimization: Check cache before fetching
     cache_key = _get_cache_key("navy", year)
@@ -1253,6 +1319,17 @@ def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
 # ── Navy Archive (browser required) ────────────────────────────────────────────
 
 def discover_navy_archive_files(_session: requests.Session, year: str) -> list[dict]:
+    """Discover Navy budget files from the SECNAV archive page using a headless browser.
+
+    Alternate source for Navy/Marine Corps exhibits hosted on the archive URL.
+
+    Args:
+        _session: Unused (browser handles HTTP); kept for interface consistency.
+        year: Four-digit fiscal year string.
+
+    Returns:
+        List of file dicts (url, name, extension, source).
+    """
     global _refresh_cache
     # Optimization: Check cache before fetching
     cache_key = _get_cache_key("navy-archive", year)
@@ -1272,6 +1349,15 @@ def discover_navy_archive_files(_session: requests.Session, year: str) -> list[d
 # ── Air Force (browser required) ─────────────────────────────────────────────
 
 def discover_airforce_files(_session: requests.Session, year: str) -> list[dict]:
+    """Discover US Air Force/Space Force budget files for a given fiscal year using a headless browser.
+
+    Args:
+        _session: Unused (browser handles HTTP); kept for interface consistency.
+        year: Four-digit fiscal year string.
+
+    Returns:
+        List of file dicts (url, name, extension, source).
+    """
     global _refresh_cache
     # Optimization: Check cache before fetching
     cache_key = _get_cache_key("airforce", year)
@@ -1371,6 +1457,22 @@ def _get_chunk_size(total_size: int) -> int:
 
 def download_file(session: requests.Session, url: str, dest_path: Path,
                   overwrite: bool = False, use_browser: bool = False) -> bool:
+    """Download a single file from url to dest_path, skipping if already current.
+
+    Handles both direct HTTP downloads and browser-based downloads for WAF-protected
+    sources. Updates the global progress tracker and manifest on completion.
+
+    Args:
+        session: Active requests.Session for HTTP downloads.
+        url: Source URL to download from.
+        dest_path: Local destination path.
+        overwrite: If True, re-download even if the file already exists.
+        use_browser: If True, use Playwright browser for the download.
+
+    Returns:
+        True if the file was successfully obtained (new, skipped, or redownloaded),
+        False on error.
+    """
     global _tracker
     fname = dest_path.name
 
@@ -1503,6 +1605,11 @@ def _extract_zip(zip_path: Path, dest_dir: Path):
 # ── Display ───────────────────────────────────────────────────────────────────
 
 def list_files(all_files: dict[str, dict[str, list[dict]]]) -> None:
+    """Print a dry-run listing of all discovered files grouped by fiscal year and source.
+
+    Args:
+        all_files: Nested dict {year: {source_label: [file_dict, ...]}} from discovery.
+    """
     grand_total = 0
     for year in sorted(all_files.keys(), reverse=True):
         sources = all_files[year]
@@ -1575,12 +1682,25 @@ def _interactive_select(title: str, items: list[str], item_labels: dict[str, str
 
 
 def interactive_select_years(available: dict[str, str]) -> list[str]:
+    """Prompt the user to select fiscal years interactively.
+
+    Args:
+        available: Dict mapping year strings to URLs (from discover_fiscal_years).
+
+    Returns:
+        List of selected year strings.
+    """
     years = list(available.keys())
     year_labels = {year: f"FY{year}" for year in years}
     return _interactive_select("Available Fiscal Years:", years, year_labels, "fiscal years")
 
 
 def interactive_select_sources() -> list[str]:
+    """Prompt the user to select download sources interactively.
+
+    Returns:
+        List of selected source identifier strings (e.g. ['army', 'navy']).
+    """
     labels = {
         "comptroller": "Comptroller (main DoD summary documents)",
         "defense-wide": "Defense Wide (budget justification books)",
@@ -1728,6 +1848,7 @@ def download_all(
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    """Parse CLI arguments and run the interactive or unattended download pipeline."""
     parser = argparse.ArgumentParser(
         description="Download budget documents from DoD Comptroller and service websites."
     )
