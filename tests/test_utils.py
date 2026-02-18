@@ -500,3 +500,127 @@ def test_file_tracker_format_bytes_gb():
     t = FileProgressTracker(total_items=1)
     result = t._format_bytes(2 * 1024 * 1024 * 1024)
     assert "GB" in result
+
+
+# ── database utilities (utils/database.py) ───────────────────────────────────
+
+from utils.database import (
+    init_pragmas,
+    batch_insert,
+    get_table_count,
+    get_table_schema,
+    table_exists,
+    create_fts5_index,
+    query_to_dicts,
+    vacuum_database,
+)
+
+
+@pytest.fixture
+def mem_conn():
+    """In-memory SQLite connection for database util tests."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT, value REAL)")
+    conn.commit()
+    yield conn
+    conn.close()
+
+
+def test_init_pragmas(tmp_path):
+    """init_pragmas sets WAL journal mode and memory temp_store (on file DB)."""
+    # WAL mode requires a file-based database (in-memory DBs use 'memory' mode)
+    db = tmp_path / "pragma_test.db"
+    conn = sqlite3.connect(str(db))
+    init_pragmas(conn)
+    mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    assert mode == "wal"
+    temp = conn.execute("PRAGMA temp_store").fetchone()[0]
+    assert temp == 2  # 2 = MEMORY
+    conn.close()
+
+
+def test_batch_insert_basic(mem_conn):
+    rows = [(1, "alpha", 1.0), (2, "beta", 2.0), (3, "gamma", 3.0)]
+    n = batch_insert(mem_conn, "INSERT INTO items (id, name, value) VALUES (?,?,?)", rows)
+    assert n == 3
+    assert mem_conn.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 3
+
+
+def test_batch_insert_small_batches(mem_conn):
+    rows = [(i, f"item{i}", float(i)) for i in range(1, 11)]
+    n = batch_insert(mem_conn, "INSERT INTO items (id, name, value) VALUES (?,?,?)",
+                     rows, batch_size=3)
+    assert n == 10
+    assert mem_conn.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 10
+
+
+def test_batch_insert_empty(mem_conn):
+    n = batch_insert(mem_conn, "INSERT INTO items (id, name, value) VALUES (?,?,?)", [])
+    assert n == 0
+
+
+def test_get_table_count_empty(mem_conn):
+    assert get_table_count(mem_conn, "items") == 0
+
+
+def test_get_table_count_with_rows(mem_conn):
+    mem_conn.execute("INSERT INTO items (name, value) VALUES ('x', 1.0)")
+    mem_conn.commit()
+    assert get_table_count(mem_conn, "items") == 1
+
+
+def test_get_table_schema(mem_conn):
+    schema = get_table_schema(mem_conn, "items")
+    names = [col["name"] for col in schema]
+    assert "id" in names
+    assert "name" in names
+    assert "value" in names
+
+
+def test_table_exists_true(mem_conn):
+    assert table_exists(mem_conn, "items") is True
+
+
+def test_table_exists_false(mem_conn):
+    assert table_exists(mem_conn, "nonexistent_table") is False
+
+
+def test_create_fts5_index(mem_conn):
+    mem_conn.execute("INSERT INTO items (name, value) VALUES ('missile defense', 1.0)")
+    mem_conn.commit()
+    create_fts5_index(mem_conn, "items", "items_fts", ["name"], rebuild=True)
+    # Verify FTS5 table exists
+    assert table_exists(mem_conn, "items_fts") is True
+    # Verify it can be searched
+    result = mem_conn.execute(
+        "SELECT rowid FROM items_fts WHERE items_fts MATCH 'missile'"
+    ).fetchall()
+    assert len(result) >= 1
+
+
+def test_query_to_dicts(mem_conn):
+    mem_conn.execute("INSERT INTO items (name, value) VALUES ('army', 42.0)")
+    mem_conn.commit()
+    rows = query_to_dicts(mem_conn, "SELECT name, value FROM items")
+    assert len(rows) == 1
+    assert rows[0]["name"] == "army"
+    assert rows[0]["value"] == 42.0
+
+
+def test_query_to_dicts_with_params(mem_conn):
+    mem_conn.execute("INSERT INTO items (name, value) VALUES ('navy', 99.0)")
+    mem_conn.commit()
+    rows = query_to_dicts(mem_conn, "SELECT * FROM items WHERE name=?", ("navy",))
+    assert len(rows) == 1
+    assert rows[0]["name"] == "navy"
+
+
+def test_vacuum_database(tmp_path):
+    """vacuum_database should complete without error."""
+    db_path = tmp_path / "test.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute("CREATE TABLE t (x INTEGER)")
+    conn.commit()
+    conn.close()
+    vacuum_database(db_path)  # should not raise
