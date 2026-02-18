@@ -1054,8 +1054,37 @@ SOURCE_DISCOVERERS = {
 
 
 # ── Download ──────────────────────────────────────────────────────────────────
+def _prefetch_remote_sizes(session: requests.Session, files: list[dict], use_browser: bool = False) -> dict:
+    """Prefetch remote file sizes for all files in parallel.
+
+    Returns: {url: size} dict. Missing URLs have unknown size.
+    """
+    if use_browser or not files:
+        return {}  # Can't HEAD with browser, skip prefetch
+
+    remote_sizes = {}
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {
+            executor.submit(session.head, f["url"], timeout=3, allow_redirects=True): f["url"]
+            for f in files
+        }
+
+        for future in as_completed(futures):
+            url = futures[future]
+            try:
+                resp = future.result()
+                if resp.status_code < 400:
+                    cl = resp.headers.get("content-length")
+                    if cl and cl.isdigit():
+                        remote_sizes[url] = int(cl)
+            except requests.RequestException:
+                pass
+
+    return remote_sizes
+
+
 def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
-                         use_browser: bool = False) -> str:
+                         use_browser: bool = False, remote_sizes: dict | None = None) -> str:
     """Check if a local file matches the remote.
 
     Returns:
@@ -1074,20 +1103,19 @@ def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
     if local_size == 0:
         return "redownload"
 
-    # Try to get remote size via HEAD request
+    # Try to get remote size (from prefetch cache or fallback HEAD)
     remote_size = None
-    try:
-        if use_browser:
-            # For browser sources we can't easily HEAD, so trust local file
-            # if it's non-empty
-            return "skip"
-        head = session.head(url, timeout=5, allow_redirects=True)
-        if head.status_code < 400:
-            cl = head.headers.get("content-length")
-            if cl and cl.isdigit():
-                remote_size = int(cl)
-    except requests.RequestException:
-        pass
+    if remote_sizes is not None and url in remote_sizes:
+        remote_size = remote_sizes[url]
+    elif not use_browser:
+        try:
+            head = session.head(url, timeout=5, allow_redirects=True)
+            if head.status_code < 400:
+                cl = head.headers.get("content-length")
+                if cl and cl.isdigit():
+                    remote_size = int(cl)
+        except requests.RequestException:
+            pass
 
     if remote_size is None:
         # Can't determine remote size — trust the local file
@@ -1100,12 +1128,12 @@ def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
 
 
 def download_file(session: requests.Session, url: str, dest_path: Path,
-                  overwrite: bool = False, use_browser: bool = False) -> bool:
+                  overwrite: bool = False, use_browser: bool = False, remote_sizes: dict | None = None) -> bool:
     global _tracker
     fname = dest_path.name
 
     if not overwrite and dest_path.exists():
-        status = _check_existing_file(session, url, dest_path, use_browser)
+        status = _check_existing_file(session, url, dest_path, use_browser, remote_sizes)
         if status == "skip":
             size = dest_path.stat().st_size
             if _tracker:
@@ -1175,9 +1203,9 @@ def _download_file_wrapper(args_tuple):
 
     Returns: (file_info, dest, ok, size)
     """
-    session, url, dest, overwrite, use_browser, delay = args_tuple
+    session, url, dest, overwrite, use_browser, delay, remote_sizes = args_tuple
     start_time = time.time()
-    ok = download_file(session, url, dest, overwrite, use_browser)
+    ok = download_file(session, url, dest, overwrite, use_browser, remote_sizes=remote_sizes)
     size = dest.stat().st_size if dest.exists() else 0
 
     # Respect delay timing
@@ -1518,7 +1546,11 @@ def main():
             _tracker.set_source(year, source_label)
 
             # Pre-filter: skip files that already exist locally (non-empty)
-            # to avoid per-file HEAD requests when not overwriting.
+            # Prefetch remote sizes for direct sources to avoid per-file HEAD requests
+            remote_sizes = {}
+            if not args.overwrite and not use_browser and len(files) > 1:
+                remote_sizes = _prefetch_remote_sizes(session, files, use_browser=False)
+
             to_download = []
             if not args.overwrite:
                 for file_info in files:
@@ -1545,7 +1577,7 @@ def main():
                     dest = dest_dir / file_info["filename"]
                     ok = download_file(
                         session, file_info["url"], dest,
-                        args.overwrite, use_browser=use_browser,
+                        args.overwrite, use_browser=use_browser, remote_sizes=remote_sizes,
                     )
                     if ok and args.extract_zips and dest.suffix.lower() == ".zip":
                         if _extraction_queue is not None:
@@ -1556,10 +1588,10 @@ def main():
             else:
                 # Parallel: direct downloads can be parallelized
                 if len(to_download) > 1:
-                    # Prepare download tasks: (session, url, dest, overwrite, use_browser, delay)
+                    # Prepare download tasks: (session, url, dest, overwrite, use_browser, delay, remote_sizes)
                     download_tasks = [
                         (session, fi["url"], dest_dir / fi["filename"],
-                         args.overwrite, use_browser, args.delay)
+                         args.overwrite, use_browser, args.delay, remote_sizes)
                         for fi in to_download
                     ]
 
@@ -1587,7 +1619,7 @@ def main():
                         dest = dest_dir / file_info["filename"]
                         ok = download_file(
                             session, file_info["url"], dest,
-                            args.overwrite, use_browser=use_browser,
+                            args.overwrite, use_browser=use_browser, remote_sizes=remote_sizes,
                         )
                         if ok and args.extract_zips and dest.suffix.lower() == ".zip":
                             if _extraction_queue is not None:
