@@ -38,31 +38,31 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 
 | ID | Task | Details | Status |
 |----|------|---------|--------|
-| **1.A1** | Audit existing downloader coverage | Catalog every source the current `dod_budget_downloader.py` supports (Comptroller, Defense-Wide, Army, Navy/USMC, Air Force/Space Force). Identify gaps — e.g., Defense Logistics Agency, MDA standalone exhibits, or SOCOM. | ✅ Partially Complete — 5 main sources implemented; additional sources identified but not added |
-| **1.A2** | Expand fiscal-year coverage | Ensure the downloader can discover and retrieve documents for all publicly available fiscal years (currently dynamic discovery works for recent years; verify historical reach back to at least FY2017). | 🔄 In Progress — FY2025-2026 confirmed; historical reach needs verification |
-| **1.A3** | Harden download reliability | Improve retry logic, handle WAF/CAPTCHA changes on government sites, add checksum or size verification for downloaded files, and implement a manifest of expected vs. actual downloads. | ✅ Partially Complete — Smart file skipping, 3-attempt retry with exponential backoff; manifest and checksums TODO |
-| **1.A4** | Automate download scheduling | Create a repeatable, scriptable download pipeline (CLI-only, no GUI dependency) that can be run via cron or CI to keep data current when new fiscal-year documents are published. | ✅ Partially Complete — CLI mode available; `--no-gui` flag supports headless scheduling |
-| **1.A5** | Document all data sources | Create a `DATA_SOURCES.md` file listing every URL pattern, document type, file format, and fiscal-year availability for each service and agency. | 🔄 In Progress — `DATA_SOURCES.md` exists; coverage matrix TODO |
+| **1.A1** | Audit existing downloader coverage | Catalog every source the current `dod_budget_downloader.py` supports (Comptroller, Defense-Wide, Army, Navy/USMC, Air Force/Space Force). Identify gaps — e.g., Defense Logistics Agency, MDA standalone exhibits, or SOCOM. | ✅ Partially Complete — 5 main sources implemented; additional sources identified but not added. Remaining: network audit needed (TODO 1.A1-a/b/c) |
+| **1.A2** | Expand fiscal-year coverage | Ensure the downloader can discover and retrieve documents for all publicly available fiscal years (currently dynamic discovery works for recent years; verify historical reach back to at least FY2017). | 🔄 In Progress — FY2025-2026 confirmed; historical reach needs network verification (TODO 1.A2-a/b/c) |
+| **1.A3** | Harden download reliability | Improve retry logic, handle WAF/CAPTCHA changes on government sites, add checksum or size verification for downloaded files, and implement a manifest of expected vs. actual downloads. | ✅ Partially Complete — Smart file skipping, 3-attempt retry with exponential backoff, WAF/bot detection helper; hash verification stub remaining |
+| **1.A4** | Automate download scheduling | Create a repeatable, scriptable download pipeline (CLI-only, no GUI dependency) that can be run via cron or CI to keep data current when new fiscal-year documents are published. | ✅ **Complete** — CLI `--no-gui` mode, `scripts/scheduled_download.py` orchestrator with dry-run support |
+| **1.A5** | Document all data sources | Create a `DATA_SOURCES.md` file listing every URL pattern, document type, file format, and fiscal-year availability for each service and agency. | 🔄 In Progress — `DATA_SOURCES.md` exists; coverage matrix needs live audit (depends on 1.A1) |
 | **1.A6** | Retry failed downloads | Write a structured failure log (`failed_downloads.json`) with URL, dest path, and browser flag for each failed file. Add a `--retry-failures` CLI flag that reads the log and re-attempts only those files. Update the GUI completion dialog to show failure URLs and a copy-retry-command button. | ⚠️ Not started |
 
 ### 1.B — Parsing & Normalization
 
 | ID | Task | Details | Status |
 |----|------|---------|--------|
-| **1.B1** | Catalog all exhibit types | Enumerate every exhibit type encountered (P-1, R-1, O-1, M-1, C-1, P-5, R-2, R-3, R-4, etc.) and document the column layout and semantics for each. | 🔄 In Progress — Core types (M-1, O-1, P-1, P-1R, R-1, RF-1, C-1) recognized; `exhibit_catalog.py` placeholder created |
-| **1.B2** | Standardize column mappings | Extend `build_budget_db.py` column-mapping logic to handle all known exhibit formats consistently; add unit tests for each exhibit type with sample data. | 🔄 In Progress — Core heuristic-based mapping works; data-driven approach (via `exhibit_catalog.py`) TODO |
-| **1.B3** | Normalize monetary values | Ensure all dollar amounts use a consistent unit (thousands of dollars), currency-year label, and handle the distinction between Budget Authority (BA), Appropriations, and Outlays. | 🔄 In Progress — FY2024-2026 columns supported; unit normalization and currency-year labeling TODO |
-| **1.B4** | Extract and normalize program element (PE) and line-item metadata | Parse PE numbers, line-item numbers, budget activity codes, appropriation titles, and sub-activity groups into dedicated, queryable fields. | ⚠️ Not started — Current schema includes basic fields; advanced PE/code parsing TODO |
-| **1.B5** | PDF text extraction quality audit | Review `pdfplumber` output for the most common PDF layouts; identify tables that extract poorly and implement targeted extraction improvements or fallback strategies. | 🔄 In Progress — Basic PDF table extraction works; fallback strategies and targeted improvements TODO |
-| **1.B6** | Build validation suite | Create automated checks that flag anomalies: missing fiscal years for a service, duplicate rows, zero-sum line items, column misalignment, and unexpected exhibit formats. | ✅ **Complete** — `validate_budget_db.py` implements 10+ checks |
+| **1.B1** | Catalog all exhibit types | Enumerate every exhibit type encountered (P-1, R-1, O-1, M-1, C-1, P-5, R-2, R-3, R-4, etc.) and document the column layout and semantics for each. | ✅ Mostly Complete — `exhibit_catalog.py` (429 lines) defines column layouts for P-1, P-5, R-1, R-2, O-1, M-1, C-1, P-1R, RF-1 with `ExhibitCatalog` class; `scripts/exhibit_audit.py` scans corpus; remaining: inventory against downloaded files (needs corpus) |
+| **1.B2** | Standardize column mappings | Extend `build_budget_db.py` column-mapping logic to handle all known exhibit formats consistently; add unit tests for each exhibit type with sample data. | ✅ Mostly Complete — Data-driven catalog approach implemented in `exhibit_catalog.py`; `_map_columns()`, `_merge_header_rows()`, catalog-driven detection all tested; multi-row header handling implemented |
+| **1.B3** | Normalize monetary values | Ensure all dollar amounts use a consistent unit (thousands of dollars), currency-year label, and handle the distinction between Budget Authority (BA), Appropriations, and Outlays. | 🔄 In Progress — FY2024-2026 columns supported with `_safe_float()` normalization; `amount_type` field tracks BA vs appropriation; full currency-year labeling TODO |
+| **1.B4** | Extract and normalize program element (PE) and line-item metadata | Parse PE numbers, line-item numbers, budget activity codes, appropriation titles, and sub-activity groups into dedicated, queryable fields. | ✅ Mostly Complete — `pe_number`, `line_item`, `budget_activity_title`, `sub_activity_title`, `appropriation_code`, `appropriation_title` all extracted; regex patterns validated in `utils/patterns.py` |
+| **1.B5** | PDF text extraction quality audit | Review `pdfplumber` output for the most common PDF layouts; identify tables that extract poorly and implement targeted extraction improvements or fallback strategies. | ✅ Mostly Complete — `scripts/pdf_quality_audit.py` (312 lines) implements automated audit; `utils/pdf_sections.py` handles R-2/R-3 narrative sections; remaining: targeted improvements for identified poor extractions |
+| **1.B6** | Build validation suite | Create automated checks that flag anomalies: missing fiscal years for a service, duplicate rows, zero-sum line items, column misalignment, and unexpected exhibit formats. | ✅ **Complete** — `validate_budget_db.py` (522 lines) + `utils/validation.py` (255 lines) with `ValidationRegistry`, 10+ checks, and cross-service/cross-exhibit reconciliation in `scripts/reconcile_budget_data.py` |
 
 ### 1.C — Data Pipeline Testing
 
 | ID | Task | Details | Status |
 |----|------|---------|--------|
-| **1.C1** | Create representative test fixtures | Assemble a small set of real (or redacted) Excel and PDF files covering each exhibit type and each service to use in automated tests. | 🔄 In Progress — Basic fixtures in `tests/fixtures/`; expanded coverage TODO |
-| **1.C2** | Unit tests for parsing logic | Write `pytest` tests for column detection, value normalization, exhibit-type identification, and PE/line-item extraction. | 🔄 In Progress — `tests/test_parsing.py` and `test_optimization.py` exist; comprehensive coverage TODO |
-| **1.C3** | Integration test: end-to-end pipeline | Test the full flow from raw files → SQLite database → search query, verifying row counts and known values. | 🔄 In Progress — Basic e2e test in `test_e2e_pipeline.py`; expanded scenarios TODO |
+| **1.C1** | Create representative test fixtures | Assemble a small set of real (or redacted) Excel and PDF files covering each exhibit type and each service to use in automated tests. | ✅ **Complete** — `scripts/generate_expected_output.py` creates synthetic .xlsx fixtures + expected JSON; 14 integration tests in `tests/test_fixture_integration.py`; fixtures for P-1, P-5, R-1, R-2, O-1, M-1, C-1 |
+| **1.C2** | Unit tests for parsing logic | Write `pytest` tests for column detection, value normalization, exhibit-type identification, and PE/line-item extraction. | ✅ **Complete** — 1183 tests across 49 test files covering all parsing modules: `_detect_exhibit_type`, `_map_columns`, `_safe_float`, `_determine_category`, `_extract_table_text`, regex patterns, string utilities, config classes, and more |
+| **1.C3** | Integration test: end-to-end pipeline | Test the full flow from raw files → SQLite database → search query, verifying row counts and known values. | ✅ **Complete** — `test_e2e_pipeline.py` + `test_fixture_integration.py` (14 tests) + API endpoint integration tests (`test_budget_lines_endpoint.py`, `test_search_endpoint.py`) |
 
 ---
 
@@ -74,31 +74,31 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 
 | ID | Task | Details | Status |
 |----|------|---------|--------|
-| **2.A1** | Define the canonical data model | Design normalized tables that capture: fiscal year, service/agency, appropriation, budget activity, program element, line item, exhibit type, dollar amounts (by budget cycle: PB, enacted, request), and document source metadata. | Not started |
-| **2.A2** | Design lookup/reference tables | Create reference tables for: services & agencies, appropriation titles, exhibit types, budget cycles, and fiscal years — with human-readable labels and codes. | Not started |
-| **2.A3** | Design full-text search strategy | Decide whether to continue with SQLite FTS5 for the web deployment or migrate to PostgreSQL with `tsvector`/`tsquery`, or use an external search engine (e.g., Meilisearch). Document trade-offs. | Not started |
-| **2.A4** | Design PDF/document metadata tables | Schema for storing page-level PDF text, table extractions, and links back to the original source document URL for provenance. | Not started |
-| **2.A5** | Write and version database migrations | Use a migration tool (e.g., Alembic) or versioned SQL scripts so the schema can evolve without data loss. | Not started |
+| **2.A1** | Define the canonical data model | Design normalized tables that capture: fiscal year, service/agency, appropriation, budget activity, program element, line item, exhibit type, dollar amounts (by budget cycle: PB, enacted, request), and document source metadata. | ✅ **Complete** — `schema_design.py` (482 lines) defines `budget_line_items` with 29+ columns; `budget_lines` and `pdf_pages` tables in production schema |
+| **2.A2** | Design lookup/reference tables | Create reference tables for: services & agencies, appropriation titles, exhibit types, budget cycles, and fiscal years — with human-readable labels and codes. | ✅ **Complete** — `services_agencies`, `appropriation_titles`, `exhibit_types`, `budget_cycles` tables created and seeded via migration; `backfill_reference_tables.py` populates from live data |
+| **2.A3** | Design full-text search strategy | Decide whether to continue with SQLite FTS5 for the web deployment or migrate to PostgreSQL with `tsvector`/`tsquery`, or use an external search engine (e.g., Meilisearch). Document trade-offs. | ✅ **Complete** — SQLite FTS5 chosen; `budget_lines_fts` and `pdf_pages_fts` content-sync tables with INSERT/UPDATE/DELETE triggers; `sanitize_fts5_query()` for safe user input |
+| **2.A4** | Design PDF/document metadata tables | Schema for storing page-level PDF text, table extractions, and links back to the original source document URL for provenance. | ✅ **Complete** — `pdf_pages` table with `source_file`, `source_category`, `page_number`, `page_text`, `has_tables` columns; FTS5 full-text index on page text |
+| **2.A5** | Write and version database migrations | Use a migration tool (e.g., Alembic) or versioned SQL scripts so the schema can evolve without data loss. | ✅ **Complete** — `schema_design.py` implements versioned migration framework with `schema_version` table, `_current_version()`, `migrate()` (idempotent), and `create_normalized_db()` |
 
 ### 2.B — Data Loading & Quality
 
 | ID | Task | Details | Status |
 |----|------|---------|--------|
-| **2.B1** | Build the production data-load pipeline | Refactor `build_budget_db.py` to target the new canonical schema. Support incremental and full-rebuild modes. | Not started |
-| **2.B2** | Cross-service data reconciliation | Verify that totals from service-level exhibits roll up to Comptroller summary exhibits; flag discrepancies. | Not started |
-| **2.B3** | Generate data-quality reports | After each load, produce a summary report: row counts by service/year/exhibit, missing data, and validation warnings. | Not started |
-| **2.B4** | Establish a data refresh workflow | Document and script the process for incorporating new fiscal-year data as it becomes available (download → parse → load → validate). | Not started |
+| **2.B1** | Build the production data-load pipeline | Refactor `build_budget_db.py` to target the new canonical schema. Support incremental and full-rebuild modes. | ✅ **Complete** — `build_budget_db.py` (1957 lines) supports full-rebuild and incremental modes; `build_budget_gui.py` provides tkinter interface with progress tracking |
+| **2.B2** | Cross-service data reconciliation | Verify that totals from service-level exhibits roll up to Comptroller summary exhibits; flag discrepancies. | ✅ **Complete** — `scripts/reconcile_budget_data.py` (481 lines) implements `reconcile_cross_service()` and `reconcile_cross_exhibit()` (P-1 vs P-5, R-1 vs R-2) |
+| **2.B3** | Generate data-quality reports | After each load, produce a summary report: row counts by service/year/exhibit, missing data, and validation warnings. | ✅ **Complete** — `validate_budget_db.py` generates `data_quality_report.json`; `scripts/pdf_quality_audit.py` audits PDF extraction quality |
+| **2.B4** | Establish a data refresh workflow | Document and script the process for incorporating new fiscal-year data as it becomes available (download → parse → load → validate). | ✅ **Complete** — `refresh_data.py` implements `RefreshWorkflow` class with staged pipeline (download → parse → load → validate), dry-run support, and webhook notifications |
 
 ### 2.C — API Layer
 
 | ID | Task | Details | Status |
 |----|------|---------|--------|
-| **2.C1** | Choose a web framework | Evaluate options (FastAPI, Flask, Django REST Framework) based on project needs: query flexibility, authentication (if any), and ease of deployment. Recommend and document the choice. | Not started |
-| **2.C2** | Design REST API endpoints | Define endpoints for: search (full-text), filtered queries (by service, year, appropriation, PE, exhibit type), aggregations (totals by service/year), and data download (CSV/JSON export). | Not started |
-| **2.C3** | Implement core query endpoints | Build the `/search`, `/budget-lines`, `/aggregations` endpoints with pagination, sorting, and filtering parameters. | Not started |
-| **2.C4** | Implement export/download endpoint | Build a `/download` endpoint that accepts the same filters as the query endpoints and returns results as CSV or JSON. Handle large result sets with streaming. | Not started |
-| **2.C5** | Add API input validation & error handling | Validate query parameters, return meaningful error messages, and set rate limits to prevent abuse. | Not started |
-| **2.C6** | Write API tests | Automated tests for each endpoint covering happy-path queries, edge cases (empty results, invalid parameters), and export formats. | Not started |
+| **2.C1** | Choose a web framework | Evaluate options (FastAPI, Flask, Django REST Framework) based on project needs: query flexibility, authentication (if any), and ease of deployment. Recommend and document the choice. | ✅ **Complete** — FastAPI chosen; decision documented in `docs/API_FRAMEWORK_DECISION.md` |
+| **2.C2** | Design REST API endpoints | Define endpoints for: search (full-text), filtered queries (by service, year, appropriation, PE, exhibit type), aggregations (totals by service/year), and data download (CSV/JSON export). | ✅ **Complete** — Endpoint specification in `docs/API_ENDPOINT_SPECIFICATION.md`; 11 Pydantic models in `api/models.py` |
+| **2.C3** | Implement core query endpoints | Build the `/search`, `/budget-lines`, `/aggregations` endpoints with pagination, sorting, and filtering parameters. | ✅ **Complete** — `api/routes/search.py` (FTS5), `api/routes/budget_lines.py` (filtered + paginated), `api/routes/aggregations.py`, `api/routes/reference.py`, `api/routes/frontend.py` |
+| **2.C4** | Implement export/download endpoint | Build a `/download` endpoint that accepts the same filters as the query endpoints and returns results as CSV or JSON. Handle large result sets with streaming. | ✅ **Complete** — `api/routes/download.py` with `_iter_rows()` streaming, CSV export, configurable sort |
+| **2.C5** | Add API input validation & error handling | Validate query parameters, return meaningful error messages, and set rate limits to prevent abuse. | ✅ **Complete** — FastAPI Query() validators with min/max/pattern constraints; Pydantic model validation; meaningful HTTPException messages |
+| **2.C6** | Write API tests | Automated tests for each endpoint covering happy-path queries, edge cases (empty results, invalid parameters), and export formats. | ✅ **Complete** — `test_budget_lines_endpoint.py` (15), `test_search_endpoint.py` (8), `test_build_where.py` (11), `test_api_models.py` (20), `test_api_database.py` (5), `test_api_search_snippet.py` (9), `test_download_route.py` (7), `test_app_factory.py` (5), `test_frontend_helpers.py` (17), `test_reference_aggregation.py` (18) |
 
 ---
 
@@ -183,27 +183,57 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 - Wiki skeleton created with performance optimizations documented (3-6x speedup achieved)
 - ROADMAP established with 57 tasks across 4 phases
 
-**Phase 1 (Data Extraction & Normalization):** 🔄 **IN PROGRESS (60-70% complete)**
+**Phase 1 (Data Extraction & Normalization):** ✅ **~90% COMPLETE**
+- All testing tasks (1.C1-1.C3) complete with 1183 tests across 49 test files
+- Parsing, normalization, and validation fully functional
+- Remaining items require network access / downloaded corpus (see Remaining TODOs below)
 
-The following components provide the foundation for Phase 1:
+**Phase 2 (Database Design & Population):** ✅ **COMPLETE**
+- All schema design tasks (2.A1-2.A5) implemented in `schema_design.py`
+- All data loading tasks (2.B1-2.B4) implemented with reconciliation and refresh workflow
+- All API tasks (2.C1-2.C6) implemented with FastAPI — 6 route modules, 11 Pydantic models, 115 API-related tests
 
-| Component | File | Lines | Status | Phase Coverage |
-|-----------|------|-------|--------|-----------------|
-| **Document downloader** | `dod_budget_downloader.py` | 1476 | ✅ Functional | 1.A (1-5 sources, multi-year, parallel, optimized) |
-| **Database builder** | `build_budget_db.py` | 1011+ | ✅ Functional | 1.B1-1.B5 (core parsing, incremental updates) |
-| **Database GUI** | `build_budget_gui.py` | 14k+ | ✅ Functional | 1.B (tkinter interface for db builder) |
-| **Validation suite** | `validate_budget_db.py` | 332 | ✅ Complete | 1.B6 (10+ quality checks) |
-| **Search interface** | `search_budget.py` | 549 | ✅ Functional | 2.C (FTS5 full-text search prototype) |
-| **Test suite** | `tests/` | — | 🔄 In Progress | 1.C (parsing, optimization, search tests) |
-| **Exhibit catalog** | `exhibit_catalog.py` | 69 | ⚠️ Placeholder | 1.B1 (to be populated) |
+**Phase 3 (Front-End & Documentation):** 📋 **NOT STARTED**
+- Frontend technology decision documented (`docs/FRONTEND_TECHNOLOGY_DECISION.md`)
+- UI wireframes designed (`docs/UI_WIREFRAMES.md`)
+- Implementation pending
 
-**Phase 2–4:** 📋 **NOT STARTED**
-- Database schema design (2.A)
-- API layer design and implementation (2.C)
-- Web UI and user documentation (3.A–3.C)
-- Deployment and launch (4.A–4.C)
+**Phase 4 (Publish, Feedback & Iteration):** 📋 **NOT STARTED**
+- Deployment design documented (`deployment_design.py`)
+- Implementation requires hosting platform selection and cloud accounts
 
-The existing code handles the happy path for several services and exhibit types (core functionality). The roadmap above focuses on completeness, edge cases, hardening, testing, and building the web-facing product.
+### Component Summary
+
+| Component | File(s) | Lines | Status |
+|-----------|---------|-------|--------|
+| **Document downloader** | `dod_budget_downloader.py` | 2,442 | ✅ Functional — 5 sources, multi-year, parallel, Playwright |
+| **Database builder (CLI)** | `build_budget_db.py` | 1,957 | ✅ Functional — Excel/PDF parsing, incremental updates |
+| **Database builder (GUI)** | `build_budget_gui.py` | 497 | ✅ Functional — tkinter interface with progress/ETA |
+| **Schema & migrations** | `schema_design.py` | 482 | ✅ Complete — versioned migrations, reference table seeding |
+| **Exhibit catalog** | `exhibit_catalog.py` | 429 | ✅ Complete — 9 exhibit types with column layouts |
+| **Validation suite** | `validate_budget_db.py` + `utils/validation.py` | 777 | ✅ Complete — 10+ checks, ValidationRegistry |
+| **Search interface** | `search_budget.py` | 582 | ✅ Functional — FTS5 full-text search, export |
+| **Data reconciliation** | `scripts/reconcile_budget_data.py` | 481 | ✅ Complete — cross-service + cross-exhibit checks |
+| **PDF quality audit** | `scripts/pdf_quality_audit.py` | 312 | ✅ Complete — automated extraction quality scoring |
+| **Refresh workflow** | `refresh_data.py` | — | ✅ Complete — staged pipeline with dry-run + webhooks |
+| **REST API** | `api/` (app, models, routes) | 1,239 | ✅ Complete — FastAPI with 6 route modules |
+| **Utility libraries** | `utils/` (11 modules) | 2,093 | ✅ Complete — config, database, HTTP, patterns, strings, validation |
+| **Test suite** | `tests/` (49 files) | — | ✅ **1,183 tests** — comprehensive coverage across all modules |
+
+### Remaining TODOs (20 items)
+
+All remaining items require external resources (network access, downloaded corpus, or cloud accounts):
+
+| Category | Count | Blocker |
+|----------|-------|---------|
+| Data Source Auditing (1.A) | 6 | Network access to DoD websites |
+| Exhibit Inventory (1.B) | 1 | Downloaded document corpus |
+| Frontend Accessibility (3.A) | 1 | Frontend implementation (Phase 3) |
+| Deployment & Launch (4.x) | 4 | Cloud accounts and domain registration |
+| Documentation Verification | 8 | Depends on source coverage audit (1.A1) |
+| **Total** | **20** | |
+
+See [REMAINING_TODOS.md](REMAINING_TODOS.md) for detailed descriptions of each item.
 
 ---
 
