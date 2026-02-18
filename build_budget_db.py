@@ -691,8 +691,10 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
     return mapping
 
 
-def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
+def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
+                      docs_dir: Path | None = None) -> int:
     """Ingest a single Excel file into the database."""
+    _docs_dir = (docs_dir or DOCS_DIR).resolve()
     wb = openpyxl.load_workbook(str(file_path), read_only=True, data_only=True)
     exhibit_type = _detect_exhibit_type(file_path.name)
     total_rows = 0
@@ -804,7 +806,7 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
                 return v * unit_multiplier if v else v
 
             batch.append((
-                str(file_path.relative_to(DOCS_DIR)),
+                str(file_path.relative_to(_docs_dir)),
                 exhibit_type,
                 sheet_name,
                 fiscal_year,
@@ -980,7 +982,7 @@ def _extract_tables_with_timeout(page, timeout_seconds=10, executor=None):
 
 
 def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
-                    page_callback=None) -> int:
+                    page_callback=None, docs_dir: Path | None = None) -> int:
     """Ingest a single PDF file into the database.
 
     Args:
@@ -988,9 +990,12 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
         file_path: Path to the PDF file.
         page_callback: Optional callable(pages_done, total_pages) called after
             each page is processed, for real-time progress reporting.
+        docs_dir: Base directory for relative path computation. Defaults to
+            the global DOCS_DIR constant.
     """
+    _docs_dir = (docs_dir or DOCS_DIR).resolve()
     category = _determine_category(file_path)
-    relative_path = str(file_path.relative_to(DOCS_DIR))
+    relative_path = str(file_path.relative_to(_docs_dir))
     total_pages = 0
 
     try:
@@ -1480,7 +1485,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         _remove_file_data(conn, rel_path, "xlsx")
 
         t0 = time.time()
-        rows = ingest_excel_file(conn, xlsx)
+        rows = ingest_excel_file(conn, xlsx, docs_dir=docs_dir)
         file_elapsed = time.time() - t0
         print(f"{rows} rows ({file_elapsed:.1f}s)")
 
@@ -1751,7 +1756,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                            "current_total_pages": page_total})
 
             t0 = time.time()
-            pages = ingest_pdf_file(conn, pdf, page_callback=_page_cb)
+            pages = ingest_pdf_file(conn, pdf, page_callback=_page_cb,
+                                    docs_dir=docs_dir)
             file_elapsed = time.time() - t0
             print(f"{pages} pages ({file_elapsed:.1f}s)")
 

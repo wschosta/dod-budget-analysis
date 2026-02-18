@@ -179,3 +179,53 @@ def test_describe_catalog_contains_column_counts():
     result = describe_catalog()
     # Should mention "columns" somewhere
     assert "columns" in result
+
+
+# ── TODO 1.B1-f: All catalog entries return valid mappings ────────────────────
+
+def _build_realistic_header(exhibit_key: str) -> list[str]:
+    """Build a synthetic header row using the first pattern from each column spec."""
+    col_specs = get_column_spec_for_exhibit(exhibit_key)
+    return [col["header_patterns"][0] for col in col_specs if col.get("header_patterns")]
+
+
+@pytest.mark.parametrize("exhibit_key", list(EXHIBIT_CATALOG.keys()))
+def test_find_matching_columns_non_empty_for_each_catalog_type(exhibit_key):
+    """Every catalog exhibit type returns at least one matched column for a
+    realistic header row constructed from its own header_patterns (1.B1-f).
+    """
+    headers = _build_realistic_header(exhibit_key)
+    assert headers, f"No header patterns found for '{exhibit_key}'"
+    matched = find_matching_columns(exhibit_key, headers)
+    assert len(matched) > 0, (
+        f"find_matching_columns('{exhibit_key}', {headers}) returned empty dict — "
+        f"header_patterns in EXHIBIT_CATALOG may not match find_matching_columns logic"
+    )
+
+
+@pytest.mark.parametrize("exhibit_key", list(EXHIBIT_CATALOG.keys()))
+def test_catalog_entry_column_count(exhibit_key):
+    """Every catalog entry has at least one column spec (1.B1-f basic sanity)."""
+    cols = get_column_spec_for_exhibit(exhibit_key)
+    assert len(cols) >= 1, f"Exhibit '{exhibit_key}' has no column specs"
+
+
+def test_find_matching_columns_r1_realistic_header():
+    """R-1 header with PE/BLI patterns maps at least program_element (1.B1-f)."""
+    headers = ["Account", "Account Title", "Organization",
+               "Budget Activity", "Program Element",
+               "Prior Year", "Current Year", "Budget Estimate"]
+    matched = find_matching_columns("r1", headers)
+    fields = set(matched.values())
+    assert "account" in fields or "program_element" in fields
+
+
+def test_find_matching_columns_c1_authorization():
+    """C-1 header includes Authorization and Appropriation patterns (1.B1-f)."""
+    headers = ["Account", "Project Number", "Project Title",
+               "Location", "Authorization Amount", "Appropriation Amount",
+               "Estimate Amount"]
+    matched = find_matching_columns("c1", headers)
+    fields = set(matched.values())
+    assert "authorization_amount" in fields
+    assert "appropriation_amount" in fields

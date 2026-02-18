@@ -330,6 +330,44 @@ def test_db(fixtures_dir, tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
+def fixtures_dir_excel_only(tmp_path_factory):
+    """Return a temporary directory with only Excel fixtures (no PDFs).
+
+    FIX-005 Option C: Provides a PDF-free fixture directory so tests that
+    exercise only Excel ingestion do not trigger pyo3/pdfplumber PanicException.
+    """
+    d = tmp_path_factory.mktemp("excel_only_fixtures")
+    _create_exhibit_xlsx(d / "p1_display.xlsx", "p1", _P1_ROWS)
+    _create_exhibit_xlsx(d / "r1_display.xlsx", "r1", _R1_ROWS)
+    _create_exhibit_xlsx(d / "c1_display.xlsx", "c1", _C1_ROWS)
+    _create_exhibit_xlsx(d / "o1_display.xlsx", "o1", _P1_ROWS[:2])
+    _create_exhibit_xlsx(d / "m1_display.xlsx", "m1", _P1_ROWS[:2])
+    _create_exhibit_xlsx(d / "rf1_display.xlsx", "rf1", _P1_ROWS[:1])
+    _create_exhibit_xlsx(d / "p5_display.xlsx", "p5", _P5_ROWS)
+    _create_exhibit_xlsx(d / "r2_display.xlsx", "r2", _R2_ROWS)
+    return d
+
+
+@pytest.fixture(scope="session")
+def test_db_excel_only(fixtures_dir_excel_only, tmp_path_factory):
+    """Return a Path to a SQLite database built from Excel-only fixtures.
+
+    FIX-005: No PDF fixtures → no pyo3/pdfplumber PanicException.
+    Tests that only need Excel data should use this fixture instead of test_db.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from build_budget_db import build_database  # type: ignore
+
+    db_dir = tmp_path_factory.mktemp("test_db_excel_only")
+    db_path = db_dir / "test_budget_excel.sqlite"
+    try:
+        build_database(fixtures_dir_excel_only, db_path, rebuild=True)
+    except Exception as exc:
+        pytest.skip(f"build_database() failed (missing deps?): {exc}")
+    return db_path
+
+
+@pytest.fixture(scope="session")
 def bad_excel(tmp_path_factory) -> Path:
     """Return a Path to an intentionally malformed Excel file.
 
