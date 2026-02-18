@@ -1,6 +1,6 @@
 # Step 1.C3 — Integration Test: End-to-End Pipeline
 
-**Status:** Partially implemented (test_pipeline.py has 8 detailed TODOs, test_e2e_pipeline.py is a stub)
+**Status:** Mostly complete (1.C3-h standalone schema test added and passing; 1.C3-a through 1.C3-g implemented but require fpdf2/pdfplumber fix; 1.C3-i done — test_e2e_pipeline.py already consolidated)
 **Type:** Code creation (AI-agent, needs fixtures from 1.C1)
 **Depends on:** 1.C1 (fixtures), 1.C2 (unit tests passing)
 

@@ -73,6 +73,41 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from build_budget_db import build_database  # type: ignore
 
 
+# ── 1.C3-h (standalone): Test empty DB schema integrity ─────────────────────
+# This test requires no fixtures — it creates an empty DB and checks schema.
+
+def test_empty_db_schema_integrity(tmp_db):
+    """Verify schema is complete on a freshly created empty database.
+
+    Uses the tmp_db fixture (create_database only, no fixture data ingested).
+    This is the standalone variant of 1.C3-h — no pdfplumber/fpdf2 required.
+    """
+    conn = tmp_db
+
+    # All expected tables
+    existing = {row[0] for row in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
+    ).fetchall()}
+
+    for table in ("budget_lines", "pdf_pages", "ingested_files",
+                  "budget_lines_fts", "pdf_pages_fts"):
+        assert table in existing, f"Table '{table}' missing from schema"
+
+    # Key columns in budget_lines (verify actual schema, not aspirational)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(budget_lines)").fetchall()}
+    for col in ("id", "source_file", "account", "account_title",
+                "budget_activity", "line_item", "organization_name", "exhibit_type",
+                "amount_fy2024_actual", "amount_fy2026_request",
+                "amount_unit", "budget_type", "pe_number"):
+        assert col in cols, f"Column '{col}' missing from budget_lines"
+
+    # FTS virtual tables
+    fts_tables = {row[0] for row in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%_fts'"
+    ).fetchall()}
+    assert len(fts_tables) >= 2, f"Expected ≥2 FTS tables, got {fts_tables}"
+
+
 # ── 1.C3-a: Test full Excel ingestion pipeline ────────────────────────────────
 
 def test_full_excel_ingestion_pipeline(test_db):
