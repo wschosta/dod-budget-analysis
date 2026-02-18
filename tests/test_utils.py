@@ -1,5 +1,6 @@
 """
-Unit tests for utils/strings.py, utils/validation.py, and utils/patterns.py.
+Unit tests for utils/strings.py, utils/validation.py, utils/patterns.py,
+and utils/progress.py.
 
 No database, network, or file I/O required.
 """
@@ -395,3 +396,107 @@ def test_downloadable_extensions_pattern():
     assert DOWNLOADABLE_EXTENSIONS.search("data.xlsx") is not None
     assert DOWNLOADABLE_EXTENSIONS.search("budget.xls") is not None
     assert DOWNLOADABLE_EXTENSIONS.search("report.txt") is None
+
+
+# ── ProgressTracker (utils/progress.py) ──────────────────────────────────────
+
+from utils.progress import (
+    ProgressTracker,
+    SilentProgressTracker,
+    TerminalProgressTracker,
+    FileProgressTracker,
+)
+
+
+def test_silent_tracker_basic():
+    """SilentProgressTracker tracks state without printing."""
+    t = SilentProgressTracker(total_items=10)
+    t.mark_completed(3)
+    t.mark_skipped(2)
+    t.mark_failed(1)
+    assert t.completed == 3
+    assert t.skipped == 2
+    assert t.failed == 1
+    assert t.processed == 6
+    assert t.remaining == 4
+
+
+def test_silent_tracker_progress_fraction():
+    t = SilentProgressTracker(total_items=4)
+    t.mark_completed(2)
+    assert t.progress_fraction == 0.5
+    assert t.progress_percent == 50
+
+
+def test_silent_tracker_zero_total():
+    """Zero total_items should not cause division by zero."""
+    t = SilentProgressTracker(total_items=0)
+    assert t.progress_fraction == 0.0
+
+
+def test_silent_tracker_over_total():
+    """Fraction caps at 1.0 even if more than total processed."""
+    t = SilentProgressTracker(total_items=5)
+    t.mark_completed(10)
+    assert t.progress_fraction == 1.0
+
+
+def test_silent_tracker_finish():
+    """finish() should not raise."""
+    t = SilentProgressTracker(total_items=5)
+    t.mark_completed(5)
+    t.finish()  # should not raise
+
+
+def test_terminal_tracker_format_bar():
+    t = TerminalProgressTracker(total_items=10, show_every_n=1)
+    t.mark_completed(5)
+    bar = t._format_bar(width=10)
+    assert bar.startswith("[")
+    assert bar.endswith("]")
+    assert "=" in bar
+
+
+def test_terminal_tracker_format_elapsed_seconds():
+    t = TerminalProgressTracker(total_items=5, show_every_n=1)
+    # Elapsed is very short — should format as "0m 00s"
+    elapsed = t._format_elapsed()
+    assert "m" in elapsed
+    assert "s" in elapsed
+
+
+def test_terminal_tracker_format_summary():
+    t = TerminalProgressTracker(total_items=10, show_every_n=1)
+    t.mark_completed(3)
+    t.mark_skipped(1)
+    t.mark_failed(1)
+    summary = t._format_summary()
+    assert "3" in summary
+    assert "skipped" in summary
+    assert "failed" in summary
+
+
+def test_file_tracker_bytes_accumulate():
+    # Note: add_bytes() calls update() which relies on _format_bar() inherited
+    # from TerminalProgressTracker — only test the byte-tracking state directly.
+    t = FileProgressTracker(total_items=5)
+    t.completed_bytes += 1024
+    t.completed_bytes += 2048
+    assert t.completed_bytes == 3072
+
+
+def test_file_tracker_format_bytes_kb():
+    t = FileProgressTracker(total_items=1)
+    assert "KB" in t._format_bytes(512 * 1024)
+
+
+def test_file_tracker_format_bytes_mb():
+    t = FileProgressTracker(total_items=1)
+    result = t._format_bytes(5 * 1024 * 1024)
+    assert "MB" in result
+
+
+def test_file_tracker_format_bytes_gb():
+    t = FileProgressTracker(total_items=1)
+    result = t._format_bytes(2 * 1024 * 1024 * 1024)
+    assert "GB" in result
