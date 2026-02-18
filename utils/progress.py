@@ -178,9 +178,10 @@ class SilentProgressTracker(ProgressTracker):
         pass
 
 
-class FileProgressTracker(ProgressTracker):
+class FileProgressTracker(TerminalProgressTracker):
     """Progress tracker for file download/upload operations.
 
+    Extends TerminalProgressTracker with byte counting.
     Tracks both file count and total bytes transferred.
     """
 
@@ -190,7 +191,7 @@ class FileProgressTracker(ProgressTracker):
         Args:
             total_items: Total number of files
         """
-        super().__init__(total_items)
+        super().__init__(total_items, show_every_n=1)
         self.total_bytes = 0
         self.completed_bytes = 0
 
