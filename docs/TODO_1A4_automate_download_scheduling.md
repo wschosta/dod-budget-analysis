@@ -1,6 +1,6 @@
 # Step 1.A4 — Automate Download Scheduling
 
-**Status:** Not started
+**Status:** Complete
 **Type:** Code + Configuration (AI-agent completable)
 **Depends on:** 1.A3-a (manifest useful but not blocking)
 

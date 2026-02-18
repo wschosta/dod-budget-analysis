@@ -1,6 +1,6 @@
 # Step 1.C2 — Unit Tests for Parsing Logic
 
-**Status:** Partially implemented (test_parsing.py has working tests for 5 functions)
+**Status:** Mostly Complete (1.C2-a ✅, 1.C2-b ✅, 1.C2-c ✅, 1.C2-d ✅, 1.C2-g ✅ done; 1.C2-e/f deferred — depend on working fpdf2/pdfplumber environment)
 **Type:** Code creation (AI-agent completable)
 **Depends on:** 1.B2 (column mapping changes should update tests)
 

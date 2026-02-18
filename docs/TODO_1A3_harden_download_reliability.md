@@ -1,6 +1,6 @@
 # Step 1.A3 — Harden Download Reliability
 
-**Status:** Not started
+**Status:** Complete (1.A3-e skipped — requires live WAF environment)
 **Type:** Code modification (multi-step, mostly AI-agent)
 **Depends on:** None
 

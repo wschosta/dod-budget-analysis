@@ -1,6 +1,6 @@
 # Step 1.A6 — Retry Failed Downloads
 
-**Status:** Not started
+**Status:** Complete
 **Type:** Code modification (AI-agent, ordered sub-tasks)
 **Depends on:** None (complements 1.A3)
 

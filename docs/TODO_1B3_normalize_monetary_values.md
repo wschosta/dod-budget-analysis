@@ -1,6 +1,6 @@
 # Step 1.B3 — Normalize Monetary Values
 
-**Status:** Not started
+**Status:** Complete
 **Type:** Code modification (AI-agent completable)
 **Depends on:** 1.B1 (to know what units each exhibit uses)
 

@@ -26,7 +26,7 @@ code for each type is used in the `exhibit_type` column of the database.
 
 ---
 
-## P-1 — Procurement
+## Summary Exhibits
 
 **DB key:** `p1`  
 **Description:** Summary procurement budget exhibit — funding requests for procurement
@@ -53,7 +53,8 @@ of weapons, vehicles, aircraft, ships, and other equipment.
 
 ---
 
-## P-1R — Procurement (Reserves)
+**Description:** Summary procurement exhibit — funding requests for procurement of
+weapons systems, vehicles, and equipment.
 
 **DB key:** `p1r`  
 **Description:** Procurement reserves budget — unfunded requirements and contingency funds
@@ -103,7 +104,20 @@ costs within procurement accounts. Supplements the P-1 summary.
 
 ---
 
-## R-1 — RDT&E
+| Field | Source Header | Type |
+|-------|--------------|------|
+| `account` | `Account` | text |
+| `account_title` | `Account Title` | text |
+| `organization` | `Organization` | text |
+| `budget_activity` | `Budget Activity` | text |
+| `budget_activity_title` | `Budget Activity Title` | text |
+| `line_item` | `Budget Line Item` | text |
+| `line_item_title` | `Budget Line Item (BLI) Title` | text |
+| `pe_number` | extracted from line_item | text |
+| `amount_fyYYYY_actual` | `FY{YYYY} Actual Amount` | real (thousands) |
+| `amount_fyYYYY_enacted` | `FY{YYYY} Enacted Amount` | real (thousands) |
+| `amount_fyYYYY_request` | `FY{YYYY} Request Amount` | real (thousands) |
+| `amount_fyYYYY_total` | `FY{YYYY} Total Amount` | real (thousands) |
 
 **DB key:** `r1`  
 **Description:** Research, Development, Test & Evaluation summary — funding for military
@@ -200,7 +214,64 @@ and cost estimate growth.
 
 ---
 
-## O-1 — Operation & Maintenance
+---
+
+### P-1R — Procurement (Reserves)
+
+**Description:** Reserve component procurement — same structure as P-1.
+
+Column mapping is identical to P-1 (shared `_map_columns()` heuristics).
+
+---
+
+### R-1 — RDT&E
+
+**Description:** Research, Development, Test & Evaluation — funding for military
+technology development programs.
+
+**Canonical column names:**
+
+| Field | Source Header | Type |
+|-------|--------------|------|
+| `account` | `Account` | text |
+| `account_title` | `Account Title` | text |
+| `organization` | `Organization` | text |
+| `budget_activity` | `Budget Activity` | text |
+| `budget_activity_title` | `Budget Activity Title` | text |
+| `line_item` | `PE/BLI` | text |
+| `line_item_title` | `Program Element/Budget Line Item (BLI) Title` | text |
+| `pe_number` | extracted from line_item | text |
+| `amount_fyYYYY_*` | `FY{YYYY} {Type} Amount` | real (thousands) |
+
+**Known variations:**
+- Budget activity codes follow DoD RDT&E taxonomy (6.1=Basic Research, 6.2=Applied, etc.)
+
+---
+
+### O-1 — Operation & Maintenance
+
+**Description:** Operation and maintenance funding — personnel operations, sustainment, training.
+
+**Canonical column names:**
+
+| Field | Source Header | Type |
+|-------|--------------|------|
+| `account` | `Account` | text |
+| `account_title` | `Account Title` | text |
+| `organization` | `Organization` | text |
+| `budget_activity` | `Budget Activity` | text |
+| `budget_activity_title` | `Budget Activity Title` | text |
+| `sub_activity` | `BSA` or `AG/BSA` | text |
+| `sub_activity_title` | `Budget SubActivity Title` | text |
+| `amount_fyYYYY_*` | `FY{YYYY} {Type} Amount` | real (thousands) |
+
+---
+
+### M-1 — Military Personnel
+
+**Description:** Military personnel funding — active duty, reserves, National Guard pay.
+
+Same column layout as O-1 (uses BSA/sub-activity structure).
 
 **DB key:** `o1`  
 **Description:** Operation and Maintenance summary — funding for personnel, operations,
@@ -225,7 +296,7 @@ sustainment, and training activities.
 
 ---
 
-## M-1 — Military Personnel
+**Canonical column names:**
 
 **DB key:** `m1`  
 **Description:** Military Personnel summary — funding for active duty, reserves, and
@@ -251,7 +322,7 @@ National Guard personnel pay, allowances, and benefits.
 
 ---
 
-## C-1 — Military Construction
+**Note:** C-1 uses authorization/appropriation semantics, not enacted/request.
 
 **DB key:** `c1`  
 **Description:** Military Construction budget — facility projects and real property

@@ -1,0 +1,64 @@
+name: Download DoD Budget Documents
+
+# Step 1.A4-c: Manual trigger only — no automatic schedule.
+# Downloaded files are NOT committed to the repo; the manifest is uploaded
+# as a workflow artifact.
+on:
+  workflow_dispatch:
+    inputs:
+      years:
+        description: >
+          Fiscal years to download (space-separated, e.g. "2026 2025") or "all"
+        required: false
+        default: "all"
+        type: string
+      sources:
+        description: >
+          Sources to download from: comptroller, defense-wide, army, navy,
+          airforce — space-separated, or "all"
+        required: false
+        default: "all"
+        type: string
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 openpyxl pdfplumber lxml fpdf2
+
+      - name: Install Playwright (for browser-required sources)
+        run: |
+          pip install playwright
+          playwright install chromium --with-deps
+
+      - name: Run scheduled download
+        run: |
+          python scripts/scheduled_download.py \
+            --output DoD_Budget_Documents \
+            --years ${{ github.event.inputs.years }} \
+            --sources ${{ github.event.inputs.sources }} \
+            --log DoD_Budget_Documents/download_log.txt
+
+      - name: Upload manifest as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: download-manifest-${{ github.run_id }}
+          path: |
+            DoD_Budget_Documents/manifest.json
+            DoD_Budget_Documents/download_log.txt
+          if-no-files-found: warn
+          retention-days: 90

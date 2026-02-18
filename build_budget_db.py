@@ -12,61 +12,19 @@ Usage:
     python build_budget_db.py --db mydb.sqlite # Custom database path
 
 ──────────────────────────────────────────────────────────────────────────────
-Phase 1 Roadmap Tasks for this file (Steps 1.B2 – 1.B5)
+Phase 1 Roadmap Tasks for this file (Steps 1.B3 – 1.B5)
 ──────────────────────────────────────────────────────────────────────────────
-**Status:** Foundation implementation complete. Below are enhancement tasks
-for robust parsing, normalization, and quality improvements.
-
-TODO 1.B2-a: Replace hard-coded _map_columns() with exhibit_catalog.py lookups.
-    Import EXHIBIT_CATALOG and use its column_spec entries to drive column
-    detection.  Fall back to the current heuristic matching only for unknown
-    exhibit types.  This makes column mapping data-driven instead of code-driven.
-    Dependency: exhibit_catalog.py TODO 1.B1-b must be done first.
-
-TODO 1.B2-b: Add unit tests for _map_columns() covering every exhibit type.
-    For each exhibit in EXHIBIT_CATALOG, create a sample header row and assert
-    that _map_columns returns the expected field→index mapping.
-    File: tests/test_parsing.py (see Step 1.C TODOs).
-
-TODO 1.B2-c: Handle multi-row headers.
-    Some exhibits split column headers across 2–3 rows (e.g., "FY 2026" on row 1
-    and "Request" on row 2).  Detect this by checking if the row after the header
-    row also contains header-like text, and merge them.
-    Token-efficient tip: modify the header_idx detection loop in ingest_excel_file()
-    to peek at rows[header_idx+1] and join cells vertically when non-data.
-
-TODO 1.B3-a: Normalize all monetary values to thousands of dollars.
-    Audit the downloaded exhibits to determine which use whole dollars vs.
-    thousands vs. millions.  Add a multiplier field to EXHIBIT_CATALOG and
-    apply it during ingestion.
-    Token-efficient tip: run a quick script that samples the first few data rows
-    from each exhibit and checks magnitude — values > 1M likely are in whole
-    dollars and need dividing by 1000.
-
-TODO 1.B3-b: Add a currency_year column to budget_lines.
-    Track whether amounts are in then-year dollars or constant dollars.  Parse
-    this from the exhibit header or sheet name where available.
+**Status:** Foundation + key enhancements implemented (1.B2-a year-agnostic
+column mapping, 1.B2-c multi-row headers, 1.B2-d FY normalization,
+1.B3-a monetary normalization, 1.B3-b currency_year, 1.B4-a PE numbers,
+1.B4-b ORG_MAP expansion, 1.B4-c appropriation parsing complete).
+Remaining tasks below.
 
 TODO 1.B3-c: Distinguish Budget Authority, Appropriations, and Outlays.
     Add an 'amount_type' column (or separate columns) to budget_lines.  C-1
     already has authorization vs. appropriation; other exhibits may have TOA
     (Total Obligation Authority) vs. BA.  Map these distinctions during
     ingestion.
-
-TODO 1.B4-a: Parse Program Element (PE) numbers into a dedicated column.
-    PE numbers follow a pattern like "0602702E".  Extract from the line_item or
-    account fields using regex r'\\d{7}[A-Z]' and store in a new pe_number
-    column for direct querying.
-
-TODO 1.B4-b: Normalize budget activity codes.
-    Budget activity codes are currently stored as raw text from the spreadsheet.
-    Standardize to a consistent format (e.g., "01", "02") and add a reference
-    table mapping codes to descriptions per appropriation.
-
-TODO 1.B4-c: Parse appropriation title from account_title.
-    The account_title field often contains both an account code and a title
-    (e.g., "2035 Aircraft Procurement, Army").  Split these into separate
-    appropriation_code and appropriation_title fields.
 
 TODO 1.B5-a: Audit PDF extraction quality for common layouts.
     Run build_budget_db.py on a sample of PDFs from each service and manually
@@ -120,21 +78,45 @@ from exhibit_catalog import find_matching_columns as _catalog_find_matching_colu
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 DOCS_DIR = Path("DoD_Budget_Documents")
 
-# Map organization codes to names
+# Map organization codes to names (Step 1.B4-b)
+# Single-letter codes from exhibit filename prefixes; longer codes from spreadsheet
+# Organization column cells.  Unknown codes are stored as-is.
 ORG_MAP = {
+    # Single-letter codes (filename-level)
     "A": "Army", "N": "Navy", "F": "Air Force", "S": "Space Force",
     "D": "Defense-Wide", "M": "Marine Corps", "J": "Joint Staff",
+    # Multi-letter / full codes found in Organization column cells
+    "SOCOM": "SOCOM", "USSOCOM": "SOCOM",
+    "DISA":  "DISA",
+    "DLA":   "DLA",
+    "MDA":   "MDA",
+    "DHA":   "DHA",  # Defense Health Agency
+    "NGB":   "NGB",  # National Guard Bureau
+    "DARPA": "DARPA",
+    "NSA":   "NSA",
+    "DIA":   "DIA",
+    "NRO":   "NRO",
+    "NGA":   "NGA",
+    "DTRA":  "DTRA",  # Defense Threat Reduction Agency
+    "DCSA":  "DCSA",  # Defense Counterintelligence and Security Agency
+    "WHS":   "WHS",   # Washington Headquarters Services
 }
 
-# Map exhibit type prefixes to readable names
+# Map exhibit type prefixes to readable names (Step 1.B1-g)
 EXHIBIT_TYPES = {
-    "m1": "Military Personnel (M-1)",
-    "o1": "Operation & Maintenance (O-1)",
-    "p1": "Procurement (P-1)",
+    # Summary exhibits
+    "m1":  "Military Personnel (M-1)",
+    "o1":  "Operation & Maintenance (O-1)",
+    "p1":  "Procurement (P-1)",
     "p1r": "Procurement (P-1R Reserves)",
-    "r1": "RDT&E (R-1)",
+    "r1":  "RDT&E (R-1)",
     "rf1": "Revolving Funds (RF-1)",
-    "c1": "Military Construction (C-1)",
+    "c1":  "Military Construction (C-1)",
+    # Detail exhibits
+    "p5":  "Procurement Detail (P-5)",
+    "r2":  "RDT&E PE Detail (R-2)",
+    "r3":  "RDT&E Project Schedule (R-3)",
+    "r4":  "RDT&E Budget Item Justification (R-4)",
 }
 
 
@@ -177,7 +159,8 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             --   4. All INSERT/SELECT statements below
             --
             -- Future refactoring options:
-            --   A. Normalized: fiscal_year_amounts(budget_line_id, fiscal_year, amount_type, amount)
+            --   A. Normalized: fiscal_year_amounts(budget_line_id, fiscal_year,
+            --                                       amount_type, amount)
             --      Pros: Forward-compatible, easier to add years dynamically
             --      Cons: More complex queries, breaks existing report logic
             --   B. JSON: Store all years as {"2024": {types...}, "2025": {...}}
@@ -200,22 +183,28 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             quantity_fy2026_request REAL,
             quantity_fy2026_total REAL,
             extra_fields TEXT,
-            -- TODO 1.B4-a: PE number extracted from line_item/account fields
+            -- PE number extracted from line_item/account fields (Step 1.B4-a)
             pe_number TEXT,
-            -- TODO 1.B3-b: Currency year (then-year or constant dollars)
+            -- Currency year context: "then-year" or "constant" (Step 1.B3-b)
             currency_year TEXT,
-            -- TODO 1.B4-c: Appropriation code and title split from account_title
+            -- Appropriation code and title split from account_title (Step 1.B4-c)
             appropriation_code TEXT,
-            appropriation_title TEXT
+            appropriation_title TEXT,
+            -- Source unit for stored amounts (Step 1.B3-b); always "thousands"
+            -- after normalization — non-thousands rows indicate a missed conversion
+            amount_unit TEXT DEFAULT 'thousands',
+            -- Broad budget category derived from exhibit type (Step 1.B3-d)
+            budget_type TEXT
         );
 
-        -- Full-text search index for budget lines
+        -- Full-text search index for budget lines (Step 1.B4-a: pe_number added)
         CREATE VIRTUAL TABLE IF NOT EXISTS budget_lines_fts USING fts5(
             account_title,
             budget_activity_title,
             sub_activity_title,
             line_item_title,
             organization_name,
+            pe_number,
             content='budget_lines',
             content_rowid='id'
         );
@@ -223,16 +212,19 @@ def create_database(db_path: Path) -> sqlite3.Connection:
         -- Triggers to keep FTS in sync
         CREATE TRIGGER IF NOT EXISTS budget_lines_ai AFTER INSERT ON budget_lines BEGIN
             INSERT INTO budget_lines_fts(rowid, account_title, budget_activity_title,
-                sub_activity_title, line_item_title, organization_name)
+                sub_activity_title, line_item_title, organization_name, pe_number)
             VALUES (new.id, new.account_title, new.budget_activity_title,
-                new.sub_activity_title, new.line_item_title, new.organization_name);
+                new.sub_activity_title, new.line_item_title, new.organization_name,
+                new.pe_number);
         END;
 
         CREATE TRIGGER IF NOT EXISTS budget_lines_ad AFTER DELETE ON budget_lines BEGIN
             INSERT INTO budget_lines_fts(budget_lines_fts, rowid, account_title,
-                budget_activity_title, sub_activity_title, line_item_title, organization_name)
+                budget_activity_title, sub_activity_title, line_item_title,
+                organization_name, pe_number)
             VALUES ('delete', old.id, old.account_title, old.budget_activity_title,
-                old.sub_activity_title, old.line_item_title, old.organization_name);
+                old.sub_activity_title, old.line_item_title, old.organization_name,
+                old.pe_number);
         END;
 
         -- PDF document pages
@@ -347,12 +339,6 @@ def create_database(db_path: Path) -> sqlite3.Connection:
 _safe_float = safe_float
 
 
-# TODO 1.B1-g [EASY, ~800 tokens]: Extend _detect_exhibit_type() to recognise
-#   detail exhibit types that exist in EXHIBIT_CATALOG but are not yet in EXHIBIT_TYPES:
-#   p5 (files like "p5_display.xlsx"), r2/r3/r4 (files like "r2_display.xlsx").
-#   Add keys to EXHIBIT_TYPES dict (around line 129) and verify with a test in
-#   tests/test_parsing.py (parametrize existing test_detect_exhibit_type).
-#   No external data needed — just string pattern matching.
 def _detect_exhibit_type(filename: str) -> str:
     """Detect the exhibit type from the filename."""
     name = filename.lower().replace("_display", "").replace(".xlsx", "")
@@ -408,11 +394,125 @@ def _detect_currency_year(sheet_name: str, filename: str) -> str:
     return "then-year"
 
 
+def _normalise_fiscal_year(raw: str) -> str:
+    """Normalise a raw fiscal-year string to canonical "FY YYYY" format (Step 1.B2-d).
+
+    Handles the three common variants that appear in DoD spreadsheet sheet names:
+      - "2026"     → "FY 2026"
+      - "FY2026"   → "FY 2026"
+      - "FY 2026"  → "FY 2026"  (already canonical, returned as-is)
+
+    If the input contains no recognisable 4-digit year, it is returned unchanged
+    so that callers always get a deterministic result.
+    """
+    m = re.search(r"(20\d{2})", raw)
+    if m:
+        return f"FY {m.group(1)}"
+    return raw
+
+
+def _detect_amount_unit(rows: list, header_idx: int) -> str:
+    """Scan title rows above the header for unit indicators (TODO 1.B3-a).
+
+    Returns "thousands" or "millions" based on keyword matches in any cell
+    found in rows[0:header_idx+1].  Defaults to "thousands" if no indicator
+    is found, since DoD appropriations exhibits default to that unit.
+    """
+    _MILLIONS = frozenset([
+        "in millions", "$ millions", "($millions)", "($ millions)",
+        "millions of dollars", "$ in millions", "in $millions",
+    ])
+    _THOUSANDS = frozenset([
+        "in thousands", "$ thousands", "($thousands)", "($ thousands)",
+        "thousands of dollars", "$ in thousands", "in $thousands",
+    ])
+
+    for row in rows[:header_idx + 1]:
+        for cell in row:
+            if cell is None:
+                continue
+            cell_lower = str(cell).strip().lower()
+            for pat in _MILLIONS:
+                if pat in cell_lower:
+                    return "millions"
+            for pat in _THOUSANDS:
+                if pat in cell_lower:
+                    return "thousands"
+
+    return "thousands"  # Default per DoD convention
+
+
+# Map exhibit type → budget_type label stored in budget_lines (TODO 1.B3-d)
+_EXHIBIT_BUDGET_TYPE: dict[str, str] = {
+    "m1": "MilPers",
+    "o1": "O&M",
+    "p1": "Procurement",
+    "p1r": "Procurement",
+    "r1": "RDT&E",
+    "r2": "RDT&E",
+    "rf1": "Revolving",
+    "c1": "Construction",
+}
+
+
 # Note: This function is ~110 lines with three logical sections:
 # 1) Common fields mapping (account, organization, budget activity)
 # 2) Sub-activity/line-item fields (varies by exhibit type)
 # 3) Amount column mapping (FY2024-2026 variants, authorization/appropriation for C-1)
 # Current implementation is functional and handles all known exhibit types.
+_HEADER_CONTINUATION_WORDS = frozenset([
+    "amount", "request", "actual", "enacted", "total", "supplemental",
+    "reconciliation", "quantity", "code", "title", "number", "no.",
+    "disc.", "disc", "prior year", "current year", "budget year",
+])
+
+
+def _merge_header_rows(header_row: list, next_row: list) -> list[str | None]:
+    """Merge a two-row header into a single row (Step 1.B2-c).
+
+    When exhibit sheets split column headers across two rows (e.g., "FY 2026"
+    on row N and "Request Amount" on row N+1), this merges them cell-by-cell
+    so that _map_columns() receives a single combined header string per column.
+
+    Only cells in next_row that are non-empty and consist entirely of short
+    header-like text are merged; if any cell looks like a data value (numeric
+    or long string), the function returns the original header_row unchanged to
+    avoid accidentally consuming a data row.
+    """
+    non_empty = [str(v).strip() for v in next_row if v is not None and str(v).strip()]
+    if not non_empty:
+        return list(header_row)  # All-blank next row — nothing to merge
+
+    # If any non-empty cell is numeric, treat next_row as a data row
+    for cell in non_empty:
+        try:
+            float(str(cell).replace(",", ""))
+            return list(header_row)
+        except ValueError:
+            pass
+
+    # If any cell is longer than 50 chars, likely a narrative data cell
+    if any(len(c) > 50 for c in non_empty):
+        return list(header_row)
+
+    # Merge pairwise; concatenate with a space where both cells are populated
+    merged = []
+    for main, sub in zip(header_row, next_row):
+        main_s = str(main).strip() if main is not None else ""
+        sub_s = str(sub).strip() if sub is not None else ""
+        if main_s and sub_s:
+            merged.append(f"{main_s} {sub_s}")
+        elif main_s:
+            merged.append(main_s)
+        elif sub_s:
+            merged.append(sub_s)
+        else:
+            merged.append(None)
+    # Pad if next_row is shorter than header_row (shouldn't happen, but defensive)
+    merged.extend(header_row[len(next_row):])
+    return merged
+
+
 # Future optimization: could split into _map_common_fields, _map_line_item_fields,
 # and _map_amount_fields for improved testability and per-exhibit customization.
 def _map_columns(headers: list, exhibit_type: str) -> dict:
@@ -469,61 +569,36 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
         elif h == "facility category title":
             mapping.setdefault("sub_activity", i)
 
-    # TODO 1.B2-a [MEDIUM, ~2000 tokens]: Make amount-column detection year-agnostic.
-    #   Replace the three hardcoded "fy2024/fy2025/fy2026" blocks below with a regex
-    #   loop over any "FY20XX" pattern found in headers. Use FISCAL_YEAR from
-    #   utils/patterns.py. Canonical column names: amount_fyYYYY_<type>. Update
-    #   validate_budget_db.py AMOUNT_COLUMNS (currently hardcoded) to query actual
-    #   column names from the DB schema instead. No external data needed.
-
-    # Amount columns — match by pattern
+    # Amount columns — year-agnostic regex detection (Step 1.B2-a).
+    # Matches any "FY YYYY" or "FYXXXX" header and classifies by sub-type
+    # keyword.  Canonical column names: amount_fyYYYY_<type>.
+    _FY_RE = re.compile(r"fy\s*(\d{4})", re.IGNORECASE)
     for i, h in enumerate(h_lower):
-        if "fy2024" in h.replace(" ", "") or "fy 2024" in h:
+        m = _FY_RE.search(h)
+        if not m:
+            continue
+        year = m.group(1)
+        if "quantity" in h:
             if "actual" in h:
-                if "quantity" in h:
-                    mapping["quantity_fy2024"] = i
-                elif "amount" in h or "actual" in h:
-                    mapping.setdefault("amount_fy2024_actual", i)
-        elif "fy2025" in h.replace(" ", "") or "fy 2025" in h:
-            if "enacted" in h:
-                if "quantity" in h:
-                    mapping["quantity_fy2025"] = i
-                elif "amount" in h or "enacted" in h:
-                    mapping.setdefault("amount_fy2025_enacted", i)
-            elif "supplemental" in h:
-                mapping.setdefault("amount_fy2025_supplemental", i)
-            elif "total" in h:
-                mapping.setdefault("amount_fy2025_total", i)
-        elif "fy2026" in h.replace(" ", "") or "fy 2026" in h:
-            if "reconcil" in h:
-                if "quantity" in h:
-                    pass
-                elif "amount" in h or "reconcil" in h:
-                    mapping.setdefault("amount_fy2026_reconciliation", i)
-            elif "total" in h:
-                if "quantity" in h:
-                    mapping["quantity_fy2026_total"] = i
-                elif "amount" in h or "total" in h:
-                    mapping.setdefault("amount_fy2026_total", i)
+                mapping.setdefault(f"quantity_fy{year}", i)
             elif "request" in h or "disc" in h:
-                if "quantity" in h:
-                    mapping["quantity_fy2026_request"] = i
-                elif "amount" in h or "request" in h or "disc" in h:
-                    mapping.setdefault("amount_fy2026_request", i)
-
-    # For sheets with only one amount column (single FY views),
-    # try to pick up the lone numeric column
-    amount_fields = [k for k in mapping if k.startswith("amount_")]
-    if not amount_fields:
-        for i, h in enumerate(h_lower):
-            if "fy 2024" in h and "actual" in h:
-                mapping["amount_fy2024_actual"] = i
-            elif "fy 2025" in h and "enacted" in h:
-                mapping["amount_fy2025_enacted"] = i
-            elif "fy 2026" in h and ("request" in h or "disc" in h):
-                mapping["amount_fy2026_request"] = i
-            elif "fy 2026" in h and "total" in h:
-                mapping["amount_fy2026_total"] = i
+                mapping.setdefault(f"quantity_fy{year}_request", i)
+            elif "total" in h:
+                mapping.setdefault(f"quantity_fy{year}_total", i)
+            else:
+                mapping.setdefault(f"quantity_fy{year}", i)
+        elif "actual" in h:
+            mapping.setdefault(f"amount_fy{year}_actual", i)
+        elif "enacted" in h or "approp" in h:
+            mapping.setdefault(f"amount_fy{year}_enacted", i)
+        elif "supplemental" in h:
+            mapping.setdefault(f"amount_fy{year}_supplemental", i)
+        elif "reconcil" in h:
+            mapping.setdefault(f"amount_fy{year}_reconciliation", i)
+        elif "total" in h:
+            mapping.setdefault(f"amount_fy{year}_total", i)
+        elif "request" in h or "disc" in h:
+            mapping.setdefault(f"amount_fy{year}_request", i)
 
     # Authorization/appropriation amounts (C-1 exhibit)
     for i, h in enumerate(h_lower):
@@ -583,33 +658,37 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
             continue
 
         headers = rows[header_idx]
+        # Detect and merge two-row headers (Step 1.B2-c): some exhibits split
+        # "FY 2026" and "Request Amount" across consecutive rows.
+        data_start = header_idx + 1
+        if header_idx + 1 < len(rows):
+            merged = _merge_header_rows(headers, rows[header_idx + 1])
+            if merged != list(headers):
+                headers = merged
+                data_start = header_idx + 2  # sub-header row consumed
+
         col_map = _map_columns(headers, exhibit_type)
 
         if "account" not in col_map:
             continue
 
-        # Detect fiscal year from sheet name
-        fy_match = re.search(r"(FY\s*)?20\d{2}", sheet_name, re.IGNORECASE)
-        fiscal_year = fy_match.group().replace("FY ", "FY").replace("FY", "FY ") if fy_match else sheet_name
-        # TODO 1.B2-d [EASY, ~600 tokens]: Normalise fiscal_year to canonical "FY YYYY".
-        #   The regex match above may return "2026", "FY2026", or "FY 2026" depending on
-        #   the sheet name, which breaks GROUP BY queries. Add a helper function
-        #   _normalise_fiscal_year(raw: str) -> str that always returns "FY YYYY" format
-        #   (e.g. "FY 2026"). Replace the assignment above with it. Add parametrized
-        #   tests in test_parsing.py covering all three input variants.
+        # Detect fiscal year from sheet name and normalise to "FY YYYY" (Step 1.B2-d)
+        fiscal_year = _normalise_fiscal_year(sheet_name)
 
         # Detect currency year for this sheet (TODO 1.B3-b)
         currency_year = _detect_currency_year(sheet_name, file_path.name)
 
-        data_rows = rows[header_idx + 1:]
-        # TODO 1.B3-a [MEDIUM, ~2000 tokens]: Add _detect_amount_unit(rows, header_idx) -> str.
-        #   Scan rows[0:header_idx] (title rows above the header) and the headers themselves
-        #   for keywords: "in thousands", "$ thousands", "$ millions", "in millions".
-        #   Returns "thousands" (default) or "millions". Store as amount_unit TEXT in
-        #   budget_lines (add column to CREATE TABLE in create_database() and to the INSERT
-        #   column list). If amount_unit == "millions", multiply all _safe_float amounts
-        #   by 1000 before inserting. Add parametrized tests in test_parsing.py.
-        #   ⚠️ Schema change required — coordinate with 1.B2-a if done in same session.
+        data_rows = rows[data_start:]
+
+        # Detect source unit and compute normalisation multiplier (Step 1.B3-a/c)
+        amount_unit = _detect_amount_unit(rows, header_idx)
+        # All stored amounts must be in thousands; multiply millions-denominated
+        # values by 1000 before inserting (Step 1.B3-c)
+        unit_multiplier = 1000.0 if amount_unit == "millions" else 1.0
+
+        # Derive budget_type from exhibit type (Step 1.B3-d)
+        budget_type = _EXHIBIT_BUDGET_TYPE.get(exhibit_type)
+
         batch = []
 
         def get_val(row, field):
@@ -628,17 +707,19 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
             if not row or all(v is None for v in row):
                 continue
 
-            acct = row[col_map["account"]] if col_map.get("account") is not None and col_map["account"] < len(row) else None
+            _acct_idx = col_map.get("account")
+            acct = row[_acct_idx] if _acct_idx is not None and _acct_idx < len(row) else None
             if not acct:
                 continue
 
-            org_code = str(row[col_map["organization"]]).strip() if col_map.get("organization") is not None and col_map["organization"] < len(row) and row[col_map["organization"]] else ""
-            org_name = ORG_MAP.get(org_code, org_code)
-            # TODO 1.B4-b [EASY, ~800 tokens]: Extend ORG_MAP (defined around line 140)
-            #   to cover additional DoD organizations: SOCOM, DISA, DLA, MDA, DHA, NGB.
-            #   Also add a fallback: if org_code is a case-insensitive substring of any
-            #   known org name, map it. Unknown codes currently land in the DB unlabelled,
-            #   showing up as unknown in validate_budget_db.py. No external data needed.
+            _org_idx = col_map.get("organization")
+            org_code = (
+                str(row[_org_idx]).strip()
+                if _org_idx is not None and _org_idx < len(row) and row[_org_idx]
+                else ""
+            )
+            # Lookup by exact code first, then by uppercase match (Step 1.B4-b)
+            org_name = ORG_MAP.get(org_code) or ORG_MAP.get(org_code.upper(), org_code)
 
             # Extract PE number from line_item or account fields (Step 1.B4-a implementation)
             line_item_val = get_str(row, "line_item")
@@ -648,6 +729,11 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
             # Split appropriation code and title from account_title (Step 1.B4-c implementation)
             acct_title_val = get_str(row, "account_title")
             approp_code, approp_title = _parse_appropriation(acct_title_val)
+
+            def _amt(field):
+                """Read a float amount and apply the unit multiplier (1.B3-c)."""
+                v = _safe_float(get_val(row, field))
+                return v * unit_multiplier if v else v
 
             batch.append((
                 str(file_path.relative_to(DOCS_DIR)),
@@ -665,22 +751,24 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
                 line_item_val,
                 get_str(row, "line_item_title"),
                 get_str(row, "classification"),
-                _safe_float(get_val(row, "amount_fy2024_actual")),
-                _safe_float(get_val(row, "amount_fy2025_enacted")),
-                _safe_float(get_val(row, "amount_fy2025_supplemental")),
-                _safe_float(get_val(row, "amount_fy2025_total")),
-                _safe_float(get_val(row, "amount_fy2026_request")),
-                _safe_float(get_val(row, "amount_fy2026_reconciliation")),
-                _safe_float(get_val(row, "amount_fy2026_total")),
-                _safe_float(get_val(row, "quantity_fy2024")),
+                _amt("amount_fy2024_actual"),
+                _amt("amount_fy2025_enacted"),
+                _amt("amount_fy2025_supplemental"),
+                _amt("amount_fy2025_total"),
+                _amt("amount_fy2026_request"),
+                _amt("amount_fy2026_reconciliation"),
+                _amt("amount_fy2026_total"),
+                _safe_float(get_val(row, "quantity_fy2024")),    # quantities are unit-less
                 _safe_float(get_val(row, "quantity_fy2025")),
                 _safe_float(get_val(row, "quantity_fy2026_request")),
                 _safe_float(get_val(row, "quantity_fy2026_total")),
-                None,         # extra_fields
-                pe_number,    # Step 1.B4-a: PE number from line_item or account
-                currency_year,  # Step 1.B3-b: currency year context
-                approp_code,  # Step 1.B4-c: appropriation code from account title
-                approp_title, # Step 1.B4-c: appropriation title from account title
+                None,          # extra_fields
+                pe_number,     # Step 1.B4-a: PE number from line_item or account
+                currency_year, # Step 1.B3-b: currency year context
+                approp_code,   # Step 1.B4-c: appropriation code from account title
+                approp_title,  # Step 1.B4-c: appropriation title from account title
+                amount_unit,   # Step 1.B3-b: normalised to "thousands"
+                budget_type,   # Step 1.B3-d: budget category from exhibit type
             ))
 
         if batch:
@@ -699,8 +787,9 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
                     quantity_fy2026_request, quantity_fy2026_total,
                     extra_fields,
                     pe_number, currency_year,
-                    appropriation_code, appropriation_title
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    appropriation_code, appropriation_title,
+                    amount_unit, budget_type
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, batch)
             total_rows += len(batch)
 
@@ -843,7 +932,9 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                 if issue_type:
                     # Record the issue for later analysis
                     conn.execute(
-                        "INSERT INTO extraction_issues (file_path, page_number, issue_type, issue_detail) VALUES (?,?,?,?)",
+                        "INSERT INTO extraction_issues"
+                        " (file_path, page_number, issue_type, issue_detail)"
+                        " VALUES (?,?,?,?)",
                         (relative_path, i + 1, issue_type.split(':')[0], issue_type)
                     )
                     page_issues_count += 1
@@ -889,13 +980,11 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
 
     except Exception as e:
         print(f"  ERROR processing {file_path.name}: {e}")
-        # TODO 1.B5-e [EASY, ~400 tokens, BUG FIX]: Verify this INSERT matches the
-        #   ingested_files schema in create_database(). Count the columns in the table
-        #   definition and ensure the VALUES list provides exactly that many. Add a test
-        #   that passes a deliberately invalid PDF path to ingest_pdf_file() and asserts
-        #   a row appears in ingested_files with status starting with "error:".
         conn.execute(
-            "INSERT OR REPLACE INTO ingested_files (file_path, file_type, file_size, file_modified, ingested_at, row_count, status) VALUES (?,?,?,?,datetime('now'),?,?)",
+            "INSERT OR REPLACE INTO ingested_files "
+            "(file_path, file_type, file_size, file_modified,"
+            " ingested_at, row_count, status) "
+            "VALUES (?,?,?,?,datetime('now'),?,?)",
             (relative_path, "pdf", file_path.stat().st_size, file_path.stat().st_mtime, 0, f"error: {e}")
         )
         return 0
@@ -1207,7 +1296,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         stat = xlsx.stat()
         conn.execute(
             "INSERT OR REPLACE INTO ingested_files "
-            "(file_path, file_type, file_size, file_modified, ingested_at, row_count, status) "
+            "(file_path, file_type, file_size, file_modified,"
+            " ingested_at, row_count, status) "
             "VALUES (?,?,?,?,datetime('now'),?,?)",
             (rel_path, "xlsx", stat.st_size, stat.st_mtime, rows, "ok")
         )
@@ -1344,7 +1434,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             stat = pdf.stat()
             conn.execute(
                 "INSERT OR REPLACE INTO ingested_files "
-                "(file_path, file_type, file_size, file_modified, ingested_at, row_count, status) "
+                "(file_path, file_type, file_size, file_modified,"
+            " ingested_at, row_count, status) "
                 "VALUES (?,?,?,?,datetime('now'),?,?)",
                 (rel_path, "pdf", stat.st_size, stat.st_mtime, pages, file_status)
             )

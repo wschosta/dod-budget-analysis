@@ -1,6 +1,6 @@
 # Step 1.B2 — Standardize Column Mappings
 
-**Status:** Not started
+**Status:** Mostly Complete (1.B2-a ✅, 1.B2-c ✅, 1.B2-d ✅, 1.B2-e ✅ done; 1.B2-b deferred — depends on 1.B1-f catalog population; 1.B2-f optional refactor)
 **Type:** Code modification + Tests
 **Depends on:** 1.B1 (exhibit catalog for column specs)
 

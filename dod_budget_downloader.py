@@ -321,6 +321,9 @@ class ProgressTracker:
         self.current_year = ""
         self.term_width = shutil.get_terminal_size((80, 24)).columns
         self._last_progress_time = 0.0
+        # Structured failure records for --retry-failures (TODO 1.A6-a)
+        # Schema: {url, dest, filename, error, source, year, use_browser, timestamp}
+        self._failed_files: list[dict] = []
 
     @property
     def processed(self) -> int:
@@ -411,6 +414,25 @@ class ProgressTracker:
         print(f"\r{line:<{self.term_width}}")
         self.print_overall()
 
+    def file_failed(self, url: str, dest: str, filename: str, error: str,
+                    use_browser: bool = False) -> None:
+        """Record a structured failure entry and update counters (TODO 1.A6-a).
+
+        Stores the full metadata needed to retry the download later via
+        ``--retry-failures``, then delegates to ``file_done`` for display.
+        """
+        self._failed_files.append({
+            "url": url,
+            "dest": dest,
+            "filename": filename,
+            "error": str(error),
+            "source": self.current_source,
+            "year": self.current_year,
+            "use_browser": use_browser,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        self.file_done(filename, 0, "fail")
+
 
 # ── GUI Progress Tracker ─────────────────────────────────────────────────────
 
@@ -439,6 +461,8 @@ class GuiProgressTracker:
         self._file_start = 0.0
         self._log_lines: list[str] = []
         self._failure_lines: list[str] = []
+        # Structured failure records for --retry-failures (TODO 1.A6-a)
+        self._failed_files: list[dict] = []
 
         self._closed = False
         self._ready = threading.Event()
@@ -642,6 +666,23 @@ class GuiProgressTracker:
         self._file_downloaded = 0
         self._file_total = 0
 
+    def file_failed(self, url: str, dest: str, filename: str, error: str,
+                    use_browser: bool = False) -> None:
+        """Record a structured failure entry and update counters (TODO 1.A6-a)."""
+        self._failed_files.append({
+            "url": url,
+            "dest": dest,
+            "filename": filename,
+            "error": str(error),
+            "source": self.current_source,
+            "year": self.current_year,
+            "use_browser": use_browser,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        # Also append URL info to failure_lines for the GUI dialog (1.A6-c)
+        self._failure_lines.append(f"[FAIL] {filename}\n       URL: {url}")
+        self.file_done(filename, 0, "fail")
+
     def show_completion_dialog(self, summary: str):
         """Replace the progress window with a completion dialog.
 
@@ -653,14 +694,18 @@ class GuiProgressTracker:
         from tkinter import ttk
 
         failure_lines = list(self._failure_lines)
+        failed_json_path = str(_manifest_path).replace("manifest.json",
+                                                        "failed_downloads.json") \
+            if _manifest_path else "failed_downloads.json"
+        retry_cmd = f"python dod_budget_downloader.py --retry-failures {failed_json_path}"
 
         # Destroy the old progress window
         self.close()
 
-        # Build completion dialog
+        # Build completion dialog (1.A6-c)
         dlg = tk.Tk()
         dlg.title("Download Complete")
-        dlg.geometry("460x200")
+        dlg.geometry("460x220")
         dlg.resizable(False, False)
         dlg.attributes("-topmost", True)
 
@@ -677,7 +722,7 @@ class GuiProgressTracker:
             """Open a scrollable text window listing all failed downloads."""
             win = tk.Toplevel(dlg)
             win.title("Failed Downloads")
-            win.geometry("560x320")
+            win.geometry("620x360")
             win.attributes("-topmost", True)
             txt = tk.Text(win, wrap="word", font=("Consolas", 9))
             sb = ttk.Scrollbar(win, orient="vertical", command=txt.yview)
@@ -688,9 +733,15 @@ class GuiProgressTracker:
                        else "No failure details available.")
             txt.configure(state="disabled")
 
+        def _copy_retry_cmd():
+            dlg.clipboard_clear()
+            dlg.clipboard_append(retry_cmd)
+
         if self.failed > 0 and failure_lines:
             ttk.Button(btn_frame, text="View Failures",
                        command=_view_failures).pack(side="left", padx=6)
+            ttk.Button(btn_frame, text="Copy Retry Command",
+                       command=_copy_retry_cmd).pack(side="left", padx=6)
 
         ttk.Button(btn_frame, text="Close",
                    command=dlg.destroy).pack(side="left", padx=6)
@@ -907,8 +958,8 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
         except Exception:
             # If page load times out, proceed with what we have
             pass
-        elapsed = int((time.time() - start) * 1000)
-        _timeout_mgr.record_time(url, elapsed)
+        elapsed_ms = int((time.time() - start) * 1000)
+        _timeout_mgr.record_time(url, elapsed_ms)
 
         if expand_all:
             btn = page.query_selector("text=Expand All")
@@ -1051,6 +1102,49 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+# Magic-byte signatures for common DoD budget file types (Step 1.A3-b)
+_MAGIC_BYTES: dict[str, bytes] = {
+    ".pdf":  b"%PDF",           # PDF
+    ".xlsx": b"PK\x03\x04",    # ZIP-based Office Open XML
+    ".xlsm": b"PK\x03\x04",
+    ".xls":  b"\xd0\xcf\x11\xe0",  # OLE2 Compound Document
+    ".zip":  b"PK\x03\x04",
+    ".docx": b"PK\x03\x04",
+    ".pptx": b"PK\x03\x04",
+}
+
+
+def _verify_download(dest_path: Path) -> bool:
+    """Verify a downloaded file has the expected magic bytes (Step 1.A3-b).
+
+    Checks the first 4 bytes of the file against known signatures for PDF,
+    Excel (both OOXML and legacy OLE2), and ZIP archives.  Files with
+    unrecognised extensions are accepted if they are non-empty.
+
+    Returns True if the file appears valid, False if it is empty or has an
+    unexpected magic signature (e.g. an HTML error page saved as a .pdf).
+    """
+    try:
+        size = dest_path.stat().st_size
+    except OSError:
+        return False
+
+    if size == 0:
+        return False
+
+    ext = dest_path.suffix.lower()
+    expected_magic = _MAGIC_BYTES.get(ext)
+    if expected_magic is None:
+        return True  # Unknown extension — accept as long as non-empty
+
+    try:
+        with open(dest_path, "rb") as fh:
+            header = fh.read(len(expected_magic))
+        return header == expected_magic
+    except OSError:
+        return False
+
 
 def _clean_file_entry(f: dict) -> dict:
     """Sanitize a file entry dict."""
@@ -1497,11 +1591,21 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
 
     if use_browser:
         ok = _browser_download_file(url, dest_path, overwrite=True)
+        # Magic-byte integrity check after browser download (Step 1.A3-b)
+        if ok and not _verify_download(dest_path):
+            print(f"\r    [CORRUPT] {fname}: unexpected file format "
+                  f"(HTML error page from browser?)          ")
+            dest_path.unlink(missing_ok=True)
+            ok = False
+
         size = dest_path.stat().st_size if dest_path.exists() else 0
-        # TODO 1.A3-b: compute hash for browser-downloaded files
         file_hash = _compute_sha256(dest_path) if ok and dest_path.exists() else None
         if _tracker:
-            _tracker.file_done(fname, size, "ok" if ok else "fail")
+            if ok:
+                _tracker.file_done(fname, size, "ok")
+            else:
+                _tracker.file_failed(url, str(dest_path), fname,
+                                     "browser download failed", use_browser=True)
         update_manifest_entry(url, "ok" if ok else "fail", size, file_hash)
         return ok
 
@@ -1569,6 +1673,15 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
                         )
 
             file_hash = sha256.hexdigest()
+
+            # Magic-byte integrity check after write (Step 1.A3-b)
+            if not _verify_download(dest_path):
+                print(f"\r    [CORRUPT] {fname}: unexpected file format "
+                      f"(HTML error page?)          ")
+                dest_path.unlink(missing_ok=True)
+                last_exc = RuntimeError("magic-byte verification failed")
+                continue  # Retry loop
+
             if _tracker:
                 _tracker.file_done(fname, downloaded, "ok")
             else:
@@ -1584,7 +1697,8 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
                 dest_path.unlink()
 
     if _tracker:
-        _tracker.file_done(fname, 0, "fail")
+        _tracker.file_failed(url, str(dest_path), fname, str(last_exc),
+                             use_browser=False)
     else:
         print(f"\r    [FAIL] {fname}: {last_exc}          ")
     update_manifest_entry(url, "fail", 0, None)
@@ -1825,6 +1939,21 @@ def download_all(
         "total_bytes": _tracker.total_bytes,
     }
 
+    # Write structured failure log for --retry-failures (TODO 1.A6-a)
+    # JSON schema: list of {url, dest, filename, error, source, year,
+    #                        use_browser, timestamp}
+    failed_json_path = output_dir / "failed_downloads.json"
+    if _tracker._failed_files:
+        failed_json_path.write_text(
+            json.dumps(_tracker._failed_files, indent=2), encoding="utf-8"
+        )
+        print(f"\n  Failure log: {failed_json_path}")
+        print(f"  Retry with: python dod_budget_downloader.py "
+              f"--retry-failures {failed_json_path}")
+    elif failed_json_path.exists():
+        # Clean up stale failure log from a previous run
+        failed_json_path.unlink()
+
     if isinstance(_tracker, GuiProgressTracker):
         total_dl = format_bytes(_tracker.total_bytes)
         elapsed_str = elapsed(_tracker.start_time)
@@ -1895,11 +2024,78 @@ def main():
         "--refresh-cache", action="store_true", dest="refresh_cache",
         help="Ignore cache and refresh discovery from source",
     )
+    parser.add_argument(
+        "--retry-failures", nargs="?", const=None, default=False,
+        metavar="PATH",
+        dest="retry_failures",
+        help=(
+            "Re-download only previously failed files. Reads from "
+            "failed_downloads.json in the output directory by default, "
+            "or from PATH if specified. Skips discovery. (TODO 1.A6-b)"
+        ),
+    )
     args = parser.parse_args()
 
     # Optimization: Set global flag for cache refresh
     global _refresh_cache
     _refresh_cache = args.refresh_cache
+
+    # ── Retry-failures early path (TODO 1.A6-b) ──────────────────────────────
+    if args.retry_failures is not False:
+        # Determine the path to read failures from
+        failures_path = (
+            Path(args.retry_failures)
+            if args.retry_failures is not None
+            else args.output / "failed_downloads.json"
+        )
+        if not failures_path.exists():
+            print(f"ERROR: Failure log not found: {failures_path}")
+            print("Run a download first to generate the failure log.")
+            sys.exit(1)
+
+        with open(failures_path) as fp:
+            failed_entries: list[dict] = json.load(fp)
+
+        if not failed_entries:
+            print("No failures to retry.")
+            sys.exit(0)
+
+        print(f"Retrying {len(failed_entries)} failed download(s)...")
+        session = get_session()
+        tracker = (ProgressTracker if args.no_gui else GuiProgressTracker)(len(failed_entries))
+        global _tracker
+        _tracker = tracker
+
+        still_failed: list[dict] = []
+        for entry in failed_entries:
+            url = entry["url"]
+            dest = Path(entry["dest"])
+            fname = entry["filename"]
+            use_browser = entry.get("use_browser", False)
+            source = entry.get("source", "")
+            year = entry.get("year", "")
+
+            _tracker.set_source(year, source)
+            ok = download_file(session, url, dest, overwrite=True,
+                               use_browser=use_browser)
+            if not ok:
+                still_failed.append(entry)
+
+        # Write updated failure log: only entries that failed again
+        if still_failed:
+            failures_path.write_text(
+                json.dumps(still_failed, indent=2), encoding="utf-8"
+            )
+            print(f"\n  {len(still_failed)} file(s) still failed — "
+                  f"log updated: {failures_path}")
+        else:
+            failures_path.unlink(missing_ok=True)
+            print("\n  All retries succeeded.")
+
+        _tracker = None
+        _close_browser()
+        _close_session()
+        sys.exit(1 if still_failed else 0)
 
     session = get_session()
 
