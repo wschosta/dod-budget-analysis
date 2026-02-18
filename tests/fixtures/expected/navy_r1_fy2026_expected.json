@@ -1,0 +1,23 @@
+{
+  "source_file": "navy_r1_fy2026.xlsx",
+  "exhibit_type": "r1",
+  "service": "Navy",
+  "row_count": 2,
+  "columns_detected": [
+    "account",
+    "account_title",
+    "organization",
+    "budget_activity",
+    "budget_activity_title",
+    "line_item",
+    "line_item_title",
+    "amount_fy2024_actual",
+    "amount_fy2025_enacted",
+    "amount_fy2026_request"
+  ],
+  "sample_values": {
+    "account": "1319",
+    "line_item": "0601103N",
+    "amount_fy2026_request": 48500.0
+  }
+}

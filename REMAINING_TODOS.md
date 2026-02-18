@@ -13,11 +13,10 @@ by category and priority.
 |---|---|
 | Data Source Auditing & Coverage (1.A) | 6 |
 | Exhibit Parsing & Cataloging (1.B) | 1 |
-| Test Fixtures (1.C) | 1 |
 | Frontend (3.A) | 1 |
 | Deployment & Launch (4.x) | 4 |
 | Documentation Verification | 8 |
-| **Total** | **21** |
+| **Total** | **20** |
 
 ---
 
@@ -40,6 +39,7 @@ by category and priority.
 | 1.C2-e | Tests for `_extract_table_text` | Already implemented; TODO comment updated to DONE |
 | 1.B2-b | Catalog-driven column detection for detail exhibits | Already implemented with tests; TODO comment updated to DONE |
 | 1.B1-f | All catalog entries return valid mappings | Already implemented with tests; TODO comment updated to DONE |
+| 1.C1 | Populate test fixtures directory | `scripts/generate_expected_output.py` creates synthetic .xlsx fixtures + expected JSON; 14 integration tests in `tests/test_fixture_integration.py` |
 
 ---
 
@@ -75,17 +75,7 @@ by category and priority.
 
 ---
 
-## 3. Test Fixtures
-
-### `tests/fixtures/README.md`
-
-| ID | Line | Description |
-|---|---|---|
-| 1.C1 | 3 | Populate fixtures directory with representative test files (real .xlsx/.pdf samples). |
-
----
-
-## 4. Frontend
+## 3. Frontend
 
 ### `frontend_design.py`
 
@@ -95,7 +85,7 @@ by category and priority.
 
 ---
 
-## 5. Deployment & Launch
+## 4. Deployment & Launch
 
 ### `deployment_design.py`
 
@@ -108,7 +98,7 @@ by category and priority.
 
 ---
 
-## 6. Documentation Verification
+## 5. Documentation Verification
 
 These are inline verification markers in documentation files that need to be resolved
 after running the source coverage audit (TODO 1.A1-a).
@@ -126,7 +116,7 @@ after running the source coverage audit (TODO 1.A1-a).
 
 ---
 
-## 7. API Documentation
+## 6. API Documentation
 
 | File | Line | Description |
 |---|---|---|

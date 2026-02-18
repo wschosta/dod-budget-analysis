@@ -1,0 +1,23 @@
+{
+  "source_file": "army_p1_fy2026.xlsx",
+  "exhibit_type": "p1",
+  "service": "Army",
+  "row_count": 3,
+  "columns_detected": [
+    "account",
+    "account_title",
+    "organization",
+    "budget_activity",
+    "budget_activity_title",
+    "line_item",
+    "line_item_title",
+    "amount_fy2024_actual",
+    "amount_fy2025_enacted",
+    "amount_fy2026_request"
+  ],
+  "sample_values": {
+    "account": "2035",
+    "line_item": "0205231A",
+    "amount_fy2026_request": 14000.0
+  }
+}
