@@ -168,6 +168,7 @@ import sys
 import threading
 import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from urllib.parse import urljoin, urlparse, unquote
 
@@ -1012,6 +1013,14 @@ def discover_airforce_files(_session: requests.Session, year: str) -> list[dict]
 
 # ── Discovery router ─────────────────────────────────────────────────────────
 
+def _make_comptroller_discoverer(available_years_dict):
+    """Create a comptroller discoverer closure that captures available_years."""
+    def discoverer(session, year):
+        url = available_years_dict[year]
+        return discover_comptroller_files(session, year, url)
+    return discoverer
+
+
 SOURCE_DISCOVERERS = {
     "defense-wide": discover_defense_wide_files,
     "army": discover_army_files,
@@ -1354,42 +1363,68 @@ def main():
     # Track which sources need browser for download
     needs_browser = any(s in BROWSER_REQUIRED_SOURCES for s in selected_sources)
 
+    # Pre-start browser if needed (before discovery, so startup time is amortized)
+    if needs_browser:
+        print("Pre-starting browser for WAF-protected sources...")
+        _get_browser_context()
+
     # ── File type filter ──
     type_filter = None
     if args.types:
         type_filter = {f".{t.lower().strip('.')}" for t in args.types}
         print(f"File type filter: {', '.join(type_filter)}")
 
-    # ── Discover files ──
+    # ── Discover files (parallel) ──
     all_files: dict[str, dict[str, list[dict]]] = {}
     # Track which source labels need browser downloads
     browser_labels: set[str] = set()
 
+    # Register comptroller discoverer with available_years closure
+    comptroller_discoverer = _make_comptroller_discoverer(available_years)
+    SOURCE_DISCOVERERS["comptroller"] = comptroller_discoverer
+
+    # Build discovery tasks: (year, source) tuples
+    discovery_tasks = []
     for year in selected_years:
         all_files[year] = {}
-
         for source in selected_sources:
-            if source == "comptroller":
-                url = available_years[year]
-                files = discover_comptroller_files(session, year, url)
-            else:
-                discoverer = SOURCE_DISCOVERERS[source]
-                files = discoverer(session, year)
+            discovery_tasks.append((year, source))
 
-            if type_filter:
-                files = [f for f in files if f["extension"] in type_filter]
+    # Execute discovery in parallel
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(SOURCE_DISCOVERERS[source], session, year): (year, source)
+            for year, source in discovery_tasks
+        }
 
-            label = (SERVICE_PAGE_TEMPLATES[source]["label"]
-                     if source != "comptroller" else "Comptroller")
-            all_files[year][label] = files
+        for future in as_completed(futures):
+            year, source = futures[future]
+            try:
+                start_discovery = time.time()
+                files = future.result()
+                elapsed = time.time() - start_discovery
 
-            if _is_browser_source(source):
-                browser_labels.add(label)
+                if type_filter:
+                    files = [f for f in files if f["extension"] in type_filter]
 
-            #if use_gui:
-            #    _tracker.discovery_step(step_label, len(files))
+                label = (SERVICE_PAGE_TEMPLATES[source]["label"]
+                         if source != "comptroller" else "Comptroller")
+                all_files[year][label] = files
 
-            time.sleep(args.delay)
+                if _is_browser_source(source):
+                    browser_labels.add(label)
+
+                # Smart delay: only sleep the remaining time
+                remaining_delay = max(0, args.delay - elapsed)
+                if remaining_delay > 0:
+                    time.sleep(remaining_delay)
+
+            except Exception as e:
+                year_label = f"FY{year}"
+                label = (SERVICE_PAGE_TEMPLATES[source]["label"]
+                         if source != "comptroller" else "Comptroller")
+                print(f"ERROR discovering {source} for {year_label}: {e}")
+                all_files[year][label] = []
 
     # ── List mode ──
     if args.list_only:
