@@ -221,11 +221,29 @@ SERVICE_PAGE_TEMPLATES = {
 } # TODO: add alternate navy source: https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx
 
 
+# ── Utility Functions ─────────────────────────────────────────────────────────
+
+def _format_bytes(b: int) -> str:
+    """Format bytes as human-readable size."""
+    if b < 1024 * 1024:
+        return f"{b / 1024:.0f} KB"
+    if b < 1024 * 1024 * 1024:
+        return f"{b / (1024 * 1024):.1f} MB"
+    return f"{b / (1024 * 1024 * 1024):.2f} GB"
+
+
+def _elapsed(start_time: float) -> str:
+    """Format elapsed time from start_time to now."""
+    secs = int(time.time() - start_time)
+    m, s = divmod(secs, 60)
+    h, m = divmod(m, 60)
+    if h:
+        return f"{h}h {m:02d}m {s:02d}s"
+    return f"{m}m {s:02d}s"
+
+
 # ── Progress Tracker ──────────────────────────────────────────────────────────
 
-# TODO: Extract shared helper methods (_format_bytes, _elapsed) from ProgressTracker
-# and GuiProgressTracker into a base class or module-level utilities to eliminate
-# the duplicated implementations in both classes.
 class ProgressTracker:
     """Tracks overall download session progress and renders status bars."""
 
@@ -245,21 +263,6 @@ class ProgressTracker:
     def processed(self) -> int:
         return self.completed + self.skipped + self.failed
 
-    def _elapsed(self) -> str:
-        secs = int(time.time() - self.start_time)
-        m, s = divmod(secs, 60)
-        h, m = divmod(m, 60)
-        if h:
-            return f"{h}h {m:02d}m {s:02d}s"
-        return f"{m}m {s:02d}s"
-
-    def _format_bytes(self, b: int) -> str:
-        if b < 1024 * 1024:
-            return f"{b / 1024:.0f} KB"
-        if b < 1024 * 1024 * 1024:
-            return f"{b / (1024 * 1024):.1f} MB"
-        return f"{b / (1024 * 1024 * 1024):.2f} GB"
-
     def _bar(self, fraction: float, width: int = 30) -> str:
         filled = int(width * fraction)
         return f"[{'#' * filled}{'-' * (width - filled)}]"
@@ -273,8 +276,8 @@ class ProgressTracker:
         frac = self.processed / self.total_files if self.total_files else 0
         pct = frac * 100
         bar = self._bar(frac, 25)
-        dl = self._format_bytes(self.total_bytes)
-        elapsed = self._elapsed()
+        dl = _format_bytes(self.total_bytes)
+        elapsed = _elapsed(self.start_time)
         remaining = self.total_files - self.processed
         line = (
             f"\r  Overall: {bar} {pct:5.1f}%  "
@@ -296,7 +299,7 @@ class ProgressTracker:
         self._last_progress_time = now
 
         if total <= 0:
-            print(f"\r    Downloading {filename}... {self._format_bytes(downloaded)}",
+            print(f"\r    Downloading {filename}... {_format_bytes(downloaded)}",
                   end="", flush=True)
             return
 
@@ -305,7 +308,7 @@ class ProgressTracker:
         bar = self._bar(frac, 20)
         elapsed = time.time() - file_start
         speed = downloaded / elapsed if elapsed > 0 else 0
-        speed_str = f"{self._format_bytes(int(speed))}/s"
+        speed_str = f"{_format_bytes(int(speed))}/s"
         eta = ""
         if speed > 0:
             remaining_bytes = total - downloaded
@@ -318,7 +321,7 @@ class ProgressTracker:
         name = filename[:40] + "..." if len(filename) > 43 else filename
         line = (
             f"\r    {name}  {bar} {pct:5.1f}%  "
-            f"{self._format_bytes(downloaded)}/{self._format_bytes(total)}  "
+            f"{_format_bytes(downloaded)}/{_format_bytes(total)}  "
             f"{speed_str}  {eta}"
         )
         print(f"{line:<{self.term_width}}", end="", flush=True)
@@ -376,21 +379,6 @@ class GuiProgressTracker:
     @property
     def processed(self) -> int:
         return self.completed + self.skipped + self.failed
-
-    def _format_bytes(self, b: int) -> str:
-        if b < 1024 * 1024:
-            return f"{b / 1024:.0f} KB"
-        if b < 1024 * 1024 * 1024:
-            return f"{b / (1024 * 1024):.1f} MB"
-        return f"{b / (1024 * 1024 * 1024):.2f} GB"
-
-    def _elapsed(self) -> str:
-        secs = int(time.time() - self.start_time)
-        m, s = divmod(secs, 60)
-        h, m = divmod(m, 60)
-        if h:
-            return f"{h}h {m:02d}m {s:02d}s"
-        return f"{m}m {s:02d}s"
 
     def _run_gui(self):
         import tkinter as tk
@@ -491,8 +479,8 @@ class GuiProgressTracker:
         self._overall_lbl.set(
             f"{frac*100:.1f}%  -  {self.processed} / {self.total_files} files")
         self._stats_var.set(
-            f"{self._format_bytes(self.total_bytes)} downloaded  |  "
-            f"{self._elapsed()} elapsed  |  "
+            f"{_format_bytes(self.total_bytes)} downloaded  |  "
+            f"{_elapsed(self.start_time)} elapsed  |  "
             f"{self.total_files - self.processed} remaining")
         self._count_var.set(
             f"Downloaded: {self.completed}    "
@@ -513,14 +501,14 @@ class GuiProgressTracker:
                 self._file_bar["value"] = file_frac * 100
                 elapsed = time.time() - self._file_start
                 speed = dl / elapsed if elapsed > 0 else 0
-                speed_str = f"{self._format_bytes(int(speed))}/s"
+                speed_str = f"{_format_bytes(int(speed))}/s"
                 self._file_lbl.set(fname)
                 self._file_stats_var.set(
-                    f"{self._format_bytes(dl)} / {self._format_bytes(total)}  "
+                    f"{_format_bytes(dl)} / {_format_bytes(total)}  "
                     f"  {speed_str}")
             else:
                 self._file_bar["value"] = 0
-                self._file_lbl.set(f"{fname}  ({self._format_bytes(dl)})")
+                self._file_lbl.set(f"{fname}  ({_format_bytes(dl)})")
                 self._file_stats_var.set("")
 
         # Log lines
@@ -720,14 +708,24 @@ def _close_browser():
     _pw_instance = _pw_browser = _pw_context = None
 
 
-def _browser_extract_links(url: str, text_filter: str | None = None,
-                           expand_all: bool = False) -> list[dict]:
-    """Use Playwright to load a page and extract downloadable file links."""
+def _new_browser_page(url: str, timeout: int = 15000, wait_until: str = "domcontentloaded"):
+    """Create and navigate a page with webdriver spoofing and origin setup."""
     ctx = _get_browser_context()
     page = ctx.new_page()
     page.add_init_script(
         'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
     )
+    parsed = urlparse(url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    page.goto(origin, timeout=timeout, wait_until=wait_until)
+    page.wait_for_timeout(500)
+    return page
+
+
+def _browser_extract_links(url: str, text_filter: str | None = None,
+                           expand_all: bool = False) -> list[dict]:
+    """Use Playwright to load a page and extract downloadable file links."""
+    page = _new_browser_page(url, timeout=30000, wait_until="networkidle")
 
     try:
         page.goto(url, timeout=30000, wait_until="networkidle")
@@ -738,25 +736,23 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
                 btn.click()
                 page.wait_for_timeout(1500)
 
-        # TODO: The downloadable extensions list is duplicated between the Python
-        # constant DOWNLOADABLE_EXTENSIONS and the JavaScript array below. If one
-        # is updated without the other, file discovery will be inconsistent.
-        # Consider injecting the Python set into the JS via page.evaluate args.
-
         # Extract links via JavaScript in the browser
+        # Inject DOWNLOADABLE_EXTENSIONS and IGNORED_HOSTS from Python
         js_filter = f"'{text_filter}'" if text_filter else "null"
+        ext_list = ', '.join(f"'{e}'" for e in DOWNLOADABLE_EXTENSIONS)
+        ignored_list = ', '.join(f"'{h}'" for h in IGNORED_HOSTS)
         raw = page.evaluate(f"""() => {{
             const tf = {js_filter};
             const allLinks = Array.from(document.querySelectorAll('a[href]'));
             const files = [];
             const seen = new Set();
-            const ignoredHosts = new Set(['dam.defense.gov']);
+            const exts = [{ext_list}];
+            const ignoredHosts = new Set([{ignored_list}]);
             for (const a of allLinks) {{
                 const href = a.href;
                 let path, host;
                 try {{ const u = new URL(href); path = u.pathname.toLowerCase(); host = u.hostname.toLowerCase(); }} catch {{ continue; }}
                 if (ignoredHosts.has(host)) continue;
-                const exts = ['.pdf', '.xlsx', '.xls', '.zip', '.csv'];
                 if (!exts.some(e => path.endsWith(e))) continue;
                 if (tf && !href.toLowerCase().includes(tf.toLowerCase())) continue;
                 if (seen.has(path)) continue;
@@ -791,21 +787,11 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
         print(f"    [SKIP] Already exists: {dest_path.name}")
         return True
 
-    ctx = _get_browser_context()
     dest_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Strategy 1: Use page.request API (fetch with browser session/cookies, no UI)
     try:
-        page = ctx.new_page()
-        page.add_init_script(
-            'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-        )
-        # First navigate to the domain so cookies/session are established
-        parsed = urlparse(url)
-        origin = f"{parsed.scheme}://{parsed.netloc}"
-        page.goto(origin, timeout=15000, wait_until="domcontentloaded")
-        page.wait_for_timeout(500)
-
+        page = _new_browser_page(url)
         resp = page.request.get(url, timeout=120000)
         if resp.ok and len(resp.body()) > 0:
             dest_path.write_bytes(resp.body())
@@ -820,16 +806,7 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
 
     # Strategy 2: Trigger download via injected anchor element
     try:
-        page = ctx.new_page()
-        page.add_init_script(
-            'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-        )
-        # Navigate to file's origin first
-        parsed = urlparse(url)
-        origin = f"{parsed.scheme}://{parsed.netloc}"
-        page.goto(origin, timeout=15000, wait_until="domcontentloaded")
-        page.wait_for_timeout(500)
-
+        page = _new_browser_page(url)
         # Escape the URL for JS
         safe_url = url.replace("'", "\\'")
         with page.expect_download(timeout=120000) as download_info:
@@ -856,17 +833,12 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
 
     # Strategy 3: Direct navigation (may open PDF viewer, but content still loads)
     try:
-        page = ctx.new_page()
-        page.add_init_script(
-            'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-        )
-        resp = page.goto(url, timeout=120000, wait_until="load")
-        if resp and resp.ok:
-            body = resp.body()
-            if body and len(body) > 0:
-                dest_path.write_bytes(body)
-                page.close()
-                return True
+        page = _new_browser_page(url, timeout=120000, wait_until="load")
+        body = page.content()
+        if body:
+            dest_path.write_bytes(body.encode('utf-8'))
+            page.close()
+            return True
         page.close()
     except Exception:
         try:
@@ -1042,7 +1014,11 @@ def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
     if not dest_path.exists():
         return "download"
 
-    local_size = dest_path.stat().st_size
+    try:
+        local_size = dest_path.stat().st_size
+    except (FileNotFoundError, OSError):
+        return "download"
+
     if local_size == 0:
         return "redownload"
 
@@ -1053,7 +1029,7 @@ def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
             # For browser sources we can't easily HEAD, so trust local file
             # if it's non-empty
             return "skip"
-        head = session.head(url, timeout=15, allow_redirects=True)
+        head = session.head(url, timeout=5, allow_redirects=True)
         if head.status_code < 400:
             cl = head.headers.get("content-length")
             if cl and cl.isdigit():
@@ -1472,13 +1448,16 @@ def main():
             if not args.overwrite:
                 for file_info in files:
                     dest = dest_dir / file_info["filename"]
-                    if dest.exists() and dest.stat().st_size > 0:
+                    try:
                         size = dest.stat().st_size
-                        if _tracker:
-                            _tracker.file_done(dest.name, size, "skip")
+                        if size > 0:
+                            if _tracker:
+                                _tracker.file_done(dest.name, size, "skip")
+                            else:
+                                print(f"    [SKIP] Already exists: {dest.name}")
                         else:
-                            print(f"    [SKIP] Already exists: {dest.name}")
-                    else:
+                            to_download.append(file_info)
+                    except FileNotFoundError:
                         to_download.append(file_info)
             else:
                 to_download = files
@@ -1497,8 +1476,8 @@ def main():
     _close_browser()
 
     # ── Summary ──
-    elapsed = _tracker._elapsed()
-    total_dl = _tracker._format_bytes(_tracker.total_bytes)
+    elapsed = _elapsed(_tracker.start_time)
+    total_dl = _format_bytes(_tracker.total_bytes)
     print(f"\n\n{'='*70}")
     print(f"  Download Complete")
     print(f"{'='*70}")
