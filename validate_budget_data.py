@@ -230,7 +230,7 @@ def validate_all(db_path: Path = DEFAULT_DB_PATH, strict: bool = False) -> dict:
     return summary
 
 
-def print_report(summary: dict):
+def print_report(summary: dict) -> None:
     """Print a human-readable validation report."""
     print(f"\n{'='*60}")
     print(f"  Budget Database Validation Report")
