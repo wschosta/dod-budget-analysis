@@ -145,8 +145,9 @@ def main():
         errors = []
 
         for py_file in py_files:
-            # Skip test and check scripts themselves
-            if "test_" in py_file.name or "check" in py_file.name:
+            # Skip test files, check scripts, and pre-commit hooks
+            if ("test_" in py_file.name or "check" in py_file.name
+                    or py_file.name.startswith(".pre-commit")):
                 continue
 
             with open(py_file) as f:

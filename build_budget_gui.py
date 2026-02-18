@@ -264,13 +264,6 @@ class BuildProgressWindow:
 
     # ── Build control ─────────────────────────────────────────────────────
 
-    def _on_build_btn_click(self):
-        """Handle Build/Cancel button click."""
-        if self.running:
-            self._cancel_build()
-        else:
-            self._start_build()
-
     def _start_build(self):
         docs = Path(self.docs_var.get())
         db = Path(self.db_var.get())
@@ -280,121 +273,142 @@ class BuildProgressWindow:
             return
 
         self.running = True
-        self.cancel_event.clear()
         self.start_time = time.time()
-        self.phase_start_times = {}
-        self.build_btn.configure(state="normal", text="Cancel Build", bg=RED)
+        self.stop_event = threading.Event()
+        self.build_btn.configure(state="disabled", text="Building...", bg=FG_DIM)
+        self.stop_btn.configure(state="normal")
         self._clear_log()
         self._log("Build started...\n", "phase")
 
         rebuild = self.rebuild_var.get()
+        resume = self.resume_var.get()
         self.build_thread = threading.Thread(
-            target=self._run_build, args=(docs, db, rebuild), daemon=True)
+            target=self._run_build, args=(docs, db, rebuild, resume), daemon=True)
         self.build_thread.start()
 
-    def _cancel_build(self):
-        """Signal the build thread to stop."""
-        self.cancel_event.set()
-        self.build_btn.configure(state="disabled", text="Cancelling...")
-        self._log("\nBuild cancellation requested.\n", "dim")
-
-    def _run_build(self, docs: Path, db: Path, rebuild: bool):
+    def _run_build(self, docs: Path, db: Path, rebuild: bool, resume: bool):
         """Runs in the background thread."""
         try:
-            build_database(docs, db, rebuild=rebuild,
+            build_database(docs, db, rebuild=rebuild, resume=resume,
                            progress_callback=self._on_progress,
-                           cancel_event=self.cancel_event)
-            if self.cancel_event.is_set():
-                self.msg_queue.put(("cancelled", 0, 0, "Build cancelled by user"))
-            else:
-                self.msg_queue.put(("done", 100, 100, "Build completed successfully"))
+                           stop_event=self.stop_event)
         except Exception as e:
-            self.msg_queue.put(("error", 0, 0, str(e)))
+            self.msg_queue.put(("error", 0, 0, str(e), {}))
 
-    def _on_progress(self, phase: str, current: int, total: int, detail: str):
+    def _request_stop(self):
+        """Request a graceful stop — saves checkpoint and exits build loop."""
+        if self.stop_event:
+            self.stop_event.set()
+            self.stop_btn.configure(state="disabled", text="Stopping...")
+            self._log("\nStop requested — finishing current file...\n", "phase")
+
+    def _on_progress(self, phase: str, current: int, total: int, detail: str,
+                     metrics: dict):
         """Called from the build thread — posts to the queue."""
-        self.msg_queue.put((phase, current, total, detail))
+        self.msg_queue.put((phase, current, total, detail, metrics))
 
     # ── Queue polling (runs on the main / UI thread) ──────────────────────
 
     def _poll_queue(self):
         try:
             while True:
-                phase, current, total, detail = self.msg_queue.get_nowait()
-                self._handle_progress(phase, current, total, detail)
+                msg = self.msg_queue.get_nowait()
+                # Support both 4-tuple (legacy) and 5-tuple (with metrics)
+                if len(msg) == 5:
+                    phase, current, total, detail, metrics = msg
+                else:
+                    phase, current, total, detail = msg
+                    metrics = {}
+                self._handle_progress(phase, current, total, detail, metrics)
         except queue.Empty:
             pass
         self.root.after(80, self._poll_queue)
 
     def _handle_progress(self, phase: str, current: int, total: int,
-                         detail: str):
+                         detail: str, metrics: dict):
         phase_labels = {
-            "scan":  "Scanning files...",
-            "excel": "Ingesting Excel files",
-            "pdf":   "Ingesting PDF files",
-            "index": "Creating indexes",
-            "done":  "Build complete",
-            "cancelled": "Build cancelled",
-            "error": "Error",
+            "scan":    "Scanning files...",
+            "excel":   "Ingesting Excel files",
+            "pdf":     "Ingesting PDF files",
+            "index":   "Creating indexes",
+            "done":    "Build complete",
+            "stopped": "Build stopped (checkpoint saved)",
+            "error":   "Error",
         }
         self.phase_label.configure(text=phase_labels.get(phase, phase))
-        self.detail_label.configure(text=detail[:120] if detail else "")
+        self.detail_label.configure(text=detail[:140] if detail else "")
 
-        # Update progress bar
+        # Progress bar
         if total > 0:
             pct = (current / total) * 100
             self.progress_var.set(pct)
             self.pct_label.configure(text=f"{pct:.0f}%")
-
-            if self.start_time and current > 0 and phase in ("excel", "pdf"):
-                if phase not in self.phase_start_times:
-                    self.phase_start_times[phase] = time.time()
-                elapsed = time.time() - self.phase_start_times[phase]
-                rate = elapsed / current
-                remaining = rate * (total - current)
-                if remaining > 60:
-                    self.eta_label.configure(text=f"~{remaining/60:.1f} min remaining")
-                else:
-                    self.eta_label.configure(text=f"~{remaining:.0f}s remaining")
-            else:
-                self.eta_label.configure(text="")
-
-        # Log detail
-        if detail and "Skipped" not in detail:
-            if phase == "done":
-                tag = "ok"
-            elif phase in ("error", "cancelled"):
-                tag = "err"
-            else:
-                tag = None
-            self._log(f"[{phase:>5}] {detail}\n", tag)
-
-        # Build finished
-        if phase == "done":
-            self.running = False
+        elif phase == "done":
             self.progress_var.set(100)
             self.pct_label.configure(text="100%")
-            self.eta_label.configure(text="")
-            elapsed = time.time() - self.start_time if self.start_time else 0
-            self._log(f"\nCompleted in {elapsed:.1f}s\n", "ok")
-            self.build_btn.configure(state="normal", text="Build Database",
-                                     bg=ACCENT)
-            self.phase_label.configure(text="Build complete")
 
-        if phase == "cancelled":
-            self.running = False
+        # ETA from metrics (preferred) or fallback to time-based estimate
+        eta_sec = metrics.get("eta_sec", 0)
+        if eta_sec > 0:
+            self.eta_label.configure(text=_fmt_eta(eta_sec))
+        elif phase in ("done", "stopped", "error", "index"):
             self.eta_label.configure(text="")
-            elapsed = time.time() - self.start_time if self.start_time else 0
-            self._log(f"\nCancelled after {elapsed:.1f}s\n", "err")
-            self.build_btn.configure(state="normal", text="Build Database",
-                                     bg=ACCENT)
-            self.phase_label.configure(text="Build cancelled")
 
-        if phase == "error":
+        # Metrics panel updates
+        files_remaining = metrics.get("files_remaining", 0)
+        if files_remaining > 0:
+            self.files_remaining_label.configure(text=str(files_remaining))
+        elif phase in ("done", "stopped"):
+            self.files_remaining_label.configure(text="0")
+
+        pages = metrics.get("pages", 0)
+        cur_pages = metrics.get("current_pages", 0)
+        cur_total = metrics.get("current_total_pages", 0)
+        if cur_total > 0:
+            self.pages_label.configure(text=f"{pages:,}  (current: {cur_pages}/{cur_total})")
+        elif pages > 0:
+            self.pages_label.configure(text=f"{pages:,}")
+
+        speed_rows = metrics.get("speed_rows", 0.0)
+        if speed_rows > 0:
+            self.rows_speed_label.configure(text=f"{speed_rows:.1f}")
+
+        speed_pages = metrics.get("speed_pages", 0.0)
+        if speed_pages > 0:
+            self.pages_speed_label.configure(text=f"{speed_pages:.1f}")
+
+        # Log detail (skip noisy "Skipped" lines)
+        if detail and "Skipped" not in detail and "Resumed (skipped)" not in detail:
+            if phase == "done":
+                tag = "ok"
+            elif phase in ("error", "stopped"):
+                tag = "err" if phase == "error" else "phase"
+            else:
+                tag = None
+            self._log(f"[{phase:>7}] {detail}\n", tag)
+
+        # Build finished / stopped
+        if phase in ("done", "stopped", "error"):
             self.running = False
-            self._log(f"\nERROR: {detail}\n", "err")
-            self.build_btn.configure(state="normal", text="Build Database",
-                                     bg=ACCENT)
+            self.stop_btn.configure(state="disabled", text="Stop (save checkpoint)")
+            elapsed_str = ""
+            if self.start_time:
+                elapsed_sec = time.time() - self.start_time
+                elapsed_str = f" in {elapsed_sec:.1f}s"
+            self.eta_label.configure(text="")
+
+            if phase == "done":
+                self.progress_var.set(100)
+                self.pct_label.configure(text="100%")
+                self._log(f"\nBuild complete{elapsed_str}\n", "ok")
+                self.build_btn.configure(state="normal", text="Build Database", bg=ACCENT)
+            elif phase == "stopped":
+                self._log(f"\nStopped{elapsed_str} — resume with 'Resume from last checkpoint'\n",
+                          "phase")
+                self.build_btn.configure(state="normal", text="Build Database", bg=ACCENT)
+            elif phase == "error":
+                self._log(f"\nERROR: {detail}\n", "err")
+                self.build_btn.configure(state="normal", text="Build Database", bg=ACCENT)
 
     # ── Log text widget helpers ───────────────────────────────────────────
 

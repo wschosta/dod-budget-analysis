@@ -342,7 +342,8 @@ def create_database(db_path: Path) -> sqlite3.Connection:
 
 # ── Excel Ingestion ───────────────────────────────────────────────────────────
 
-# _safe_float is now imported from utils.common for consistency across codebase
+# _safe_float is imported from utils.common for consistency across codebase
+_safe_float = safe_float
 
 
 def _detect_exhibit_type(filename: str) -> str:
@@ -1043,6 +1044,10 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     pdf_files = sorted(docs_dir.rglob("*.pdf"))
     total_files = len(xlsx_files) + len(pdf_files)
 
+    # Save initial checkpoint so the session exists in build_progress from the start
+    _save_checkpoint(conn, session_id, 0, total_files, 0, 0, 0,
+                     notes="Build started")
+
     _progress("scan", 0, total_files,
               f"Found {len(xlsx_files)} Excel + {len(pdf_files)} PDF files",
               {"files_remaining": total_files - len(already_processed)})
@@ -1125,6 +1130,12 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         total_budget_rows += rows
         files_done_total += 1
         _metrics["rows"] = total_budget_rows
+
+        # Post-file progress update with updated row count
+        _progress("excel", xi + 1, len(xlsx_files),
+                  f"Done: {xlsx.name} ({rows} rows)",
+                  {"rows": total_budget_rows,
+                   "files_remaining": total_files - files_done_total})
 
         # Track file as processed and checkpoint periodically
         _mark_file_processed(conn, session_id, rel_path, "excel", rows_count=rows)
