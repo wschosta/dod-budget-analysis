@@ -118,7 +118,8 @@ def show_sources(conn: sqlite3.Connection) -> None:
         name = r["file_path"]
         if len(name) > 55:
             name = "..." + name[-52:]
-        print(f"  {name:<55} {r['file_type']:>5} {r['row_count']:>8,} {r['ingested_at']:>20}{status}")
+        ftype = r['file_type']
+        print(f"  {name:<55} {ftype:>5} {r['row_count']:>8,} {r['ingested_at']:>20}{status}")
 
     # Show last update time
     row = conn.execute("SELECT MAX(ingested_at) as last FROM ingested_files").fetchone()
@@ -510,7 +511,8 @@ def main() -> None:
     parser.add_argument("--exhibit", default=None,
                         help="Filter by exhibit type (m1, o1, p1, r1, etc.)")
     parser.add_argument("--category", default=None,
-                        help="Filter PDF results by source category (Army, Navy, Comptroller, etc.)")
+                        help="Filter PDF results by source category "
+                             "(Army, Navy, Comptroller, etc.)")
     parser.add_argument("--top", type=int, default=25,
                         help="Number of results (default: 25)")
     parser.add_argument("--summary", action="store_true",

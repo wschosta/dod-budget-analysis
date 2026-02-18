@@ -158,7 +158,8 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             --   4. All INSERT/SELECT statements below
             --
             -- Future refactoring options:
-            --   A. Normalized: fiscal_year_amounts(budget_line_id, fiscal_year, amount_type, amount)
+            --   A. Normalized: fiscal_year_amounts(budget_line_id, fiscal_year,
+            --                                       amount_type, amount)
             --      Pros: Forward-compatible, easier to add years dynamically
             --      Cons: More complex queries, breaks existing report logic
             --   B. JSON: Store all years as {"2024": {types...}, "2025": {...}}
@@ -683,7 +684,8 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
             if not row or all(v is None for v in row):
                 continue
 
-            acct = row[col_map["account"]] if col_map.get("account") is not None and col_map["account"] < len(row) else None
+            _acct_idx = col_map.get("account")
+            acct = row[_acct_idx] if _acct_idx is not None and _acct_idx < len(row) else None
             if not acct:
                 continue
 
@@ -907,7 +909,9 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                 if issue_type:
                     # Record the issue for later analysis
                     conn.execute(
-                        "INSERT INTO extraction_issues (file_path, page_number, issue_type, issue_detail) VALUES (?,?,?,?)",
+                        "INSERT INTO extraction_issues"
+                        " (file_path, page_number, issue_type, issue_detail)"
+                        " VALUES (?,?,?,?)",
                         (relative_path, i + 1, issue_type.split(':')[0], issue_type)
                     )
                     page_issues_count += 1
@@ -955,7 +959,8 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
         print(f"  ERROR processing {file_path.name}: {e}")
         conn.execute(
             "INSERT OR REPLACE INTO ingested_files "
-            "(file_path, file_type, file_size, file_modified, ingested_at, row_count, status) "
+            "(file_path, file_type, file_size, file_modified,"
+            " ingested_at, row_count, status) "
             "VALUES (?,?,?,?,datetime('now'),?,?)",
             (relative_path, "pdf", file_path.stat().st_size, file_path.stat().st_mtime, 0, f"error: {e}")
         )
@@ -1267,7 +1272,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         stat = xlsx.stat()
         conn.execute(
             "INSERT OR REPLACE INTO ingested_files "
-            "(file_path, file_type, file_size, file_modified, ingested_at, row_count, status) "
+            "(file_path, file_type, file_size, file_modified,"
+            " ingested_at, row_count, status) "
             "VALUES (?,?,?,?,datetime('now'),?,?)",
             (rel_path, "xlsx", stat.st_size, stat.st_mtime, rows, "ok")
         )
@@ -1403,7 +1409,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             stat = pdf.stat()
             conn.execute(
                 "INSERT OR REPLACE INTO ingested_files "
-                "(file_path, file_type, file_size, file_modified, ingested_at, row_count, status) "
+                "(file_path, file_type, file_size, file_modified,"
+            " ingested_at, row_count, status) "
                 "VALUES (?,?,?,?,datetime('now'),?,?)",
                 (rel_path, "pdf", stat.st_size, stat.st_mtime, pages, file_status)
             )
