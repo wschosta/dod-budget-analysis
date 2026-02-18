@@ -13,7 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.http import RetryStrategy, SessionManager, TimeoutManager, CacheManager
+from utils.http import RetryStrategy, SessionManager, TimeoutManager, CacheManager, download_file
 
 
 # ── RetryStrategy tests ──────────────────────────────────────────────────────
@@ -261,3 +261,70 @@ class TestCacheManager:
         cm.put("complex", data)
         result = cm.get("complex")
         assert result == data
+
+
+# ── download_file tests ──────────────────────────────────────────────────────
+
+class TestDownloadFile:
+    def _mock_session(self, content=b"file data", status=200, raise_exc=None):
+        from unittest.mock import MagicMock
+        import requests
+
+        session = MagicMock()
+        if raise_exc:
+            session.get.side_effect = raise_exc
+            return session
+
+        response = MagicMock()
+        response.status_code = status
+        response.raise_for_status = MagicMock()
+        if status >= 400:
+            response.raise_for_status.side_effect = requests.HTTPError()
+        response.iter_content = MagicMock(return_value=[content])
+        session.get.return_value = response
+        return session
+
+    def test_success(self, tmp_path):
+        dest = tmp_path / "out" / "file.pdf"
+        session = self._mock_session(content=b"PDF content here")
+        result = download_file("https://example.com/file.pdf", dest, session=session)
+        assert result is True
+        assert dest.exists()
+        assert dest.read_bytes() == b"PDF content here"
+
+    def test_creates_parent_dirs(self, tmp_path):
+        dest = tmp_path / "a" / "b" / "c" / "file.pdf"
+        session = self._mock_session()
+        download_file("https://example.com/file.pdf", dest, session=session)
+        assert dest.exists()
+
+    def test_http_error_returns_false(self, tmp_path):
+        import requests
+        dest = tmp_path / "file.pdf"
+        session = self._mock_session(raise_exc=requests.ConnectionError("failed"))
+        result = download_file("https://example.com/file.pdf", dest, session=session)
+        assert result is False
+
+    def test_cleans_empty_file_on_error(self, tmp_path):
+        import requests
+        dest = tmp_path / "file.pdf"
+        # Create an empty file to simulate partial download
+        dest.write_bytes(b"")
+        session = self._mock_session(raise_exc=requests.ConnectionError("failed"))
+        download_file("https://example.com/file.pdf", dest, session=session)
+        assert not dest.exists()  # Empty file should be cleaned up
+
+    def test_timeout_passed_to_session(self, tmp_path):
+        dest = tmp_path / "file.pdf"
+        session = self._mock_session()
+        download_file("https://example.com/f.pdf", dest, session=session, timeout=60)
+        session.get.assert_called_once()
+        _, kwargs = session.get.call_args
+        assert kwargs["timeout"] == 60
+
+    def test_streaming_enabled(self, tmp_path):
+        dest = tmp_path / "file.pdf"
+        session = self._mock_session()
+        download_file("https://example.com/f.pdf", dest, session=session)
+        _, kwargs = session.get.call_args
+        assert kwargs["stream"] is True
