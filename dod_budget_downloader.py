@@ -727,11 +727,6 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
                 btn.click()
                 page.wait_for_timeout(1500)
 
-        # TODO: The downloadable extensions list is duplicated between the Python
-        # constant DOWNLOADABLE_EXTENSIONS and the JavaScript array below. If one
-        # is updated without the other, file discovery will be inconsistent.
-        # Consider injecting the Python set into the JS via page.evaluate args.
-
         # Extract links via JavaScript in the browser
         js_filter = f"'{text_filter}'" if text_filter else "null"
         raw = page.evaluate(f"""(exts, tf) => {{
