@@ -41,7 +41,7 @@ otherwise noted.
 
 | Step | Task | Type | TODO File | Skeleton File(s) |
 |------|------|------|-----------|-------------------|
-| 1.B1 | Catalog all exhibit types | DATA PROCESSING | [TODO](TODO_1B1_catalog_exhibit_types.md) | `docs/wiki/Exhibit-Types.md` |
+| 1.B1 | Catalog all exhibit types | AI-agent ✅ **Complete** (audit run needs data) | [TODO](TODO_1B1_catalog_exhibit_types.md) | `exhibit_catalog.py`, `scripts/exhibit_audit.py`, `docs/wiki/Exhibit-Types.md` |
 | 1.B2 | Standardize column mappings | AI-agent + DATA PROCESSING (1.B2-a done) | [TODO](TODO_1B2_standardize_column_mappings.md) | `build_budget_db.py`, `validate_budget_db.py` |
 | 1.B3 | Normalize monetary values | AI-agent ✅ **Complete** | [TODO](TODO_1B3_normalize_monetary_values.md) | `build_budget_db.py`, `search_budget.py`, `validate_budget_db.py` |
 | 1.B4 | Extract PE metadata | AI-agent ✅ **Complete** | [TODO](TODO_1B4_extract_pe_metadata.md) | `build_budget_db.py`, `docs/wiki/Data-Dictionary.md` |

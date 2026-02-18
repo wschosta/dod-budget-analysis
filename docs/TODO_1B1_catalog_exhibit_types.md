@@ -1,6 +1,6 @@
 # Step 1.B1 — Catalog All Exhibit Types
 
-**Status:** Not started
+**Status:** Mostly complete (1.B1-a script written at scripts/exhibit_audit.py; exhibit_catalog.py already cataloged all types; wiki updated; audit run against real files deferred until data available)
 **Type:** Research + Documentation (DATA PROCESSING required)
 **Depends on:** Downloaded budget documents in `DoD_Budget_Documents/`
 
