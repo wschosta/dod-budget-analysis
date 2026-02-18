@@ -27,7 +27,9 @@ from build_budget_db import (
     _extract_table_text,
     _determine_category,
     _map_columns,
+    _extract_pe_number,
 )
+from utils.common import sanitize_filename
 
 
 # ── TODO 1.C2-a: _detect_exhibit_type ────────────────────────────────────────
@@ -52,25 +54,21 @@ def test_detect_exhibit_type(filename, expected):
 # ── TODO 1.C2-c: _safe_float ─────────────────────────────────────────────────
 
 @pytest.mark.parametrize("val, expected", [
-    (None, None),
-    ("", None),
-    (" ", None),
+    (None, 0.0),      # None -> default 0.0
+    ("", 0.0),        # empty string -> default 0.0
+    (" ", 0.0),       # whitespace-only -> default 0.0
     ("123", 123.0),
     (123, 123.0),
     (0, 0.0),
     (0.0, 0.0),
     (-5.5, -5.5),
     ("-5.5", -5.5),
-    ("abc", None),
+    ("abc", 0.0),     # unparseable -> default 0.0
     ("12.34", 12.34),
-    (True, 1.0),     # bool is numeric in Python
+    (True, 1.0),      # bool is numeric in Python
 ])
 def test_safe_float(val, expected):
-    result = _safe_float(val)
-    if expected is None:
-        assert result is None
-    else:
-        assert result == expected
+    assert _safe_float(val) == expected
 
 
 # ── TODO 1.C2-d: _determine_category ─────────────────────────────────────────
@@ -165,18 +163,181 @@ def test_map_columns_empty_headers():
     assert mapping == {}
 
 
-# ── STEP 1.C2 STATUS: Core tests implemented ───────────────────────────────
-#
-# COMPLETED test groups:
-#   ✓ 1.C2-a: test_detect_exhibit_type
-#   ✓ 1.C2-c: test_safe_float
-#   ✓ 1.C2-d: test_determine_category
-#   ✓ 1.C2-e: test_extract_table_text
-#   ✓ 1.C2-b: test_map_columns (partial coverage for P-1, C-1)
-#
-# REMAINING tasks (per docs/TODO_1C2_unit_tests_parsing.md):
-#   - 1.C2-b-extended: Additional _map_columns tests for R, M, O, RF exhibits
-#   - 1.C2-f: _sanitize_filename edge case testing
-#   - 1.C2-g: Clean up legacy TODO comments in related test files
-#
-# See docs/TODO_1C2_unit_tests_parsing.md for full specification.
+# ── 1.C2-a extended: _map_columns additional exhibit types ───────────────────
+
+def test_map_columns_r1_headers():
+    """R-1 research exhibits use PE/BLI instead of Budget Line Item."""
+    headers = [
+        "Account", "Account Title", "Organization",
+        "Budget Activity", "Budget Activity Title",
+        "PE/BLI", "Program Element/Budget Line Item (BLI) Title",
+        "FY2024 Actual\nAmount", "FY2025 Enacted\nAmount",
+        "FY2026 Request\nAmount",
+    ]
+    mapping = _map_columns(headers, "r1")
+    assert "account" in mapping
+    assert "organization" in mapping
+    assert "budget_activity" in mapping
+    assert "line_item" in mapping        # PE/BLI → line_item
+    assert "line_item_title" in mapping  # Program Element/BLI Title
+
+
+def test_map_columns_o1_headers():
+    """O-1 operation & maintenance exhibits use BSA sub-activity columns."""
+    headers = [
+        "Account", "Account Title", "Organization",
+        "Budget Activity", "Budget Activity Title",
+        "BSA", "Budget SubActivity Title",
+        "FY2024 Actual\nAmount", "FY2025 Enacted\nAmount",
+        "FY2026 Request\nAmount",
+    ]
+    mapping = _map_columns(headers, "o1")
+    assert "account" in mapping
+    assert "sub_activity" in mapping        # BSA → sub_activity
+    assert "sub_activity_title" in mapping  # Budget SubActivity Title
+
+
+def test_map_columns_m1_headers():
+    """M-1 military personnel exhibits share the same BSA layout as O-1."""
+    headers = [
+        "Account", "Account Title", "Organization",
+        "Budget Activity", "Budget Activity Title",
+        "BSA", "Budget SubActivity Title",
+        "FY2024 Actual\nAmount", "FY2025 Enacted\nAmount",
+        "FY2026 Request\nAmount",
+    ]
+    mapping = _map_columns(headers, "m1")
+    assert "sub_activity" in mapping
+    assert "sub_activity_title" in mapping
+    assert "amount_fy2024_actual" in mapping
+    assert "amount_fy2026_request" in mapping
+
+
+def test_map_columns_rf1_headers():
+    """RF-1 revolving fund exhibits share the P-1 Budget Line Item layout."""
+    headers = [
+        "Account", "Account Title", "Organization",
+        "Budget Activity", "Budget Activity Title",
+        "Budget Line Item", "Budget Line Item (BLI) Title",
+        "FY2024 Actual\nAmount", "FY2025 Enacted\nAmount",
+        "FY2026 Request\nAmount",
+    ]
+    mapping = _map_columns(headers, "rf1")
+    assert "line_item" in mapping
+    assert "line_item_title" in mapping
+    assert "amount_fy2025_enacted" in mapping
+    assert "amount_fy2026_request" in mapping
+
+
+def test_map_columns_p1r_headers():
+    """P-1R exhibits use the same columns as P-1."""
+    headers = [
+        "Account", "Account Title", "Organization",
+        "Budget Activity", "Budget Activity Title",
+        "Budget Line Item", "Budget Line Item (BLI) Title",
+        "FY2024 Actual\nAmount", "FY2025 Enacted\nAmount",
+        "FY2026 Request\nAmount",
+    ]
+    mapping = _map_columns(headers, "p1r")
+    assert "account" in mapping
+    assert "line_item" in mapping
+    assert "line_item_title" in mapping
+    assert "amount_fy2024_actual" in mapping
+    assert "amount_fy2026_request" in mapping
+
+
+def test_map_columns_multiline_headers():
+    """Headers with embedded newlines are normalised before matching."""
+    headers = [
+        "Account", "Account Title",
+        "FY2024 Actual\nAmount",
+        "FY2025 Enacted\nAmount",
+        "FY2026 Request\nAmount",
+    ]
+    mapping = _map_columns(headers, "p1")
+    assert "amount_fy2024_actual" in mapping
+    assert "amount_fy2025_enacted" in mapping
+    assert "amount_fy2026_request" in mapping
+
+
+def test_map_columns_case_insensitive():
+    """Column matching is case-insensitive."""
+    headers = [
+        "ACCOUNT", "ACCOUNT TITLE", "ORGANIZATION",
+        "BUDGET ACTIVITY", "BUDGET ACTIVITY TITLE",
+        "BUDGET LINE ITEM", "BUDGET LINE ITEM (BLI) TITLE",
+    ]
+    mapping = _map_columns(headers, "p1")
+    assert "account" in mapping
+    assert "account_title" in mapping
+    assert "organization" in mapping
+    assert "line_item" in mapping
+    assert "line_item_title" in mapping
+
+
+# ── 1.C2-b: sanitize_filename tests ──────────────────────────────────────────
+
+def test_sanitize_filename_normal():
+    """Normal filenames pass through unchanged."""
+    assert sanitize_filename("budget_FY2026.xlsx") == "budget_FY2026.xlsx"
+
+
+def test_sanitize_filename_path_separators():
+    """Forward and backward slashes are replaced with underscores."""
+    result = sanitize_filename("army/budget\\file.pdf")
+    assert "/" not in result
+    assert "\\" not in result
+
+
+def test_sanitize_filename_query_string():
+    """Query parameters after '?' are stripped."""
+    result = sanitize_filename("file.pdf?key=value&other=123")
+    assert "?" not in result
+    assert result == "file.pdf"
+
+
+def test_sanitize_filename_invalid_chars():
+    """Invalid filesystem characters are replaced."""
+    for ch in '<>:"|*':
+        result = sanitize_filename(f"file{ch}name.pdf")
+        assert ch not in result
+
+
+def test_sanitize_filename_unicode():
+    """Unicode filenames are handled without error."""
+    result = sanitize_filename("budzhet_\u0444\u0430\u0439\u043b.pdf")
+    assert isinstance(result, str)
+    assert len(result) > 0
+
+
+def test_sanitize_filename_empty():
+    """Empty string returns a string (not None or an exception)."""
+    result = sanitize_filename("")
+    assert isinstance(result, str)
+
+
+# ── 1.C2-d: _extract_pe_number tests ─────────────────────────────────────────
+
+def test_extract_pe_number_valid():
+    """Standard 7-digit + 1-2 uppercase letter PE numbers are extracted."""
+    assert _extract_pe_number("0602702E") == "0602702E"
+    assert _extract_pe_number("0305116BB") == "0305116BB"
+
+
+def test_extract_pe_number_embedded():
+    """PE number embedded in a longer string is found correctly."""
+    result = _extract_pe_number("Program 0801273F Advanced Research")
+    assert result == "0801273F"
+
+
+def test_extract_pe_number_no_match():
+    """Returns None when no PE number is present."""
+    assert _extract_pe_number("no pe here") is None
+    assert _extract_pe_number("") is None
+    assert _extract_pe_number(None) is None
+
+
+def test_extract_pe_number_returns_first():
+    """When multiple PE numbers appear, the first match is returned."""
+    result = _extract_pe_number("0602702E and 0305116BB programs")
+    assert result == "0602702E"
