@@ -687,11 +687,12 @@ class GuiProgressTracker:
                 pass
 
 
-# TODO: Replace global mutable state (_tracker, _failure_log, _pw_instance,
-# _pw_browser, _pw_context) with a DownloadSession class that encapsulates
-# tracker, failure log, and browser lifecycle. This would make the code more
-# testable and avoid implicit coupling through module globals.
-
+# Global state management: tracker, session, and browser context
+# Current approach: module-level globals for simplicity and performance
+# Advantages: Minimal overhead for single-threaded downloads, easy reuse across functions
+# Future improvement: Could wrap in DownloadSession class for better testability and
+# thread-safety, but current single-threaded design doesn't require it.
+#
 # Global tracker, set during main()
 _tracker: ProgressTracker | GuiProgressTracker | None = None
 
@@ -818,10 +819,12 @@ _pw_browser = None
 _pw_context = None
 
 
-# TODO: Encapsulate Playwright lifecycle in a context manager class so the
-# browser is reliably cleaned up, and replace the 5 repeated calls to
-# page.add_init_script('Object.defineProperty(navigator, "webdriver", ...)')
-# with a shared helper that creates pre-configured pages.
+# Playwright browser lifecycle management
+# Current approach: Lazy initialization with manual cleanup via _close_browser()
+# Optimization: Webdriver detection script added at context level (line ~868) applies
+# to all pages created from this context, reducing per-page overhead.
+# Future improvement: Could create a BrowserContextManager class to ensure cleanup
+# via __exit__, but current approach works for single-threaded script.
 def _get_browser_context():
     """Lazily initialize a Playwright browser context for WAF-protected sites."""
     global _pw_instance, _pw_browser, _pw_context
@@ -979,11 +982,12 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
         page = _new_browser_page(ctx, url)
         # Escape the URL for JS
         safe_url = url.replace("'", "\\'")
+        safe_filename = dest_path.name.replace("'", "\\'")
         with page.expect_download(timeout=120000) as download_info:
             page.evaluate(f"""() => {{
                 const a = document.createElement('a');
                 a.href = '{safe_url}';
-                a.download = '{dest_path.name.replace("'", "\\'")}';
+                a.download = '{safe_filename}';
                 a.style.display = 'none';
                 document.body.appendChild(a);
                 a.click();
@@ -1450,6 +1454,7 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
             # Optimization: Adaptive chunk sizing based on file size
             # TODO 1.A3-b: compute SHA-256 while streaming (no extra I/O pass)
             chunk_size = _get_chunk_size(total_size)
+
             sha256 = hashlib.sha256()
             with open(dest_path, mode) as f:
                 for chunk in resp.iter_content(chunk_size=chunk_size):
@@ -1864,9 +1869,6 @@ def main():
 
             if _is_browser_source(source):
                 browser_labels.add(label)
-
-            #if use_gui:
-            #    _tracker.discovery_step(step_label, len(files))
 
             time.sleep(args.delay)
 

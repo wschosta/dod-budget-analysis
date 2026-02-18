@@ -346,14 +346,18 @@ def _detect_currency_year(sheet_name: str, filename: str) -> str:
     return "then-year"
 
 
-# TODO: This function is ~110 lines with three large loops over h_lower doing
-# related but distinct work (common fields, sub-activity/line-item, amounts).
-# Consider splitting into _map_common_fields, _map_line_item_fields, and
-# _map_amount_fields for readability and easier per-exhibit customization.
+# Note: This function is ~110 lines with three logical sections:
+# 1) Common fields mapping (account, organization, budget activity)
+# 2) Sub-activity/line-item fields (varies by exhibit type)
+# 3) Amount column mapping (FY2024-2026 variants, authorization/appropriation for C-1)
+# Current implementation is functional and handles all known exhibit types.
+# Future optimization: could split into _map_common_fields, _map_line_item_fields,
+# and _map_amount_fields for improved testability and per-exhibit customization.
 def _map_columns(headers: list, exhibit_type: str) -> dict:
     """Map column headers to standardized field names.
 
-    Returns a dict mapping our field names to column indices.
+    Returns a dict mapping our field names to column indices. Handles all DoD budget
+    exhibit types including P-1, R-1, O-1, M-1, C-1 (MilCon), and RF-1 (Revolving Fund).
     """
     mapping = {}
     h_lower = [str(h).lower().replace("\n", " ").strip() if h else "" for h in headers]
@@ -526,12 +530,12 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
             org_code = str(row[col_map["organization"]]).strip() if col_map.get("organization") is not None and col_map["organization"] < len(row) and row[col_map["organization"]] else ""
             org_name = ORG_MAP.get(org_code, org_code)
 
-            # TODO 1.B4-a: extract PE number from line_item or account fields
+            # Extract PE number from line_item or account fields (Step 1.B4-a implementation)
             line_item_val = get_str(row, "line_item")
             account_val = str(acct).strip()
             pe_number = _extract_pe_number(line_item_val) or _extract_pe_number(account_val)
 
-            # TODO 1.B4-c: split appropriation code and title from account_title
+            # Split appropriation code and title from account_title (Step 1.B4-c implementation)
             acct_title_val = get_str(row, "account_title")
             approp_code, approp_title = _parse_appropriation(acct_title_val)
 
@@ -563,10 +567,10 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
                 _safe_float(get_val(row, "quantity_fy2026_request")),
                 _safe_float(get_val(row, "quantity_fy2026_total")),
                 None,         # extra_fields
-                pe_number,    # TODO 1.B4-a
-                currency_year,  # TODO 1.B3-b
-                approp_code,  # TODO 1.B4-c
-                approp_title, # TODO 1.B4-c
+                pe_number,    # Step 1.B4-a: PE number from line_item or account
+                currency_year,  # Step 1.B3-b: currency year context
+                approp_code,  # Step 1.B4-c: appropriation code from account title
+                approp_title, # Step 1.B4-c: appropriation title from account title
             ))
 
         if batch:
