@@ -1465,9 +1465,9 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
             dest_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Optimization: Adaptive chunk sizing based on file size
+            # TODO 1.A3-b: compute SHA-256 while streaming (no extra I/O pass)
             chunk_size = _get_chunk_size(total_size)
 
-            # Compute SHA-256 while streaming (no extra I/O pass)
             sha256 = hashlib.sha256()
             with open(dest_path, mode) as f:
                 for chunk in resp.iter_content(chunk_size=chunk_size):
