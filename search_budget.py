@@ -25,7 +25,7 @@ import textwrap
 from pathlib import Path
 
 # Shared utilities: Import from utils package for consistency across codebase
-from utils import get_connection, sanitize_fts5_query
+from utils import get_connection, sanitize_fts5_query, format_amount
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 
@@ -201,11 +201,8 @@ def search_pdf_pages(conn: sqlite3.Connection, query: str,
 
 # ── Display ───────────────────────────────────────────────────────────────────
 
-def _fmt_amount(val: float | None) -> str:
-    """Format a dollar amount in thousands."""
-    if val is None:
-        return "-"
-    return f"${val:,.0f}"
+# Note: _fmt_amount removed — now using format_amount() from utils.formatting
+# format_amount() provides consistent currency formatting across the codebase
 
 
 def display_budget_results(results: list, query: str) -> None:
@@ -232,11 +229,11 @@ def display_budget_results(results: list, query: str) -> None:
 
         print(f"\n  [{org}] {title}")
         print(f"    Account: {r['account']}  |  Exhibit: {r['exhibit_type']}  |  Sheet: {r['sheet_name']}")
-        print(f"    FY2024 Actual: {_fmt_amount(r['amount_fy2024_actual']):>15}"
-              f"    FY2025 Enacted: {_fmt_amount(r['amount_fy2025_enacted']):>15}"
-              f"    FY2026 Request: {_fmt_amount(r['amount_fy2026_request']):>15}")
+        print(f"    FY2024 Actual: {format_amount(r['amount_fy2024_actual']):>15}"
+              f"    FY2025 Enacted: {format_amount(r['amount_fy2025_enacted']):>15}"
+              f"    FY2026 Request: {format_amount(r['amount_fy2026_request']):>15}")
         if r["amount_fy2026_total"] and r["amount_fy2026_total"] != r["amount_fy2026_request"]:
-            print(f"    FY2026 Total:   {_fmt_amount(r['amount_fy2026_total']):>15}")
+            print(f"    FY2026 Total:   {format_amount(r['amount_fy2026_total']):>15}")
         print(f"    Source: {r['source_file']}")
 
 

@@ -24,6 +24,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+# Shared utilities: Import from utils package for consistency across codebase
+from utils import get_connection
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 
@@ -211,7 +213,7 @@ def validate_all(db_path: Path = DEFAULT_DB_PATH, strict: bool = False) -> dict:
         print("Run 'python build_budget_db.py' first to build the database.")
         sys.exit(1)
 
-    conn = sqlite3.connect(str(db_path))
+    conn = get_connection(db_path)
     results = []
     for check_fn in ALL_CHECKS:
         result = check_fn(conn)
