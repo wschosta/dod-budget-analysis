@@ -11,10 +11,12 @@ Usage:
     python validate_budget_data.py --strict              # Non-zero exit on warnings
     python validate_budget_data.py --json                # Output as JSON
 
-Remaining TODOs:
+Status: Core validation checks implemented (1.B6-b, 1.B6-c, 1.B6-e, 1.B6-f, 1.B6-g)
+
+Remaining Phase 1 enhancements:
     1.B6-a: Check for missing fiscal-year coverage per service.
     1.B6-d: Detect column misalignment (text in numeric columns or vice versa).
-    1.B6-h: Wire validation into build_budget_db.py post-build step.
+    1.B6-h: Wire validation into build_budget_db.py post-build step (auto-validate after build)
 """
 
 import json
@@ -22,6 +24,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+# Shared utilities: Import from utils package for consistency across codebase
+from utils import get_connection
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 
@@ -209,7 +213,7 @@ def validate_all(db_path: Path = DEFAULT_DB_PATH, strict: bool = False) -> dict:
         print("Run 'python build_budget_db.py' first to build the database.")
         sys.exit(1)
 
-    conn = sqlite3.connect(str(db_path))
+    conn = get_connection(db_path)
     results = []
     for check_fn in ALL_CHECKS:
         result = check_fn(conn)
@@ -230,7 +234,7 @@ def validate_all(db_path: Path = DEFAULT_DB_PATH, strict: bool = False) -> dict:
     return summary
 
 
-def print_report(summary: dict):
+def print_report(summary: dict) -> None:
     """Print a human-readable validation report."""
     print(f"\n{'='*60}")
     print(f"  Budget Database Validation Report")

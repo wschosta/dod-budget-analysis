@@ -12,23 +12,48 @@ web-facing, queryable database of Department of Defense budget data.
 
 | Page | Description | Status |
 |------|-------------|--------|
-| **[Performance Optimizations](Performance-Optimizations.md)** ⚡ | **3-6x speedup achieved** — Overview of all 13 optimizations | ✅ Complete |
-| [Data Sources](Data-Sources.md) | Catalog of all DoD budget data sources, URLs, and file formats | 🔄 In Progress (Phase 1.A, Step 1.A5) |
-| [Exhibit Types](Exhibit-Types.md) | Budget exhibit type catalog with column layouts and semantics | 🔄 In Progress (Phase 1.B, Step 1.B1) |
-| [Data Dictionary](Data-Dictionary.md) | Field definitions for the database and API | 📋 Planned (Phase 2–3, Steps 2.A1, 3.C2) |
-| [Database Schema](Database-Schema.md) | Schema documentation and entity relationships | 📋 Planned (Phase 2.A, Steps 2.A1–2.A5) |
-| [API Reference](API-Reference.md) | REST API endpoint documentation | 📋 Planned (Phase 2.C, Steps 2.C2–2.C6) |
-| [Getting Started](Getting-Started.md) | End-user guide for searching and downloading data | 🔄 Partial (Phase 3.C, Step 3.C1) |
-| [FAQ](FAQ.md) | Frequently asked questions | 🔄 Partial (Phase 3.C, Step 3.C3) |
-| [Methodology](Methodology.md) | Data collection methodology and known limitations | 🔄 Partial (Phase 3.C, Step 3.C6) |
-| [Contributing](Contributing.md) | Development setup, coding standards, and PR process | 📋 Planned (Phase 4.C, Step 4.C6) |
+| **[Performance Optimizations](Performance-Optimizations.md)** | **3-6x speedup achieved** — Overview of all 13 optimizations | Complete |
+| [Getting Started](Getting-Started.md) | End-user guide for searching, downloading, and querying data | Complete |
+| [Data Sources](Data-Sources.md) | Catalog of all DoD budget data sources, URLs, and file formats | Complete |
+| [Exhibit Types](Exhibit-Types.md) | Budget exhibit type catalog with column layouts and semantics | Complete |
+| [Data Dictionary](Data-Dictionary.md) | Field definitions for the database | Complete |
+| [Database Schema](Database-Schema.md) | Schema documentation and entity relationships | Complete |
+| [Methodology](Methodology.md) | Data collection, parsing methodology, and known limitations | Complete |
+| [FAQ](FAQ.md) | Frequently asked questions | Complete |
+| [Utilities Reference](Utilities-Reference.md) | Shared utility modules — http, formatting, database, strings | Complete |
+| [Contributing](Contributing.md) | Development setup, coding standards, and PR process | Complete |
+| [API Reference](API-Reference.md) | REST API endpoint documentation | Planned (Phase 2.C) |
+
+---
+
+## Quick Start
+
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt
+playwright install chromium
+
+# 2. Download budget documents (FY2026, all sources)
+python dod_budget_downloader.py --years 2026 --sources all
+
+# 3. Build the database
+python build_budget_db.py
+
+# 4. Search
+python search_budget.py "F-35"
+
+# 5. Validate data quality
+python validate_budget_db.py --verbose
+```
 
 ---
 
 ## Quick Links
 
-- **Task Index:** [docs/TASK_INDEX.md](../TASK_INDEX.md) — master list of all Phase 0–1 tasks
+- **Task Index:** [docs/TASK_INDEX.md](../TASK_INDEX.md) — master list of all Phase 0-1 tasks
 - **Validation Suite:** `python validate_budget_db.py --verbose` — run data quality checks
 - **Downloader:** `python dod_budget_downloader.py` — download DoD budget documents
 - **Database Builder:** `python build_budget_db.py` — parse documents into SQLite
+- **GUI Builder:** `python build_budget_gui.py` — graphical builder with progress tracking
 - **Search:** `python search_budget.py <query>` — full-text search the database
+- **Refresh Pipeline:** `python refresh_data.py --years 2026` — download + build + validate

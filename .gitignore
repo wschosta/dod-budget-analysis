@@ -3,6 +3,7 @@
 *.sqlite-shm
 *.sqlite-wal
 DoD_Budget_Documents/
+discovery_cache/
 
 # Temp/working directories
 _ul*
@@ -29,3 +30,5 @@ Thumbs.db
 
 # Claude Code
 .claude/
+
+nul

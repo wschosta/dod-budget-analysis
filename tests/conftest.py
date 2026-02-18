@@ -5,23 +5,23 @@ Provides reusable test fixtures: sample Excel files, sample PDFs, temporary
 SQLite databases, and pre-loaded database connections.
 
 ──────────────────────────────────────────────────────────────────────────────
-TODOs — fixture creation tasks (IMPLEMENTED)
+Fixture creation tasks (STEP 1.C1 COMPLETE)
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO 1.C1-a: Create minimal Excel fixture for each summary exhibit type.
-    DONE — see _create_exhibit_xlsx() and the fixtures_dir fixture below.
+1.C1-a: Create minimal Excel fixture for each summary exhibit type.
+    ✓ DONE — see _create_exhibit_xlsx() and the fixtures_dir fixture below.
 
-TODO 1.C1-b: Create minimal PDF fixtures.
-    DONE — see _create_sample_pdf() using fpdf2 below.
+1.C1-b: Create minimal PDF fixtures.
+    ✓ DONE — see _create_sample_pdf() using fpdf2 below.
 
-TODO 1.C1-c: Create a fixture that builds a pre-populated test database.
-    DONE — see test_db fixture below.
+1.C1-c: Create a fixture that builds a pre-populated test database.
+    ✓ DONE — see test_db fixture below.
 
-TODO 1.C1-d: Create a fixture for a "known bad" Excel file.
-    DONE — see bad_excel fixture below.
+1.C1-d: Create a fixture for a "known bad" Excel file.
+    ✓ DONE — see bad_excel fixture below.
 
-TODO 1.C1-e: Add fixture requirements to requirements-dev.txt.
-    DONE — requirements-dev.txt already lists pytest, pytest-cov, fpdf2.
+1.C1-e: Add fixture requirements to requirements-dev.txt.
+    ✓ DONE — requirements-dev.txt already lists pytest, pytest-cov, fpdf2.
 """
 
 import sys
@@ -301,12 +301,3 @@ def tmp_db(tmp_path):
     conn = create_database(db_path)
     yield conn
     conn.close()
-# TODO [Step 1.C2]: Add shared pytest fixtures here.
-#
-# Planned fixtures:
-#   - tmp_db: creates a temporary SQLite database using create_database() ✓ done
-#   - sample_xlsx: returns path to a representative test Excel file ✓ done (fixtures_dir)
-#   - sample_pdf: returns path to a representative test PDF file ✓ done (fixtures_dir)
-#   - built_db: a pre-built database from fixture files for search tests ✓ done (test_db)
-#
-# See docs/TODO_1C2_unit_tests_parsing.md for full specification.

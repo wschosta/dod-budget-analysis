@@ -1,67 +1,92 @@
 # Data Sources
 
-Catalog of all DoD budget data sources used by the downloader (`dod_budget_downloader.py`).
+Catalog of all DoD budget data sources configured in `dod_budget_downloader.py`.
 
-> **Current Status:** Phase 1.A, Step 1.A5 — In Progress. Full coverage matrix needs completion.
-> See [DATA_SOURCES.md](../../DATA_SOURCES.md) in the root for detailed TODO items.
+> **Full reference:** See [DATA_SOURCES.md](../../DATA_SOURCES.md) in the project root for
+> complete URL templates, JSON schema, file-integrity notes, and coverage matrix.
 
 ---
 
-## Comptroller (comptroller.war.gov)
+## Global Constants
+
+| Constant | Value |
+|----------|-------|
+| `BASE_URL` | `https://comptroller.war.gov` |
+| `BUDGET_MATERIALS_URL` | `https://comptroller.war.gov/Budget-Materials/` |
+| `DOWNLOADABLE_EXTENSIONS` | `.pdf`, `.xlsx`, `.xls`, `.zip`, `.csv` |
+| `IGNORED_HOSTS` | `dam.defense.gov` |
+| `BROWSER_REQUIRED_SOURCES` | `army`, `navy`, `navy-archive`, `airforce` |
+
+---
+
+## Sources
+
+| Source ID | Organization | Site | Access Method |
+|-----------|-------------|------|---------------|
+| `comptroller` | DoD Comptroller (OUSD-C) | `comptroller.war.gov` | Direct HTTP |
+| `defense-wide` | DoD Comptroller (Defense-Wide) | `comptroller.war.gov` | Direct HTTP |
+| `army` | ASA(FM&C) — U.S. Army | `asafm.army.mil` | Playwright browser |
+| `navy` | SECNAV FM&C — U.S. Navy | `secnav.navy.mil` | Playwright browser |
+| `navy-archive` | SECNAV FM&C — Navy Archive | `secnav.navy.mil` | Playwright browser |
+| `airforce` | SAF/FMC — Air Force / Space Force | `saffm.hq.af.mil` | Playwright browser |
+
+### `comptroller`
 
 - **Base URL:** `https://comptroller.war.gov/Budget-Materials/`
-- **Content:** Defense-wide summary exhibits, rollup documents
-- **Formats:** Excel (`.xlsx`), PDF (`.pdf`)
-- **Discovery:** Automatic link crawling from budget materials index
-- **Access method:** Direct HTTP requests
+- **Discovery:** `discover_fiscal_years()` crawls FY index; `discover_comptroller_files()` crawls each year's page
+- **Formats:** PDF, Excel (`.xlsx`, `.xls`), ZIP
+- **FY range:** Dynamically discovered (typically FY 2017–current)
 
-## Defense-Wide
+### `defense-wide`
 
 - **URL pattern:** `https://comptroller.war.gov/Budget-Materials/FY{fy}BudgetJustification/`
-- **Content:** Defense-wide agency justification books
-- **Formats:** Excel (`.xlsx`), PDF (`.pdf`)
-- **Discovery:** Automatic link crawling per fiscal year
-- **Access method:** Direct HTTP requests
+- **Discovery:** `discover_defense_wide_files()` — direct HTTP crawl
+- **Formats:** PDF (primary), Excel
+- **FY range:** FY 2017–current
 
-## US Army (asafm.army.mil)
+### `army`
 
-- **URL pattern:** `https://www.asafm.army.mil/Budget-Materials/`
-- **Content:** Army budget justification exhibits
-- **Formats:** Excel (`.xlsx`), PDF (`.pdf`)
-- **Discovery:** Browser-based link extraction (WAF-protected)
-- **Access method:** Playwright browser (`BROWSER_REQUIRED_SOURCES`)
+- **URL:** `https://www.asafm.army.mil/Budget-Materials/`
+- **Discovery:** `discover_army_files()` — Playwright browser (WAF-protected)
+- **Formats:** Excel exhibits (`p1_display.xlsx`, `r1.xlsx`, etc.), PDF justification books
+- **FY range:** FY 2018–current
 
-## US Navy (secnav.navy.mil)
+### `navy`
 
 - **URL pattern:** `https://www.secnav.navy.mil/fmc/Pages/Fiscal-Year-{fy}.aspx`
-- **Alternate source:** `https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx`
-- **Content:** Navy and Marine Corps budget exhibits
-- **Formats:** Excel (`.xlsx`), PDF (`.pdf`)
-- **Discovery:** Browser-based link extraction (WAF-protected)
-- **Access method:** Playwright browser (`BROWSER_REQUIRED_SOURCES`)
+- **Discovery:** `discover_navy_files()` — Playwright browser (WAF-protected)
+- **Formats:** PDF (separate Navy + Marine Corps books), Excel exhibits
+- **FY range:** FY 2019–current
 
-## US Air Force / Space Force (saffm.hq.af.mil)
+### `navy-archive`
+
+- **URL:** `https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx`
+- **Discovery:** `discover_navy_archive_files()` — Playwright browser
+- **Formats:** PDF, Excel
+- **FY range:** FY 2017–2018 (older years not on the main FY index)
+
+### `airforce`
 
 - **URL pattern:** `https://www.saffm.hq.af.mil/FM-Resources/Budget/Air-Force-Presidents-Budget-FY{fy2}/`
-- **Content:** Air Force and Space Force budget exhibits
-- **Formats:** Excel (`.xlsx`), PDF (`.pdf`)
-- **Discovery:** Browser-based link extraction (WAF-protected)
-- **Access method:** Playwright browser (`BROWSER_REQUIRED_SOURCES`)
+- **Discovery:** `discover_airforce_files()` — Playwright browser (WAF-protected)
+- **Formats:** PDF (Air Force + Space Force justification books), Excel exhibits
+- **FY range:** FY 2019–current (Space Force separated FY 2021+)
 
 ---
 
 ## Coverage Matrix
 
-<!-- TODO [Step 1.A5]: Fill in after running the downloader against each source
-     and recording discovered file counts per fiscal year. -->
+<!-- TODO [Step 1.A5-c]: Fill in after running downloader audit (Step 1.A1) -->
+<!-- Values marked with ~ are unverified estimates; blank = not expected     -->
 
 | Source | FY2017 | FY2018 | FY2019 | FY2020 | FY2021 | FY2022 | FY2023 | FY2024 | FY2025 | FY2026 |
 |--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|
-| Comptroller | | | | | | | | | | |
-| Defense-Wide | | | | | | | | | | |
-| Army | | | | | | | | | | |
-| Navy | | | | | | | | | | |
-| Air Force | | | | | | | | | | |
+| comptroller  | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
+| defense-wide | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
+| army         |   | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
+| navy         |   |   | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
+| navy-archive | ~ | ~ |   |   |   |   |   |   |   |   |
+| airforce     |   |   | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
 
 ---
 
@@ -70,4 +95,31 @@ Catalog of all DoD budget data sources used by the downloader (`dod_budget_downl
 - **Downloadable extensions:** `.pdf`, `.xlsx`, `.xls`, `.zip`, `.csv`
 - **Ignored hosts:** `dam.defense.gov`
 - **Default output directory:** `DoD_Budget_Documents/`
+- **Browser-required sources:** `army`, `navy`, `navy-archive`, `airforce` (government WAF blocks plain HTTP)
+- **File integrity:** `_verify_download()` checks magic bytes after every download; corrupt files are deleted and retried
+- **Failure log:** `failed_downloads.json` written to output dir; use `--retry-failures` to re-attempt
 - **Browser-required sources:** Army, Navy, Air Force (government WAF blocks plain HTTP)
+
+---
+
+## Notes on Coverage
+
+- **Coverage matrix:** The matrix above shows nominal coverage. Actual file counts depend
+  on network access to each source. Run `python dod_budget_downloader.py --list --years all
+  --sources all` to populate actual counts.
+
+- **Historical years:** Comptroller and Defense-Wide tend to have documents back to
+  FY2017 or earlier. Service sites (Army, Navy, Air Force) may have different historical
+  depth. Older years may use different URL patterns.
+
+- **Missing agencies:** The following agencies publish budget materials but are not
+  yet directly sourced (they may appear under Defense-Wide):
+  - Defense Logistics Agency (DLA)
+  - Missile Defense Agency (MDA)
+  - Defense Health Agency (DHA)
+  - Defense Information Systems Agency (DISA)
+  - Special Operations Command (SOCOM)
+
+- **File types:** Most exhibits are published as `.xlsx`. PDFs are typically budget
+  justification narratives. ZIP files may contain batches of exhibits that are
+  automatically extracted after download.

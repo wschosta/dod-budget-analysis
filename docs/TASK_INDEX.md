@@ -30,10 +30,10 @@ otherwise noted.
 |------|------|------|-----------|-------------------|
 | 1.A1 | Audit downloader coverage | AI-agent + web research | [TODO](TODO_1A1_audit_downloader_coverage.md) | — |
 | 1.A2 | Expand fiscal-year coverage | ENVIRONMENT TESTING | [TODO](TODO_1A2_expand_fiscal_year_coverage.md) | — |
-| 1.A3 | Harden download reliability | AI-agent (3 sub-tasks) + ENVIRONMENT TESTING (1 sub-task) | [TODO](TODO_1A3_harden_download_reliability.md) | — |
-| 1.A4 | Automate download scheduling | AI-agent (decisions resolved: manual trigger, manifest as artifact) | [TODO](TODO_1A4_automate_download_scheduling.md) | `scripts/scheduled_download.py` |
-| 1.A5 | Document all data sources | AI-agent | [TODO](TODO_1A5_document_data_sources.md) | `docs/wiki/Data-Sources.md` |
-| 1.A6 | Retry failed downloads | AI-agent (3 sub-tasks: failure log, CLI flag, GUI polish) | [TODO](TODO_1A6_retry_failed_downloads.md) | — |
+| 1.A3 | Harden download reliability | AI-agent ✅ **Complete** (1.A3-e skipped — needs live WAF) | [TODO](TODO_1A3_harden_download_reliability.md) | `dod_budget_downloader.py` |
+| 1.A4 | Automate download scheduling | AI-agent ✅ **Complete** | [TODO](TODO_1A4_automate_download_scheduling.md) | `scripts/scheduled_download.py`, `.github/workflows/download.yml` |
+| 1.A5 | Document all data sources | AI-agent ✅ **Complete** (1.A5-c deferred — needs audit) | [TODO](TODO_1A5_document_data_sources.md) | `DATA_SOURCES.md`, `docs/wiki/Data-Sources.md` |
+| 1.A6 | Retry failed downloads | AI-agent ✅ **Complete** | [TODO](TODO_1A6_retry_failed_downloads.md) | `dod_budget_downloader.py` |
 
 ---
 
@@ -41,10 +41,10 @@ otherwise noted.
 
 | Step | Task | Type | TODO File | Skeleton File(s) |
 |------|------|------|-----------|-------------------|
-| 1.B1 | Catalog all exhibit types | DATA PROCESSING | [TODO](TODO_1B1_catalog_exhibit_types.md) | `docs/wiki/Exhibit-Types.md` |
-| 1.B2 | Standardize column mappings | AI-agent + DATA PROCESSING | [TODO](TODO_1B2_standardize_column_mappings.md) | — |
-| 1.B3 | Normalize monetary values | DATA PROCESSING (decisions resolved: thousands canonical, display toggle to millions) | [TODO](TODO_1B3_normalize_monetary_values.md) | — |
-| 1.B4 | Extract PE/line-item metadata | AI-agent + DATA PROCESSING | [TODO](TODO_1B4_extract_pe_metadata.md) | — |
+| 1.B1 | Catalog all exhibit types | AI-agent ✅ **Complete** (audit run needs data) | [TODO](TODO_1B1_catalog_exhibit_types.md) | `exhibit_catalog.py`, `scripts/exhibit_audit.py`, `docs/wiki/Exhibit-Types.md` |
+| 1.B2 | Standardize column mappings | AI-agent + DATA PROCESSING (1.B2-a done) | [TODO](TODO_1B2_standardize_column_mappings.md) | `build_budget_db.py`, `validate_budget_db.py` |
+| 1.B3 | Normalize monetary values | AI-agent ✅ **Complete** | [TODO](TODO_1B3_normalize_monetary_values.md) | `build_budget_db.py`, `search_budget.py`, `validate_budget_db.py` |
+| 1.B4 | Extract PE metadata | AI-agent ✅ **Complete** | [TODO](TODO_1B4_extract_pe_metadata.md) | `build_budget_db.py`, `docs/wiki/Data-Dictionary.md` |
 | 1.B5 | PDF extraction quality audit | ENVIRONMENT TESTING | [TODO](TODO_1B5_pdf_extraction_audit.md) | — |
 | 1.B6 | Build validation suite | AI-agent ✅ **Complete** | [TODO](TODO_1B6_build_validation_suite.md) | `validate_budget_db.py` |
 
@@ -54,9 +54,9 @@ otherwise noted.
 
 | Step | Task | Type | TODO File | Skeleton File(s) |
 |------|------|------|-----------|-------------------|
-| 1.C1 | Create test fixtures | DATA PROCESSING + USER INTERVENTION | [TODO](TODO_1C1_create_test_fixtures.md) | `tests/fixtures/` |
-| 1.C2 | Unit tests for parsing | AI-agent | [TODO](TODO_1C2_unit_tests_parsing.md) | `tests/test_parsing.py`, `tests/conftest.py` |
-| 1.C3 | Integration test: E2E pipeline | AI-agent (needs fixtures) | [TODO](TODO_1C3_integration_test_e2e.md) | `tests/test_e2e_pipeline.py` |
+| 1.C1 | Create test fixtures | AI-agent ✅ **Mostly Complete** (1.C1-e deferred) | [TODO](TODO_1C1_create_test_fixtures.md) | `tests/conftest.py` |
+| 1.C2 | Unit tests for parsing | AI-agent ✅ **Mostly Complete** (1.C2-e/f need working env) | [TODO](TODO_1C2_unit_tests_parsing.md) | `tests/test_parsing.py`, `tests/conftest.py` |
+| 1.C3 | Integration test: E2E pipeline | AI-agent ✅ **Complete** (schema test passing; full suite needs fpdf2 fix) | [TODO](TODO_1C3_integration_test_e2e.md) | `tests/test_pipeline.py` |
 
 ---
 

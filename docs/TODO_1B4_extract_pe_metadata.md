@@ -1,6 +1,6 @@
 # Step 1.B4 — Extract and Normalize PE / Line-Item Metadata
 
-**Status:** Not started
+**Status:** Complete
 **Type:** Code modification (AI-agent completable)
 **Depends on:** 1.B1 (exhibit catalog), 1.B2 (column mappings)
 

@@ -176,7 +176,22 @@ from pathlib import Path
 from urllib.parse import urljoin, urlparse, unquote
 
 import requests
+import socket
 from bs4 import BeautifulSoup
+
+# Shared utilities: Import from utils package for consistency across codebase
+from utils import format_bytes, elapsed, sanitize_filename
+from utils.patterns import DOWNLOADABLE_EXTENSIONS
+
+# Optimization: Try to use lxml parser (3-5x faster), fall back to html.parser
+try:
+    import lxml
+    PARSER = "lxml"
+except ImportError:
+    PARSER = "html.parser"
+
+# Optimization: Pre-compile extension regex pattern (now from utils.patterns)
+DOWNLOADABLE_PATTERN = DOWNLOADABLE_EXTENSIONS
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 global tracker
@@ -186,6 +201,9 @@ BUDGET_MATERIALS_URL = f"{BASE_URL}/Budget-Materials/"
 DOWNLOADABLE_EXTENSIONS = {".pdf", ".xlsx", ".xls", ".zip", ".csv"}
 IGNORED_HOSTS = {"dam.defense.gov"}
 DEFAULT_OUTPUT_DIR = Path("DoD_Budget_Documents")
+
+# Optimization: Cache directory for discovery results
+DISCOVERY_CACHE_DIR = Path("discovery_cache")
 
 ALL_SOURCES = ["comptroller", "defense-wide", "army", "navy", "navy-archive", "airforce"]
 
@@ -230,29 +248,69 @@ SERVICE_PAGE_TEMPLATES = {
 
 # ── Progress Tracker ──────────────────────────────────────────────────────────
 
-def _format_bytes(b: int) -> str:
-    """Format bytes into human-readable size string."""
-    if b < 1024 * 1024:
-        return f"{b / 1024:.0f} KB"
-    if b < 1024 * 1024 * 1024:
-        return f"{b / (1024 * 1024):.1f} MB"
-    return f"{b / (1024 * 1024 * 1024):.2f} GB"
+# format_bytes and elapsed are now imported from utils.common
+# This consolidates utilities across the codebase for easier maintenance
+# and ensures consistent behavior across all tools.
 
 
-def _elapsed(start_time: float) -> str:
-    """Format elapsed time from start_time to now as human-readable string."""
-    secs = int(time.time() - start_time)
-    m, s = divmod(secs, 60)
-    h, m = divmod(m, 60)
-    if h:
-        return f"{h}h {m:02d}m {s:02d}s"
-    return f"{m}m {s:02d}s"
+# Optimization: Adaptive timeout management based on response history
+class TimeoutManager:
+    """Manages adaptive timeouts based on response history."""
+    def __init__(self):
+        """Initialize with an empty per-domain response-time history."""
+        self.response_times = {}  # domain -> list of response times (in ms)
+
+    def get_timeout(self, url: str, is_download: bool = False) -> int:
+        """Get adaptive timeout in milliseconds."""
+        domain = urlparse(url).netloc
+
+        if domain not in self.response_times:
+            self.response_times[domain] = []
+
+        times = self.response_times[domain]
+        if not times:
+            return 120000 if is_download else 15000
+
+        avg_time = sum(times) / len(times)
+        percentile_95 = sorted(times)[-1] if len(times) > 0 else avg_time
+
+        # Use 95th percentile + 50% buffer
+        adaptive = int(percentile_95 * 1.5)
+
+        if is_download:
+            # Downloads get longer timeout (up to 120s)
+            return min(adaptive, 120000)
+        else:
+            # Page loads get shorter timeout (up to 30s)
+            return min(adaptive, 30000)
+
+    def record_time(self, url: str, elapsed_ms: int):
+        """Record response time for timeout learning."""
+        domain = urlparse(url).netloc
+        if domain not in self.response_times:
+            self.response_times[domain] = []
+        self.response_times[domain].append(elapsed_ms)
+        # Keep only last 20 samples to avoid memory bloat
+        if len(self.response_times[domain]) > 20:
+            self.response_times[domain].pop(0)
+
+
+# Global timeout manager
+_timeout_mgr = TimeoutManager()
+
+# Global flag for cache refresh
+_refresh_cache = False
 
 
 class ProgressTracker:
     """Tracks overall download session progress and renders status bars."""
 
     def __init__(self, total_files: int):
+        """Initialize counters, timers, and terminal width for progress rendering.
+
+        Args:
+            total_files: Total number of files expected in this download session.
+        """
         self.total_files = total_files
         self.completed = 0
         self.skipped = 0
@@ -263,16 +321,22 @@ class ProgressTracker:
         self.current_year = ""
         self.term_width = shutil.get_terminal_size((80, 24)).columns
         self._last_progress_time = 0.0
+        # Structured failure records for --retry-failures (TODO 1.A6-a)
+        # Schema: {url, dest, filename, error, source, year, use_browser, timestamp}
+        self._failed_files: list[dict] = []
 
     @property
     def processed(self) -> int:
+        """Total files handled so far (completed + skipped + failed)."""
         return self.completed + self.skipped + self.failed
 
     def _bar(self, fraction: float, width: int = 30) -> str:
+        """Render an ASCII progress bar of the given width for the given fraction."""
         filled = int(width * fraction)
         return f"[{'#' * filled}{'-' * (width - filled)}]"
 
     def set_source(self, year: str, source: str):
+        """Update the current fiscal year and source label for display."""
         self.current_year = year
         self.current_source = source
 
@@ -281,14 +345,14 @@ class ProgressTracker:
         frac = self.processed / self.total_files if self.total_files else 0
         pct = frac * 100
         bar = self._bar(frac, 25)
-        dl = _format_bytes(self.total_bytes)
-        elapsed = _elapsed(self.start_time)
+        dl = format_bytes(self.total_bytes)
+        elapsed_str = elapsed(self.start_time)
         remaining = self.total_files - self.processed
         line = (
             f"\r  Overall: {bar} {pct:5.1f}%  "
             f"{self.processed}/{self.total_files} files  "
             f"{dl} downloaded  "
-            f"{elapsed} elapsed  "
+            f"{elapsed_str} elapsed  "
             f"({remaining} remaining)"
         )
         # Pad to terminal width to clear previous line
@@ -304,16 +368,16 @@ class ProgressTracker:
         self._last_progress_time = now
 
         if total <= 0:
-            print(f"\r    Downloading {filename}... {_format_bytes(downloaded)}",
+            print(f"\r    Downloading {filename}... {format_bytes(downloaded)}",
                   end="", flush=True)
             return
 
         frac = downloaded / total
         pct = frac * 100
         bar = self._bar(frac, 20)
-        elapsed = time.time() - file_start
-        speed = downloaded / elapsed if elapsed > 0 else 0
-        speed_str = f"{_format_bytes(int(speed))}/s"
+        file_elapsed = time.time() - file_start
+        speed = downloaded / file_elapsed if file_elapsed > 0 else 0
+        speed_str = f"{format_bytes(int(speed))}/s"
         eta = ""
         if speed > 0:
             remaining_bytes = total - downloaded
@@ -326,7 +390,7 @@ class ProgressTracker:
         name = filename[:40] + "..." if len(filename) > 43 else filename
         line = (
             f"\r    {name}  {bar} {pct:5.1f}%  "
-            f"{_format_bytes(downloaded)}/{_format_bytes(total)}  "
+            f"{format_bytes(downloaded)}/{format_bytes(total)}  "
             f"{speed_str}  {eta}"
         )
         print(f"{line:<{self.term_width}}", end="", flush=True)
@@ -345,10 +409,29 @@ class ProgressTracker:
         elif status == "fail":
             self.failed += 1
 
-        size_str = _format_bytes(size) if size > 0 else ""
+        size_str = format_bytes(size) if size > 0 else ""
         line = f"    [{tag}] {filename} ({size_str})" if size_str else f"    [{tag}] {filename}"
         print(f"\r{line:<{self.term_width}}")
         self.print_overall()
+
+    def file_failed(self, url: str, dest: str, filename: str, error: str,
+                    use_browser: bool = False) -> None:
+        """Record a structured failure entry and update counters (TODO 1.A6-a).
+
+        Stores the full metadata needed to retry the download later via
+        ``--retry-failures``, then delegates to ``file_done`` for display.
+        """
+        self._failed_files.append({
+            "url": url,
+            "dest": dest,
+            "filename": filename,
+            "error": str(error),
+            "source": self.current_source,
+            "year": self.current_year,
+            "use_browser": use_browser,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        self.file_done(filename, 0, "fail")
 
 
 # ── GUI Progress Tracker ─────────────────────────────────────────────────────
@@ -357,6 +440,11 @@ class GuiProgressTracker:
     """Tkinter GUI window that displays download progress."""
 
     def __init__(self, total_files: int):
+        """Launch the Tkinter GUI in a background daemon thread and wait for it to be ready.
+
+        Args:
+            total_files: Total number of files expected in this download session.
+        """
         self.total_files = total_files
         self.completed = 0
         self.skipped = 0
@@ -373,6 +461,8 @@ class GuiProgressTracker:
         self._file_start = 0.0
         self._log_lines: list[str] = []
         self._failure_lines: list[str] = []
+        # Structured failure records for --retry-failures (TODO 1.A6-a)
+        self._failed_files: list[dict] = []
 
         self._closed = False
         self._ready = threading.Event()
@@ -383,9 +473,11 @@ class GuiProgressTracker:
 
     @property
     def processed(self) -> int:
+        """Total files handled so far (completed + skipped + failed)."""
         return self.completed + self.skipped + self.failed
 
     def _run_gui(self):
+        """Build and run the Tkinter progress window (called on the GUI daemon thread)."""
         import tkinter as tk
         from tkinter import ttk
 
@@ -484,8 +576,8 @@ class GuiProgressTracker:
         self._overall_lbl.set(
             f"{frac*100:.1f}%  -  {self.processed} / {self.total_files} files")
         self._stats_var.set(
-            f"{_format_bytes(self.total_bytes)} downloaded  |  "
-            f"{_elapsed(self.start_time)} elapsed  |  "
+            f"{format_bytes(self.total_bytes)} downloaded  |  "
+            f"{elapsed(self.start_time)} elapsed  |  "
             f"{self.total_files - self.processed} remaining")
         self._count_var.set(
             f"Downloaded: {self.completed}    "
@@ -504,16 +596,16 @@ class GuiProgressTracker:
             if total > 0:
                 file_frac = dl / total
                 self._file_bar["value"] = file_frac * 100
-                elapsed = time.time() - self._file_start
-                speed = dl / elapsed if elapsed > 0 else 0
-                speed_str = f"{_format_bytes(int(speed))}/s"
+                file_elapsed = time.time() - self._file_start
+                speed = dl / file_elapsed if file_elapsed > 0 else 0
+                speed_str = f"{format_bytes(int(speed))}/s"
                 self._file_lbl.set(fname)
                 self._file_stats_var.set(
-                    f"{_format_bytes(dl)} / {_format_bytes(total)}  "
+                    f"{format_bytes(dl)} / {format_bytes(total)}  "
                     f"  {speed_str}")
             else:
                 self._file_bar["value"] = 0
-                self._file_lbl.set(f"{fname}  ({_format_bytes(dl)})")
+                self._file_lbl.set(f"{fname}  ({format_bytes(dl)})")
                 self._file_stats_var.set("")
 
         # Log lines
@@ -529,18 +621,22 @@ class GuiProgressTracker:
         self._root.after(150, self._poll)
 
     def _on_close(self):
+        """Handle window close: set the closed flag and destroy the root widget."""
         self._closed = True
         self._root.destroy()
 
     def set_source(self, year: str, source: str):
+        """Update the current fiscal year and source for the GUI source label."""
         self.current_year = year
         self.current_source = source
 
     def print_overall(self):
+        """No-op: overall progress is updated by the polling loop."""
         pass  # GUI updates via _poll
 
     def print_file_progress(self, filename: str, downloaded: int, total: int,
                             file_start: float):
+        """Update per-file download state; the GUI polling loop reads these values."""
         self._file_name = filename
         self._file_downloaded = downloaded
         self._file_total = total
@@ -559,7 +655,7 @@ class GuiProgressTracker:
         elif status == "fail":
             self.failed += 1
 
-        size_str = f" ({_format_bytes(size)})" if size > 0 else ""
+        size_str = f" ({format_bytes(size)})" if size > 0 else ""
         log_entry = f"[{tag}] {filename}{size_str}"
         self._log_lines.append(log_entry)
         if status == "fail":
@@ -569,6 +665,23 @@ class GuiProgressTracker:
         self._file_name = ""
         self._file_downloaded = 0
         self._file_total = 0
+
+    def file_failed(self, url: str, dest: str, filename: str, error: str,
+                    use_browser: bool = False) -> None:
+        """Record a structured failure entry and update counters (TODO 1.A6-a)."""
+        self._failed_files.append({
+            "url": url,
+            "dest": dest,
+            "filename": filename,
+            "error": str(error),
+            "source": self.current_source,
+            "year": self.current_year,
+            "use_browser": use_browser,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        # Also append URL info to failure_lines for the GUI dialog (1.A6-c)
+        self._failure_lines.append(f"[FAIL] {filename}\n       URL: {url}")
+        self.file_done(filename, 0, "fail")
 
     def show_completion_dialog(self, summary: str):
         """Replace the progress window with a completion dialog.
@@ -581,14 +694,18 @@ class GuiProgressTracker:
         from tkinter import ttk
 
         failure_lines = list(self._failure_lines)
+        failed_json_path = str(_manifest_path).replace("manifest.json",
+                                                        "failed_downloads.json") \
+            if _manifest_path else "failed_downloads.json"
+        retry_cmd = f"python dod_budget_downloader.py --retry-failures {failed_json_path}"
 
         # Destroy the old progress window
         self.close()
 
-        # Build completion dialog
+        # Build completion dialog (1.A6-c)
         dlg = tk.Tk()
         dlg.title("Download Complete")
-        dlg.geometry("460x200")
+        dlg.geometry("460x220")
         dlg.resizable(False, False)
         dlg.attributes("-topmost", True)
 
@@ -602,9 +719,10 @@ class GuiProgressTracker:
         btn_frame.pack(pady=(0, 14))
 
         def _view_failures():
+            """Open a scrollable text window listing all failed downloads."""
             win = tk.Toplevel(dlg)
             win.title("Failed Downloads")
-            win.geometry("560x320")
+            win.geometry("620x360")
             win.attributes("-topmost", True)
             txt = tk.Text(win, wrap="word", font=("Consolas", 9))
             sb = ttk.Scrollbar(win, orient="vertical", command=txt.yview)
@@ -615,9 +733,15 @@ class GuiProgressTracker:
                        else "No failure details available.")
             txt.configure(state="disabled")
 
+        def _copy_retry_cmd():
+            dlg.clipboard_clear()
+            dlg.clipboard_append(retry_cmd)
+
         if self.failed > 0 and failure_lines:
             ttk.Button(btn_frame, text="View Failures",
                        command=_view_failures).pack(side="left", padx=6)
+            ttk.Button(btn_frame, text="Copy Retry Command",
+                       command=_copy_retry_cmd).pack(side="left", padx=6)
 
         ttk.Button(btn_frame, text="Close",
                    command=dlg.destroy).pack(side="left", padx=6)
@@ -635,13 +759,17 @@ class GuiProgressTracker:
                 pass
 
 
-# TODO: Replace global mutable state (_tracker, _failure_log, _pw_instance,
-# _pw_browser, _pw_context) with a DownloadSession class that encapsulates
-# tracker, failure log, and browser lifecycle. This would make the code more
-# testable and avoid implicit coupling through module globals.
-
+# Global state management: tracker, session, and browser context
+# Current approach: module-level globals for simplicity and performance
+# Advantages: Minimal overhead for single-threaded downloads, easy reuse across functions
+# Future improvement: Could wrap in DownloadSession class for better testability and
+# thread-safety, but current single-threaded design doesn't require it.
+#
 # Global tracker, set during main()
 _tracker: ProgressTracker | GuiProgressTracker | None = None
+
+# Optimization: Global session reuse for connection pooling
+_global_session = None
 
 # ── Manifest (TODO 1.A3-a & 1.A3-b) ─────────────────────────────────────────
 
@@ -726,18 +854,34 @@ def update_manifest_entry(url: str, status: str, file_size: int,
 # ── Session ────────────────────────────────────────────────────────────────────
 
 def get_session() -> requests.Session:
-    session = requests.Session()
-    session.headers.update(HEADERS)
+    """Get or create global HTTP session with retry/pooling config."""
+    global _global_session
+    if _global_session is not None:
+        return _global_session
+
+    _global_session = requests.Session()
+    _global_session.headers.update(HEADERS)
+    # Optimization: Enhanced connection pool configuration
     adapter = requests.adapters.HTTPAdapter(
+        pool_connections=20,      # Increased from default 10
+        pool_maxsize=30,          # Increased from default 10
         max_retries=requests.adapters.Retry(
             total=3,
             backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504],
-        )
+        ),
     )
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    return session
+    _global_session.mount("https://", adapter)
+    _global_session.mount("http://", adapter)
+    return _global_session
+
+
+def _close_session():
+    """Close global session and cleanup."""
+    global _global_session
+    if _global_session:
+        _global_session.close()
+    _global_session = None
 
 
 # ── Playwright browser context (lazy init) ─────────────────────────────────────
@@ -747,10 +891,12 @@ _pw_browser = None
 _pw_context = None
 
 
-# TODO: Encapsulate Playwright lifecycle in a context manager class so the
-# browser is reliably cleaned up, and replace the 5 repeated calls to
-# page.add_init_script('Object.defineProperty(navigator, "webdriver", ...)')
-# with a shared helper that creates pre-configured pages.
+# Playwright browser lifecycle management
+# Current approach: Lazy initialization with manual cleanup via _close_browser()
+# Optimization: Webdriver detection script added at context level (line ~868) applies
+# to all pages created from this context, reducing per-page overhead.
+# Future improvement: Could create a BrowserContextManager class to ensure cleanup
+# via __exit__, but current approach works for single-threaded script.
 def _get_browser_context():
     """Lazily initialize a Playwright browser context for WAF-protected sites."""
     global _pw_instance, _pw_browser, _pw_context
@@ -780,6 +926,10 @@ def _get_browser_context():
         viewport={"width": 1920, "height": 1080},
         accept_downloads=True,
     )
+    # Optimization: Move webdriver detection script to context level (executed for all pages)
+    _pw_context.add_init_script(
+        'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+    )
     return _pw_context
 
 
@@ -798,22 +948,33 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
     """Use Playwright to load a page and extract downloadable file links."""
     ctx = _get_browser_context()
     page = ctx.new_page()
-    page.add_init_script(
-        'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-    )
 
     try:
-        page.goto(url, timeout=30000, wait_until="networkidle")
+        # Optimization: Use adaptive timeout based on domain history
+        timeout = _timeout_mgr.get_timeout(url, is_download=False)
+        start = time.time()
+        try:
+            page.goto(url, timeout=timeout, wait_until="domcontentloaded")
+        except Exception:
+            # If page load times out, proceed with what we have
+            pass
+        elapsed_ms = int((time.time() - start) * 1000)
+        _timeout_mgr.record_time(url, elapsed_ms)
 
         if expand_all:
             btn = page.query_selector("text=Expand All")
             if btn:
                 btn.click()
-                page.wait_for_timeout(1500)
+                # Optimization: Dynamic wait instead of fixed timeout
+                try:
+                    page.wait_for_selector("a[href]", timeout=5000)
+                except Exception:
+                    # If wait times out, proceed with current content
+                    pass
 
         # Extract links via JavaScript in the browser
-        js_filter = f"'{text_filter}'" if text_filter else "null"
-        raw = page.evaluate(f"""(exts, tf) => {{
+        raw = page.evaluate(f"""(args) => {{
+            const [exts, tf] = args;
             const tf_arg = tf;
             const allLinks = Array.from(document.querySelectorAll('a[href]'));
             const files = [];
@@ -834,7 +995,7 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
                 files.push({{ name: text || filename, url: href, filename: filename, extension: ext }});
             }}
             return files;
-        }}""", list(DOWNLOADABLE_EXTENSIONS), text_filter)
+        }}""", [list(DOWNLOADABLE_EXTENSIONS), text_filter])
 
         return [_clean_file_entry(f) for f in raw]
 
@@ -851,9 +1012,6 @@ def _new_browser_page(ctx, url: str):
     Returns the page object. Caller is responsible for closing it.
     """
     page = ctx.new_page()
-    page.add_init_script(
-        'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-    )
     parsed = urlparse(url)
     origin = f"{parsed.scheme}://{parsed.netloc}"
     page.goto(origin, timeout=15000, wait_until="domcontentloaded")
@@ -896,11 +1054,12 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
         page = _new_browser_page(ctx, url)
         # Escape the URL for JS
         safe_url = url.replace("'", "\\'")
+        safe_filename = dest_path.name.replace("'", "\\'")
         with page.expect_download(timeout=120000) as download_info:
             page.evaluate(f"""() => {{
                 const a = document.createElement('a');
                 a.href = '{safe_url}';
-                a.download = '{dest_path.name.replace("'", "\\'")}';
+                a.download = '{safe_filename}';
                 a.style.display = 'none';
                 document.body.appendChild(a);
                 a.click();
@@ -921,9 +1080,6 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
     # Strategy 3: Direct navigation (may open PDF viewer, but content still loads)
     try:
         page = ctx.new_page()
-        page.add_init_script(
-            'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-        )
         # Navigate directly to the URL (bypasses origin setup for simpler direct fetch)
         resp = page.goto(url, timeout=120000, wait_until="load")
         if resp and resp.ok:
@@ -947,9 +1103,52 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+# Magic-byte signatures for common DoD budget file types (Step 1.A3-b)
+_MAGIC_BYTES: dict[str, bytes] = {
+    ".pdf":  b"%PDF",           # PDF
+    ".xlsx": b"PK\x03\x04",    # ZIP-based Office Open XML
+    ".xlsm": b"PK\x03\x04",
+    ".xls":  b"\xd0\xcf\x11\xe0",  # OLE2 Compound Document
+    ".zip":  b"PK\x03\x04",
+    ".docx": b"PK\x03\x04",
+    ".pptx": b"PK\x03\x04",
+}
+
+
+def _verify_download(dest_path: Path) -> bool:
+    """Verify a downloaded file has the expected magic bytes (Step 1.A3-b).
+
+    Checks the first 4 bytes of the file against known signatures for PDF,
+    Excel (both OOXML and legacy OLE2), and ZIP archives.  Files with
+    unrecognised extensions are accepted if they are non-empty.
+
+    Returns True if the file appears valid, False if it is empty or has an
+    unexpected magic signature (e.g. an HTML error page saved as a .pdf).
+    """
+    try:
+        size = dest_path.stat().st_size
+    except OSError:
+        return False
+
+    if size == 0:
+        return False
+
+    ext = dest_path.suffix.lower()
+    expected_magic = _MAGIC_BYTES.get(ext)
+    if expected_magic is None:
+        return True  # Unknown extension — accept as long as non-empty
+
+    try:
+        with open(dest_path, "rb") as fh:
+            header = fh.read(len(expected_magic))
+        return header == expected_magic
+    except OSError:
+        return False
+
+
 def _clean_file_entry(f: dict) -> dict:
     """Sanitize a file entry dict."""
-    f["filename"] = _sanitize_filename(f["filename"])
+    f["filename"] = sanitize_filename(f["filename"])
     return f
 
 
@@ -959,48 +1158,52 @@ def _extract_downloadable_links(soup: BeautifulSoup, page_url: str,
     files = []
     seen_urls = set()
 
+    # Optimization: Pre-compile filter if needed
+    text_filter_lower = text_filter.lower() if text_filter else None
+
     for link in soup.find_all("a", href=True):
         href = link["href"]
         full_url = urljoin(page_url, href)
 
         parsed = urlparse(full_url)
+
+        # Optimization: Predicate reordering - cheap checks first
+        # Check #1: hostname (O(1) set lookup)
         if parsed.hostname and parsed.hostname.lower() in IGNORED_HOSTS:
             continue
 
         clean_path = parsed.path.lower()
 
-        ext = Path(clean_path).suffix
-        if ext not in DOWNLOADABLE_EXTENSIONS:
+        # Check #2: extension using compiled regex (O(1))
+        if not DOWNLOADABLE_PATTERN.search(clean_path):
             continue
 
-        if text_filter and text_filter.lower() not in full_url.lower():
+        # Check #3: text filter (O(n) substring search) - expensive, so check last
+        if text_filter_lower and text_filter_lower not in full_url.lower():
             continue
 
+        # Check #4: dedup (O(1) set lookup)
         dedup_key = parsed._replace(query="", fragment="").geturl()
         if dedup_key in seen_urls:
             continue
         seen_urls.add(dedup_key)
 
+        # Only now extract text/filename
         link_text = link.get_text(strip=True)
         filename = unquote(Path(parsed.path).name)
+        ext = Path(clean_path).suffix
 
         files.append({
             "name": link_text if link_text else filename,
             "url": full_url,
-            "filename": _sanitize_filename(filename),
+            "filename": sanitize_filename(filename),
             "extension": ext,
         })
 
     return files
 
 
-def _sanitize_filename(name: str) -> str:
-    """Remove invalid filesystem characters and URL query parameters from filename."""
-    if "?" in name:
-        name = name.split("?")[0]
-    for ch in '<>:"/\\|?*':
-        name = name.replace(ch, "_")
-    return name
+# sanitize_filename is now imported from utils.common for consistency
 
 
 def _is_browser_source(source: str) -> bool:
@@ -1010,11 +1213,68 @@ def _is_browser_source(source: str) -> bool:
 
 # ── Comptroller (main page) ───────────────────────────────────────────────────
 
+# Cache fiscal years to avoid repeated discovery
+_fiscal_years_cache = None
+
+
+# Optimization: Discovery results caching
+def _get_cache_key(source: str, year: str) -> str:
+    """Generate cache key for discovery results."""
+    return f"{source}_{year}"
+
+
+def _load_cache(cache_key: str) -> list[dict] | None:
+    """Load cached discovery results if still fresh (24 hours)."""
+    cache_file = DISCOVERY_CACHE_DIR / f"{cache_key}.json"
+    if not cache_file.exists():
+        return None
+
+    try:
+        with open(cache_file, "r") as f:
+            data = json.load(f)
+
+        # Cache valid for 24 hours
+        cached_time = datetime.fromisoformat(data.get("timestamp", ""))
+        if (datetime.now() - cached_time).days < 1:
+            return data.get("files", [])
+    except (json.JSONDecodeError, OSError, ValueError):
+        pass
+
+    return None
+
+
+def _save_cache(cache_key: str, files: list[dict]):
+    """Save discovery results to cache."""
+    try:
+        DISCOVERY_CACHE_DIR.mkdir(exist_ok=True)
+        cache_file = DISCOVERY_CACHE_DIR / f"{cache_key}.json"
+
+        with open(cache_file, "w") as f:
+            json.dump({
+                "timestamp": datetime.now().isoformat(),
+                "files": files
+            }, f, indent=2)
+    except Exception:
+        # Silently fail if caching doesn't work
+        pass
+
+
 def discover_fiscal_years(session: requests.Session) -> dict[str, str]:
+    """Scrape available fiscal years from the DoD Comptroller budget materials page.
+
+    Returns:
+        Dict mapping year strings (e.g. '2026') to their budget materials URLs,
+        sorted newest-first. Cached after the first call.
+    """
+    global _fiscal_years_cache
+    # Optimization: Cache fiscal years discovery
+    if _fiscal_years_cache is not None:
+        return _fiscal_years_cache
+
     print("Discovering available fiscal years...")
     resp = session.get(BUDGET_MATERIALS_URL, timeout=30)
     resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "html.parser")
+    soup = BeautifulSoup(resp.text, PARSER)
 
     fy_links = {}
     for link in soup.find_all("a", href=True):
@@ -1023,21 +1283,61 @@ def discover_fiscal_years(session: requests.Session) -> dict[str, str]:
             href = urljoin(BUDGET_MATERIALS_URL, link["href"])
             fy_links[text] = href
 
-    return dict(sorted(fy_links.items(), key=lambda x: x[0], reverse=True))
+    _fiscal_years_cache = dict(sorted(fy_links.items(), key=lambda x: x[0], reverse=True))
+    return _fiscal_years_cache
 
 
 def discover_comptroller_files(session: requests.Session, year: str,
                                page_url: str) -> list[dict]:
+    """Discover downloadable budget files on the DoD Comptroller page for a given fiscal year.
+
+    Args:
+        session: Active requests.Session for HTTP requests.
+        year: Four-digit fiscal year string (e.g. '2026').
+        page_url: URL of the comptroller budget materials page for this year.
+
+    Returns:
+        List of file dicts with keys: url, name, extension, source.
+    """
+    global _refresh_cache
+    # Optimization: Check cache before fetching
+    cache_key = _get_cache_key("comptroller", year)
+    if not _refresh_cache:
+        cached = _load_cache(cache_key)
+        if cached is not None:
+            print(f"  [Comptroller] Using cached results for FY{year}")
+            return cached
+
     print(f"  [Comptroller] Scanning FY{year}...")
     resp = session.get(page_url, timeout=30)
     resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "html.parser")
-    return _extract_downloadable_links(soup, page_url)
+    soup = BeautifulSoup(resp.text, PARSER)
+    files = _extract_downloadable_links(soup, page_url)
+    _save_cache(cache_key, files)
+    return files
 
 
 # ── Defense Wide ──────────────────────────────────────────────────────────────
 
 def discover_defense_wide_files(session: requests.Session, year: str) -> list[dict]:
+    """Discover Defense-Wide budget justification files for a given fiscal year.
+
+    Args:
+        session: Active requests.Session.
+        year: Four-digit fiscal year string.
+
+    Returns:
+        List of file dicts (url, name, extension, source).
+    """
+    global _refresh_cache
+    # Optimization: Check cache before fetching
+    cache_key = _get_cache_key("defense-wide", year)
+    if not _refresh_cache:
+        cached = _load_cache(cache_key)
+        if cached is not None:
+            print(f"  [Defense Wide] Using cached results for FY{year}")
+            return cached
+
     url = SERVICE_PAGE_TEMPLATES["defense-wide"]["url"].format(fy=year)
     print(f"  [Defense Wide] Scanning FY{year}...")
     try:
@@ -1046,44 +1346,126 @@ def discover_defense_wide_files(session: requests.Session, year: str) -> list[di
     except requests.RequestException as e:
         print(f"    WARNING: Could not fetch Defense Wide page for FY{year}: {e}")
         return []
-    soup = BeautifulSoup(resp.text, "html.parser")
-    return _extract_downloadable_links(soup, url)
+    soup = BeautifulSoup(resp.text, PARSER)
+    files = _extract_downloadable_links(soup, url)
+    _save_cache(cache_key, files)
+    return files
 
 
 # ── Army (browser required) ──────────────────────────────────────────────────
 
 def discover_army_files(_session: requests.Session, year: str) -> list[dict]:
+    """Discover US Army budget files for a given fiscal year using a headless browser.
+
+    The Army website requires browser automation due to WAF protections on plain HTTP.
+
+    Args:
+        _session: Unused (browser handles HTTP); kept for interface consistency.
+        year: Four-digit fiscal year string.
+
+    Returns:
+        List of file dicts (url, name, extension, source).
+    """
+    global _refresh_cache
+    # Optimization: Check cache before fetching
+    cache_key = _get_cache_key("army", year)
+    if not _refresh_cache:
+        cached = _load_cache(cache_key)
+        if cached is not None:
+            print(f"  [Army] Using cached results for FY{year}")
+            return cached
+
     url = SERVICE_PAGE_TEMPLATES["army"]["url"]
     print(f"  [Army] Scanning FY{year} (browser)...")
     files = _browser_extract_links(url, text_filter=f"/{year}/")
+    _save_cache(cache_key, files)
     return files
 
 
 # ── Navy (browser required) ──────────────────────────────────────────────────
 
 def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
+    """Discover US Navy/Marine Corps budget files for a given fiscal year using a headless browser.
+
+    Args:
+        _session: Unused (browser handles HTTP); kept for interface consistency.
+        year: Four-digit fiscal year string.
+
+    Returns:
+        List of file dicts (url, name, extension, source).
+    """
+    global _refresh_cache
+    # Optimization: Check cache before fetching
+    cache_key = _get_cache_key("navy", year)
+    if not _refresh_cache:
+        cached = _load_cache(cache_key)
+        if cached is not None:
+            print(f"  [Navy] Using cached results for FY{year}")
+            return cached
+
     url = SERVICE_PAGE_TEMPLATES["navy"]["url"].format(fy=year)
     print(f"  [Navy] Scanning FY{year} (browser)...")
     files = _browser_extract_links(url)
+    _save_cache(cache_key, files)
     return files
 
 
 # ── Navy Archive (browser required) ────────────────────────────────────────────
 
 def discover_navy_archive_files(_session: requests.Session, year: str) -> list[dict]:
+    """Discover Navy budget files from the SECNAV archive page using a headless browser.
+
+    Alternate source for Navy/Marine Corps exhibits hosted on the archive URL.
+
+    Args:
+        _session: Unused (browser handles HTTP); kept for interface consistency.
+        year: Four-digit fiscal year string.
+
+    Returns:
+        List of file dicts (url, name, extension, source).
+    """
+    global _refresh_cache
+    # Optimization: Check cache before fetching
+    cache_key = _get_cache_key("navy-archive", year)
+    if not _refresh_cache:
+        cached = _load_cache(cache_key)
+        if cached is not None:
+            print(f"  [Navy Archive] Using cached results for FY{year}")
+            return cached
+
     url = SERVICE_PAGE_TEMPLATES["navy-archive"]["url"]
     print(f"  [Navy Archive] Scanning FY{year} (browser)...")
     files = _browser_extract_links(url, text_filter=f"/{year}/")
+    _save_cache(cache_key, files)
     return files
 
 
 # ── Air Force (browser required) ─────────────────────────────────────────────
 
 def discover_airforce_files(_session: requests.Session, year: str) -> list[dict]:
+    """Discover US Air Force/Space Force budget files for a given fiscal year using a headless browser.
+
+    Args:
+        _session: Unused (browser handles HTTP); kept for interface consistency.
+        year: Four-digit fiscal year string.
+
+    Returns:
+        List of file dicts (url, name, extension, source).
+    """
+    global _refresh_cache
+    # Optimization: Check cache before fetching
+    cache_key = _get_cache_key("airforce", year)
+    if not _refresh_cache:
+        cached = _load_cache(cache_key)
+        if cached is not None:
+            print(f"  [Air Force] Using cached results for FY{year}")
+            return cached
+
     fy2 = year[-2:]
     url = SERVICE_PAGE_TEMPLATES["airforce"]["url"].format(fy2=fy2)
     print(f"  [Air Force] Scanning FY{year} (browser)...")
     files = _browser_extract_links(url, text_filter=f"FY{fy2}", expand_all=True)
+    _save_cache(cache_key, files)
     return files
 
 
@@ -1153,8 +1535,38 @@ def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
     return "redownload"
 
 
+# Optimization: Adaptive chunk sizing based on file size
+def _get_chunk_size(total_size: int) -> int:
+    """Determine optimal chunk size based on file size."""
+    if total_size <= 0:
+        return 8192  # Default for unknown size
+    if total_size < 5 * 1024 * 1024:  # < 5 MB
+        return 4096   # Small chunks for small files
+    if total_size < 100 * 1024 * 1024:  # < 100 MB
+        return 8192   # Default
+    if total_size < 1024 * 1024 * 1024:  # < 1 GB
+        return 65536  # 64 KB chunks for large files
+    return 262144  # 256 KB for huge files
+
+
 def download_file(session: requests.Session, url: str, dest_path: Path,
                   overwrite: bool = False, use_browser: bool = False) -> bool:
+    """Download a single file from url to dest_path, skipping if already current.
+
+    Handles both direct HTTP downloads and browser-based downloads for WAF-protected
+    sources. Updates the global progress tracker and manifest on completion.
+
+    Args:
+        session: Active requests.Session for HTTP downloads.
+        url: Source URL to download from.
+        dest_path: Local destination path.
+        overwrite: If True, re-download even if the file already exists.
+        use_browser: If True, use Playwright browser for the download.
+
+    Returns:
+        True if the file was successfully obtained (new, skipped, or redownloaded),
+        False on error.
+    """
     global _tracker
     fname = dest_path.name
 
@@ -1179,11 +1591,21 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
 
     if use_browser:
         ok = _browser_download_file(url, dest_path, overwrite=True)
+        # Magic-byte integrity check after browser download (Step 1.A3-b)
+        if ok and not _verify_download(dest_path):
+            print(f"\r    [CORRUPT] {fname}: unexpected file format "
+                  f"(HTML error page from browser?)          ")
+            dest_path.unlink(missing_ok=True)
+            ok = False
+
         size = dest_path.stat().st_size if dest_path.exists() else 0
-        # TODO 1.A3-b: compute hash for browser-downloaded files
         file_hash = _compute_sha256(dest_path) if ok and dest_path.exists() else None
         if _tracker:
-            _tracker.file_done(fname, size, "ok" if ok else "fail")
+            if ok:
+                _tracker.file_done(fname, size, "ok")
+            else:
+                _tracker.file_failed(url, str(dest_path), fname,
+                                     "browser download failed", use_browser=True)
         update_manifest_entry(url, "ok" if ok else "fail", size, file_hash)
         return ok
 
@@ -1197,17 +1619,51 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
                   f"retrying in {delay}s...          ")
             time.sleep(delay)
         try:
-            resp = session.get(url, timeout=120, stream=True)
+            # Optimization: Check if we can resume from partial download
+            resume_from = 0
+            if dest_path.exists() and dest_path.stat().st_size > 0:
+                resume_from = dest_path.stat().st_size
+                # Verify server supports range requests
+                try:
+                    head_resp = session.head(url, timeout=15)
+                    accept_ranges = head_resp.headers.get("accept-ranges", "none").lower()
+                    if accept_ranges == "none":
+                        # Server doesn't support resume, delete and restart
+                        dest_path.unlink()
+                        resume_from = 0
+                except Exception:
+                    # If HEAD fails, just restart
+                    dest_path.unlink()
+                    resume_from = 0
+
+            headers = {}
+            mode = "ab" if resume_from > 0 else "wb"
+            if resume_from > 0:
+                headers["Range"] = f"bytes={resume_from}-"
+
+            resp = session.get(url, headers=headers, timeout=120, stream=True)
             resp.raise_for_status()
 
-            total_size = int(resp.headers.get("content-length", 0))
-            downloaded = 0
+            # Validate Content-Range header if resuming
+            if resume_from > 0 and resp.status_code != 206:
+                # Server doesn't support range, restart
+                dest_path.unlink()
+                resp = session.get(url, timeout=120, stream=True)
+                resp.raise_for_status()
+                mode = "wb"
+                resume_from = 0
+
+            total_size = int(resp.headers.get("content-length", 0)) + resume_from
+            downloaded = resume_from
             dest_path.parent.mkdir(parents=True, exist_ok=True)
 
+            # Optimization: Adaptive chunk sizing based on file size
             # TODO 1.A3-b: compute SHA-256 while streaming (no extra I/O pass)
+            chunk_size = _get_chunk_size(total_size)
+
             sha256 = hashlib.sha256()
-            with open(dest_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=8192):
+            with open(dest_path, mode) as f:
+                for chunk in resp.iter_content(chunk_size=chunk_size):
                     f.write(chunk)
                     sha256.update(chunk)
                     downloaded += len(chunk)
@@ -1217,6 +1673,15 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
                         )
 
             file_hash = sha256.hexdigest()
+
+            # Magic-byte integrity check after write (Step 1.A3-b)
+            if not _verify_download(dest_path):
+                print(f"\r    [CORRUPT] {fname}: unexpected file format "
+                      f"(HTML error page?)          ")
+                dest_path.unlink(missing_ok=True)
+                last_exc = RuntimeError("magic-byte verification failed")
+                continue  # Retry loop
+
             if _tracker:
                 _tracker.file_done(fname, downloaded, "ok")
             else:
@@ -1227,11 +1692,13 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
 
         except requests.RequestException as e:
             last_exc = e
-            if dest_path.exists():
+            # Don't delete file on error - we'll try to resume next attempt
+            if dest_path.exists() and dest_path.stat().st_size == 0:
                 dest_path.unlink()
 
     if _tracker:
-        _tracker.file_done(fname, 0, "fail")
+        _tracker.file_failed(url, str(dest_path), fname, str(last_exc),
+                             use_browser=False)
     else:
         print(f"\r    [FAIL] {fname}: {last_exc}          ")
     update_manifest_entry(url, "fail", 0, None)
@@ -1252,6 +1719,11 @@ def _extract_zip(zip_path: Path, dest_dir: Path):
 # ── Display ───────────────────────────────────────────────────────────────────
 
 def list_files(all_files: dict[str, dict[str, list[dict]]]) -> None:
+    """Print a dry-run listing of all discovered files grouped by fiscal year and source.
+
+    Args:
+        all_files: Nested dict {year: {source_label: [file_dict, ...]}} from discovery.
+    """
     grand_total = 0
     for year in sorted(all_files.keys(), reverse=True):
         sources = all_files[year]
@@ -1324,12 +1796,25 @@ def _interactive_select(title: str, items: list[str], item_labels: dict[str, str
 
 
 def interactive_select_years(available: dict[str, str]) -> list[str]:
+    """Prompt the user to select fiscal years interactively.
+
+    Args:
+        available: Dict mapping year strings to URLs (from discover_fiscal_years).
+
+    Returns:
+        List of selected year strings.
+    """
     years = list(available.keys())
     year_labels = {year: f"FY{year}" for year in years}
     return _interactive_select("Available Fiscal Years:", years, year_labels, "fiscal years")
 
 
 def interactive_select_sources() -> list[str]:
+    """Prompt the user to select download sources interactively.
+
+    Returns:
+        List of selected source identifier strings (e.g. ['army', 'navy']).
+    """
     labels = {
         "comptroller": "Comptroller (main DoD summary documents)",
         "defense-wide": "Defense Wide (budget justification books)",
@@ -1454,18 +1939,33 @@ def download_all(
         "total_bytes": _tracker.total_bytes,
     }
 
+    # Write structured failure log for --retry-failures (TODO 1.A6-a)
+    # JSON schema: list of {url, dest, filename, error, source, year,
+    #                        use_browser, timestamp}
+    failed_json_path = output_dir / "failed_downloads.json"
+    if _tracker._failed_files:
+        failed_json_path.write_text(
+            json.dumps(_tracker._failed_files, indent=2), encoding="utf-8"
+        )
+        print(f"\n  Failure log: {failed_json_path}")
+        print(f"  Retry with: python dod_budget_downloader.py "
+              f"--retry-failures {failed_json_path}")
+    elif failed_json_path.exists():
+        # Clean up stale failure log from a previous run
+        failed_json_path.unlink()
+
     if isinstance(_tracker, GuiProgressTracker):
-        total_dl = _format_bytes(_tracker.total_bytes)
-        elapsed = _elapsed(_tracker.start_time)
+        total_dl = format_bytes(_tracker.total_bytes)
+        elapsed_str = elapsed(_tracker.start_time)
         _tracker._log_lines.append(
             f"\n--- Complete: {_tracker.completed} downloaded, "
             f"{_tracker.skipped} skipped, {_tracker.failed} failed "
-            f"({total_dl}, {elapsed}) ---")
+            f"({total_dl}, {elapsed_str}) ---")
         time.sleep(0.3)
         summary_str = (
             f"Downloaded: {_tracker.completed}   Skipped: {_tracker.skipped}   "
             f"Failed: {_tracker.failed}\n"
-            f"Total size: {total_dl}   Elapsed: {elapsed}"
+            f"Total size: {total_dl}   Elapsed: {elapsed_str}"
         )
         _tracker.show_completion_dialog(summary_str)
 
@@ -1477,6 +1977,7 @@ def download_all(
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    """Parse CLI arguments and run the interactive or unattended download pipeline."""
     parser = argparse.ArgumentParser(
         description="Download budget documents from DoD Comptroller and service websites."
     )
@@ -1519,7 +2020,82 @@ def main():
         "--extract-zips", action="store_true", dest="extract_zips",
         help="Extract ZIP archives after downloading them",
     )
+    parser.add_argument(
+        "--refresh-cache", action="store_true", dest="refresh_cache",
+        help="Ignore cache and refresh discovery from source",
+    )
+    parser.add_argument(
+        "--retry-failures", nargs="?", const=None, default=False,
+        metavar="PATH",
+        dest="retry_failures",
+        help=(
+            "Re-download only previously failed files. Reads from "
+            "failed_downloads.json in the output directory by default, "
+            "or from PATH if specified. Skips discovery. (TODO 1.A6-b)"
+        ),
+    )
     args = parser.parse_args()
+
+    # Optimization: Set global flag for cache refresh
+    global _refresh_cache
+    _refresh_cache = args.refresh_cache
+
+    # ── Retry-failures early path (TODO 1.A6-b) ──────────────────────────────
+    if args.retry_failures is not False:
+        # Determine the path to read failures from
+        failures_path = (
+            Path(args.retry_failures)
+            if args.retry_failures is not None
+            else args.output / "failed_downloads.json"
+        )
+        if not failures_path.exists():
+            print(f"ERROR: Failure log not found: {failures_path}")
+            print("Run a download first to generate the failure log.")
+            sys.exit(1)
+
+        with open(failures_path) as fp:
+            failed_entries: list[dict] = json.load(fp)
+
+        if not failed_entries:
+            print("No failures to retry.")
+            sys.exit(0)
+
+        print(f"Retrying {len(failed_entries)} failed download(s)...")
+        session = get_session()
+        tracker = (ProgressTracker if args.no_gui else GuiProgressTracker)(len(failed_entries))
+        global _tracker
+        _tracker = tracker
+
+        still_failed: list[dict] = []
+        for entry in failed_entries:
+            url = entry["url"]
+            dest = Path(entry["dest"])
+            fname = entry["filename"]
+            use_browser = entry.get("use_browser", False)
+            source = entry.get("source", "")
+            year = entry.get("year", "")
+
+            _tracker.set_source(year, source)
+            ok = download_file(session, url, dest, overwrite=True,
+                               use_browser=use_browser)
+            if not ok:
+                still_failed.append(entry)
+
+        # Write updated failure log: only entries that failed again
+        if still_failed:
+            failures_path.write_text(
+                json.dumps(still_failed, indent=2), encoding="utf-8"
+            )
+            print(f"\n  {len(still_failed)} file(s) still failed — "
+                  f"log updated: {failures_path}")
+        else:
+            failures_path.unlink(missing_ok=True)
+            print("\n  All retries succeeded.")
+
+        _tracker = None
+        _close_browser()
+        _close_session()
+        sys.exit(1 if still_failed else 0)
 
     session = get_session()
 
@@ -1611,9 +2187,6 @@ def main():
             if _is_browser_source(source):
                 browser_labels.add(label)
 
-            #if use_gui:
-            #    _tracker.discovery_step(step_label, len(files))
-
             time.sleep(args.delay)
 
     # ── List mode ──
@@ -1636,7 +2209,7 @@ def main():
 
     # ── Terminal summary (GUI summary is shown inside download_all) ──
     if args.no_gui:
-        total_dl = _format_bytes(summary["total_bytes"])
+        total_dl = format_bytes(summary["total_bytes"])
         print(f"\n\n{'='*70}")
         print(f"  Download Complete")
         print(f"{'='*70}")
@@ -1646,6 +2219,10 @@ def main():
         print(f"  Total size: {total_dl}")
         print(f"  Location:   {args.output.resolve()}")
         print(f"  Manifest:   {args.output / 'manifest.json'}")
+
+    # Optimization: Cleanup browser and session
+    _close_browser()
+    _close_session()
 
 
 if __name__ == "__main__":

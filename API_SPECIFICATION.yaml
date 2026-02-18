@@ -1,0 +1,438 @@
+# DoD Budget Analysis API Specification — Step 2.C2-a
+# Version: 1.0
+# Last Updated: 2026-02-18
+
+openapi: 3.0.0
+info:
+  title: DoD Budget Analysis API
+  description: REST API for searching and analyzing DoD budget documents
+  version: 1.0.0
+  contact:
+    name: Project Team
+    url: https://github.com/wschosta/dod-budget-analysis
+
+servers:
+  - url: http://localhost:5000/api/v1
+    description: Development server
+  - url: https://api.dod-budget.example.com/api/v1
+    description: Production server
+
+tags:
+  - name: Search
+    description: Budget line item and document search
+  - name: Aggregations
+    description: Summary statistics and rollups
+  - name: Reference Data
+    description: Lookup tables and metadata
+  - name: Export
+    description: Data export endpoints
+
+paths:
+  /search/budget-lines:
+    get:
+      tags:
+        - Search
+      summary: Search budget line items
+      description: Full-text search across budget line items with optional filtering
+      operationId: searchBudgetLines
+      parameters:
+        - name: q
+          in: query
+          description: Search query (supports AND, OR, phrase queries)
+          required: true
+          schema:
+            type: string
+            example: "missile defense"
+        - name: org
+          in: query
+          description: Filter by organization (case-insensitive)
+          schema:
+            type: string
+            enum:
+              - Army
+              - Navy
+              - Air Force
+              - Space Force
+              - Marine Corps
+              - Defense-Wide
+              - Joint Staff
+        - name: exhibit_type
+          in: query
+          description: Filter by exhibit type code
+          schema:
+            type: string
+            enum:
+              - p1
+              - r1
+              - o1
+              - m1
+              - c1
+              - rf1
+              - p1r
+        - name: fiscal_year
+          in: query
+          description: Filter by fiscal year (e.g., "FY2026")
+          schema:
+            type: string
+            pattern: '^FY\d{4}$'
+        - name: limit
+          in: query
+          description: Maximum results to return (default 25, max 100)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+        - name: offset
+          in: query
+          description: Pagination offset (default 0)
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        '200':
+          description: Successful search result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResultSet'
+        '400':
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /search/pdf-pages:
+    get:
+      tags:
+        - Search
+      summary: Search PDF document content
+      description: Full-text search across scanned/OCR'd PDF pages
+      operationId: searchPdfPages
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search query
+          schema:
+            type: string
+        - name: category
+          in: query
+          description: PDF source category
+          schema:
+            type: string
+            enum:
+              - Comptroller
+              - Defense-Wide
+              - Army
+              - Navy
+              - Air Force
+              - Space Force
+              - Marine Corps
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 15
+            maximum: 50
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_results:
+                    type: integer
+                  pages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PdfPage'
+
+  /budget-lines/{id}:
+    get:
+      tags:
+        - Search
+      summary: Get a specific budget line item
+      operationId: getBudgetLine
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Budget line item details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BudgetLine'
+        '404':
+          description: Budget line not found
+
+  /aggregations/by-organization:
+    get:
+      tags:
+        - Aggregations
+      summary: Sum budget amounts by organization
+      operationId: aggregateByOrganization
+      parameters:
+        - name: fiscal_year
+          in: query
+          schema:
+            type: string
+            example: "FY2026"
+        - name: exhibit_type
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Aggregated totals by organization
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fiscal_year:
+                    type: string
+                  totals:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        organization:
+                          type: string
+                        total_amount_thousands:
+                          type: number
+                        line_count:
+                          type: integer
+
+  /aggregations/by-exhibit-type:
+    get:
+      tags:
+        - Aggregations
+      summary: Sum budget amounts by exhibit type
+      operationId: aggregateByExhibitType
+      parameters:
+        - name: fiscal_year
+          in: query
+          schema:
+            type: string
+        - name: org
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Aggregated totals by exhibit type
+
+  /reference/organizations:
+    get:
+      tags:
+        - Reference Data
+      summary: Get list of available organizations
+      operationId: listOrganizations
+      responses:
+        '200':
+          description: List of organizations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  organizations:
+                    type: array
+                    items:
+                      type: string
+
+  /reference/exhibit-types:
+    get:
+      tags:
+        - Reference Data
+      summary: Get list of exhibit type codes
+      operationId: listExhibitTypes
+      responses:
+        '200':
+          description: Exhibit type codes and descriptions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  exhibit_types:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code:
+                          type: string
+                        name:
+                          type: string
+
+  /reference/fiscal-years:
+    get:
+      tags:
+        - Reference Data
+      summary: Get available fiscal years
+      operationId: listFiscalYears
+      responses:
+        '200':
+          description: Available fiscal years in database
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fiscal_years:
+                    type: array
+                    items:
+                      type: string
+
+  /summary:
+    get:
+      tags:
+        - Aggregations
+      summary: Database summary statistics
+      operationId: getSummary
+      responses:
+        '200':
+          description: Database summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  budget_lines_total:
+                    type: integer
+                  pdf_pages_total:
+                    type: integer
+                  files_ingested:
+                    type: integer
+                  last_update:
+                    type: string
+                    format: date-time
+
+  /export/budget-lines:
+    post:
+      tags:
+        - Export
+      summary: Export budget lines to CSV or JSON
+      operationId: exportBudgetLines
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: string
+                  description: Search query
+                org:
+                  type: string
+                fiscal_year:
+                  type: string
+                format:
+                  type: string
+                  enum:
+                    - csv
+                    - json
+      responses:
+        '200':
+          description: Exported data file
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/json:
+              schema:
+                type: object
+
+components:
+  schemas:
+    BudgetLine:
+      type: object
+      properties:
+        id:
+          type: integer
+        source_file:
+          type: string
+        exhibit_type:
+          type: string
+        fiscal_year:
+          type: string
+        account:
+          type: string
+        account_title:
+          type: string
+        organization:
+          type: string
+        organization_name:
+          type: string
+        budget_activity_title:
+          type: string
+        line_item_title:
+          type: string
+        amount_fy2024_actual:
+          type: number
+        amount_fy2025_enacted:
+          type: number
+        amount_fy2026_request:
+          type: number
+        pe_number:
+          type: string
+          description: Program Element number if parsed
+
+    PdfPage:
+      type: object
+      properties:
+        id:
+          type: integer
+        source_file:
+          type: string
+        source_category:
+          type: string
+        page_number:
+          type: integer
+        page_text:
+          type: string
+        has_tables:
+          type: boolean
+        table_data:
+          type: string
+
+    SearchResultSet:
+      type: object
+      properties:
+        query:
+          type: string
+        total_results:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BudgetLine'
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        status_code:
+          type: integer

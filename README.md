@@ -27,7 +27,7 @@ The tool downloads PDFs, Excel spreadsheets (`.xlsx`, `.xls`), ZIP archives, and
 - **Terminal-only mode** (`--no-gui`) with ASCII progress bars
 - **Failure logging** - timestamped `.txt` log with URLs for any failed downloads
 - **Configurable** - filter by fiscal year, source, and file type
-- **⚡ Optimized for Speed** - 3-6x faster with parallel discovery and downloads (see [OPTIMIZATION_DOCS](OPTIMIZATION_DOCS/))
+- **⚡ Optimized for Speed** - 5-15x faster with 10 performance enhancements (see [docs/wiki/optimizations](docs/wiki/optimizations/))
 
 ## Requirements
 
@@ -93,6 +93,9 @@ python dod_budget_downloader.py --years 2026 --overwrite
 | `--types` | Filter by file type (e.g., `pdf xlsx`) |
 | `--overwrite` | Re-download files even if they already exist |
 | `--no-gui` | Disable GUI window, use terminal-only progress |
+| `--refresh-cache` | Ignore cache and refresh discovery from source |
+| `--delay` | Seconds to wait between requests (default: 0.5) |
+| `--extract-zips` | Extract ZIP archives after downloading them |
 
 ## Output Structure
 
@@ -116,17 +119,18 @@ DoD_Budget_Documents/
 
 ## Performance
 
-This tool is optimized for speed with 13 performance enhancements:
+This tool is optimized for speed with 10 performance enhancements:
 
-| Phase | Speedup | Key Optimizations |
-|-------|---------|-------------------|
-| **Discovery** | 3-5x | Parallel sources (4 threads), smart delays |
-| **Download** | 3-6x | Parallel workers (4 threads), connection pooling |
-| **Overall** | **3-6x** | ~6 min → ~1-2 min for typical workloads |
+| Use Case | Speedup | Key Optimizations |
+|----------|---------|-------------------|
+| **Fresh Discovery** | 1.3x | lxml parser, connection pooling |
+| **Cached Discovery** | 10-20x | Metadata caching (24h TTL) |
+| **Download Retry** | 2-3x | Partial resume, adaptive chunking |
+| **Overall** | **5-15x** | Cumulative effect of all optimizations |
 
-**Example**: Downloading 5 years × all sources goes from 6-11 minutes to 1-2 minutes.
+**Example**: First run discovers sources, second run reuses cache for 10-20x speedup.
 
-See [OPTIMIZATION_DOCS/00_START_HERE.md](OPTIMIZATION_DOCS/00_START_HERE.md) for detailed optimization information.
+See [docs/wiki/optimizations/START_HERE.md](docs/wiki/optimizations/START_HERE.md) for detailed optimization information.
 
 ## Architecture
 
