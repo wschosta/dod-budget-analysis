@@ -162,6 +162,10 @@ Usage:
 """
 
 import argparse
+<<<<<<< HEAD
+=======
+import hashlib
+>>>>>>> 7ad013903c7c264171d055155b087b2a05f12088
 import json
 import os
 import re
@@ -170,7 +174,11 @@ import sys
 import threading
 import time
 import zipfile
+<<<<<<< HEAD
 from datetime import datetime
+=======
+from datetime import datetime, timezone
+>>>>>>> 7ad013903c7c264171d055155b087b2a05f12088
 from pathlib import Path
 from urllib.parse import urljoin, urlparse, unquote
 
@@ -704,8 +712,89 @@ class GuiProgressTracker:
 # Global tracker, set during main()
 _tracker: ProgressTracker | GuiProgressTracker | None = None
 
+<<<<<<< HEAD
 # Optimization: Global session reuse for connection pooling
 _global_session = None
+=======
+# ── Manifest (TODO 1.A3-a & 1.A3-b) ─────────────────────────────────────────
+
+# In-memory manifest; written to disk by write_manifest() / update_manifest_entry()
+_manifest: dict = {}
+_manifest_path: Path | None = None
+
+
+def _compute_sha256(file_path: Path) -> str:
+    """Compute the SHA-256 hex digest of a file.
+
+    Reads in 64 KB chunks to avoid loading large files into memory.
+    Implements TODO 1.A3-b.
+    """
+    h = hashlib.sha256()
+    with open(file_path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def write_manifest(output_dir: Path, all_files: dict, manifest_path: Path) -> None:
+    """Write an initial manifest.json listing all files to be downloaded.
+
+    Each entry records: url, expected_filename, source, fiscal_year, extension.
+    After downloading, call update_manifest_entry() to add status/size/hash.
+    Implements TODO 1.A3-a.
+    """
+    global _manifest, _manifest_path
+    _manifest_path = manifest_path
+
+    entries: dict[str, dict] = {}
+    for year, sources in all_files.items():
+        for source_label, files in sources.items():
+            for f in files:
+                key = f["url"]
+                entries[key] = {
+                    "url": f["url"],
+                    "filename": f["filename"],
+                    "source": source_label,
+                    "fiscal_year": year,
+                    "extension": f.get("extension", ""),
+                    "status": "pending",
+                    "file_size": None,
+                    "sha256": None,
+                    "downloaded_at": None,
+                }
+
+    _manifest = entries
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(manifest_path, "w", encoding="utf-8") as fh:
+        json.dump({"generated_at": datetime.now(timezone.utc).isoformat(), "files": entries}, fh, indent=2)
+
+
+def update_manifest_entry(url: str, status: str, file_size: int,
+                          file_hash: str | None) -> None:
+    """Update a manifest entry after a download attempt.
+
+    Writes the updated manifest to disk immediately so it survives crashes.
+    Implements TODO 1.A3-a / 1.A3-b.
+    """
+    global _manifest, _manifest_path
+    if not _manifest_path or url not in _manifest:
+        return
+    _manifest[url].update({
+        "status": status,
+        "file_size": file_size,
+        "sha256": file_hash,
+        "downloaded_at": datetime.now(timezone.utc).isoformat(),
+    })
+    try:
+        with open(_manifest_path, "w", encoding="utf-8") as fh:
+            json.dump(
+                {"generated_at": _manifest.get("_meta_generated_at", ""),
+                 "files": _manifest},
+                fh, indent=2,
+            )
+    except OSError:
+        pass  # Non-fatal: manifest update failures don't block downloads
+>>>>>>> 7ad013903c7c264171d055155b087b2a05f12088
 
 
 # ── Session ────────────────────────────────────────────────────────────────────
@@ -1234,13 +1323,18 @@ SOURCE_DISCOVERERS = {
 
 # ── Download ──────────────────────────────────────────────────────────────────
 def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
-                         use_browser: bool = False) -> str:
+                         use_browser: bool = False,
+                         expected_hash: str | None = None) -> str:
     """Check if a local file matches the remote.
 
+    If expected_hash is provided (from the manifest, TODO 1.A3-b), verifies
+    the local file's SHA-256 digest against it and triggers a redownload on
+    mismatch (handles silent corruption).
+
     Returns:
-        "skip"     - file exists and size matches (or remote size unknown)
-        "redownload" - file exists but size mismatch (partial/corrupt)
-        "download" - file does not exist
+        "skip"       - file exists and content matches (size or hash check)
+        "redownload" - file exists but is corrupt/mismatched
+        "download"   - file does not exist
     """
     if not dest_path.exists():
         return "download"
@@ -1248,6 +1342,14 @@ def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
     local_size = dest_path.stat().st_size
     if local_size == 0:
         return "redownload"
+
+    # TODO 1.A3-b: if we have a previously-recorded hash, verify it
+    if expected_hash:
+        local_hash = _compute_sha256(dest_path)
+        if local_hash != expected_hash:
+            print(f"\r    [HASH MISMATCH] {dest_path.name} — will redownload")
+            return "redownload"
+        return "skip"
 
     # Try to get remote size via HEAD request
     remote_size = None
@@ -1293,14 +1395,19 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
     global _tracker
     fname = dest_path.name
 
+    # Retrieve expected hash from manifest for integrity check (TODO 1.A3-b)
+    expected_hash = (_manifest.get(url) or {}).get("sha256")
+
     if not overwrite and dest_path.exists():
-        status = _check_existing_file(session, url, dest_path, use_browser)
+        status = _check_existing_file(session, url, dest_path, use_browser,
+                                      expected_hash=expected_hash)
         if status == "skip":
             size = dest_path.stat().st_size
             if _tracker:
                 _tracker.file_done(fname, size, "skip")
             else:
                 print(f"    [SKIP] Already exists: {fname}")
+            update_manifest_entry(url, "skip", size, expected_hash)
             return True
         if status == "redownload":
             local_mb = dest_path.stat().st_size / (1024 * 1024)
@@ -1309,9 +1416,12 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
 
     if use_browser:
         ok = _browser_download_file(url, dest_path, overwrite=True)
+        size = dest_path.stat().st_size if dest_path.exists() else 0
+        # TODO 1.A3-b: compute hash for browser-downloaded files
+        file_hash = _compute_sha256(dest_path) if ok and dest_path.exists() else None
         if _tracker:
-            size = dest_path.stat().st_size if dest_path.exists() else 0
             _tracker.file_done(fname, size, "ok" if ok else "fail")
+        update_manifest_entry(url, "ok" if ok else "fail", size, file_hash)
         return ok
 
     file_start = time.time()
@@ -1362,23 +1472,33 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
             downloaded = resume_from
             dest_path.parent.mkdir(parents=True, exist_ok=True)
 
+<<<<<<< HEAD
             # Optimization: Adaptive chunk sizing based on file size
             chunk_size = _get_chunk_size(total_size)
 
             with open(dest_path, mode) as f:
                 for chunk in resp.iter_content(chunk_size=chunk_size):
+=======
+            # TODO 1.A3-b: compute SHA-256 while streaming (no extra I/O pass)
+            sha256 = hashlib.sha256()
+            with open(dest_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+>>>>>>> 7ad013903c7c264171d055155b087b2a05f12088
                     f.write(chunk)
+                    sha256.update(chunk)
                     downloaded += len(chunk)
                     if _tracker:
                         _tracker.print_file_progress(
                             fname, downloaded, total_size, file_start
                         )
 
+            file_hash = sha256.hexdigest()
             if _tracker:
                 _tracker.file_done(fname, downloaded, "ok")
             else:
                 size_mb = downloaded / (1024 * 1024)
                 print(f"\r    [OK] {fname} ({size_mb:.1f} MB)          ")
+            update_manifest_entry(url, "ok", downloaded, file_hash)
             return True
 
         except requests.RequestException as e:
@@ -1391,6 +1511,7 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
         _tracker.file_done(fname, 0, "fail")
     else:
         print(f"\r    [FAIL] {fname}: {last_exc}          ")
+    update_manifest_entry(url, "fail", 0, None)
     return False
 
 
@@ -1495,6 +1616,139 @@ def interactive_select_sources() -> list[str]:
         "airforce": "US Air Force / Space Force",
     }
     return _interactive_select("Available Sources:", list(ALL_SOURCES), labels, "sources")
+
+
+# ── Programmatic download entry point (TODO 1.A4-a) ─────────────────────────
+
+
+def download_all(
+    all_files: dict,
+    output_dir: Path,
+    browser_labels: set,
+    *,
+    overwrite: bool = False,
+    delay: float = 0.5,
+    extract_zips: bool = False,
+    use_gui: bool = False,
+    manifest_path: Path | None = None,
+) -> dict:
+    """Download all discovered files and return a summary dict.
+
+    This is the programmatic interface decoupled from argparse/sys.argv, so it
+    can be called from cron jobs, CI pipelines, or the data-refresh script
+    (TODO 2.B4-a) without depending on the interactive/GUI layer.
+
+    Args:
+        all_files:      Nested dict {year: {source_label: [file_info, ...]}}
+                        as returned by the discover_* functions.
+        output_dir:     Root directory to write downloaded files into.
+        browser_labels: Set of source labels that require Playwright.
+        overwrite:      Re-download files that already exist locally.
+        delay:          Seconds to sleep between requests (rate-limit courtesy).
+        extract_zips:   Automatically extract .zip archives after downloading.
+        use_gui:        Show a Tkinter GUI progress window (requires display).
+        manifest_path:  Where to write/update the download manifest JSON.
+                        Defaults to output_dir/manifest.json.
+
+    Returns:
+        Summary dict with keys: downloaded, skipped, failed, total_bytes.
+    """
+    global _tracker
+
+    if manifest_path is None:
+        manifest_path = output_dir / "manifest.json"
+
+    # Write initial manifest before downloading (TODO 1.A3-a)
+    write_manifest(output_dir, all_files, manifest_path)
+
+    session = get_session()
+
+    total_files = sum(
+        len(f) for yr in all_files.values() for f in yr.values()
+    )
+    print(f"\nReady to download {total_files} file(s) to: {output_dir.resolve()}\n")
+
+    if use_gui:
+        _tracker = GuiProgressTracker(total_files)
+    else:
+        _tracker = ProgressTracker(total_files)
+        _tracker.print_overall()
+        print()
+
+    for year in sorted(all_files.keys(), reverse=True):
+        sources = all_files[year]
+        year_total = sum(len(f) for f in sources.values())
+        if year_total == 0:
+            print(f"\n  FY{year}: No matching files found.")
+            continue
+
+        for source_label, files in sources.items():
+            if not files:
+                continue
+
+            use_browser = source_label in browser_labels
+            safe_label = source_label.replace(" ", "_")
+            dest_dir = output_dir / f"FY{year}" / safe_label
+            print(f"\n{'='*70}")
+            method = "browser" if use_browser else "direct"
+            print(f"  FY{year} / {source_label} "
+                  f"({len(files)} files, {method}) -> {dest_dir}")
+            print(f"{'='*70}")
+            _tracker.set_source(year, source_label)
+
+            # Pre-filter: skip files that already exist locally (non-empty)
+            to_download = []
+            if not overwrite:
+                for file_info in files:
+                    dest = dest_dir / file_info["filename"]
+                    if dest.exists() and dest.stat().st_size > 0:
+                        size = dest.stat().st_size
+                        if _tracker:
+                            _tracker.file_done(dest.name, size, "skip")
+                        else:
+                            print(f"    [SKIP] Already exists: {dest.name}")
+                        update_manifest_entry(file_info["url"], "skip", size,
+                                              (_manifest.get(file_info["url"]) or {}).get("sha256"))
+                    else:
+                        to_download.append(file_info)
+            else:
+                to_download = files
+
+            for file_info in to_download:
+                dest = dest_dir / file_info["filename"]
+                ok = download_file(
+                    session, file_info["url"], dest,
+                    overwrite, use_browser=use_browser,
+                )
+                if ok and extract_zips and dest.suffix.lower() == ".zip":
+                    _extract_zip(dest, dest_dir)
+                time.sleep(delay)
+
+    summary = {
+        "downloaded": _tracker.completed,
+        "skipped": _tracker.skipped,
+        "failed": _tracker.failed,
+        "total_bytes": _tracker.total_bytes,
+    }
+
+    if isinstance(_tracker, GuiProgressTracker):
+        total_dl = _format_bytes(_tracker.total_bytes)
+        elapsed = _elapsed(_tracker.start_time)
+        _tracker._log_lines.append(
+            f"\n--- Complete: {_tracker.completed} downloaded, "
+            f"{_tracker.skipped} skipped, {_tracker.failed} failed "
+            f"({total_dl}, {elapsed}) ---")
+        time.sleep(0.3)
+        summary_str = (
+            f"Downloaded: {_tracker.completed}   Skipped: {_tracker.skipped}   "
+            f"Failed: {_tracker.failed}\n"
+            f"Total size: {total_dl}   Elapsed: {elapsed}"
+        )
+        _tracker.show_completion_dialog(summary_str)
+
+    _tracker = None
+    _close_browser()
+    return summary
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -1653,96 +1907,30 @@ def main():
         _close_browser()
         return
 
-    # ── Download ──
-    total_files = sum(
-        len(f) for yr in all_files.values() for f in yr.values()
+    # ── Download via download_all() (TODO 1.A4-a) ──
+    summary = download_all(
+        all_files,
+        args.output,
+        browser_labels,
+        overwrite=args.overwrite,
+        delay=args.delay,
+        extract_zips=args.extract_zips,
+        use_gui=not args.no_gui,
+        manifest_path=args.output / "manifest.json",
     )
-    print(f"\nReady to download {total_files} file(s) to: {args.output.resolve()}\n")
 
+    # ── Terminal summary (GUI summary is shown inside download_all) ──
     if args.no_gui:
-        _tracker = ProgressTracker(total_files)
-        _tracker.print_overall()
-        print()  # newline after initial overall bar
-    else:
-        _tracker = GuiProgressTracker(total_files)
-
-    for year in sorted(all_files.keys(), reverse=True):
-        sources = all_files[year]
-        year_total = sum(len(f) for f in sources.values())
-        if year_total == 0:
-            print(f"\n  FY{year}: No matching files found.")
-            continue
-
-        for source_label, files in sources.items():
-            if not files:
-                continue
-
-            use_browser = source_label in browser_labels
-            safe_label = source_label.replace(" ", "_")
-            dest_dir = args.output / f"FY{year}" / safe_label
-            print(f"\n{'='*70}")
-            method = "browser" if use_browser else "direct"
-            print(f"  FY{year} / {source_label} "
-                  f"({len(files)} files, {method}) -> {dest_dir}")
-            print(f"{'='*70}")
-            _tracker.set_source(year, source_label)
-
-            # Pre-filter: skip files that already exist locally (non-empty)
-            # to avoid per-file HEAD requests when not overwriting.
-            to_download = []
-            if not args.overwrite:
-                for file_info in files:
-                    dest = dest_dir / file_info["filename"]
-                    if dest.exists() and dest.stat().st_size > 0:
-                        size = dest.stat().st_size
-                        if _tracker:
-                            _tracker.file_done(dest.name, size, "skip")
-                        else:
-                            print(f"    [SKIP] Already exists: {dest.name}")
-                    else:
-                        to_download.append(file_info)
-            else:
-                to_download = files
-
-            for file_info in to_download:
-                dest = dest_dir / file_info["filename"]
-                ok = download_file(
-                    session, file_info["url"], dest,
-                    args.overwrite, use_browser=use_browser,
-                )
-                if ok and args.extract_zips and dest.suffix.lower() == ".zip":
-                    _extract_zip(dest, dest_dir)
-                time.sleep(args.delay)
-
-    # ── Cleanup ──
-    _close_browser()
-
-    # ── Summary ──
-    elapsed = _tracker._elapsed()
-    total_dl = _tracker._format_bytes(_tracker.total_bytes)
-    print(f"\n\n{'='*70}")
-    print(f"  Download Complete")
-    print(f"{'='*70}")
-    print(f"  Downloaded: {_tracker.completed}")
-    print(f"  Skipped:    {_tracker.skipped}")
-    print(f"  Failed:     {_tracker.failed}")
-    print(f"  Total size: {total_dl}")
-    print(f"  Elapsed:    {elapsed}")
-    print(f"  Location:   {args.output.resolve()}")
-
-    if isinstance(_tracker, GuiProgressTracker):
-        # Append final log line so it appears in the log widget before we grab it
-        _tracker._log_lines.append(
-            f"\n--- Complete: {_tracker.completed} downloaded, "
-            f"{_tracker.skipped} skipped, {_tracker.failed} failed "
-            f"({total_dl}, {elapsed}) ---")
-        # Give the GUI poll loop one cycle to flush the log lines
-        time.sleep(0.3)
-        summary = (f"Downloaded: {_tracker.completed}   Skipped: {_tracker.skipped}   "
-                   f"Failed: {_tracker.failed}\n"
-                   f"Total size: {total_dl}   Elapsed: {elapsed}")
-        _tracker.show_completion_dialog(summary)
-    _tracker = None
+        total_dl = _format_bytes(summary["total_bytes"])
+        print(f"\n\n{'='*70}")
+        print(f"  Download Complete")
+        print(f"{'='*70}")
+        print(f"  Downloaded: {summary['downloaded']}")
+        print(f"  Skipped:    {summary['skipped']}")
+        print(f"  Failed:     {summary['failed']}")
+        print(f"  Total size: {total_dl}")
+        print(f"  Location:   {args.output.resolve()}")
+        print(f"  Manifest:   {args.output / 'manifest.json'}")
 
     # Optimization: Cleanup browser and session
     _close_browser()
