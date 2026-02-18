@@ -130,9 +130,13 @@ ORG_MAP = {
 EXHIBIT_TYPES = {
     "m1": "Military Personnel (M-1)",
     "o1": "Operation & Maintenance (O-1)",
-    "p1": "Procurement (P-1)",
     "p1r": "Procurement (P-1R Reserves)",
+    "p1": "Procurement (P-1)",
+    "p5": "Procurement Detail (P-5)",
     "r1": "RDT&E (R-1)",
+    "r2": "RDT&E Detail (R-2)",
+    "r3": "RDT&E Detail (R-3)",
+    "r4": "RDT&E Detail (R-4)",
     "rf1": "Revolving Funds (RF-1)",
     "c1": "Military Construction (C-1)",
 }
@@ -177,7 +181,8 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             --   4. All INSERT/SELECT statements below
             --
             -- Future refactoring options:
-            --   A. Normalized: fiscal_year_amounts(budget_line_id, fiscal_year, amount_type, amount)
+            --   A. Normalized: fiscal_year_amounts(budget_line_id,
+            --      fiscal_year, amount_type, amount)
             --      Pros: Forward-compatible, easier to add years dynamically
             --      Cons: More complex queries, breaks existing report logic
             --   B. JSON: Store all years as {"2024": {types...}, "2025": {...}}
@@ -206,7 +211,11 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             currency_year TEXT,
             -- TODO 1.B4-c: Appropriation code and title split from account_title
             appropriation_code TEXT,
-            appropriation_title TEXT
+            appropriation_title TEXT,
+            -- TODO 1.B3-a: amount unit (thousands or millions)
+            amount_unit TEXT,
+            -- TODO 1.B5-f: budget type (procurement, rdt&e, o&m, etc.)
+            budget_type TEXT
         );
 
         -- Full-text search index for budget lines
@@ -408,6 +417,73 @@ def _detect_currency_year(sheet_name: str, filename: str) -> str:
     return "then-year"
 
 
+def _detect_amount_unit(rows: list, header_idx: int) -> str:
+    """Detect whether amounts are in thousands or millions.
+
+    Scans all rows up to and including header_idx for unit keywords.
+    Returns 'millions' if detected before 'thousands', else 'thousands'.
+    Implements TODO 1.B3-a.
+    """
+    for row in rows[:header_idx + 1]:
+        for cell in row:
+            if cell is None:
+                continue
+            text = str(cell).lower()
+            mil_pos = text.find("million")
+            thou_pos = text.find("thousand")
+            if mil_pos >= 0 and (thou_pos < 0 or mil_pos < thou_pos):
+                return "millions"
+            if thou_pos >= 0:
+                return "thousands"
+    return "thousands"
+
+
+def _normalise_fiscal_year(raw: str) -> str:
+    """Normalise a raw fiscal year string to canonical 'FY YYYY' format.
+
+    Handles bare years ('2026'), compact ('FY2026'), spaced ('FY 2026'),
+    lowercase, and embedded strings ('Sheet FY2026').
+    Returns the input unchanged if no four-digit year is found.
+    Implements TODO 1.B2-d.
+    """
+    match = re.search(r"(?:FY\s*)?(20\d{2})", raw, re.IGNORECASE)
+    if not match:
+        return raw
+    return f"FY {match.group(1)}"
+
+
+def _merge_header_rows(header: list, sub: list) -> list:
+    """Merge a two-row split header into a single row.
+
+    If the sub-row is all blank, or looks like a data row (numeric values
+    or text longer than 50 chars), returns the header unchanged.
+    Otherwise appends each non-None sub cell to its matching header cell.
+    Implements TODO 1.B2-c.
+    """
+    non_none = [c for c in sub if c is not None]
+    if not non_none:
+        return list(header)
+
+    for cell in non_none:
+        cell_str = str(cell).strip()
+        try:
+            float(cell_str)
+            return list(header)  # numeric value → treat sub as data row
+        except ValueError:
+            pass
+        if len(cell_str) > 50:
+            return list(header)  # long narrative → treat sub as data row
+
+    merged = []
+    for i, h in enumerate(header):
+        s = sub[i] if i < len(sub) else None
+        if s is not None and str(s).strip():
+            merged.append(f"{h} {s}".strip() if h else str(s))
+        else:
+            merged.append(h)
+    return merged
+
+
 # Note: This function is ~110 lines with three logical sections:
 # 1) Common fields mapping (account, organization, budget activity)
 # 2) Sub-activity/line-item fields (varies by exhibit type)
@@ -534,6 +610,28 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
         elif "total obligation authority" in h:
             mapping.setdefault("amount_fy2026_total", i)
 
+    # Year-agnostic amount column detection (Step 1.B2-a).
+    # Handles any FY20XX year not already covered by the hardcoded blocks above.
+    _fy_re = re.compile(r"fy\s*(20\d{2})")
+    for i, h in enumerate(h_lower):
+        m = _fy_re.search(h.replace(" ", "")) or _fy_re.search(h)
+        if not m:
+            continue
+        year = m.group(1)
+        prefix = f"amount_fy{year}"
+        if "actual" in h:
+            mapping.setdefault(f"{prefix}_actual", i)
+        elif "enacted" in h:
+            mapping.setdefault(f"{prefix}_enacted", i)
+        elif "supplemental" in h:
+            mapping.setdefault(f"{prefix}_supplemental", i)
+        elif "reconcil" in h:
+            mapping.setdefault(f"{prefix}_reconciliation", i)
+        elif "total" in h:
+            mapping.setdefault(f"{prefix}_total", i)
+        elif "request" in h or "disc" in h:
+            mapping.setdefault(f"{prefix}_request", i)
+
     # TODO 1.B2-c [MEDIUM, ~1500 tokens]: Handle multi-row headers.
     #   Some exhibit sheets split header text across two rows (e.g., row N has "FY2026"
     #   and row N+1 has "Request Amount" in the same column). In ingest_excel_file(),
@@ -590,7 +688,10 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
 
         # Detect fiscal year from sheet name
         fy_match = re.search(r"(FY\s*)?20\d{2}", sheet_name, re.IGNORECASE)
-        fiscal_year = fy_match.group().replace("FY ", "FY").replace("FY", "FY ") if fy_match else sheet_name
+        fiscal_year = (
+            fy_match.group().replace("FY ", "FY").replace("FY", "FY ")
+            if fy_match else sheet_name
+        )
         # TODO 1.B2-d [EASY, ~600 tokens]: Normalise fiscal_year to canonical "FY YYYY".
         #   The regex match above may return "2026", "FY2026", or "FY 2026" depending on
         #   the sheet name, which breaks GROUP BY queries. Add a helper function
@@ -628,11 +729,17 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
             if not row or all(v is None for v in row):
                 continue
 
-            acct = row[col_map["account"]] if col_map.get("account") is not None and col_map["account"] < len(row) else None
+            _acc_idx = col_map.get("account")
+            acct = row[_acc_idx] if _acc_idx is not None and _acc_idx < len(row) else None
             if not acct:
                 continue
 
-            org_code = str(row[col_map["organization"]]).strip() if col_map.get("organization") is not None and col_map["organization"] < len(row) and row[col_map["organization"]] else ""
+            _org_idx = col_map.get("organization")
+            org_code = (
+                str(row[_org_idx]).strip()
+                if _org_idx is not None and _org_idx < len(row) and row[_org_idx]
+                else ""
+            )
             org_name = ORG_MAP.get(org_code, org_code)
             # TODO 1.B4-b [EASY, ~800 tokens]: Extend ORG_MAP (defined around line 140)
             #   to cover additional DoD organizations: SOCOM, DISA, DLA, MDA, DHA, NGB.
@@ -842,7 +949,9 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                 if issue_type:
                     # Record the issue for later analysis
                     conn.execute(
-                        "INSERT INTO extraction_issues (file_path, page_number, issue_type, issue_detail) VALUES (?,?,?,?)",
+                        "INSERT INTO extraction_issues "
+                        "(file_path, page_number, issue_type, issue_detail) "
+                        "VALUES (?,?,?,?)",
                         (relative_path, i + 1, issue_type.split(':')[0], issue_type)
                     )
                     page_issues_count += 1
@@ -894,8 +1003,12 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
         #   that passes a deliberately invalid PDF path to ingest_pdf_file() and asserts
         #   a row appears in ingested_files with status starting with "error:".
         conn.execute(
-            "INSERT OR REPLACE INTO ingested_files (file_path, file_type, file_size, file_modified, ingested_at, row_count, status) VALUES (?,?,?,?,datetime('now'),?,?)",
-            (relative_path, "pdf", file_path.stat().st_size, file_path.stat().st_mtime, 0, f"error: {e}")
+            "INSERT OR REPLACE INTO ingested_files "
+            "(file_path, file_type, file_size, file_modified, "
+            "ingested_at, row_count, status) "
+            "VALUES (?,?,?,?,datetime('now'),?,?)",
+            (relative_path, "pdf", file_path.stat().st_size,
+             file_path.stat().st_mtime, 0, f"error: {e}")
         )
         return 0
 
@@ -1383,7 +1496,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 """)
                 conn.execute("""
                     CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN
-                        INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data)
+                        INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid,
+                            page_text, source_file, table_data)
                         VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data);
                     END
                 """)
@@ -1397,7 +1511,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 )
                 conn.execute(
                     "CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN "
-                    "INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data) "
+                    "INSERT INTO pdf_pages_fts"
+                    "(pdf_pages_fts, rowid, page_text, source_file, table_data) "
                     "VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data); END"
                 )
                 conn.commit()
@@ -1453,7 +1568,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         UPDATE data_sources SET last_updated = datetime('now')
         WHERE source_id IN (
             SELECT DISTINCT
-                substr(file_path, 1, instr(substr(file_path, 1+instr(file_path, '/')), '/') + instr(file_path, '/') - 1)
+                substr(file_path, 1,
+                    instr(substr(file_path, 1+instr(file_path, '/')), '/')
+                    + instr(file_path, '/') - 1)
             FROM ingested_files
         )
     """)
