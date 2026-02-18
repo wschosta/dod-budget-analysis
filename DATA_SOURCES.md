@@ -1,213 +1,217 @@
-# DoD Budget Data Sources Documentation
+# DoD Budget Data Sources
 
-## Overview
-
-This document describes all configured data sources for the DoD Budget Analysis Tool, including base URLs, file patterns, supported fiscal years, and access requirements.
-
----
-
-## 1. Comptroller (DoD Office of the Under Secretary of Defense - Comptroller)
-
-**Source ID**: `comptroller`
-**Organization**: DoD Comptroller (OUSD-C)
-**Primary Content**: DoD Summary Budget Documents, Green Book, Overview of Budget documents
-
-### Base URL Pattern
-```
-https://comptroller.defense.gov/Budget-Materials/FY{YEAR}/
-```
-
-### Available Files
-- Summary budget justification documents (PDF)
-- Green Book (budget overview) - typically 100-200 MB PDF
-- Budget highlights (PDF) - executive summary
-- General information exhibit (PDF)
-
-### Fiscal Years Confirmed
-- FY 2017–2026 (continuous coverage)
-- Some years available back to FY 2012 via Wayback Machine
-
-### File Types
-- PDF (primary)
-- Excel tables (supplemental on some pages)
-
-### Access Requirements
-- Public domain (no authentication required)
-- Direct HTTP access available
-- Site accessed via beautifulsoup4 HTML scraping
-
-### Notes
-- Comptroller site reorganizes annually; URL patterns consistent within fiscal year
-- Files are large (50-300 MB); recommend incremental downloads
-- Some documents hosted on subdomains (e.g., `.mil/fmb/` for budget materials)
+Authoritative reference for every data source configured in
+`dod_budget_downloader.py`.  URL patterns, access methods, and file
+formats are extracted directly from the source code constants.
 
 ---
 
-## 2. Defense-Wide Services (Unified Defense-Wide Budget Materials)
+## Global Constants
 
-**Source ID**: `defense-wide`
-**Organization**: DoD Comptroller (Defense-Wide section)
-**Primary Content**: Defense-wide justification books, agency budget materials
-
-### Base URL Pattern
+```python
+BASE_URL                = "https://comptroller.war.gov"
+BUDGET_MATERIALS_URL    = "https://comptroller.war.gov/Budget-Materials/"
+DOWNLOADABLE_EXTENSIONS = {".pdf", ".xlsx", ".xls", ".zip", ".csv"}
+IGNORED_HOSTS           = {"dam.defense.gov"}
+ALL_SOURCES             = ["comptroller", "defense-wide", "army",
+                           "navy", "navy-archive", "airforce"]
+BROWSER_REQUIRED_SOURCES = {"army", "navy", "navy-archive", "airforce"}
 ```
-https://comptroller.defense.gov/Budget-Materials/FY{YEAR}/BudgetJustification/
-```
-
-### Available Files
-- Defense-wide summary justification book (PDF)
-- Individual agency justification books (PDFs) - available as links on the main page
-- Exhibit files for defense-wide accounts
-
-### Fiscal Years Confirmed
-- FY 2018–2026 (continuous coverage)
-- FY 2017 available with slightly different URL structure
-
-### File Types
-- PDF (primary)
-
-### Access Requirements
-- Public domain
-- Direct HTTP access
-
-### Notes
-- Page contains links to sub-agency PDF documents (DIA, NSA, NRO, DISA, etc.)
-- Recommend parsing page HTML to auto-discover individual PDFs
-- File sizes: 10-50 MB per document
 
 ---
 
-## 3. United States Army (ASA(FM&C) - Army Financial Management & Comptroller)
+## Sources
 
-**Source ID**: `army`
-**Organization**: U.S. Army
-**Primary Content**: Army budget justification books, exhibit tables, historical data
+### 1. `comptroller` — DoD Comptroller
 
-### Base URL Pattern
+**Organization:** Office of the Under Secretary of Defense (Comptroller)
+**Site:** `comptroller.war.gov`
+**Discovery:** Auto-crawling of fiscal-year index from `BUDGET_MATERIALS_URL`
+**Access method:** Direct HTTP (`requests` + BeautifulSoup)
+**WAF/Browser required:** No
+
+**Base URL (fiscal-year index):**
 ```
-https://asafm.army.mil/Budget/BudgetMaterials/FY{YEAR}/
+https://comptroller.war.gov/Budget-Materials/
 ```
 
-### Available Files
-- Army budget justification book (PDF) - primary source document
-- Exhibit tables (Excel) - structured budget data
-- Historical budget summaries (CSV/Excel)
+`discover_fiscal_years()` fetches this page, finds all four-digit year links,
+and returns a `{year: page_url}` dict.  `discover_comptroller_files()` then
+crawls each year's page for downloadable links.
 
-### Fiscal Years Confirmed
-- FY 2018–2026 (confirmed continuous)
-- FY 2017 available (URL differs slightly)
-- FY 2016 and earlier available but require manual lookup
-
-### File Types
-- PDF (justification books)
-- Excel/CSV (exhibits)
-
-### Access Requirements
-- Public domain (.mil site, no authentication)
-- May require session management if behind firewall
-
-### Notes
-- Army site structure is relatively stable year-over-year
-- Excel exhibits follow consistent naming pattern (e.g., "O1_display.xlsx")
-- Largest documents in the database (justification book ~200 MB)
+**File types:** PDF, Excel (`.xlsx`, `.xls`), ZIP
+**FY range:** Dynamically discovered from the index page (typically FY 2017–current)
+<!-- TODO: verify actual earliest year after running 1.A1 audit -->
 
 ---
 
-## 4. United States Navy & Marine Corps (SECNAV FM&C - Financial Management & Comptroller)
+### 2. `defense-wide` — Defense-Wide Budget Justification
 
-**Source ID**: `navy`
-**Organization**: U.S. Navy
-**Primary Content**: Navy/Marine Corps budget justification, exhibit data
+**Organization:** DoD Comptroller (Defense-Wide section)
+**Site:** `comptroller.war.gov`
+**Discovery:** `discover_defense_wide_files()` — crawls the justification sub-page
+**Access method:** Direct HTTP
+**WAF/Browser required:** No
 
-### Base URL Pattern
+**URL template:**
 ```
-https://www.secnav.navy.mil/fmc/fmb/Documents/FY{YEAR}/
-```
-
-### Available Files
-- Navy budget justification book (PDF)
-- Marine Corps budget justification book (PDF)
-- Exhibit tables (Excel)
-- Historical budget data
-
-### Fiscal Years Confirmed
-- FY 2019–2026 (confirmed continuous on secnav domain)
-- FY 2018 and earlier available at alternate URL (see below)
-
-### Alternate Base URL (older fiscal years)
-```
-https://www.secnav.navy.mil/fmc/fmb/Documents/fy{year}/
+https://comptroller.war.gov/Budget-Materials/FY{fy}BudgetJustification/
 ```
 
-### File Types
-- PDF (justification books, ~150-200 MB each)
-- Excel (exhibits)
-
-### Access Requirements
-- Public domain (.mil site)
-- Standard HTTP access
-
-### Notes
-- Two separate justification books (Navy + Marine Corps), each ~150 MB
-- URL pattern differs slightly for FY 2018 and earlier (lowercase "fy" vs "FY")
-- Exhibits include both budget and personnel data
+**File types:** PDF (primary), Excel
+**FY range:** FY 2017–current  <!-- TODO: verify after audit -->
 
 ---
 
-## 5. United States Air Force & Space Force (SAF/FMC - Financial Management & Comptroller)
+### 3. `army` — U.S. Army
 
-**Source ID**: `airforce`
-**Organization**: U.S. Air Force
-**Primary Content**: Air Force and Space Force budget justification, exhibit tables
+**Organization:** ASA(FM&C) — Army Financial Management & Comptroller
+**Site:** `asafm.army.mil`
+**Discovery:** `discover_army_files()` — Playwright browser crawl
+**Access method:** Playwright browser (`BROWSER_REQUIRED_SOURCES`)
+**WAF/Browser required:** Yes — government WAF blocks plain HTTP
 
-### Base URL Pattern
+**URL template:**
 ```
-https://www.saffm.hq.af.mil/Budget/FY{YEAR}/
+https://www.asafm.army.mil/Budget-Materials/
 ```
 
-### Available Files
-- Air Force budget justification book (PDF)
-- Space Force budget justification book (PDF) - separated in FY 2021+
-- Exhibit tables (Excel)
-- Historical budget submissions (CSV)
-
-### Fiscal Years Confirmed
-- FY 2019–2026 (continuous)
-- FY 2018 and earlier at slightly different URL
-
-### File Types
-- PDF (150-180 MB per book)
-- Excel (exhibits)
-- CSV (supplemental historical data)
-
-### Access Requirements
-- Public domain (.mil site)
-- Standard HTTP access
-
-### Notes
-- Space Force separated as distinct service starting FY 2021
-- Prior to FY 2021, Space Force budget was part of Air Force RDT&E
-- URL structure consistent year-over-year (FY 2019+)
+**File types:** Excel (exhibits: `p1_display.xlsx`, `r1.xlsx`, `o1_display.xlsx`, etc.),
+PDF (justification books)
+**FY range:** FY 2018–current  <!-- TODO: verify after audit -->
 
 ---
 
-## Historical Coverage Summary
+### 4. `navy` — U.S. Navy / Marine Corps
 
-| Fiscal Year | Comptroller | Defense-Wide | Army | Navy | Air Force |
-|-------------|:-----------:|:------------:|:----:|:----:|:---------:|
-| FY 2026     | ✓ | ✓ | ✓ | ✓ | ✓ |
-| FY 2025     | ✓ | ✓ | ✓ | ✓ | ✓ |
-| FY 2024     | ✓ | ✓ | ✓ | ✓ | ✓ |
-| FY 2023     | ✓ | ✓ | ✓ | ✓ | ✓ |
-| FY 2022     | ✓ | ✓ | ✓ | ✓ | ✓ |
-| FY 2021     | ✓ | ✓ | ✓ | ✓ | ✓ |
-| FY 2020     | ✓ | ✓ | ✓ | ✓ | ✓ |
-| FY 2019     | ✓ | ✓ | ✓ | ✓ | ✓ |
-| FY 2018     | ✓ | ~ | ✓ | ✓ | ✓ |
+**Organization:** SECNAV FM&C — Office of the Secretary of the Navy
+**Site:** `secnav.navy.mil`
+**Discovery:** `discover_navy_files()` — Playwright browser crawl
+**Access method:** Playwright browser (`BROWSER_REQUIRED_SOURCES`)
+**WAF/Browser required:** Yes
 
-Legend: ✓ = confirmed available, ~ = available with alternate URL
+**URL template (current fiscal years):**
+```
+https://www.secnav.navy.mil/fmc/Pages/Fiscal-Year-{fy}.aspx
+```
+
+**File types:** PDF (justification books — Navy + Marine Corps separately),
+Excel (exhibits)
+**FY range:** FY 2019–current  <!-- TODO: verify after audit -->
 
 ---
 
-**Last Updated**: 2026-02-18
-**Document Version**: 1.0
+### 5. `navy-archive` — U.S. Navy Archive
+
+**Organization:** SECNAV FM&C
+**Site:** `secnav.navy.mil`
+**Discovery:** `discover_navy_archive_files()` — Playwright browser crawl
+**Access method:** Playwright browser (`BROWSER_REQUIRED_SOURCES`)
+**WAF/Browser required:** Yes
+
+**URL (static archive page):**
+```
+https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx
+```
+
+Used to retrieve older fiscal years not available on the main FY index page.
+
+**File types:** PDF, Excel
+**FY range:** FY 2017–2018 (older fiscal years)  <!-- TODO: verify after audit -->
+
+---
+
+### 6. `airforce` — U.S. Air Force / Space Force
+
+**Organization:** SAF/FMC — Secretary of the Air Force Financial Management
+**Site:** `saffm.hq.af.mil`
+**Discovery:** `discover_airforce_files()` — Playwright browser crawl
+**Access method:** Playwright browser (`BROWSER_REQUIRED_SOURCES`)
+**WAF/Browser required:** Yes
+
+**URL template:**
+```
+https://www.saffm.hq.af.mil/FM-Resources/Budget/Air-Force-Presidents-Budget-FY{fy2}/
+```
+
+(`fy2` = two-digit fiscal year, e.g. `26` for FY 2026)
+
+**File types:** PDF (Air Force + Space Force justification books), Excel (exhibits)
+**FY range:** FY 2019–current  <!-- TODO: verify; Space Force separated FY 2021+ -->
+
+---
+
+## SOURCE_DISCOVERERS Mapping
+
+```python
+SOURCE_DISCOVERERS = {
+    "defense-wide": discover_defense_wide_files,
+    "army":         discover_army_files,
+    "navy":         discover_navy_files,
+    "navy-archive": discover_navy_archive_files,
+    "airforce":     discover_airforce_files,
+}
+# comptroller uses discover_comptroller_files() called via discover_fiscal_years()
+```
+
+---
+
+## Failure Log Schema (`failed_downloads.json`)
+
+When downloads fail, `dod_budget_downloader.py` writes a
+`failed_downloads.json` in the output directory.  Each entry has the
+following fields:
+
+```json
+{
+  "url":        "<string> — original download URL",
+  "dest":       "<string> — intended local file path",
+  "filename":   "<string> — sanitized filename",
+  "error":      "<string> — exception message or 'magic-byte verification failed'",
+  "source":     "<string> — source ID (e.g. 'army')",
+  "year":       "<string> — fiscal year (e.g. '2026')",
+  "use_browser": "<bool>  — true if Playwright browser was required",
+  "timestamp":  "<string> — ISO 8601 UTC timestamp of failure"
+}
+```
+
+Use `--retry-failures [PATH]` to re-attempt all entries in this file.
+
+---
+
+## File Integrity Verification
+
+After every download, `_verify_download()` checks the first 4 bytes of
+the saved file against known magic-byte signatures:
+
+| Extension | Expected bytes | Format |
+|-----------|---------------|--------|
+| `.pdf`    | `%PDF`        | PDF |
+| `.xlsx`, `.xlsm`, `.zip`, `.docx`, `.pptx` | `PK\x03\x04` | ZIP / Office Open XML |
+| `.xls`    | `\xD0\xCF\x11\xE0` | OLE2 Compound Document |
+
+Files that fail verification (e.g., HTML error pages served as PDF) are
+deleted and retried.
+
+---
+
+## Coverage Matrix
+
+<!-- TODO [Step 1.A5-c]: Fill in after running audit (Step 1.A1) -->
+<!-- Values marked with ~ are unverified estimates                  -->
+
+| Source | FY2017 | FY2018 | FY2019 | FY2020 | FY2021 | FY2022 | FY2023 | FY2024 | FY2025 | FY2026 |
+|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|
+| comptroller  | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
+| defense-wide | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
+| army         |   | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
+| navy         |   |   | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
+| navy-archive | ~ | ~ |   |   |   |   |   |   |   |   |
+| airforce     |   |   | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
+
+Legend: ~ = expected available but unverified, blank = not expected
+
+---
+
+**Last Updated:** 2026-02-18 (from source code — Step 1.A5-a)
+**See also:** [docs/wiki/Data-Sources.md](docs/wiki/Data-Sources.md)

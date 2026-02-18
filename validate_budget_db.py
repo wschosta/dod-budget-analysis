@@ -8,6 +8,36 @@ Usage:
     python validate_budget_db.py                     # Default database
     python validate_budget_db.py --db mydb.sqlite    # Custom path
     python validate_budget_db.py --verbose            # Show all issue details
+
+──────────────────────────────────────────────────────────────────────────────
+TODOs for this file
+──────────────────────────────────────────────────────────────────────────────
+
+TODO VALDB-001 [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add PE number format validation check.
+    Steps:
+      1. Add check_pe_number_format(conn) function
+      2. Query pe_number column; validate against regex [0-9]{7}[A-Z]{1,2}
+      3. Flag rows where pe_number is populated but malformed
+      4. Add to ALL_CHECKS list
+    Success: Malformed PE numbers flagged (e.g., "0602702" missing suffix).
+
+TODO VALDB-002 [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add negative amount detection check.
+    Steps:
+      1. Add check_negative_amounts(conn) function
+      2. Query amount_fy* columns for values < 0
+      3. Flag as info (negative amounts are valid for reductions but unusual)
+      4. Add to ALL_CHECKS list
+    Success: Negative amounts surfaced for review.
+
+TODO VALDB-003 [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add --json output flag for machine-readable reports.
+    Steps:
+      1. Add --json argument to argparse
+      2. If set, output generate_report results as JSON instead of text
+      3. Support piping to data_quality_report.json
+    Success: `python validate_budget_db.py --json > report.json` works.
 """
 
 import argparse
@@ -20,35 +50,23 @@ from utils import get_connection
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 
-# Known exhibit types (from build_budget_db.py)
-# TODO 1.B1-g-validator [EASY, ~400 tokens, DEPENDS ON 1.B1-g]: Sync KNOWN_EXHIBIT_TYPES
-#   from exhibit_catalog instead of hardcoding. After 1.B1-g adds p5/r2/r3/r4 to
-#   EXHIBIT_TYPES in build_budget_db.py, this set becomes stale. Replace with:
-#     from exhibit_catalog import list_all_exhibit_types
-#     KNOWN_EXHIBIT_TYPES = set(list_all_exhibit_types())
-#   No external data needed.
-KNOWN_EXHIBIT_TYPES = {"m1", "o1", "p1", "p1r", "r1", "rf1", "c1"}
+# Known exhibit types — imported from exhibit_catalog so it stays in sync
+# with the canonical catalog (Step 1.B1-g-validator).
+from exhibit_catalog import list_all_exhibit_types  # noqa: E402
+KNOWN_EXHIBIT_TYPES = set(list_all_exhibit_types())
 
-# Known organizations (from build_budget_db.py ORG_MAP values)
-KNOWN_ORGS = {"Army", "Navy", "Air Force", "Space Force",
-              "Defense-Wide", "Marine Corps", "Joint Staff"}
+# Known organizations — imported from build_budget_db.py so it stays in sync
+# with ORG_MAP (Step 1.B4-b).
+from build_budget_db import ORG_MAP as _ORG_MAP  # noqa: E402
+KNOWN_ORGS = set(_ORG_MAP.values())
 
-# Amount columns in the budget_lines table
-# TODO 1.B2-a-followup [EASY, ~600 tokens, DEPENDS ON 1.B2-a]: After making
-#   _map_columns() year-agnostic, replace this hardcoded list with a dynamic query
-#   inside each check function that uses it:
-#     cols = conn.execute("PRAGMA table_info(budget_lines)").fetchall()
-#     amount_cols = [c[1] for c in cols if c[1].startswith("amount_fy")]
-#   This makes the validator automatically adapt when new fiscal year columns are added.
-AMOUNT_COLUMNS = [
-    "amount_fy2024_actual",
-    "amount_fy2025_enacted",
-    "amount_fy2025_supplemental",
-    "amount_fy2025_total",
-    "amount_fy2026_request",
-    "amount_fy2026_reconciliation",
-    "amount_fy2026_total",
-]
+# Amount columns in the budget_lines table — queried dynamically from the
+# DB schema (Step 1.B2-a) so the validator automatically adapts when new
+# fiscal year columns are added without requiring code changes here.
+def _get_amount_columns(conn: sqlite3.Connection) -> list[str]:
+    """Return all amount_fy* columns present in budget_lines schema."""
+    cols = conn.execute("PRAGMA table_info(budget_lines)").fetchall()
+    return [c[1] for c in cols if c[1].startswith("amount_fy")]
 
 
 # ── Individual checks ────────────────────────────────────────────────────────
@@ -121,8 +139,11 @@ def check_duplicates(conn: sqlite3.Connection) -> list[dict]:
 def check_zero_amounts(conn: sqlite3.Connection) -> list[dict]:
     """Find line items where every amount column is NULL or zero."""
     issues = []
+    amount_cols = _get_amount_columns(conn)
+    if not amount_cols:
+        return issues
     null_checks = " AND ".join(
-        f"(COALESCE({col}, 0) = 0)" for col in AMOUNT_COLUMNS
+        f"(COALESCE({col}, 0) = 0)" for col in amount_cols
     )
     rows = conn.execute(f"""
         SELECT source_file, exhibit_type, account, account_title,
@@ -225,6 +246,41 @@ def check_ingestion_errors(conn: sqlite3.Connection) -> list[dict]:
     return issues
 
 
+def check_unit_consistency(conn: sqlite3.Connection) -> list[dict]:
+    """Flag budget lines where amount_unit is not 'thousands' (Step 1.B3-f).
+
+    After normalisation all stored amounts should be in thousands of dollars.
+    Rows where amount_unit differs indicate a missed unit conversion and the
+    stored values may be off by a factor of 1,000.
+    """
+    issues = []
+    try:
+        rows = conn.execute("""
+            SELECT exhibit_type, source_file, amount_unit, COUNT(*) AS n
+            FROM budget_lines
+            WHERE amount_unit IS NOT NULL AND amount_unit != 'thousands'
+            GROUP BY exhibit_type, source_file, amount_unit
+            ORDER BY n DESC
+        """).fetchall()
+    except Exception:
+        # Column may not exist in pre-1.B3-b databases
+        return []
+
+    for r in rows:
+        issues.append({
+            "check": "unit_consistency",
+            "severity": "warning",
+            "detail": (
+                f"{r['exhibit_type']} exhibit '{r['source_file']}' has "
+                f"amount_unit='{r['amount_unit']}' ({r['n']} rows) — "
+                "unit normalisation may not have been applied"
+            ),
+            "file_path": r["source_file"],
+        })
+
+    return issues
+
+
 def check_empty_files(conn: sqlite3.Connection) -> list[dict]:
     """Find ingested files that produced zero rows/pages."""
     issues = []
@@ -256,6 +312,7 @@ ALL_CHECKS = [
     ("Unknown Exhibit Types", check_unknown_exhibits),
     ("Ingestion Errors", check_ingestion_errors),
     ("Empty Files", check_empty_files),
+    ("Unit Consistency", check_unit_consistency),      # Step 1.B3-f
 ]
 
 

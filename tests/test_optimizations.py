@@ -200,16 +200,18 @@ class TestStringUtilities:
         assert '"defense"' in result
         assert " OR " in result
 
-        # FTS5 keywords should be removed
+        # FTS5 keywords (AND/OR/NOT) are removed from user input;
+        # remaining terms are kept and joined with " OR " as the FTS5 separator
         result = sanitize_fts5_query("missile AND defense OR system")
-        assert "AND" not in result
-        assert "OR" not in result
-        assert '"missile"' in result
+        assert "AND" not in result      # user AND keyword stripped
+        assert '"missile"' in result    # user terms preserved
+        assert '"defense"' in result
+        assert '"system"' in result
 
-        # Special characters should be removed
+        # Special characters are stripped; terms wrapped in quotes for literal match
         result = sanitize_fts5_query('search"with(parens)')
-        assert "(" not in result
-        assert '"' not in result
+        assert "(" not in result        # paren removed
+        assert ")" not in result        # paren removed
 
         # Empty queries should return empty string
         assert sanitize_fts5_query("AND OR NOT") == ""

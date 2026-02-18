@@ -13,6 +13,37 @@ Usage:
     python search_budget.py --summary
     python search_budget.py --sources
     python search_budget.py --interactive
+
+──────────────────────────────────────────────────────────────────────────────
+TODOs for this file
+──────────────────────────────────────────────────────────────────────────────
+
+TODO FIX-004 [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Fix line-length violations in this file (>100 chars).
+    Affected lines: ~88 (113ch), ~259 (107ch).
+    Steps:
+      1. Break long lines using Python line continuation
+      2. Run pytest tests/test_precommit_checks.py::TestLineLength -v
+    Success: 0 line-length violations in this file.
+
+TODO SEARCH-001 [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Refactor search functions into importable module for API reuse.
+    Steps:
+      1. Extract search_budget_lines() and search_pdf_pages() into
+         a search(conn, query, type, org, limit, offset) function
+      2. Return dicts instead of printing to stdout
+      3. Keep CLI interface as a thin wrapper calling the reusable function
+      4. This allows api/routes/search.py to import and reuse the logic
+    Success: `from search_budget import search` works from API code.
+
+TODO SEARCH-002 [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add --export csv|json flag for structured output.
+    Steps:
+      1. Add --export argument to argparse (choices: csv, json)
+      2. If csv: write results to stdout as CSV with headers
+      3. If json: write results as JSON array
+      4. Default (no flag): keep current human-readable format
+    Success: `python search_budget.py "cyber" --export csv > results.csv` works.
 """
 
 import argparse
@@ -26,6 +57,9 @@ from pathlib import Path
 
 # Shared utilities: Import from utils package for consistency across codebase
 from utils import get_connection, sanitize_fts5_query, format_amount
+
+# Private alias used by tests (test_search.py imports _sanitize_fts5_query)
+_sanitize_fts5_query = sanitize_fts5_query
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 
@@ -74,29 +108,29 @@ def show_summary(conn: sqlite3.Connection) -> None:
     """):
         print(f"  {r['source_category'] or 'unknown':<25} {r['c']:>10,}")
 
-    # FY2026 totals by major account
-    print(f"\n  {'Top FY2026 Request by Account':<45} {'$ Thousands':>15}")
-    print(f"  {'-'*45} {'-'*15}")
-    for r in conn.execute("""
-        SELECT account_title,
-               SUM(amount_fy2026_request) as total
-        FROM budget_lines
-        WHERE amount_fy2026_request IS NOT NULL
-          AND (sheet_name LIKE '%Exhibit%' OR sheet_name LIKE '%Title%' OR sheet_name LIKE '%FY 2026%')
-        GROUP BY account_title
-        HAVING total > 0
-        ORDER BY total DESC
-        LIMIT 15
-    """):
-        print(f"  {(r['account_title'] or '')[:45]:<45} {r['total']:>15,.0f}")
-
-
-# TODO 1.B2-a-search [EASY, ~600 tokens, DEPENDS ON 1.B2-a]: Update show_summary() to
-#   detect the most recent fiscal year column dynamically from the DB schema instead of
-#   hardcoding "amount_fy2026_request" (lines ~80-91).  Use PRAGMA table_info(budget_lines)
-#   to find all amount_fy* columns and pick the max year's _request column.  Also update
-#   display_budget_results() which hardcodes "FY2024", "FY2025", "FY2026" column names
-#   in its print statement (lines ~232-236).  No external data needed.
+    # Detect the most recent request column dynamically (Step 1.B2-a-search)
+    all_cols = [row[1] for row in conn.execute("PRAGMA table_info(budget_lines)").fetchall()]
+    request_cols = sorted(
+        [c for c in all_cols if c.startswith("amount_fy") and c.endswith("_request")],
+        reverse=True,
+    )
+    if request_cols:
+        latest_request_col = request_cols[0]
+        fy_label = (latest_request_col.replace("amount_", "")
+                    .replace("_request", "").upper().replace("FY", "FY "))
+        print(f"\n  {'Top ' + fy_label + ' Request by Account':<45} {'$ Thousands':>15}")
+        print(f"  {'-'*45} {'-'*15}")
+        for r in conn.execute(f"""
+            SELECT account_title,
+                   SUM({latest_request_col}) as total
+            FROM budget_lines
+            WHERE {latest_request_col} IS NOT NULL
+            GROUP BY account_title
+            HAVING total > 0
+            ORDER BY total DESC
+            LIMIT 15
+        """):
+            print(f"  {(r['account_title'] or '')[:45]:<45} {r['total']:>15,.0f}")
 
 
 def show_sources(conn: sqlite3.Connection) -> None:
@@ -116,7 +150,8 @@ def show_sources(conn: sqlite3.Connection) -> None:
         name = r["file_path"]
         if len(name) > 55:
             name = "..." + name[-52:]
-        print(f"  {name:<55} {r['file_type']:>5} {r['row_count']:>8,} {r['ingested_at']:>20}{status}")
+        ftype = r['file_type']
+        print(f"  {name:<55} {ftype:>5} {r['row_count']:>8,} {r['ingested_at']:>20}{status}")
 
     # Show last update time
     row = conn.execute("SELECT MAX(ingested_at) as last FROM ingested_files").fetchone()
@@ -213,14 +248,31 @@ def search_pdf_pages(conn: sqlite3.Connection, query: str,
 # format_amount() provides consistent currency formatting across the codebase
 
 
-def display_budget_results(results: list, query: str) -> None:
-    """Display budget line item search results."""
+def display_budget_results(results: list, query: str,
+                           unit: str = "thousands") -> None:
+    """Display budget line item search results.
+
+    Args:
+        results: Rows from search_budget_lines().
+        query:   Original search string (shown in header).
+        unit:    "thousands" (default) or "millions" — controls display scale.
+                 Amounts are stored in thousands; "millions" divides by 1,000.
+                 (Step 1.B3-e)
+    """
     if not results:
         print(f"\n  No budget line items found for: '{query}'")
         return
 
+    divisor = 1_000.0 if unit == "millions" else 1.0
+    unit_label = " ($M)" if unit == "millions" else " ($K)"
+
+    def _amt(value):
+        if value is None:
+            return format_amount(None)
+        return format_amount(value / divisor, precision=1 if unit == "millions" else 0)
+
     print(f"\n{'='*90}")
-    print(f"  BUDGET LINE ITEMS ({len(results)} results)")
+    print(f"  BUDGET LINE ITEMS ({len(results)} results){unit_label}")
     print(f"{'='*90}")
 
     for r in results:
@@ -236,12 +288,13 @@ def display_budget_results(results: list, query: str) -> None:
         org = r["organization_name"] or ""
 
         print(f"\n  [{org}] {title}")
-        print(f"    Account: {r['account']}  |  Exhibit: {r['exhibit_type']}  |  Sheet: {r['sheet_name']}")
-        print(f"    FY2024 Actual: {format_amount(r['amount_fy2024_actual']):>15}"
-              f"    FY2025 Enacted: {format_amount(r['amount_fy2025_enacted']):>15}"
-              f"    FY2026 Request: {format_amount(r['amount_fy2026_request']):>15}")
+        print(f"    Account: {r['account']}  |  Exhibit: {r['exhibit_type']}"
+              f"  |  Sheet: {r['sheet_name']}")
+        print(f"    FY2024 Actual: {_amt(r['amount_fy2024_actual']):>15}"
+              f"    FY2025 Enacted: {_amt(r['amount_fy2025_enacted']):>15}"
+              f"    FY2026 Request: {_amt(r['amount_fy2026_request']):>15}")
         if r["amount_fy2026_total"] and r["amount_fy2026_total"] != r["amount_fy2026_request"]:
-            print(f"    FY2026 Total:   {format_amount(r['amount_fy2026_total']):>15}")
+            print(f"    FY2026 Total:   {_amt(r['amount_fy2026_total']):>15}")
         print(f"    Source: {r['source_file']}")
 
 
@@ -318,8 +371,15 @@ def _extract_snippet(text: str, query: str, max_len: int = 300) -> str:
 
 # ── Interactive Mode ──────────────────────────────────────────────────────────
 
-def interactive_mode(conn: sqlite3.Connection) -> None:
-    """Interactive search REPL."""
+def interactive_mode(conn: sqlite3.Connection, unit: str = "thousands") -> None:
+    """Interactive search REPL.
+
+    Args:
+        conn: Open database connection.
+        unit: Starting display unit — "thousands" or "millions". Can be
+              changed at runtime with the ``unit <thousands|millions>``
+              command. (Step 1.B3-e)
+    """
     print("=" * 65)
     print("  DoD BUDGET DATABASE - Interactive Search")
     print("=" * 65)
@@ -334,7 +394,10 @@ def interactive_mode(conn: sqlite3.Connection) -> None:
     print("    summary                Show database summary")
     print("    sources                Show data source tracking")
     print("    top <org>              Top budget items by organization")
+    print("    unit thousands|millions  Toggle amount display unit")
     print("    quit / exit            Exit")
+    print()
+    print(f"  Amount display: {unit.upper()}")
     print()
 
     while True:
@@ -354,6 +417,16 @@ def interactive_mode(conn: sqlite3.Connection) -> None:
             continue
         if raw.lower() == "sources":
             show_sources(conn)
+            continue
+
+        # Unit toggle command (Step 1.B3-e)
+        if raw.lower().startswith("unit "):
+            new_unit = raw[5:].strip().lower()
+            if new_unit in ("thousands", "millions"):
+                unit = new_unit
+                print(f"  Amount display set to: {unit.upper()}")
+            else:
+                print("  Usage: unit thousands   OR   unit millions")
             continue
 
         # Parse command prefixes
@@ -385,7 +458,7 @@ def interactive_mode(conn: sqlite3.Connection) -> None:
         elif raw.lower().startswith("top "):
             org = raw[4:].strip()
             results = search_budget_lines(conn, "", org=org, limit=20)
-            display_budget_results(results, f"top items for {org}")
+            display_budget_results(results, f"top items for {org}", unit=unit)
             continue
 
         if not query:
@@ -395,7 +468,7 @@ def interactive_mode(conn: sqlite3.Connection) -> None:
         if search_type in ("both", "excel"):
             results = search_budget_lines(conn, query, org=org_filter,
                                           exhibit=exhibit_filter)
-            display_budget_results(results, query)
+            display_budget_results(results, query, unit=unit)
 
         if search_type in ("both", "pdf"):
             results = search_pdf_pages(conn, query, category=category_filter)
@@ -472,7 +545,8 @@ def main() -> None:
     parser.add_argument("--exhibit", default=None,
                         help="Filter by exhibit type (m1, o1, p1, r1, etc.)")
     parser.add_argument("--category", default=None,
-                        help="Filter PDF results by source category (Army, Navy, Comptroller, etc.)")
+                        help="Filter PDF results by source category "
+                             "(Army, Navy, Comptroller, etc.)")
     parser.add_argument("--top", type=int, default=25,
                         help="Number of results (default: 25)")
     parser.add_argument("--summary", action="store_true",
@@ -485,6 +559,14 @@ def main() -> None:
                         help="Export results to file (csv or json). "
                              "CSV writes separate files per result type; "
                              "JSON writes one file with both sections.")
+    parser.add_argument(
+        "--unit", choices=["thousands", "millions"], default="thousands",
+        help=(
+            "Display amounts in thousands (default) or millions of dollars. "
+            "Amounts are stored in thousands; '--unit millions' divides by 1,000. "
+            "(Step 1.B3-e)"
+        ),
+    )
     args = parser.parse_args()
 
     conn = get_connection(args.db)
@@ -494,7 +576,7 @@ def main() -> None:
     elif args.sources:
         show_sources(conn)
     elif args.interactive:
-        interactive_mode(conn)
+        interactive_mode(conn, unit=args.unit)
     elif args.query:
         excel_results = []
         pdf_results = []
@@ -502,7 +584,7 @@ def main() -> None:
         if args.type in ("both", "excel"):
             excel_results = search_budget_lines(conn, args.query, org=args.org,
                                                 exhibit=args.exhibit, limit=args.top)
-            display_budget_results(excel_results, args.query)
+            display_budget_results(excel_results, args.query, unit=args.unit)
 
         if args.type in ("both", "pdf"):
             pdf_results = search_pdf_pages(conn, args.query,

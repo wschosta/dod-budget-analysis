@@ -9,19 +9,79 @@ Fixture creation tasks (STEP 1.C1 COMPLETE)
 ──────────────────────────────────────────────────────────────────────────────
 
 1.C1-a: Create minimal Excel fixture for each summary exhibit type.
-    ✓ DONE — see _create_exhibit_xlsx() and the fixtures_dir fixture below.
+    DONE — see _create_exhibit_xlsx() and the fixtures_dir fixture below.
 
 1.C1-b: Create minimal PDF fixtures.
-    ✓ DONE — see _create_sample_pdf() using fpdf2 below.
+    DONE — see _create_sample_pdf() using fpdf2 below.
 
 1.C1-c: Create a fixture that builds a pre-populated test database.
-    ✓ DONE — see test_db fixture below.
+    DONE — see test_db fixture below.
 
 1.C1-d: Create a fixture for a "known bad" Excel file.
-    ✓ DONE — see bad_excel fixture below.
+    DONE — see bad_excel fixture below.
 
 1.C1-e: Add fixture requirements to requirements-dev.txt.
-    ✓ DONE — requirements-dev.txt already lists pytest, pytest-cov, fpdf2.
+    DONE — requirements-dev.txt already lists pytest, pytest-cov, fpdf2.
+
+──────────────────────────────────────────────────────────────────────────────
+Remaining TODOs
+──────────────────────────────────────────────────────────────────────────────
+
+TODO FIX-005 [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
+    Fix pyo3_runtime.PanicException in test_pipeline.py tests.
+    All 8 test_pipeline tests error with PanicException from pdfplumber
+    during test_db fixture creation (build_database processes PDF fixtures).
+    Steps:
+      1. Investigate: run build_database() on just the PDF fixtures manually
+         to see if the panic is in fpdf2 output or pdfplumber parsing
+      2. Option A: Generate simpler PDF fixtures that pdfplumber handles
+      3. Option B: Catch pyo3_runtime.PanicException in ingest_pdf_file()
+         and log as a warning instead of crashing
+      4. Option C: Create fixtures_dir_excel_only for tests that don't need PDF
+      5. Run pytest tests/test_pipeline.py -v to verify
+    Success: All 8 test_pipeline tests pass (or cleanly skip PDF-only tests).
+
+TODO FIX-006 [Complexity: LOW] [Tokens: ~500] [User: NO]
+    Fix test_rows_metric_increases_with_excel in test_build_integration.py.
+    Likely caused by the undefined `rows` variable bug (TODO FIX-001).
+    Steps:
+      1. First fix TODO FIX-001 in build_budget_db.py
+      2. Re-run: pytest tests/test_build_integration.py -v
+    Dependency: TODO FIX-001 must be fixed first.
+    Success: test_rows_metric_increases_with_excel passes.
+
+TODO TEST-001 [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add Excel fixtures for detail exhibit types (P-5, R-2).
+    Steps:
+      1. Add _P5_ROWS and _R2_ROWS sample data tuples here
+      2. Create "p5" and "r2" header patterns in _create_exhibit_xlsx()
+      3. Generate p5_display.xlsx and r2_display.xlsx in fixtures_dir
+    Success: Detail exhibit fixtures available for pipeline tests.
+
+TODO TEST-002 [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add fixture for API integration tests (FastAPI TestClient).
+    Dependency: Requires api/app.py to exist (TODO 2.C7-a).
+    Steps:
+      1. Add app_client fixture using FastAPI TestClient
+      2. Wire it to test_db database path
+      3. Yield the client; tests/test_api.py can use it
+    Success: test_api.py can import and use app_client fixture.
+
+TODO TEST-003 [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
+    Expand PDF fixtures to cover more layout variations.
+    Steps:
+      1. Create PDFs with: multi-page tables, landscape orientation,
+         tables without gridlines, mixed text+table pages
+      2. Add parametrized tests in test_parsing.py
+    Success: PDF extraction tested across 5+ layout variations.
+
+TODO TEST-004 [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Fix test functions that return values (pytest warnings).
+    Steps:
+      1. Search: grep -rn 'return ' tests/ in test_ functions
+      2. Replace return with assert or remove dead returns
+      3. Run: pytest -W error::pytest.PytestReturnNotNoneWarning
+    Success: Zero PytestReturnNotNoneWarning warnings.
 """
 
 import sys
@@ -301,12 +361,3 @@ def tmp_db(tmp_path):
     conn = create_database(db_path)
     yield conn
     conn.close()
-# TODO [Step 1.C2]: Add shared pytest fixtures here.
-#
-# Planned fixtures:
-#   - tmp_db: creates a temporary SQLite database using create_database() ✓ done
-#   - sample_xlsx: returns path to a representative test Excel file ✓ done (fixtures_dir)
-#   - sample_pdf: returns path to a representative test PDF file ✓ done (fixtures_dir)
-#   - built_db: a pre-built database from fixture files for search tests ✓ done (test_db)
-#
-# See docs/TODO_1C2_unit_tests_parsing.md for full specification.

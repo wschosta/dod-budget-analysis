@@ -14,6 +14,29 @@ Usage:
     python refresh_data.py --years 2025 2026 --sources all  # Multiple years
     python refresh_data.py --dry-run --years 2026           # Preview without downloading
     python refresh_data.py --help                           # Show full options
+
+──────────────────────────────────────────────────────────────────────────────
+TODOs for this file
+──────────────────────────────────────────────────────────────────────────────
+
+TODO REFRESH-001 [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Use Python imports instead of subprocess for internal scripts.
+    Steps:
+      1. Import build_database from build_budget_db directly
+      2. Import validate_all from validate_budget_data directly
+      3. Replace subprocess.run() calls with direct function calls
+      4. Keep subprocess only for dod_budget_downloader.py (or use download_all()
+         once TODO 1.A4-a refactor is done)
+    Benefit: Better error handling, no subprocess overhead, testable.
+    Success: Stages 2-4 call Python functions directly.
+
+TODO REFRESH-002 [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add --notify flag for email/Slack notification on completion/failure.
+    Steps:
+      1. Add --notify argument (optional webhook URL or email)
+      2. After workflow, POST summary JSON to webhook or send email
+      3. Include: stages completed, row counts, any errors
+    Success: Unattended refreshes send status notifications.
 """
 
 import argparse
@@ -28,15 +51,17 @@ from pathlib import Path
 class RefreshWorkflow:
     """Orchestrates the complete data refresh pipeline."""
 
-    def __init__(self, verbose=False, dry_run=False):
+    def __init__(self, verbose=False, dry_run=False, workers=4):
         """Initialize workflow state.
 
         Args:
             verbose: If True, emit detailed stage output.
             dry_run: If True, log commands without executing them.
+            workers: Number of concurrent HTTP download threads.
         """
         self.verbose = verbose
         self.dry_run = dry_run
+        self.workers = workers
         self.start_time = None
         self.results = {}
 
@@ -87,7 +112,8 @@ class RefreshWorkflow:
         self.log("STAGE 1: DOWNLOAD BUDGET DOCUMENTS")
         self.log("=" * 60)
 
-        cmd = ["python", "dod_budget_downloader.py"]
+        cmd = ["python", "dod_budget_downloader.py", "--no-gui",
+               "--workers", str(self.workers)]
         if years:
             cmd.extend(["--years"] + [str(y) for y in years])
         if sources:
@@ -261,10 +287,17 @@ Examples:
         action="store_true",
         help="Verbose output with detailed progress",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help="Number of concurrent HTTP download threads (default: 4)",
+    )
 
     args = parser.parse_args()
 
-    workflow = RefreshWorkflow(verbose=args.verbose, dry_run=args.dry_run)
+    workflow = RefreshWorkflow(verbose=args.verbose, dry_run=args.dry_run,
+                              workers=args.workers)
     exit_code = workflow.run(args.years or [2026], args.sources or ["all"])
     sys.exit(exit_code)
 
