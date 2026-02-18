@@ -1166,24 +1166,17 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
     try:
         for i, pdf in enumerate(pdf_files):
-<<<<<<< HEAD
             # Check for graceful shutdown request
             if stop_event and stop_event.is_set():
                 print("\n  Graceful stop requested — saving checkpoint...")
                 _save_checkpoint(conn, session_id, files_done_total, total_files,
-                                 total_pdf_pages + _metrics.get("pages", 0),
-                                 total_budget_rows, 0, str(pdf), "interrupted")
+                                 total_pdf_pages, total_budget_rows,
+                                 0, str(pdf), "interrupted")
                 _progress("stopped", i, len(pdf_files),
                           f"Stopped at {pdf.name} — resume with --resume",
                           {"files_remaining": total_files - files_done_total})
                 conn.commit()
                 return
-=======
-            # Check for cancellation
-            if cancel_event and cancel_event.is_set():
-                print("\n  Build cancelled by user")
-                break
->>>>>>> 67b4c24b81fefe0020e593b119f5aa3383abb98b
 
             rel_path = str(pdf.relative_to(docs_dir))
 
