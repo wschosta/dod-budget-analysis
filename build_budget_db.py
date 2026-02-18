@@ -292,20 +292,20 @@ def _detect_exhibit_type(filename: str) -> str:
     return "unknown"
 
 
-# TODO: This function is ~110 lines with three large loops over h_lower doing
-# related but distinct work (common fields, sub-activity/line-item, amounts).
-# Consider splitting into _map_common_fields, _map_line_item_fields, and
-# _map_amount_fields for readability and easier per-exhibit customization.
 def _map_columns(headers: list, exhibit_type: str) -> dict:
     """Map column headers to standardized field names.
 
     Returns a dict mapping our field names to column indices.
+    Optimized to use a single pass over headers with fallback logic.
     """
     mapping = {}
     h_lower = [str(h).lower().replace("\n", " ").strip() if h else "" for h in headers]
 
-    # Common fields present in all exhibits
+    # Single-pass column mapping with normalized field matching
     for i, h in enumerate(h_lower):
+        h_normalized = h.replace(" ", "")
+
+        # Common fields
         if h == "account":
             mapping["account"] = i
         elif h == "account title":
@@ -319,9 +319,8 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
         elif h == "classification":
             mapping["classification"] = i
 
-    # Sub-activity / line item fields (varies by exhibit)
-    for i, h in enumerate(h_lower):
-        if h in ("bsa", "ag/bsa"):
+        # Sub-activity / line item fields
+        elif h in ("bsa", "ag/bsa"):
             mapping["sub_activity"] = i
         elif "budget subactivity" in h and "title" in h:
             mapping["sub_activity_title"] = i
@@ -334,11 +333,9 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
             mapping["line_item_title"] = i
         elif h == "pe/bli":
             mapping["line_item"] = i
-        elif h == "program element/budget line item (bli) title":
-            mapping["line_item_title"] = i
         elif h in ("sag/bli",):
             mapping["line_item"] = i
-        elif h in ("sag/budget line item (bli) title",):
+        elif h == "sag/budget line item (bli) title":
             mapping["line_item_title"] = i
         elif h == "construction project title":
             mapping["line_item_title"] = i
@@ -349,58 +346,41 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
         elif h == "facility category title":
             mapping.setdefault("sub_activity", i)
 
-    # Amount columns — match by pattern
-    for i, h in enumerate(h_lower):
-        if "fy2024" in h.replace(" ", "") or "fy 2024" in h:
-            if "actual" in h:
-                if "quantity" in h:
-                    mapping["quantity_fy2024"] = i
-                elif "amount" in h or "actual" in h:
-                    mapping.setdefault("amount_fy2024_actual", i)
-        elif "fy2025" in h.replace(" ", "") or "fy 2025" in h:
-            if "enacted" in h:
-                if "quantity" in h:
-                    mapping["quantity_fy2025"] = i
-                elif "amount" in h or "enacted" in h:
-                    mapping.setdefault("amount_fy2025_enacted", i)
+        # FY2024 amounts and quantities
+        elif "fy2024" in h_normalized or "fy2024" in h:
+            if "quantity" in h:
+                mapping["quantity_fy2024"] = i
+            elif "actual" in h and ("amount" in h or "actual" in h):
+                mapping.setdefault("amount_fy2024_actual", i)
+
+        # FY2025 amounts and quantities
+        elif "fy2025" in h_normalized or "fy2025" in h:
+            if "quantity" in h:
+                mapping["quantity_fy2025"] = i
+            elif "enacted" in h and ("amount" in h or "enacted" in h):
+                mapping.setdefault("amount_fy2025_enacted", i)
             elif "supplemental" in h:
                 mapping.setdefault("amount_fy2025_supplemental", i)
             elif "total" in h:
                 mapping.setdefault("amount_fy2025_total", i)
-        elif "fy2026" in h.replace(" ", "") or "fy 2026" in h:
-            if "reconcil" in h:
-                if "quantity" in h:
-                    pass
-                elif "amount" in h or "reconcil" in h:
-                    mapping.setdefault("amount_fy2026_reconciliation", i)
-            elif "total" in h:
-                if "quantity" in h:
+
+        # FY2026 amounts and quantities
+        elif "fy2026" in h_normalized or "fy2026" in h:
+            if "quantity" in h:
+                if "total" in h:
                     mapping["quantity_fy2026_total"] = i
-                elif "amount" in h or "total" in h:
-                    mapping.setdefault("amount_fy2026_total", i)
-            elif "request" in h or "disc" in h:
-                if "quantity" in h:
+                elif "request" in h or "disc" in h:
                     mapping["quantity_fy2026_request"] = i
-                elif "amount" in h or "request" in h or "disc" in h:
+            elif "reconcil" in h and ("amount" in h or "reconcil" in h):
+                mapping.setdefault("amount_fy2026_reconciliation", i)
+            elif "total" in h and ("amount" in h or "total" in h):
+                mapping.setdefault("amount_fy2026_total", i)
+            elif "request" in h or "disc" in h:
+                if "amount" in h or "request" in h or "disc" in h:
                     mapping.setdefault("amount_fy2026_request", i)
 
-    # For sheets with only one amount column (single FY views),
-    # try to pick up the lone numeric column
-    amount_fields = [k for k in mapping if k.startswith("amount_")]
-    if not amount_fields:
-        for i, h in enumerate(h_lower):
-            if "fy 2024" in h and "actual" in h:
-                mapping["amount_fy2024_actual"] = i
-            elif "fy 2025" in h and "enacted" in h:
-                mapping["amount_fy2025_enacted"] = i
-            elif "fy 2026" in h and ("request" in h or "disc" in h):
-                mapping["amount_fy2026_request"] = i
-            elif "fy 2026" in h and "total" in h:
-                mapping["amount_fy2026_total"] = i
-
-    # Authorization/appropriation amounts (C-1 exhibit)
-    for i, h in enumerate(h_lower):
-        if "authorization amount" in h:
+        # Authorization/appropriation amounts (C-1 exhibit)
+        elif "authorization amount" in h:
             mapping.setdefault("amount_fy2026_request", i)
         elif "appropriation amount" in h:
             mapping.setdefault("amount_fy2025_enacted", i)
@@ -418,13 +398,15 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
-        rows = list(ws.iter_rows(values_only=True))
-        if len(rows) < 3:
-            continue
+        rows_iter = ws.iter_rows(values_only=True)
 
-        # Find the header row (row with "Account" in first meaningful position)
+        # Find the header row in the first 5 rows (buffer to avoid full materialization)
         header_idx = None
-        for i, row in enumerate(rows[:5]):
+        first_rows = []
+        for i, row in enumerate(rows_iter):
+            first_rows.append(row)
+            if i >= 4:
+                break
             for val in row:
                 if val and str(val).strip().lower() == "account":
                     header_idx = i
@@ -432,10 +414,10 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
             if header_idx is not None:
                 break
 
-        if header_idx is None:
+        if header_idx is None or len(first_rows) < 3:
             continue
 
-        headers = rows[header_idx]
+        headers = first_rows[header_idx]
         col_map = _map_columns(headers, exhibit_type)
 
         if "account" not in col_map:
@@ -445,29 +427,33 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
         fy_match = re.search(r"(FY\s*)?20\d{2}", sheet_name, re.IGNORECASE)
         fiscal_year = fy_match.group().replace("FY ", "FY").replace("FY", "FY ") if fy_match else sheet_name
 
-        data_rows = rows[header_idx + 1:]
         batch = []
 
         def get_val(row, field):
+            """Safely get value from row using column mapping."""
             idx = col_map.get(field)
-            if idx is not None and idx < len(row):
-                return row[idx]
-            return None
+            return row[idx] if idx is not None and idx < len(row) else None
 
         def get_str(row, field):
+            """Get string value from row, safe for None."""
             v = get_val(row, field)
             return str(v).strip() if v is not None else None
 
-        for row in data_rows:
+        def get_org_name(row):
+            """Get organization name, defaulting to code if not in map."""
+            org_code = get_str(row, "organization") or ""
+            return ORG_MAP.get(org_code, org_code)
+
+        # Process rows after header
+        for row in rows_iter:
             if not row or all(v is None for v in row):
                 continue
 
-            acct = row[col_map["account"]] if col_map.get("account") is not None and col_map["account"] < len(row) else None
+            acct = get_val(row, "account")
             if not acct:
                 continue
 
-            org_code = str(row[col_map["organization"]]).strip() if col_map.get("organization") is not None and col_map["organization"] < len(row) and row[col_map["organization"]] else ""
-            org_name = ORG_MAP.get(org_code, org_code)
+            org_name = get_org_name(row)
 
             batch.append((
                 str(file_path.relative_to(DOCS_DIR)),
@@ -634,17 +620,21 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path) -> int:
                     else:
                         raise
 
-                # Extract tables with timeout to prevent hangs on malformed PDFs
-                tables = []
-                tables, issue_type = _extract_tables_with_timeout(page, timeout_seconds=10)
-                if issue_type:
-                    # Record the issue for later analysis
-                    conn.execute(
-                        "INSERT INTO extraction_issues (file_path, page_number, issue_type, issue_detail) VALUES (?,?,?,?)",
-                        (relative_path, i + 1, issue_type.split(':')[0], issue_type)
-                    )
-                    page_issues_count += 1
-                    tables = []  # Use empty tables on timeout/error
+                # Extract tables only if page likely contains structured content
+                tables = None
+                issue_type = None
+                if _likely_has_tables(page):
+                    tables, issue_type = _extract_tables_with_timeout(page, timeout_seconds=10)
+                    if issue_type:
+                        # Record the issue for later analysis
+                        conn.execute(
+                            "INSERT INTO extraction_issues (file_path, page_number, issue_type, issue_detail) VALUES (?,?,?,?)",
+                            (relative_path, i + 1, issue_type.split(':')[0], issue_type)
+                        )
+                        page_issues_count += 1
+                        tables = []
+                else:
+                    tables = []
 
                 table_text = _extract_table_text(tables)
 
@@ -716,6 +706,25 @@ def _remove_file_data(conn: sqlite3.Connection, rel_path: str, file_type: str):
         conn.execute("DELETE FROM budget_lines WHERE source_file = ?", (rel_path,))
     elif file_type == "pdf":
         conn.execute("DELETE FROM pdf_pages WHERE source_file = ?", (rel_path,))
+
+
+def _recreate_pdf_fts_triggers(conn: sqlite3.Connection):
+    """Recreate FTS5 triggers for pdf_pages table.
+
+    Used after bulk operations to maintain FTS5 index synchronization.
+    """
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS pdf_pages_ai AFTER INSERT ON pdf_pages BEGIN
+            INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data)
+            VALUES (new.id, new.page_text, new.source_file, new.table_data);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN
+            INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data)
+            VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data);
+        END
+    """)
 
 
 def _register_data_source(conn: sqlite3.Connection, docs_dir: Path):
@@ -892,35 +901,17 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         if final_page_count > initial_page_count:
             # Rebuild FTS5 indexes in batch (triggers were dropped, now rebuild in one go)
             print("\n  Rebuilding full-text search indexes...")
-            conn.execute("""
-                DELETE FROM pdf_pages_fts;
-            """)
+            conn.execute("DELETE FROM pdf_pages_fts;")
             conn.execute("""
                 INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data)
                 SELECT id, page_text, source_file, table_data FROM pdf_pages;
             """)
-
-            # Recreate the triggers for future incremental updates
-            conn.execute("""
-                CREATE TRIGGER IF NOT EXISTS pdf_pages_ai AFTER INSERT ON pdf_pages BEGIN
-                    INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data)
-                    VALUES (new.id, new.page_text, new.source_file, new.table_data);
-                END
-            """)
-
-            conn.execute("""
-                CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN
-                    INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data)
-                    VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data);
-                END
-            """)
-
+            _recreate_pdf_fts_triggers(conn)
             conn.commit()
             print("  FTS5 rebuild complete and triggers recreated")
         else:
             # No new pages, just recreate triggers without rebuild
-            conn.execute("CREATE TRIGGER IF NOT EXISTS pdf_pages_ai AFTER INSERT ON pdf_pages BEGIN INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data) VALUES (new.id, new.page_text, new.source_file, new.table_data); END")
-            conn.execute("CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data) VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data); END")
+            _recreate_pdf_fts_triggers(conn)
             conn.commit()
             print("  Skipped FTS5 rebuild (no new pages added)")
 
