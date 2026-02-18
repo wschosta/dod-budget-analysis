@@ -636,9 +636,8 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
             org_name = ORG_MAP.get(org_code, org_code)
             # TODO 1.B4-b [EASY, ~800 tokens]: Extend ORG_MAP (defined around line 140)
             #   to cover additional DoD organizations: SOCOM, DISA, DLA, MDA, DHA, NGB.
-            #   Also add a fallback: if org_code is a case-insensitive substring of any
-            #   known org name, map it. Unknown codes currently land in the DB unlabelled,
-            #   showing up as unknown in validate_budget_db.py. No external data needed.
+            #   Unknown codes fall back to the raw org_code value (see .get() above);
+            #   these show up as unlabelled in validate_budget_db.py reports.
 
             # Extract PE number from line_item or account fields (Step 1.B4-a implementation)
             line_item_val = get_str(row, "line_item")
