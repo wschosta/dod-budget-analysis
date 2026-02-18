@@ -60,14 +60,10 @@ TODO 2.B1-a [Complexity: HIGH] [Tokens: ~4000] [User: NO]
       4. Run test_pipeline.py to verify no regressions
     Success: Database uses normalized schema; all existing tests pass.
 
-TODO 2.B1-b [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    Backfill reference tables from existing flat data.
-    Steps:
-      1. Write one-time script (~40 lines) that reads budget_lines
-      2. Extract unique: organization_name → services, exhibit_type → exhibit_types,
-         account/account_title → appropriation_titles
-      3. INSERT IGNORE into reference tables
-    Success: Reference tables populated from real data.
+DONE 2.B1-b  backfill_reference_tables.py: reads distinct organization_name,
+    exhibit_type, (account, account_title) from budget_lines; INSERT OR IGNORE
+    into services_agencies, exhibit_types, appropriation_titles. Supports
+    --dry-run and --db flags. Classifies service category by keyword.
 
 TODO 2.B2-a [Complexity: MEDIUM] [Tokens: ~2000] [User: YES — needs real data]
     Cross-service reconciliation check.
@@ -89,13 +85,8 @@ DONE 2.B3-a  generate_quality_report() in validate_budget_data.py writes
     data_quality_report.json with row counts by (service, fiscal_year, exhibit_type),
     null/zero percentages per amount column, and full validation results.
 
-TODO 2.B4-a [Complexity: LOW] [Tokens: ~500] [User: NO]
-    DONE — refresh_data.py already implements this workflow.
-    Verify refresh_data.py calls the correct scripts and works end-to-end.
-    Steps:
-      1. Review refresh_data.py stages match this spec
-      2. Run `python refresh_data.py --dry-run --years 2026` to verify
-    Success: Dry-run completes with all 4 stages reported.
+DONE 2.B4-a  refresh_data.py implements 4-stage workflow: download, build, validate,
+    report. `python refresh_data.py --dry-run --years 2026` verified working.
 """
 
 import sqlite3

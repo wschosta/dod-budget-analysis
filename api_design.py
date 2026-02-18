@@ -22,13 +22,7 @@ DONE 2.C5-a  api/models.py: Pydantic models for all request/response types.
 DONE 2.C5-b  Error handlers in api/app.py: returns JSON for 400/404/500,
              never HTML tracebacks.
 
-TODO 2.C6-a [Complexity: MEDIUM] [Tokens: ~4000] [User: NO]
-    Write API tests using pytest + httpx (FastAPI TestClient).
-    Dependency: Requires fastapi + httpx installed (added to requirements.txt).
-    Steps:
-      1. Create tests/test_api.py
-      2. Wire test_db_excel_only fixture to FastAPI app via TestClient
-      3. Test each endpoint: happy path, empty results, invalid params,
-         pagination edge cases, CSV/JSON export correctness
-    Success: All 7+ endpoints tested; pytest passes.
+DONE 2.C6-a  tests/test_api.py created (27 tests): TestClient with test_db_excel_only
+    fixture; TestHealth, TestSearch, TestBudgetLines, TestAggregations,
+    TestReference, TestDownload; happy path + 400/404/422 + CSV/JSON export.
 """

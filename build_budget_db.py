@@ -37,18 +37,10 @@ TODO 1.B5-a [Complexity: MEDIUM] [Tokens: ~2000] [User: YES — needs downloaded
       3. Record findings in docs/pdf_quality_audit.md
     Success: A report listing which PDF layouts extract poorly.
 
-TODO 1.B5-b [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    Implement table-aware PDF extraction with fallback strategies.
-    Steps:
-      1. In _extract_tables_with_timeout(), after "lines" strategy returns
-         empty/error, retry with {"vertical_strategy": "text",
-         "horizontal_strategy": "lines"}
-      2. If still empty, try {"vertical_strategy": "text",
-         "horizontal_strategy": "text"}
-      3. Each fallback gets its own timeout; return first non-empty result
-      4. Log strategy used as issue_type "fallback_text_lines" etc.
-      5. Add test with PDF fixture that needs text strategy
-    Success: More tables extracted from PDFs lacking visible gridlines.
+DONE 1.B5-b  _extract_tables_with_timeout() implements 3 progressive strategies:
+    1. lines/lines (primary), 2. text/lines (fallback_text_lines),
+    3. text/text (fallback_text_text). Returns first non-empty result with
+    issue_type label. ThreadPoolExecutor timeout per strategy call.
 
 TODO 1.B5-c [Complexity: HIGH] [Tokens: ~4000] [User: NO]
     Extract structured data from narrative PDF sections (R-2/R-3).
