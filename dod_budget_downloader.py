@@ -913,6 +913,7 @@ def _extract_downloadable_links(soup: BeautifulSoup, page_url: str,
 
 
 def _sanitize_filename(name: str) -> str:
+    """Remove invalid filesystem characters and URL query parameters from filename."""
     if "?" in name:
         name = name.split("?")[0]
     for ch in '<>:"/\\|?*':
@@ -921,6 +922,7 @@ def _sanitize_filename(name: str) -> str:
 
 
 def _is_browser_source(source: str) -> bool:
+    """Check if a source requires browser access to work around WAF protection."""
     return source in BROWSER_REQUIRED_SOURCES
 
 
