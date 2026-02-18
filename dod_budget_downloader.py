@@ -1082,6 +1082,49 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+# Magic-byte signatures for common DoD budget file types (Step 1.A3-b)
+_MAGIC_BYTES: dict[str, bytes] = {
+    ".pdf":  b"%PDF",           # PDF
+    ".xlsx": b"PK\x03\x04",    # ZIP-based Office Open XML
+    ".xlsm": b"PK\x03\x04",
+    ".xls":  b"\xd0\xcf\x11\xe0",  # OLE2 Compound Document
+    ".zip":  b"PK\x03\x04",
+    ".docx": b"PK\x03\x04",
+    ".pptx": b"PK\x03\x04",
+}
+
+
+def _verify_download(dest_path: Path) -> bool:
+    """Verify a downloaded file has the expected magic bytes (Step 1.A3-b).
+
+    Checks the first 4 bytes of the file against known signatures for PDF,
+    Excel (both OOXML and legacy OLE2), and ZIP archives.  Files with
+    unrecognised extensions are accepted if they are non-empty.
+
+    Returns True if the file appears valid, False if it is empty or has an
+    unexpected magic signature (e.g. an HTML error page saved as a .pdf).
+    """
+    try:
+        size = dest_path.stat().st_size
+    except OSError:
+        return False
+
+    if size == 0:
+        return False
+
+    ext = dest_path.suffix.lower()
+    expected_magic = _MAGIC_BYTES.get(ext)
+    if expected_magic is None:
+        return True  # Unknown extension — accept as long as non-empty
+
+    try:
+        with open(dest_path, "rb") as fh:
+            header = fh.read(len(expected_magic))
+        return header == expected_magic
+    except OSError:
+        return False
+
+
 def _clean_file_entry(f: dict) -> dict:
     """Sanitize a file entry dict."""
     f["filename"] = sanitize_filename(f["filename"])
@@ -1446,8 +1489,14 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
 
     if use_browser:
         ok = _browser_download_file(url, dest_path, overwrite=True)
+        # Magic-byte integrity check after browser download (Step 1.A3-b)
+        if ok and not _verify_download(dest_path):
+            print(f"\r    [CORRUPT] {fname}: unexpected file format "
+                  f"(HTML error page from browser?)          ")
+            dest_path.unlink(missing_ok=True)
+            ok = False
+
         size = dest_path.stat().st_size if dest_path.exists() else 0
-        # TODO 1.A3-b: compute hash for browser-downloaded files
         file_hash = _compute_sha256(dest_path) if ok and dest_path.exists() else None
         if _tracker:
             if ok:
@@ -1522,6 +1571,15 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
                         )
 
             file_hash = sha256.hexdigest()
+
+            # Magic-byte integrity check after write (Step 1.A3-b)
+            if not _verify_download(dest_path):
+                print(f"\r    [CORRUPT] {fname}: unexpected file format "
+                      f"(HTML error page?)          ")
+                dest_path.unlink(missing_ok=True)
+                last_exc = RuntimeError("magic-byte verification failed")
+                continue  # Retry loop
+
             if _tracker:
                 _tracker.file_done(fname, downloaded, "ok")
             else:
