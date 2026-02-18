@@ -60,7 +60,17 @@ by category and priority.
 | `tests/test_frontend_helpers.py` | 17 | `api/routes/frontend.py` — _get_services, _get_exhibit_types, _parse_filters, _query_results |
 | `tests/test_download_route.py` | 7 | `api/routes/download.py` — _iter_rows streaming, column list, allowed sorts |
 | `tests/test_app_factory.py` | 5 | `api/app.py` — create_app() factory, health endpoint (200 + 503) |
-| **Total** | **200** | Test count: 561 → 929 (+368 new tests across both sessions) |
+| `tests/test_patterns.py` | 48 | `utils/patterns.py` — all 7 pre-compiled regex patterns (PE_NUMBER, FISCAL_YEAR, etc.) |
+| `tests/test_config_classes.py` | 34 | `utils/config.py` — Config, DatabaseConfig, DownloadConfig, KnownValues, ColumnMapping, FilePatterns |
+| `tests/test_reference_aggregation.py` | 18 | `api/routes/reference.py` + `aggregations.py` — reference endpoints, fallback paths, aggregation filters |
+| `tests/test_scheduled_download.py` | 18 | `scripts/scheduled_download.py` + `run_precommit_checks.py` — download orchestration, PreCommitChecker |
+| `tests/test_validation_classes.py` | 45 | `utils/validation.py` — ValidationIssue, ValidationResult, ValidationRegistry, standalone validators |
+| `tests/test_strings_edge_cases.py` | 25 | `utils/strings.py` — safe_float NaN/Inf/currency, normalize_whitespace unicode, sanitize_fts5_query |
+| `tests/test_schema_design.py` | 13 | `schema_design.py` — _current_version, migrate (idempotent, seeds, indexes), create_normalized_db |
+| `tests/test_precommit_hook.py` | 16 | `.pre-commit-hook.py` — check_syntax, check_code_quality, check_security, check_database_schema |
+| `tests/test_http_utils.py` (additions) | 6 | `utils/http.py` — download_file() success, error handling, cleanup, streaming |
+| optimization_validation fixes | 0 | Fixed PytestReturnNotNoneWarning + _safe_float expectations in existing tests |
+| **Total** | **423** | Test count: 561 → 1152 (+591 new tests across all sessions) |
 
 ---
 
