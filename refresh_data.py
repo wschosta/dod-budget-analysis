@@ -167,52 +167,52 @@ class RefreshWorkflow:
             return False
 
     def stage_4_report(self) -> bool:
-        """Stage 4: Generate quality report."""
+        """Stage 4: Generate quality report (2.B3-a: extended data-quality JSON)."""
         self.log("=" * 60)
         self.log("STAGE 4: GENERATE QUALITY REPORT")
         self.log("=" * 60)
 
+        if self.dry_run:
+            self.log("[DRY RUN] Would call generate_quality_report()", "detail")
+            self.results["report"] = "completed"
+            return True
+
+        if not self.db_path.exists():
+            self.log("Database not found; skipping report generation", "warn")
+            self.results["report"] = "skipped"
+            return False
+
         try:
-            import sqlite3
+            from validate_budget_data import (  # noqa: PLC0415
+                generate_quality_report,
+            )
+            quality_report = generate_quality_report(
+                self.db_path,
+                output_path=Path("data_quality_report.json"),
+                print_console=self.verbose,
+            )
 
-            if not self.db_path.exists():
-                self.log("Database not found; skipping report generation", "warn")
-                self.results["report"] = "skipped"
-                return False
-
-            conn = sqlite3.connect(str(self.db_path))
-            conn.row_factory = sqlite3.Row
-
-            budget_count = conn.execute(
-                "SELECT COUNT(*) as cnt FROM budget_lines"
-            ).fetchone()["cnt"]
-            pdf_count = conn.execute(
-                "SELECT COUNT(*) as cnt FROM pdf_pages"
-            ).fetchone()["cnt"]
-            files_count = conn.execute(
-                "SELECT COUNT(*) as cnt FROM ingested_files"
-            ).fetchone()["cnt"]
-
-            # Generate report
-            report = {
+            # Also write a lean refresh_report.json with workflow metadata
+            db_size_mb = self.db_path.stat().st_size / (1024 * 1024)
+            refresh_report = {
                 "timestamp": datetime.now().isoformat(),
                 "database_file": str(self.db_path),
-                "database_size_mb": self.db_path.stat().st_size / (1024 * 1024),
-                "statistics": {
-                    "budget_lines": budget_count,
-                    "pdf_pages": pdf_count,
-                    "files_ingested": files_count,
-                },
+                "database_size_mb": round(db_size_mb, 2),
+                "total_budget_lines": quality_report["total_budget_lines"],
+                "validation_summary": quality_report["validation_summary"],
+                "workflow_stages": self.results,
             }
-
-            # Write report to file
             report_path = Path("refresh_report.json")
             with open(report_path, "w") as f:
-                json.dump(report, f, indent=2)
+                json.dump(refresh_report, f, indent=2)
 
-            self.log(f"Quality report saved to {report_path}", "ok")
+            self.log(
+                f"Quality report: {quality_report['total_budget_lines']:,} budget lines, "
+                f"{quality_report['validation_summary']['total_warnings']} warning(s)",
+                "ok",
+            )
+            self.log(f"Reports saved: data_quality_report.json, {report_path}", "ok")
             self.results["report"] = "completed"
-            conn.close()
             return True
 
         except Exception as e:

@@ -20,11 +20,15 @@ Remaining TODOs
 DONE 1.B6-a: check_fiscal_year_coverage() added — flags orgs missing expected FYs.
 DONE 1.B6-d: check_column_types() added — detects text in numeric amount columns.
 DONE 1.B6-h: validate_all() wired into build_budget_db.py post-build step.
+DONE 2.B3-a: generate_quality_report() writes data_quality_report.json with
+    row counts by (service, fiscal_year, exhibit_type), null/zero percentages
+    for each amount column, and full validation check results.
 """
 
 import json
 import sqlite3
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # Shared utilities: Import from utils package for consistency across codebase
@@ -335,6 +339,98 @@ def print_report(summary: dict) -> None:
     print(f"\n  Summary: {summary['total_checks']} checks, "
           f"{summary['total_warnings']} warning(s), "
           f"{summary['total_failures']} failure(s)\n")
+
+
+def generate_quality_report(
+    db_path: Path = DEFAULT_DB_PATH,
+    output_path: Path = Path("data_quality_report.json"),
+    print_console: bool = True,
+) -> dict:
+    """Generate a JSON data-quality report after a build (2.B3-a).
+
+    Extends the basic validation summary with:
+      - Row counts broken down by (service/org, fiscal_year, exhibit_type)
+      - Null/zero percentages for each amount column
+      - Full validation check results from validate_all()
+
+    Writes the report to output_path and returns the report dict.
+
+    Args:
+        db_path:       Path to the SQLite database.
+        output_path:   JSON file to write (default: data_quality_report.json).
+        print_console: If True, also print the human-readable validation report.
+
+    Returns:
+        Report dict with keys: timestamp, database, total_budget_lines,
+        row_counts_by_service_fy_exhibit, amount_column_stats,
+        validation_summary.
+    """
+    conn = get_connection(db_path)
+
+    # 1. Row counts by (organization_name, fiscal_year, exhibit_type)
+    cur = conn.execute("""
+        SELECT organization_name, fiscal_year, exhibit_type, COUNT(*) AS row_count
+        FROM budget_lines
+        WHERE organization_name IS NOT NULL
+        GROUP BY organization_name, fiscal_year, exhibit_type
+        ORDER BY organization_name, fiscal_year, exhibit_type
+    """)
+    row_counts = [
+        {
+            "service": r[0],
+            "fiscal_year": r[1],
+            "exhibit_type": r[2],
+            "row_count": r[3],
+        }
+        for r in cur.fetchall()
+    ]
+
+    # 2. Null/zero percentages for each amount column
+    total_rows = conn.execute("SELECT COUNT(*) FROM budget_lines").fetchone()[0]
+    amount_stats: dict = {}
+    for col in AMOUNT_COLUMNS:
+        if total_rows:
+            null_ct = conn.execute(
+                f"SELECT COUNT(*) FROM budget_lines WHERE {col} IS NULL"
+            ).fetchone()[0]
+            zero_ct = conn.execute(
+                f"SELECT COUNT(*) FROM budget_lines WHERE {col} = 0"
+            ).fetchone()[0]
+            amount_stats[col] = {
+                "null_count": null_ct,
+                "null_pct": round(null_ct / total_rows * 100, 1),
+                "zero_count": zero_ct,
+                "zero_pct": round(zero_ct / total_rows * 100, 1),
+            }
+        else:
+            amount_stats[col] = {
+                "null_count": 0, "null_pct": 0.0,
+                "zero_count": 0, "zero_pct": 0.0,
+            }
+
+    conn.close()
+
+    # 3. Run validation checks
+    val_summary = validate_all(db_path)
+    if print_console:
+        print_report(val_summary)
+
+    report = {
+        "timestamp": datetime.now().isoformat(),
+        "database": str(db_path),
+        "total_budget_lines": total_rows,
+        "row_counts_by_service_fy_exhibit": row_counts,
+        "amount_column_stats": amount_stats,
+        "validation_summary": {
+            "total_checks": val_summary["total_checks"],
+            "total_warnings": val_summary["total_warnings"],
+            "total_failures": val_summary["total_failures"],
+            "checks": val_summary["checks"],
+        },
+    }
+
+    output_path.write_text(json.dumps(report, indent=2))
+    return report
 
 
 if __name__ == "__main__":

@@ -1931,11 +1931,20 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
               {"files_remaining": 0, "eta_sec": 0.0})
     conn.close()
 
-    # 1.B6-h: Run post-build validation (non-blocking — warnings only)
+    # 1.B6-h / 2.B3-a: Post-build validation + data-quality JSON report
     try:
-        from validate_budget_data import validate_all, print_report  # noqa: PLC0415
-        val_summary = validate_all(db_path)
-        print_report(val_summary)
+        from validate_budget_data import (  # noqa: PLC0415
+            generate_quality_report,
+        )
+        report = generate_quality_report(db_path, print_console=True)
+        val = report["validation_summary"]
+        print(
+            f"\n  [QUALITY REPORT] {report['total_budget_lines']:,} budget lines | "
+            f"{val['total_checks']} checks | "
+            f"{val['total_warnings']} warning(s) | "
+            f"{val['total_failures']} failure(s)"
+        )
+        print("  [QUALITY REPORT] Written to data_quality_report.json")
     except Exception as _val_err:
         print(f"\n  [VALIDATION] Skipped: {_val_err}")
 

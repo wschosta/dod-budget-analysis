@@ -39,10 +39,10 @@ TODO 2.B1-a [Complexity: HIGH] [Tokens: ~4000] [User: NO]
     Dependency: All 2.A* DDL is now written (schema_design.py).
     Steps: see schema_design.py notes above for column mappings.
 
-TODO 2.B3-a [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    Generate data-quality report (JSON) after each build.
-    (validate_budget_data.py + refresh_data.py already create some reports;
-    this TODO extends them to include row counts by service/FY/exhibit.)
+DONE 2.B3-a  generate_quality_report() added to validate_budget_data.py;
+    called from build_budget_db.py post-build step and refresh_data.stage_4_report().
+    Writes data_quality_report.json with row counts by (service/org, fiscal_year,
+    exhibit_type) and null/zero percentages for each amount column.
 
 
 ──────────────────────────────────────────────────────────────────────────────
@@ -85,15 +85,9 @@ TODO 2.B2-b [Complexity: MEDIUM] [Tokens: ~2000] [User: YES — needs real data]
       3. Output discrepancy report
     Success: Summary-vs-detail deltas within expected tolerance.
 
-TODO 2.B3-a [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    Generate data-quality report (JSON) after each load.
-    Steps:
-      1. After build_database() completes, gather row counts by
-         (service, fiscal_year, exhibit_type)
-      2. Compute null/zero percentages for amount columns
-      3. Include validation warnings from validate_budget_data.py
-      4. Write to data_quality_report.json
-    Success: JSON report generated automatically after each build.
+DONE 2.B3-a  generate_quality_report() in validate_budget_data.py writes
+    data_quality_report.json with row counts by (service, fiscal_year, exhibit_type),
+    null/zero percentages per amount column, and full validation results.
 
 TODO 2.B4-a [Complexity: LOW] [Tokens: ~500] [User: NO]
     DONE — refresh_data.py already implements this workflow.
