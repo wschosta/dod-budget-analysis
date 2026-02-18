@@ -409,6 +409,23 @@ def _detect_currency_year(sheet_name: str, filename: str) -> str:
     return "then-year"
 
 
+def _normalise_fiscal_year(raw: str) -> str:
+    """Normalise a raw fiscal-year string to canonical "FY YYYY" format (Step 1.B2-d).
+
+    Handles the three common variants that appear in DoD spreadsheet sheet names:
+      - "2026"     → "FY 2026"
+      - "FY2026"   → "FY 2026"
+      - "FY 2026"  → "FY 2026"  (already canonical, returned as-is)
+
+    If the input contains no recognisable 4-digit year, it is returned unchanged
+    so that callers always get a deterministic result.
+    """
+    m = re.search(r"(20\d{2})", raw)
+    if m:
+        return f"FY {m.group(1)}"
+    return raw
+
+
 def _detect_amount_unit(rows: list, header_idx: int) -> str:
     """Scan title rows above the header for unit indicators (TODO 1.B3-a).
 
@@ -650,15 +667,8 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
         if "account" not in col_map:
             continue
 
-        # Detect fiscal year from sheet name
-        fy_match = re.search(r"(FY\s*)?20\d{2}", sheet_name, re.IGNORECASE)
-        fiscal_year = fy_match.group().replace("FY ", "FY").replace("FY", "FY ") if fy_match else sheet_name
-        # TODO 1.B2-d [EASY, ~600 tokens]: Normalise fiscal_year to canonical "FY YYYY".
-        #   The regex match above may return "2026", "FY2026", or "FY 2026" depending on
-        #   the sheet name, which breaks GROUP BY queries. Add a helper function
-        #   _normalise_fiscal_year(raw: str) -> str that always returns "FY YYYY" format
-        #   (e.g. "FY 2026"). Replace the assignment above with it. Add parametrized
-        #   tests in test_parsing.py covering all three input variants.
+        # Detect fiscal year from sheet name and normalise to "FY YYYY" (Step 1.B2-d)
+        fiscal_year = _normalise_fiscal_year(sheet_name)
 
         # Detect currency year for this sheet (TODO 1.B3-b)
         currency_year = _detect_currency_year(sheet_name, file_path.name)

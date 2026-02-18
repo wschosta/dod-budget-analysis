@@ -30,6 +30,7 @@ from build_budget_db import (
     _extract_pe_number,
     _detect_amount_unit,
     _merge_header_rows,
+    _normalise_fiscal_year,
 )
 from utils.common import sanitize_filename
 
@@ -451,3 +452,18 @@ def test_merge_header_rows_two_row_map_columns():
     assert "amount_fy2026_request" in mapping
     assert "amount_fy2025_enacted" in mapping
     assert "amount_fy2024_actual" in mapping
+
+
+# ── 1.B2-d: _normalise_fiscal_year tests ─────────────────────────────────────
+
+@pytest.mark.parametrize("raw, expected", [
+    ("2026",          "FY 2026"),  # bare year → canonical
+    ("FY2026",        "FY 2026"),  # no space → canonical
+    ("FY 2026",       "FY 2026"),  # already canonical
+    ("FY2024",        "FY 2024"),
+    ("fy 2025",       "FY 2025"),  # lowercase
+    ("Sheet FY2026",  "FY 2026"),  # embedded in sheet name
+    ("no year here",  "no year here"),  # no year → unchanged
+])
+def test_normalise_fiscal_year(raw, expected):
+    assert _normalise_fiscal_year(raw) == expected
