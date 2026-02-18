@@ -620,9 +620,33 @@ class GuiProgressTracker:
 
         self._root.after(150, self._poll)
 
+    def _cleanup_vars(self):
+        """Delete StringVar references on the GUI thread before destroying root.
+
+        StringVar.__del__ calls into the Tcl interpreter. If Python's garbage
+        collector runs these destructors from the main thread (e.g. at interpreter
+        shutdown) after the GUI thread has exited, tkinter raises:
+            RuntimeError: main thread is not in main loop
+        Explicitly deleting the attributes here and forcing a GC cycle ensures
+        the destructors run on the GUI thread while the Tcl interpreter is still
+        valid.
+        """
+        import gc
+        for attr in ('_src_var', '_overall_lbl', '_stats_var',
+                     '_file_lbl', '_file_stats_var', '_count_var'):
+            if hasattr(self, attr):
+                delattr(self, attr)
+        gc.collect()
+
     def _on_close(self):
         """Handle window close: set the closed flag and destroy the root widget."""
         self._closed = True
+        self._cleanup_vars()
+        self._root.destroy()
+
+    def _do_close(self):
+        """Destroy the root window on the GUI thread after cleaning up StringVars."""
+        self._cleanup_vars()
         self._root.destroy()
 
     def set_source(self, year: str, source: str):
@@ -754,7 +778,7 @@ class GuiProgressTracker:
         if not self._closed and hasattr(self, '_root'):
             self._closed = True
             try:
-                self._root.after(0, self._root.destroy)
+                self._root.after(0, self._do_close)
             except Exception:
                 pass
 
