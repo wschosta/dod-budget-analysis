@@ -1,10 +1,13 @@
 """
 Canonical Schema Design — Steps 2.A1 through 2.A5
 
+**Status:** Phase 2 Planning (Phase 1 currently in progress)
+
 This module will define the production-quality relational schema for the DoD
-budget database.  The current build_budget_db.py uses a flat schema (one
-budget_lines table, one pdf_pages table, one ingested_files table).  This
-redesign normalizes the data for proper querying and cross-referencing.
+budget database. The current build_budget_db.py uses a flat schema (one
+budget_lines table, one pdf_pages table, one ingested_files table). This
+redesign will normalize the data for proper querying and cross-referencing
+in Phase 2.
 
 Current schema (build_budget_db.py):
     budget_lines: source_file, sheet_name, fiscal_year, exhibit_type, category,
