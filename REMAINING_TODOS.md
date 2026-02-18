@@ -1,6 +1,6 @@
 # Remaining TODOs
 
-Updated: 2026-02-18
+Updated: 2026-02-18 (continued session)
 
 This document catalogs all remaining TODO items found across the codebase, organized
 by category and priority.
@@ -40,6 +40,22 @@ by category and priority.
 | 1.B2-b | Catalog-driven column detection for detail exhibits | Already implemented with tests; TODO comment updated to DONE |
 | 1.B1-f | All catalog entries return valid mappings | Already implemented with tests; TODO comment updated to DONE |
 | 1.C1 | Populate test fixtures directory | `scripts/generate_expected_output.py` creates synthetic .xlsx fixtures + expected JSON; 14 integration tests in `tests/test_fixture_integration.py` |
+
+### Test Coverage Improvements (continued session)
+
+| Test File | Tests | Modules Covered |
+|---|---|---|
+| `tests/test_backfill.py` | 11 | `backfill_reference_tables.py` — backfill(), service classification, deduplication, dry-run, CLI |
+| `tests/test_refresh_workflow.py` | 22 | `refresh_data.py` — RefreshWorkflow init, logging, run_command, dry-run stages, webhook notification |
+| `tests/test_database_utils.py` | 19 | `utils/database.py` — init_pragmas, batch_insert, table introspection, FTS5 index/triggers, vacuum |
+| `tests/test_pdf_sections.py` | 24 | `utils/pdf_sections.py` — R-2/R-3 section pattern matching, narrative parsing, is_narrative_exhibit |
+| `tests/test_common_utils.py` | 12 | `utils/common.py` — format_bytes, elapsed, sanitize_filename, get_connection |
+| `tests/test_exhibit_inventory.py` | 19 | `exhibit_type_inventory.py` — ExhibitInventory scan, report, JSON/CSV export |
+| `tests/test_search_extended.py` | 9 | `search_budget.py` — display_budget_results, display_pdf_results, export_results |
+| `tests/test_build_where.py` | 11 | `api/routes/budget_lines.py` — _build_where() SQL WHERE clause builder |
+| `tests/test_gui_eta.py` | 10 | `build_budget_gui.py` — _fmt_eta() ETA formatting |
+| `tests/test_api_database.py` | 5 | `api/database.py` — get_db() FastAPI dependency, connection lifecycle |
+| **Total** | **142** | Test count: 561 → 844 (+283 new tests across both sessions) |
 
 ---
 
