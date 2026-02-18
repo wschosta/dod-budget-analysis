@@ -29,6 +29,7 @@ from build_budget_db import (
     _map_columns,
     _extract_pe_number,
     _detect_amount_unit,
+    _merge_header_rows,
 )
 from utils.common import sanitize_filename
 
@@ -401,3 +402,52 @@ def test_detect_amount_unit_millions_priority():
     rows = [["in millions of dollars, prior amounts in thousands"]]
     # 'in millions' appears first in the keyword scan → millions wins
     assert _detect_amount_unit(rows, 0) == "millions"
+
+
+# ── 1.B2-c: _merge_header_rows tests ─────────────────────────────────────────
+
+def test_merge_header_rows_two_row_split():
+    """Two-row split headers (e.g. 'FY 2026' / 'Request Amount') are merged."""
+    header = ["Account", "Account Title", "FY 2026", "FY 2025"]
+    sub    = [None,      None,            "Request Amount", "Enacted Amount"]
+    merged = _merge_header_rows(header, sub)
+    assert merged[0] == "Account"          # unchanged
+    assert merged[1] == "Account Title"    # unchanged
+    assert "FY 2026" in merged[2] and "Request Amount" in merged[2]
+    assert "FY 2025" in merged[3] and "Enacted Amount" in merged[3]
+
+
+def test_merge_header_rows_all_blank_sub():
+    """All-blank sub-row returns the header row unchanged."""
+    header = ["Account", "FY2026 Request"]
+    sub    = [None, None]
+    merged = _merge_header_rows(header, sub)
+    assert merged == list(header)
+
+
+def test_merge_header_rows_numeric_sub_not_merged():
+    """Sub-row with numeric values is treated as a data row — not merged."""
+    header = ["Account", "Title", "FY2026 Request"]
+    sub    = ["001",     "Widget", "1234.0"]
+    merged = _merge_header_rows(header, sub)
+    assert merged == list(header)
+
+
+def test_merge_header_rows_long_text_not_merged():
+    """Sub-row with long narrative text is not merged (data row heuristic)."""
+    header = ["Account", "Description"]
+    sub    = ["A", "This is a very long narrative description that exceeds 50 characters and represents real data"]
+    merged = _merge_header_rows(header, sub)
+    assert merged == list(header)
+
+
+def test_merge_header_rows_two_row_map_columns():
+    """After merging two-row headers, _map_columns produces correct mapping."""
+    header = ["Account", "Account Title", "FY2026", "FY2025", "FY2024"]
+    sub    = [None,       None,           "Request Amount", "Enacted Amount", "Actual Amount"]
+    merged = _merge_header_rows(header, sub)
+    mapping = _map_columns(merged, "p1")
+    assert "account" in mapping
+    assert "amount_fy2026_request" in mapping
+    assert "amount_fy2025_enacted" in mapping
+    assert "amount_fy2024_actual" in mapping

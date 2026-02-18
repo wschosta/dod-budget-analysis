@@ -28,13 +28,6 @@ TODO 1.B2-b: Add unit tests for _map_columns() covering every exhibit type.
     that _map_columns returns the expected field→index mapping.
     File: tests/test_parsing.py (see Step 1.C TODOs).
 
-TODO 1.B2-c: Handle multi-row headers.
-    Some exhibits split column headers across 2–3 rows (e.g., "FY 2026" on row 1
-    and "Request" on row 2).  Detect this by checking if the row after the header
-    row also contains header-like text, and merge them.
-    Token-efficient tip: modify the header_idx detection loop in ingest_excel_file()
-    to peek at rows[header_idx+1] and join cells vertically when non-data.
-
 TODO 1.B3-a: Normalize all monetary values to thousands of dollars.
     Audit the downloaded exhibits to determine which use whole dollars vs.
     thousands vs. millions.  Add a multiplier field to EXHIBIT_CATALOG and
@@ -465,6 +458,59 @@ _EXHIBIT_BUDGET_TYPE: dict[str, str] = {
 # 2) Sub-activity/line-item fields (varies by exhibit type)
 # 3) Amount column mapping (FY2024-2026 variants, authorization/appropriation for C-1)
 # Current implementation is functional and handles all known exhibit types.
+_HEADER_CONTINUATION_WORDS = frozenset([
+    "amount", "request", "actual", "enacted", "total", "supplemental",
+    "reconciliation", "quantity", "code", "title", "number", "no.",
+    "disc.", "disc", "prior year", "current year", "budget year",
+])
+
+
+def _merge_header_rows(header_row: list, next_row: list) -> list[str | None]:
+    """Merge a two-row header into a single row (Step 1.B2-c).
+
+    When exhibit sheets split column headers across two rows (e.g., "FY 2026"
+    on row N and "Request Amount" on row N+1), this merges them cell-by-cell
+    so that _map_columns() receives a single combined header string per column.
+
+    Only cells in next_row that are non-empty and consist entirely of short
+    header-like text are merged; if any cell looks like a data value (numeric
+    or long string), the function returns the original header_row unchanged to
+    avoid accidentally consuming a data row.
+    """
+    non_empty = [str(v).strip() for v in next_row if v is not None and str(v).strip()]
+    if not non_empty:
+        return list(header_row)  # All-blank next row — nothing to merge
+
+    # If any non-empty cell is numeric, treat next_row as a data row
+    for cell in non_empty:
+        try:
+            float(str(cell).replace(",", ""))
+            return list(header_row)
+        except ValueError:
+            pass
+
+    # If any cell is longer than 50 chars, likely a narrative data cell
+    if any(len(c) > 50 for c in non_empty):
+        return list(header_row)
+
+    # Merge pairwise; concatenate with a space where both cells are populated
+    merged = []
+    for main, sub in zip(header_row, next_row):
+        main_s = str(main).strip() if main is not None else ""
+        sub_s = str(sub).strip() if sub is not None else ""
+        if main_s and sub_s:
+            merged.append(f"{main_s} {sub_s}")
+        elif main_s:
+            merged.append(main_s)
+        elif sub_s:
+            merged.append(sub_s)
+        else:
+            merged.append(None)
+    # Pad if next_row is shorter than header_row (shouldn't happen, but defensive)
+    merged.extend(header_row[len(next_row):])
+    return merged
+
+
 # Future optimization: could split into _map_common_fields, _map_line_item_fields,
 # and _map_amount_fields for improved testability and per-exhibit customization.
 def _map_columns(headers: list, exhibit_type: str) -> dict:
@@ -561,14 +607,6 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
         elif "total obligation authority" in h:
             mapping.setdefault("amount_fy2026_total", i)
 
-    # TODO 1.B2-c [MEDIUM, ~1500 tokens]: Handle multi-row headers.
-    #   Some exhibit sheets split header text across two rows (e.g., row N has "FY2026"
-    #   and row N+1 has "Request Amount" in the same column). In ingest_excel_file(),
-    #   after finding header_idx, check if rows[header_idx+1] contains only blank or
-    #   continuation words; if so, merge each cell with " ".join() before passing to
-    #   _map_columns(). Add a test in test_parsing.py with a two-row header fixture.
-    #   No external data needed.
-
     return mapping
 
 
@@ -598,6 +636,15 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
             continue
 
         headers = rows[header_idx]
+        # Detect and merge two-row headers (Step 1.B2-c): some exhibits split
+        # "FY 2026" and "Request Amount" across consecutive rows.
+        data_start = header_idx + 1
+        if header_idx + 1 < len(rows):
+            merged = _merge_header_rows(headers, rows[header_idx + 1])
+            if merged != list(headers):
+                headers = merged
+                data_start = header_idx + 2  # sub-header row consumed
+
         col_map = _map_columns(headers, exhibit_type)
 
         if "account" not in col_map:
@@ -616,7 +663,7 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
         # Detect currency year for this sheet (TODO 1.B3-b)
         currency_year = _detect_currency_year(sheet_name, file_path.name)
 
-        data_rows = rows[header_idx + 1:]
+        data_rows = rows[data_start:]
 
         # Detect source unit and compute normalisation multiplier (Step 1.B3-a/c)
         amount_unit = _detect_amount_unit(rows, header_idx)
