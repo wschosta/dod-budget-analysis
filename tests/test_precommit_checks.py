@@ -124,10 +124,19 @@ class TestCodeQuality:
 
     def test_no_breakpoint_statements(self):
         """No pdb/breakpoint statements should be committed."""
+        # Exclude pre-commit checker infrastructure files — they reference the
+        # patterns as string literals (not actual debug calls) for detection logic.
+        skip_files = {"run_precommit_checks.py", ".pre-commit-hook.py"}
         errors = []
         for py_file in self.get_python_files():
+            if py_file.name in skip_files:
+                continue
             with open(py_file) as f:
                 for i, line in enumerate(f, 1):
+                    # Skip lines that are clearly string literals / comments
+                    stripped = line.strip()
+                    if stripped.startswith("#") or stripped.startswith(("'", '"', "r'")):
+                        continue
                     if re.search(r"\bbreakpoint\(\)", line):
                         errors.append(f"{py_file}:{i}: breakpoint() found")
                     if re.search(r"\bpdb\.set_trace\(\)", line):

@@ -460,9 +460,10 @@ def test_database_schema_integrity(test_db):
     )
 
     expected_cols = [
-        "id", "source_file", "file_type", "account", "account_title",
+        "id", "source_file", "account", "account_title",
         "budget_activity", "line_item", "organization_name",
         "exhibit_type", "amount_fy2024_actual", "amount_fy2026_request"
+        # Note: file_type is in ingested_files, not budget_lines
     ]
 
     for col in expected_cols:
