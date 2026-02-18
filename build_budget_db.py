@@ -1092,6 +1092,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             _save_checkpoint(conn, session_id, files_done_total, total_files,
                              _metrics["pages"], _metrics["rows"],
                              0, str(xlsx), "interrupted")
+            conn.commit()
             _progress("stopped", xi, len(xlsx_files),
                       f"Stopped at {xlsx.name} — resume with --resume",
                       {"files_remaining": total_files - files_done_total})
@@ -1179,6 +1180,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     last_commit_time = time.time()
     initial_page_count = conn.execute("SELECT COUNT(*) FROM pdf_pages").fetchone()[0]
     pdf_file_times: list[float] = []  # per-file elapsed for speed calc
+    _pdf_stopped = False  # set when a graceful stop fires inside the PDF loop
 
     # Drop FTS5 triggers for bulk insert speedup
     print("  Dropping FTS5 triggers for bulk insert optimization...")
@@ -1197,11 +1199,12 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 _save_checkpoint(conn, session_id, files_done_total, total_files,
                                  total_pdf_pages, total_budget_rows,
                                  0, str(pdf), "interrupted")
+                conn.commit()
+                _pdf_stopped = True
                 _progress("stopped", i, len(pdf_files),
                           f"Stopped at {pdf.name} — resume with --resume",
                           {"files_remaining": total_files - files_done_total})
-                conn.commit()
-                return
+                break
 
             rel_path = str(pdf.relative_to(docs_dir))
 
@@ -1293,42 +1296,48 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 last_commit_time = time.time()
 
     finally:
-        # Rebuild FTS5 if new pages were added
-        final_page_count = conn.execute("SELECT COUNT(*) FROM pdf_pages").fetchone()[0]
-        if final_page_count > initial_page_count:
-            print("\n  Rebuilding full-text search indexes...")
-            conn.execute("DELETE FROM pdf_pages_fts;")
-            conn.execute("""
-                INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data)
-                SELECT id, page_text, source_file, table_data FROM pdf_pages;
-            """)
-            conn.execute("""
-                CREATE TRIGGER IF NOT EXISTS pdf_pages_ai AFTER INSERT ON pdf_pages BEGIN
+        if not _pdf_stopped:
+            # Rebuild FTS5 if new pages were added
+            final_page_count = conn.execute("SELECT COUNT(*) FROM pdf_pages").fetchone()[0]
+            if final_page_count > initial_page_count:
+                print("\n  Rebuilding full-text search indexes...")
+                conn.execute("DELETE FROM pdf_pages_fts;")
+                conn.execute("""
                     INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data)
-                    VALUES (new.id, new.page_text, new.source_file, new.table_data);
-                END
-            """)
-            conn.execute("""
-                CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN
-                    INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data)
-                    VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data);
-                END
-            """)
-            conn.commit()
-            print("  FTS5 rebuild complete and triggers recreated")
-        else:
-            conn.execute(
-                "CREATE TRIGGER IF NOT EXISTS pdf_pages_ai AFTER INSERT ON pdf_pages BEGIN "
-                "INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data) "
-                "VALUES (new.id, new.page_text, new.source_file, new.table_data); END"
-            )
-            conn.execute(
-                "CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN "
-                "INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data) "
-                "VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data); END"
-            )
-            conn.commit()
-            print("  Skipped FTS5 rebuild (no new pages added)")
+                    SELECT id, page_text, source_file, table_data FROM pdf_pages;
+                """)
+                conn.execute("""
+                    CREATE TRIGGER IF NOT EXISTS pdf_pages_ai AFTER INSERT ON pdf_pages BEGIN
+                        INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data)
+                        VALUES (new.id, new.page_text, new.source_file, new.table_data);
+                    END
+                """)
+                conn.execute("""
+                    CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN
+                        INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data)
+                        VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data);
+                    END
+                """)
+                conn.commit()
+                print("  FTS5 rebuild complete and triggers recreated")
+            else:
+                conn.execute(
+                    "CREATE TRIGGER IF NOT EXISTS pdf_pages_ai AFTER INSERT ON pdf_pages BEGIN "
+                    "INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data) "
+                    "VALUES (new.id, new.page_text, new.source_file, new.table_data); END"
+                )
+                conn.execute(
+                    "CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN "
+                    "INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data) "
+                    "VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data); END"
+                )
+                conn.commit()
+                print("  Skipped FTS5 rebuild (no new pages added)")
+
+    # If stopped gracefully during PDF loop, close and exit cleanly
+    if _pdf_stopped:
+        conn.close()
+        return
 
     if skipped_pdf:
         print(f"\n  Skipped {skipped_pdf} unchanged PDF file(s)")
