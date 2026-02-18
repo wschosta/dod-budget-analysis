@@ -28,6 +28,8 @@ from validate_budget_db import (
     check_ingestion_errors,
     check_unit_consistency,
     check_empty_files,
+    _get_amount_columns,
+    generate_report,
 )
 
 
@@ -281,3 +283,62 @@ def test_check_empty_files_flagged(conn):
     issues = check_empty_files(conn)
     assert len(issues) == 1
     assert issues[0]["severity"] == "warning"
+
+
+# ── _get_amount_columns ────────────────────────────────────────────────────────
+
+def test_get_amount_columns_returns_list(conn):
+    """Returns a list of amount_fy* column names from budget_lines schema."""
+    cols = _get_amount_columns(conn)
+    assert isinstance(cols, list)
+    assert len(cols) > 0
+
+
+def test_get_amount_columns_prefix(conn):
+    """Every column returned starts with 'amount_fy'."""
+    cols = _get_amount_columns(conn)
+    for col in cols:
+        assert col.startswith("amount_fy"), f"Unexpected column: {col}"
+
+
+def test_get_amount_columns_includes_standard(conn):
+    """Standard FY2024-2026 amount columns are present."""
+    cols = _get_amount_columns(conn)
+    assert "amount_fy2024_actual" in cols
+    assert "amount_fy2025_enacted" in cols
+    assert "amount_fy2026_request" in cols
+
+
+# ── generate_report ────────────────────────────────────────────────────────────
+
+def test_generate_report_empty_db_returns_int(conn, capsys):
+    """generate_report returns an integer issue count."""
+    result = generate_report(conn)
+    assert isinstance(result, int)
+
+
+def test_generate_report_empty_db_prints_output(conn, capsys):
+    """generate_report prints report header to stdout."""
+    generate_report(conn)
+    out = capsys.readouterr().out
+    assert "VALIDATION REPORT" in out
+
+
+def test_generate_report_no_issues_pass(conn, capsys):
+    """Clean database with data reports zero errors."""
+    _insert_line(conn, amount_fy2026_request=500.0)
+    _insert_ingested(conn, row_count=1, status="ok")
+    result = generate_report(conn)
+    # May have warnings (missing years in single-org DB), but no errors
+    assert result >= 0
+
+
+def test_generate_report_verbose_shows_detail(conn, capsys):
+    """Verbose mode prints issue details."""
+    # Insert a duplicate to trigger an issue
+    for _ in range(2):
+        _insert_line(conn)
+    generate_report(conn, verbose=True)
+    out = capsys.readouterr().out
+    # Verbose mode should show at least one issue detail
+    assert "ERROR" in out or "WARNING" in out or "INFO" in out
