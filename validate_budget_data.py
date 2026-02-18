@@ -13,10 +13,39 @@ Usage:
 
 Status: Core validation checks implemented (1.B6-b, 1.B6-c, 1.B6-e, 1.B6-f, 1.B6-g)
 
-Remaining Phase 1 enhancements:
-    1.B6-a: Check for missing fiscal-year coverage per service.
-    1.B6-d: Detect column misalignment (text in numeric columns or vice versa).
-    1.B6-h: Wire validation into build_budget_db.py post-build step (auto-validate after build)
+──────────────────────────────────────────────────────────────────────────────
+Remaining TODOs
+──────────────────────────────────────────────────────────────────────────────
+
+TODO 1.B6-a [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
+    Add check for missing fiscal-year coverage per service.
+    Steps:
+      1. Add check_fiscal_year_coverage(conn) function
+      2. Query: SELECT organization, GROUP_CONCAT(DISTINCT fiscal_year)
+         FROM budget_lines GROUP BY organization
+      3. For each org, check against set of all FYs in database
+      4. Flag orgs missing expected years as warnings
+      5. Add to ALL_CHECKS list
+    Success: Missing FY coverage flagged (e.g., "Navy missing FY2018").
+
+TODO 1.B6-d [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
+    Detect column misalignment (text in numeric columns or vice versa).
+    Steps:
+      1. Add check_column_types(conn) function
+      2. For each amount_fy* column, query for rows where TYPEOF(col) != 'real'
+         AND col IS NOT NULL
+      3. Flag misaligned rows as warnings with source_file context
+      4. Add to ALL_CHECKS list
+    Success: Text-in-numeric-column errors detected and reported.
+
+TODO 1.B6-h [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Wire validation into build_budget_db.py as post-build auto-check.
+    (See also build_budget_db.py TODO 1.B6-h for the integration side.)
+    Steps:
+      1. Ensure validate_all() can be imported and called from build_budget_db
+      2. Return summary dict (not sys.exit) when called programmatically
+      3. Print compact summary after build completes
+    Success: Every build run ends with validation report.
 """
 
 import json

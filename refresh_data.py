@@ -14,6 +14,29 @@ Usage:
     python refresh_data.py --years 2025 2026 --sources all  # Multiple years
     python refresh_data.py --dry-run --years 2026           # Preview without downloading
     python refresh_data.py --help                           # Show full options
+
+──────────────────────────────────────────────────────────────────────────────
+TODOs for this file
+──────────────────────────────────────────────────────────────────────────────
+
+TODO REFRESH-001 [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Use Python imports instead of subprocess for internal scripts.
+    Steps:
+      1. Import build_database from build_budget_db directly
+      2. Import validate_all from validate_budget_data directly
+      3. Replace subprocess.run() calls with direct function calls
+      4. Keep subprocess only for dod_budget_downloader.py (or use download_all()
+         once TODO 1.A4-a refactor is done)
+    Benefit: Better error handling, no subprocess overhead, testable.
+    Success: Stages 2-4 call Python functions directly.
+
+TODO REFRESH-002 [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add --notify flag for email/Slack notification on completion/failure.
+    Steps:
+      1. Add --notify argument (optional webhook URL or email)
+      2. After workflow, POST summary JSON to webhook or send email
+      3. Include: stages completed, row counts, any errors
+    Success: Unattended refreshes send status notifications.
 """
 
 import argparse
