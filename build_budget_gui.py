@@ -149,6 +149,20 @@ class BuildProgressWindow:
                        activeforeground=FG, font=("Segoe UI", 9)
                        ).pack(side="left")
 
+        # Workers control (parallel PDF extraction)
+        import os as _os
+        default_workers = min(_os.cpu_count() or 1, 4)
+        tk.Label(opt_frame, text="  Workers:", bg=BG, fg=FG_DIM,
+                 font=("Segoe UI", 9)).pack(side="left", padx=(12, 2))
+        self.workers_var = tk.IntVar(value=default_workers)
+        workers_spin = tk.Spinbox(
+            opt_frame, from_=1, to=16, width=3,
+            textvariable=self.workers_var,
+            bg=BG_CARD, fg=FG, buttonbackground=BG_CARD,
+            insertbackground=FG, relief="flat",
+            font=("Consolas", 9))
+        workers_spin.pack(side="left")
+
         # ── Progress card ──
         card = tk.Frame(self.root, bg=BG_CARD, highlightbackground=BORDER,
                         highlightthickness=1)
@@ -287,16 +301,20 @@ class BuildProgressWindow:
 
         rebuild = self.rebuild_var.get()
         resume = self.resume_var.get()
+        workers = self.workers_var.get()
         self.build_thread = threading.Thread(
-            target=self._run_build, args=(docs, db, rebuild, resume), daemon=True)
+            target=self._run_build, args=(docs, db, rebuild, resume, workers),
+            daemon=True)
         self.build_thread.start()
 
-    def _run_build(self, docs: Path, db: Path, rebuild: bool, resume: bool):
+    def _run_build(self, docs: Path, db: Path, rebuild: bool, resume: bool,
+                   workers: int):
         """Runs in the background thread."""
         try:
             build_database(docs, db, rebuild=rebuild, resume=resume,
                            progress_callback=self._on_progress,
-                           stop_event=self.stop_event)
+                           stop_event=self.stop_event,
+                           workers=workers)
         except Exception as e:
             self.msg_queue.put(("error", 0, 0, str(e), {}))
 
