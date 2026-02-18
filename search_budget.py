@@ -116,7 +116,8 @@ def show_summary(conn: sqlite3.Connection) -> None:
     )
     if request_cols:
         latest_request_col = request_cols[0]
-        fy_label = latest_request_col.replace("amount_", "").replace("_request", "").upper().replace("FY", "FY ")
+        fy_label = (latest_request_col.replace("amount_", "")
+                    .replace("_request", "").upper().replace("FY", "FY "))
         print(f"\n  {'Top ' + fy_label + ' Request by Account':<45} {'$ Thousands':>15}")
         print(f"  {'-'*45} {'-'*15}")
         for r in conn.execute(f"""
@@ -287,7 +288,8 @@ def display_budget_results(results: list, query: str,
         org = r["organization_name"] or ""
 
         print(f"\n  [{org}] {title}")
-        print(f"    Account: {r['account']}  |  Exhibit: {r['exhibit_type']}  |  Sheet: {r['sheet_name']}")
+        print(f"    Account: {r['account']}  |  Exhibit: {r['exhibit_type']}"
+              f"  |  Sheet: {r['sheet_name']}")
         print(f"    FY2024 Actual: {_amt(r['amount_fy2024_actual']):>15}"
               f"    FY2025 Enacted: {_amt(r['amount_fy2025_enacted']):>15}"
               f"    FY2026 Request: {_amt(r['amount_fy2026_request']):>15}")
