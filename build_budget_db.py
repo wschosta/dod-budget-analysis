@@ -94,9 +94,12 @@ TODO 1.B5-c: Extract structured data from narrative PDF sections.
 
 import argparse
 import re
+import signal
 import sqlite3
 import sys
 import time
+import uuid
+from datetime import datetime
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
@@ -857,10 +860,8 @@ def _register_data_source(conn: sqlite3.Connection, docs_dir: Path):
 
 def _create_session_id() -> str:
     """Create a unique session ID for this build session."""
-    from datetime import datetime
-    import uuid
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    unique_id = str(uuid.uuid4())[:8]  # Use first 8 chars of UUID
+    unique_id = str(uuid.uuid4())[:8]
     return f"sess-{timestamp}-{unique_id}"
 
 
@@ -942,22 +943,51 @@ def _mark_session_complete(conn: sqlite3.Connection, session_id: str, notes: str
 
 
 def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
-                   progress_callback=None, resume: bool = False):
+                   progress_callback=None, resume: bool = False,
+                   checkpoint_interval: int = 10,
+                   stop_event=None):
     """Build or incrementally update the budget database.
 
     Args:
         docs_dir: Path to the DoD_Budget_Documents directory.
         db_path: Path for the SQLite database file.
         rebuild: If True, delete existing database and rebuild from scratch.
-        progress_callback: Optional callable(phase, current, total, detail)
+        progress_callback: Optional callable(phase, current, total, detail, metrics)
             where phase is 'scan', 'excel', 'pdf', 'index', or 'done',
-            current/total are progress counts, and detail is a status string.
+            current/total are progress counts, detail is a status string, and
+            metrics is a dict with keys: rows, pages, speed_rows, speed_pages,
+            eta_sec, files_remaining, current_pages, current_total_pages.
         resume: If True, attempt to resume from last checkpoint.
+        checkpoint_interval: Save a checkpoint every N files (default 10).
+        stop_event: Optional threading.Event; when set, the build saves a
+            checkpoint and exits cleanly (graceful shutdown).
     """
-    def _progress(phase, current, total, detail=""):
-        if progress_callback:
-            progress_callback(phase, current, total, detail)
+    # ── Metrics state shared across the build ─────────────────────────────
+    _metrics = {
+        "rows": 0,
+        "pages": 0,
+        "speed_rows": 0.0,    # rows/sec (exponentially smoothed)
+        "speed_pages": 0.0,   # pages/sec (exponentially smoothed)
+        "eta_sec": 0.0,
+        "files_remaining": 0,
+        "current_pages": 0,       # pages in current PDF
+        "current_total_pages": 0, # total pages in current PDF
+    }
 
+    def _progress(phase, current, total, detail="", metrics_update=None):
+        if metrics_update:
+            _metrics.update(metrics_update)
+        if progress_callback:
+            progress_callback(phase, current, total, detail, dict(_metrics))
+
+    def _update_speed(key, new_value, alpha=0.3):
+        """Exponential moving average for speed tracking."""
+        if _metrics[key] == 0.0:
+            _metrics[key] = new_value
+        else:
+            _metrics[key] = alpha * new_value + (1 - alpha) * _metrics[key]
+
+    # ── Setup ──────────────────────────────────────────────────────────────
     if not docs_dir.exists():
         _progress("error", 0, 0, f"Documents directory not found: {docs_dir}")
         raise FileNotFoundError(f"Documents directory not found: {docs_dir}")
@@ -974,71 +1004,144 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     else:
         print(f"Updating existing database: {db_path}")
 
-    # Register data sources
+    # ── Session and resume setup ───────────────────────────────────────────
+    session_id = None
+    already_processed: set = set()
+
+    if resume and not rebuild:
+        checkpoint = _get_last_checkpoint(conn)
+        if checkpoint:
+            session_id = checkpoint["session_id"]
+            already_processed = _get_processed_files(conn, session_id)
+            print(f"\nResuming session: {session_id}")
+            print(f"  Already processed: {len(already_processed)} file(s)")
+        else:
+            print("\nNo checkpoint found — starting fresh build.")
+
+    if session_id is None:
+        session_id = _create_session_id()
+
+    # ── Scan ───────────────────────────────────────────────────────────────
     _progress("scan", 0, 0, "Scanning directories...")
     _register_data_source(conn, docs_dir)
 
-    # Collect all files
     xlsx_files = sorted(docs_dir.rglob("*.xlsx"))
     pdf_files = sorted(docs_dir.rglob("*.pdf"))
     total_files = len(xlsx_files) + len(pdf_files)
 
     _progress("scan", 0, total_files,
-              f"Found {len(xlsx_files)} Excel + {len(pdf_files)} PDF files")
+              f"Found {len(xlsx_files)} Excel + {len(pdf_files)} PDF files",
+              {"files_remaining": total_files - len(already_processed)})
     print(f"\nFound {len(xlsx_files)} Excel files and {len(pdf_files)} PDF files")
 
-    # ── Ingest Excel files ──
+    if already_processed:
+        xl_skipped_resume = sum(1 for f in xlsx_files
+                                if str(f.relative_to(docs_dir)) in already_processed)
+        pdf_skipped_resume = sum(1 for f in pdf_files
+                                 if str(f.relative_to(docs_dir)) in already_processed)
+        print(f"  Resuming: skipping {xl_skipped_resume} Excel + {pdf_skipped_resume} PDF "
+              f"files already processed in session {session_id}")
+
+    # ── Ingest Excel files ─────────────────────────────────────────────────
     print(f"\n{'='*60}")
     print("  INGESTING EXCEL FILES")
     print(f"{'='*60}")
 
     total_budget_rows = 0
     skipped_xlsx = 0
+    excel_file_times: list[float] = []  # per-file elapsed times for speed calc
+    files_done_total = 0  # across both xlsx and pdf
+
     for xi, xlsx in enumerate(xlsx_files):
+        # Check for graceful shutdown request
+        if stop_event and stop_event.is_set():
+            print("\n  Graceful stop requested — saving checkpoint...")
+            _save_checkpoint(conn, session_id, files_done_total, total_files,
+                             _metrics["pages"], _metrics["rows"],
+                             0, str(xlsx), "interrupted")
+            _progress("stopped", xi, len(xlsx_files),
+                      f"Stopped at {xlsx.name} — resume with --resume",
+                      {"files_remaining": total_files - files_done_total})
+            conn.close()
+            return
+
         rel_path = str(xlsx.relative_to(docs_dir))
+
+        # Skip if already processed in a resumed session
+        if rel_path in already_processed:
+            skipped_xlsx += 1
+            files_done_total += 1
+            _progress("excel", xi + 1, len(xlsx_files),
+                      f"Resumed (skipped): {xlsx.name}",
+                      {"files_remaining": total_files - files_done_total})
+            continue
+
         if not rebuild and not _file_needs_update(conn, rel_path, xlsx):
             skipped_xlsx += 1
+            files_done_total += 1
             _progress("excel", xi + 1, len(xlsx_files),
-                      f"Skipped (unchanged): {xlsx.name}")
+                      f"Skipped (unchanged): {xlsx.name}",
+                      {"files_remaining": total_files - files_done_total})
             continue
 
         _progress("excel", xi + 1, len(xlsx_files),
-                  f"Processing: {xlsx.name}")
+                  f"Processing: {xlsx.name}",
+                  {"files_remaining": total_files - files_done_total})
         print(f"  Processing: {xlsx.name}...", end=" ", flush=True)
 
-        # Remove old data if re-ingesting
         _remove_file_data(conn, rel_path, "xlsx")
 
         t0 = time.time()
         rows = ingest_excel_file(conn, xlsx)
-        elapsed = time.time() - t0
-        print(f"{rows} rows ({elapsed:.1f}s)")
+        file_elapsed = time.time() - t0
+        print(f"{rows} rows ({file_elapsed:.1f}s)")
+
+        # Update speed tracking
+        if file_elapsed > 0 and rows > 0:
+            _update_speed("speed_rows", rows / file_elapsed)
+        excel_file_times.append(file_elapsed)
 
         stat = xlsx.stat()
         conn.execute(
-            "INSERT OR REPLACE INTO ingested_files (file_path, file_type, file_size, file_modified, ingested_at, row_count, status) VALUES (?,?,?,?,datetime('now'),?,?)",
+            "INSERT OR REPLACE INTO ingested_files "
+            "(file_path, file_type, file_size, file_modified, ingested_at, row_count, status) "
+            "VALUES (?,?,?,?,datetime('now'),?,?)",
             (rel_path, "xlsx", stat.st_size, stat.st_mtime, rows, "ok")
         )
         total_budget_rows += rows
+        files_done_total += 1
+        _metrics["rows"] = total_budget_rows
+
+        # Track file as processed and checkpoint periodically
+        _mark_file_processed(conn, session_id, rel_path, "excel", rows_count=rows)
+        if files_done_total % checkpoint_interval == 0:
+            remaining = total_files - files_done_total
+            # ETA: average per-file time × files remaining
+            avg_time = sum(excel_file_times) / len(excel_file_times) if excel_file_times else 0
+            _metrics["eta_sec"] = avg_time * remaining
+            _metrics["files_remaining"] = remaining
+            _save_checkpoint(conn, session_id, files_done_total, total_files,
+                             _metrics["pages"], total_budget_rows,
+                             stat.st_size, rel_path, "ok")
 
     conn.commit()
     if skipped_xlsx:
         print(f"\n  Skipped {skipped_xlsx} unchanged Excel file(s)")
     print(f"  Ingested budget line items: {total_budget_rows:,}")
 
-    # ── Ingest PDF files ──
+    # ── Ingest PDF files ───────────────────────────────────────────────────
     print(f"\n{'='*60}")
     print("  INGESTING PDF FILES")
     print(f"{'='*60}")
 
     total_pdf_pages = 0
     skipped_pdf = 0
-    processed = 0
+    processed_pdf = 0
     last_commit_time = time.time()
     initial_page_count = conn.execute("SELECT COUNT(*) FROM pdf_pages").fetchone()[0]
+    pdf_file_times: list[float] = []  # per-file elapsed for speed calc
 
-    # Drop FTS5 triggers for bulk insert speedup - we'll rebuild FTS5 at the end
-    # PRAGMA disable_trigger doesn't work on virtual table triggers, so we drop and recreate
+    # Drop FTS5 triggers for bulk insert speedup
     print("  Dropping FTS5 triggers for bulk insert optimization...")
     try:
         conn.execute("DROP TRIGGER IF EXISTS pdf_pages_ai")
@@ -1049,27 +1152,78 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
     try:
         for i, pdf in enumerate(pdf_files):
+            # Check for graceful shutdown request
+            if stop_event and stop_event.is_set():
+                print("\n  Graceful stop requested — saving checkpoint...")
+                _save_checkpoint(conn, session_id, files_done_total, total_files,
+                                 total_pdf_pages + _metrics.get("pages", 0),
+                                 total_budget_rows, 0, str(pdf), "interrupted")
+                _progress("stopped", i, len(pdf_files),
+                          f"Stopped at {pdf.name} — resume with --resume",
+                          {"files_remaining": total_files - files_done_total})
+                conn.commit()
+                return
+
             rel_path = str(pdf.relative_to(docs_dir))
-            if not rebuild and not _file_needs_update(conn, rel_path, pdf):
+
+            # Skip if already processed in resumed session
+            if rel_path in already_processed:
                 skipped_pdf += 1
+                files_done_total += 1
                 _progress("pdf", i + 1, len(pdf_files),
-                          f"Skipped (unchanged): {pdf.name}")
+                          f"Resumed (skipped): {pdf.name}",
+                          {"files_remaining": total_files - files_done_total})
                 continue
 
-            processed += 1
-            _progress("pdf", i + 1, len(pdf_files),
-                      f"[{processed}] {pdf.name}")
-            print(f"  [{processed}/{len(pdf_files) - skipped_pdf}] {pdf.name}...", end=" ", flush=True)
+            if not rebuild and not _file_needs_update(conn, rel_path, pdf):
+                skipped_pdf += 1
+                files_done_total += 1
+                _progress("pdf", i + 1, len(pdf_files),
+                          f"Skipped (unchanged): {pdf.name}",
+                          {"files_remaining": total_files - files_done_total})
+                continue
 
-            # Remove old data if re-ingesting
+            processed_pdf += 1
+            files_done_total += 1
+            _metrics["files_remaining"] = total_files - files_done_total
+
+            # Get PDF page count before processing for display
+            try:
+                import pdfplumber as _ppl
+                with _ppl.open(str(pdf)) as _doc:
+                    pdf_page_total = len(_doc.pages)
+            except Exception:
+                pdf_page_total = 0
+
+            _progress("pdf", i + 1, len(pdf_files),
+                      f"[{processed_pdf}] {pdf.name}",
+                      {"files_remaining": total_files - files_done_total,
+                       "current_pages": 0,
+                       "current_total_pages": pdf_page_total})
+            print(f"  [{processed_pdf}/{len(pdf_files) - skipped_pdf}] {pdf.name}...",
+                  end=" ", flush=True)
+
             _remove_file_data(conn, rel_path, "pdf")
 
             t0 = time.time()
             pages = ingest_pdf_file(conn, pdf)
-            elapsed = time.time() - t0
-            print(f"{pages} pages ({elapsed:.1f}s)")
+            file_elapsed = time.time() - t0
+            print(f"{pages} pages ({file_elapsed:.1f}s)")
 
-            # Check if this file had any extraction issues
+            # Update speed tracking
+            if file_elapsed > 0 and pages > 0:
+                _update_speed("speed_pages", pages / file_elapsed)
+            pdf_file_times.append(file_elapsed)
+
+            # ETA update: average time per file × remaining PDF files
+            pdfs_remaining = len(pdf_files) - (i + 1)
+            avg_pdf_time = (sum(pdf_file_times) / len(pdf_file_times)
+                            if pdf_file_times else 0)
+            _metrics["eta_sec"] = avg_pdf_time * pdfs_remaining
+            _metrics["pages"] = total_pdf_pages + pages
+            _metrics["current_pages"] = pages
+            _metrics["current_total_pages"] = pdf_page_total
+
             issue_count = conn.execute(
                 "SELECT COUNT(*) FROM extraction_issues WHERE file_path = ?",
                 (rel_path,)
@@ -1078,51 +1232,63 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
             stat = pdf.stat()
             conn.execute(
-                "INSERT OR REPLACE INTO ingested_files (file_path, file_type, file_size, file_modified, ingested_at, row_count, status) VALUES (?,?,?,?,datetime('now'),?,?)",
+                "INSERT OR REPLACE INTO ingested_files "
+                "(file_path, file_type, file_size, file_modified, ingested_at, row_count, status) "
+                "VALUES (?,?,?,?,datetime('now'),?,?)",
                 (rel_path, "pdf", stat.st_size, stat.st_mtime, pages, file_status)
             )
             total_pdf_pages += pages
+            _metrics["pages"] = total_pdf_pages
 
-            # Commit every 2 seconds for good durability without excessive I/O
+            # Track file as processed
+            _mark_file_processed(conn, session_id, rel_path, "pdf", pages_count=pages)
+
+            # Checkpoint every N files
+            if files_done_total % checkpoint_interval == 0:
+                _save_checkpoint(conn, session_id, files_done_total, total_files,
+                                 total_pdf_pages, total_budget_rows,
+                                 stat.st_size, rel_path, file_status)
+
+            # Commit every 2 seconds for durability
             if time.time() - last_commit_time > 2.0:
                 conn.commit()
                 last_commit_time = time.time()
 
     finally:
-        # Only rebuild FTS5 if we actually added new pages
+        # Rebuild FTS5 if new pages were added
         final_page_count = conn.execute("SELECT COUNT(*) FROM pdf_pages").fetchone()[0]
         if final_page_count > initial_page_count:
-            # Rebuild FTS5 indexes in batch (triggers were dropped, now rebuild in one go)
             print("\n  Rebuilding full-text search indexes...")
-            conn.execute("""
-                DELETE FROM pdf_pages_fts;
-            """)
+            conn.execute("DELETE FROM pdf_pages_fts;")
             conn.execute("""
                 INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data)
                 SELECT id, page_text, source_file, table_data FROM pdf_pages;
             """)
-
-            # Recreate the triggers for future incremental updates
             conn.execute("""
                 CREATE TRIGGER IF NOT EXISTS pdf_pages_ai AFTER INSERT ON pdf_pages BEGIN
                     INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data)
                     VALUES (new.id, new.page_text, new.source_file, new.table_data);
                 END
             """)
-
             conn.execute("""
                 CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN
                     INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data)
                     VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data);
                 END
             """)
-
             conn.commit()
             print("  FTS5 rebuild complete and triggers recreated")
         else:
-            # No new pages, just recreate triggers without rebuild
-            conn.execute("CREATE TRIGGER IF NOT EXISTS pdf_pages_ai AFTER INSERT ON pdf_pages BEGIN INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data) VALUES (new.id, new.page_text, new.source_file, new.table_data); END")
-            conn.execute("CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data) VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data); END")
+            conn.execute(
+                "CREATE TRIGGER IF NOT EXISTS pdf_pages_ai AFTER INSERT ON pdf_pages BEGIN "
+                "INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data) "
+                "VALUES (new.id, new.page_text, new.source_file, new.table_data); END"
+            )
+            conn.execute(
+                "CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN "
+                "INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data) "
+                "VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data); END"
+            )
             conn.commit()
             print("  Skipped FTS5 rebuild (no new pages added)")
 
@@ -1130,12 +1296,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         print(f"\n  Skipped {skipped_pdf} unchanged PDF file(s)")
     print(f"  Ingested PDF pages: {total_pdf_pages:,}")
 
-    # ── Detect removed files ──
-    all_current = set()
-    for f in xlsx_files:
-        all_current.add(str(f.relative_to(docs_dir)))
-    for f in pdf_files:
-        all_current.add(str(f.relative_to(docs_dir)))
+    # ── Detect removed files ───────────────────────────────────────────────
+    all_current = {str(f.relative_to(docs_dir)) for f in xlsx_files}
+    all_current |= {str(f.relative_to(docs_dir)) for f in pdf_files}
 
     orphaned = conn.execute(
         "SELECT file_path, file_type FROM ingested_files"
@@ -1152,7 +1315,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         conn.commit()
         print(f"  Cleaned up {removed_count} removed file(s)")
 
-    # ── Create indexes ──
+    # ── Create indexes ─────────────────────────────────────────────────────
     _progress("index", 0, 1, "Creating indexes...")
     print("\nCreating indexes...")
     conn.executescript("""
@@ -1169,7 +1332,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     conn.commit()
     _progress("index", 1, 1, "Indexes created")
 
-    # ── Update data source timestamps ──
+    # ── Update data source timestamps ──────────────────────────────────────
     conn.execute("""
         UPDATE data_sources SET last_updated = datetime('now')
         WHERE source_id IN (
@@ -1180,7 +1343,12 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     """)
     conn.commit()
 
-    # ── Summary ──
+    # ── Mark session complete ──────────────────────────────────────────────
+    _mark_session_complete(conn, session_id,
+                           f"Processed {files_done_total} files: "
+                           f"{total_budget_rows:,} rows, {total_pdf_pages:,} pages")
+
+    # ── Summary ────────────────────────────────────────────────────────────
     total_lines = conn.execute("SELECT COUNT(*) FROM budget_lines").fetchone()[0]
     total_pages = conn.execute("SELECT COUNT(*) FROM pdf_pages").fetchone()[0]
     db_size = db_path.stat().st_size / (1024 * 1024)
@@ -1207,7 +1375,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         print(f"  Unchanged (skip):   {skipped_xlsx + skipped_pdf}")
         summary += f"\nNew/updated: {new_files} | Skipped: {skipped_xlsx + skipped_pdf}"
 
-    _progress("done", total_files, total_files, summary)
+    _progress("done", total_files, total_files, summary,
+              {"files_remaining": 0, "eta_sec": 0.0})
     conn.close()
 
 
@@ -1219,10 +1388,34 @@ def main():
                         help=f"Documents directory (default: {DOCS_DIR})")
     parser.add_argument("--rebuild", action="store_true",
                         help="Force full rebuild (delete existing database)")
+    parser.add_argument("--resume", action="store_true",
+                        help="Resume from last checkpoint")
+    parser.add_argument("--checkpoint-interval", type=int, default=10,
+                        metavar="N",
+                        help="Save a checkpoint every N files (default: 10)")
     args = parser.parse_args()
 
+    # ── Graceful shutdown via Ctrl+C ───────────────────────────────────────
+    import threading
+    stop_event = threading.Event()
+
+    def _sigint_handler(sig, frame):
+        if not stop_event.is_set():
+            print("\n\nKeyboard interrupt — finishing current file and saving checkpoint...")
+            print("Resume later with: python build_budget_db.py --resume")
+            stop_event.set()
+        else:
+            print("\nForce-quitting...")
+            sys.exit(1)
+
+    signal.signal(signal.SIGINT, _sigint_handler)
+
     try:
-        build_database(args.docs, args.db, rebuild=args.rebuild)
+        build_database(args.docs, args.db,
+                       rebuild=args.rebuild,
+                       resume=args.resume,
+                       checkpoint_interval=args.checkpoint_interval,
+                       stop_event=stop_event)
     except FileNotFoundError as e:
         print(f"ERROR: {e}")
         sys.exit(1)

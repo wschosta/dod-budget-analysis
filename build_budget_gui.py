@@ -19,6 +19,21 @@ from pathlib import Path
 
 from build_budget_db import build_database, DEFAULT_DB_PATH, DOCS_DIR
 
+# ── ETA formatting helper ──────────────────────────────────────────────────────
+
+def _fmt_eta(seconds: float) -> str:
+    """Format seconds into a human-readable ETA string."""
+    if seconds <= 0:
+        return ""
+    s = int(seconds)
+    if s < 60:
+        return f"~{s}s remaining"
+    m, s = divmod(s, 60)
+    if m < 60:
+        return f"~{m}m {s:02d}s remaining"
+    h, m = divmod(m, 60)
+    return f"~{h}h {m:02d}m remaining"
+
 
 # ── Colour palette ────────────────────────────────────────────────────────────
 
@@ -41,20 +56,20 @@ class BuildProgressWindow:
         self.root.title("DoD Budget Database Builder")
         self.root.configure(bg=BG)
         self.root.resizable(True, True)
-        self.root.minsize(640, 480)
+        self.root.minsize(680, 560)
 
         # Centre on screen
-        w, h = 720, 540
+        w, h = 760, 620
         sx = self.root.winfo_screenwidth()
         sy = self.root.winfo_screenheight()
         self.root.geometry(f"{w}x{h}+{(sx-w)//2}+{(sy-h)//2}")
 
-        # Thread-safe message queue: (phase, current, total, detail)
+        # Thread-safe message queue: (phase, current, total, detail, metrics)
         self.msg_queue: queue.Queue = queue.Queue()
         self.build_thread: threading.Thread | None = None
         self.start_time: float | None = None
-        self.phase_start_times: dict = {}
         self.running = False
+        self.stop_event: threading.Event | None = None
 
         self._build_ui()
         self._poll_queue()
@@ -123,6 +138,13 @@ class BuildProgressWindow:
                        variable=self.rebuild_var, bg=BG, fg=FG,
                        selectcolor=BG_CARD, activebackground=BG,
                        activeforeground=FG, font=("Segoe UI", 9)
+                       ).pack(side="left", padx=(0, 16))
+
+        self.resume_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(opt_frame, text="Resume from last checkpoint",
+                       variable=self.resume_var, bg=BG, fg=FG,
+                       selectcolor=BG_CARD, activebackground=BG,
+                       activeforeground=FG, font=("Segoe UI", 9)
                        ).pack(side="left")
 
         # ── Progress card ──
@@ -136,8 +158,8 @@ class BuildProgressWindow:
 
         # Detail label (current file)
         self.detail_label = ttk.Label(card, text="Press 'Build Database' to start",
-                                      style="Detail.TLabel", wraplength=650)
-        self.detail_label.pack(anchor="w", padx=14, pady=(0, 8))
+                                      style="Detail.TLabel", wraplength=700)
+        self.detail_label.pack(anchor="w", padx=14, pady=(0, 6))
 
         # Progress bar
         self.progress_var = tk.DoubleVar(value=0)
@@ -148,18 +170,52 @@ class BuildProgressWindow:
 
         # Percent + ETA row
         pct_frame = tk.Frame(card, bg=BG_CARD)
-        pct_frame.pack(fill="x", padx=14)
+        pct_frame.pack(fill="x", padx=14, pady=(0, 4))
         self.pct_label = ttk.Label(pct_frame, text="0%", style="Stat.TLabel")
         self.pct_label.pack(side="left")
         self.eta_label = ttk.Label(pct_frame, text="", style="Stat.TLabel")
         self.eta_label.pack(side="right")
+
+        # ── Metrics panel (files remaining, speed, pages) ──
+        metrics_frame = tk.Frame(card, bg=BG_CARD)
+        metrics_frame.pack(fill="x", padx=14, pady=(0, 6))
+
+        # Left: file counts
+        left_m = tk.Frame(metrics_frame, bg=BG_CARD)
+        left_m.pack(side="left", fill="x", expand=True)
+        tk.Label(left_m, text="Files remaining:", bg=BG_CARD, fg=FG_DIM,
+                 font=("Segoe UI", 8)).grid(row=0, column=0, sticky="w")
+        self.files_remaining_label = tk.Label(left_m, text="—", bg=BG_CARD, fg=FG,
+                                              font=("Consolas", 9))
+        self.files_remaining_label.grid(row=0, column=1, sticky="w", padx=(6, 20))
+
+        tk.Label(left_m, text="PDF pages:", bg=BG_CARD, fg=FG_DIM,
+                 font=("Segoe UI", 8)).grid(row=1, column=0, sticky="w")
+        self.pages_label = tk.Label(left_m, text="—", bg=BG_CARD, fg=FG,
+                                    font=("Consolas", 9))
+        self.pages_label.grid(row=1, column=1, sticky="w", padx=(6, 20))
+
+        # Right: speed
+        right_m = tk.Frame(metrics_frame, bg=BG_CARD)
+        right_m.pack(side="right", fill="x")
+        tk.Label(right_m, text="Rows/sec:", bg=BG_CARD, fg=FG_DIM,
+                 font=("Segoe UI", 8)).grid(row=0, column=0, sticky="e", padx=(0, 6))
+        self.rows_speed_label = tk.Label(right_m, text="—", bg=BG_CARD, fg=FG,
+                                         font=("Consolas", 9))
+        self.rows_speed_label.grid(row=0, column=1, sticky="w")
+
+        tk.Label(right_m, text="Pages/sec:", bg=BG_CARD, fg=FG_DIM,
+                 font=("Segoe UI", 8)).grid(row=1, column=0, sticky="e", padx=(0, 6))
+        self.pages_speed_label = tk.Label(right_m, text="—", bg=BG_CARD, fg=FG,
+                                          font=("Consolas", 9))
+        self.pages_speed_label.grid(row=1, column=1, sticky="w")
 
         # Stats text
         self.stats_text = tk.Text(card, height=8, bg=BG_CARD, fg=FG,
                                   font=("Consolas", 9), relief="flat",
                                   insertbackground=FG, wrap="word",
                                   state="disabled", borderwidth=0)
-        self.stats_text.pack(fill="both", expand=True, padx=14, pady=(8, 12))
+        self.stats_text.pack(fill="both", expand=True, padx=14, pady=(4, 12))
         self.stats_text.tag_configure("phase", foreground=YELLOW)
         self.stats_text.tag_configure("ok", foreground=GREEN)
         self.stats_text.tag_configure("err", foreground=RED)
@@ -175,6 +231,13 @@ class BuildProgressWindow:
             font=("Segoe UI", 11, "bold"), relief="flat",
             command=self._start_build)
         self.build_btn.pack(side="left", padx=(0, 10))
+
+        self.stop_btn = tk.Button(
+            btn_frame, text="Stop (save checkpoint)", width=22,
+            bg=YELLOW, fg="#1e1e2e", activebackground=RED,
+            font=("Segoe UI", 10), relief="flat",
+            command=self._request_stop, state="disabled")
+        self.stop_btn.pack(side="left", padx=(0, 10))
 
         self.close_btn = tk.Button(
             btn_frame, text="Close", width=10,
