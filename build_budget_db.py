@@ -744,14 +744,23 @@ def _extract_tables_with_timeout(page, timeout_seconds=10):
         return None, f"error: {str(e)[:50]}"
 
 
-def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path) -> int:
-    """Ingest a single PDF file into the database."""
+def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
+                    page_callback=None) -> int:
+    """Ingest a single PDF file into the database.
+
+    Args:
+        conn: Database connection.
+        file_path: Path to the PDF file.
+        page_callback: Optional callable(pages_done, total_pages) called after
+            each page is processed, for real-time progress reporting.
+    """
     category = _determine_category(file_path)
     relative_path = str(file_path.relative_to(DOCS_DIR))
     total_pages = 0
 
     try:
         with pdfplumber.open(str(file_path)) as pdf:
+            num_pages = len(pdf.pages)
             batch = []
             page_issues_count = 0  # Track timeouts/errors for this file
             for i, page in enumerate(pdf.pages):
@@ -781,6 +790,8 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path) -> int:
 
                 # Skip truly empty pages
                 if not text.strip() and not table_text.strip():
+                    if page_callback:
+                        page_callback(i + 1, num_pages)
                     continue
 
                 batch.append((
@@ -791,6 +802,9 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path) -> int:
                     1 if tables else 0,
                     table_text if table_text else None,
                 ))
+
+                if page_callback:
+                    page_callback(i + 1, num_pages)
 
                 # Batch insert every 1000 pages (larger batch = fewer executemany calls)
                 if len(batch) >= 1000:
@@ -1212,26 +1226,27 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             files_done_total += 1
             _metrics["files_remaining"] = total_files - files_done_total
 
-            # Get PDF page count before processing for display
-            try:
-                import pdfplumber as _ppl
-                with _ppl.open(str(pdf)) as _doc:
-                    pdf_page_total = len(_doc.pages)
-            except Exception:
-                pdf_page_total = 0
-
             _progress("pdf", i + 1, len(pdf_files),
                       f"[{processed_pdf}] {pdf.name}",
                       {"files_remaining": total_files - files_done_total,
                        "current_pages": 0,
-                       "current_total_pages": pdf_page_total})
+                       "current_total_pages": 0})
             print(f"  [{processed_pdf}/{len(pdf_files) - skipped_pdf}] {pdf.name}...",
                   end=" ", flush=True)
 
             _remove_file_data(conn, rel_path, "pdf")
 
+            def _page_cb(pages_done: int, page_total: int) -> None:
+                _metrics["current_pages"] = pages_done
+                _metrics["current_total_pages"] = page_total
+                _progress("pdf", i + 1, len(pdf_files),
+                          f"[{processed_pdf}] {pdf.name} — page {pages_done}/{page_total}",
+                          {"files_remaining": total_files - files_done_total,
+                           "current_pages": pages_done,
+                           "current_total_pages": page_total})
+
             t0 = time.time()
-            pages = ingest_pdf_file(conn, pdf)
+            pages = ingest_pdf_file(conn, pdf, page_callback=_page_cb)
             file_elapsed = time.time() - t0
             print(f"{pages} pages ({file_elapsed:.1f}s)")
 
@@ -1246,8 +1261,6 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                             if pdf_file_times else 0)
             _metrics["eta_sec"] = avg_pdf_time * pdfs_remaining
             _metrics["pages"] = total_pdf_pages + pages
-            _metrics["current_pages"] = pages
-            _metrics["current_total_pages"] = pdf_page_total
 
             issue_count = conn.execute(
                 "SELECT COUNT(*) FROM extraction_issues WHERE file_path = ?",
