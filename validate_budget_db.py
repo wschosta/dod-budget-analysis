@@ -21,6 +21,12 @@ from utils import get_connection
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 
 # Known exhibit types (from build_budget_db.py)
+# TODO 1.B1-g-validator [EASY, ~400 tokens, DEPENDS ON 1.B1-g]: Sync KNOWN_EXHIBIT_TYPES
+#   from exhibit_catalog instead of hardcoding. After 1.B1-g adds p5/r2/r3/r4 to
+#   EXHIBIT_TYPES in build_budget_db.py, this set becomes stale. Replace with:
+#     from exhibit_catalog import list_all_exhibit_types
+#     KNOWN_EXHIBIT_TYPES = set(list_all_exhibit_types())
+#   No external data needed.
 KNOWN_EXHIBIT_TYPES = {"m1", "o1", "p1", "p1r", "r1", "rf1", "c1"}
 
 # Known organizations (from build_budget_db.py ORG_MAP values)
@@ -28,6 +34,12 @@ KNOWN_ORGS = {"Army", "Navy", "Air Force", "Space Force",
               "Defense-Wide", "Marine Corps", "Joint Staff"}
 
 # Amount columns in the budget_lines table
+# TODO 1.B2-a-followup [EASY, ~600 tokens, DEPENDS ON 1.B2-a]: After making
+#   _map_columns() year-agnostic, replace this hardcoded list with a dynamic query
+#   inside each check function that uses it:
+#     cols = conn.execute("PRAGMA table_info(budget_lines)").fetchall()
+#     amount_cols = [c[1] for c in cols if c[1].startswith("amount_fy")]
+#   This makes the validator automatically adapt when new fiscal year columns are added.
 AMOUNT_COLUMNS = [
     "amount_fy2024_actual",
     "amount_fy2025_enacted",
