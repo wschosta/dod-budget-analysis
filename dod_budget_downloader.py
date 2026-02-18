@@ -162,6 +162,7 @@ Usage:
 
 import argparse
 import os
+import queue
 import re
 import shutil
 import sys
@@ -640,6 +641,51 @@ class GuiProgressTracker:
 
 # Global tracker, set during main()
 _tracker: ProgressTracker | GuiProgressTracker | None = None
+
+# ZIP extraction queue and background thread
+_extraction_queue: queue.Queue | None = None
+_extractor_thread: threading.Thread | None = None
+_extractor_stop = False
+
+
+def _zip_extractor_worker():
+    """Background worker thread that processes ZIP extractions from queue."""
+    global _extraction_queue, _extractor_stop
+    while not _extractor_stop:
+        try:
+            zip_path, dest_dir = _extraction_queue.get(timeout=1)
+            if zip_path is None:  # Sentinel value for shutdown
+                break
+            _extract_zip(zip_path, dest_dir)
+            _extraction_queue.task_done()
+        except queue.Empty:
+            continue
+        except Exception as e:
+            print(f"    [ERROR] ZIP extraction failed: {e}")
+
+
+def _start_extraction_worker():
+    """Start the background ZIP extraction worker thread."""
+    global _extraction_queue, _extractor_thread, _extractor_stop
+    if _extraction_queue is not None:
+        return  # Already running
+    _extraction_queue = queue.Queue()
+    _extractor_stop = False
+    _extractor_thread = threading.Thread(target=_zip_extractor_worker, daemon=True)
+    _extractor_thread.start()
+
+
+def _stop_extraction_worker():
+    """Stop the background ZIP extraction worker thread and wait for completion."""
+    global _extraction_queue, _extractor_thread, _extractor_stop
+    if _extraction_queue is None:
+        return
+    _extraction_queue.put((None, None))  # Sentinel to stop worker
+    _extractor_stop = True
+    if _extractor_thread:
+        _extractor_thread.join(timeout=5)
+    _extraction_queue = None
+    _extractor_thread = None
 
 
 # ── Session ────────────────────────────────────────────────────────────────────
@@ -1439,6 +1485,10 @@ def main():
     )
     print(f"\nReady to download {total_files} file(s) to: {args.output.resolve()}\n")
 
+    # Start background ZIP extraction worker if extracting
+    if args.extract_zips:
+        _start_extraction_worker()
+
     if args.no_gui:
         _tracker = ProgressTracker(total_files)
         _tracker.print_overall()
@@ -1498,7 +1548,10 @@ def main():
                         args.overwrite, use_browser=use_browser,
                     )
                     if ok and args.extract_zips and dest.suffix.lower() == ".zip":
-                        _extract_zip(dest, dest_dir)
+                        if _extraction_queue is not None:
+                            _extraction_queue.put((dest, dest_dir))
+                        else:
+                            _extract_zip(dest, dest_dir)
                     time.sleep(args.delay)
             else:
                 # Parallel: direct downloads can be parallelized
@@ -1522,7 +1575,10 @@ def main():
                                     _tracker.file_done(dest.name, size, status)
 
                                 if ok and args.extract_zips and dest.suffix.lower() == ".zip":
-                                    _extract_zip(dest, dest_dir)
+                                    if _extraction_queue is not None:
+                                        _extraction_queue.put((dest, dest_dir))
+                                    else:
+                                        _extract_zip(dest, dest_dir)
                             except Exception as e:
                                 print(f"    [ERROR] Download failed: {e}")
                 else:
@@ -1534,10 +1590,14 @@ def main():
                             args.overwrite, use_browser=use_browser,
                         )
                         if ok and args.extract_zips and dest.suffix.lower() == ".zip":
-                            _extract_zip(dest, dest_dir)
+                            if _extraction_queue is not None:
+                                _extraction_queue.put((dest, dest_dir))
+                            else:
+                                _extract_zip(dest, dest_dir)
                         time.sleep(args.delay)
 
     # ── Cleanup ──
+    _stop_extraction_worker()  # Wait for all ZIPs to finish extracting
     _close_browser()
 
     # ── Summary ──
