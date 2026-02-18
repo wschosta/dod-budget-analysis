@@ -1,10 +1,9 @@
 # Methodology & Limitations
 
-<!-- TODO [Step 3.C6]: Write full methodology after the data pipeline is
-     hardened and validated. -->
+How data is collected, parsed, and loaded into the DoD Budget Analysis database.
 
-How data is collected, parsed, and loaded into the DoD Budget Analysis
-database.
+> **Current Status:** Phase 3.C, Step 3.C6 — Partial. Core methodology is implemented and documented in code;
+> expanded documentation and limitations to be finalized after Phase 1 hardening is complete.
 
 ---
 
