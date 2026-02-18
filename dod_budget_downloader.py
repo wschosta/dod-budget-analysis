@@ -758,10 +758,25 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
         page.close()
 
 
-# TODO: The three download strategies below share identical page setup boilerplate
-# (new_page, add_init_script, goto origin, wait). Extract a _new_browser_page(url)
-# helper that returns a page already navigated to the file's origin, reducing the
-# ~50 lines of repeated setup/teardown to a single call per strategy.
+def _new_browser_page(ctx, url: str):
+    """Create and initialize a new browser page navigated to the URL's origin.
+
+    Sets up anti-bot/webdriver detection bypass and navigates to the origin
+    to establish cookies/session before strategy-specific actions.
+
+    Returns the page object. Caller is responsible for closing it.
+    """
+    page = ctx.new_page()
+    page.add_init_script(
+        'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+    )
+    parsed = urlparse(url)
+    origin = f"{parsed.scheme}://{parsed.netloc}"
+    page.goto(origin, timeout=15000, wait_until="domcontentloaded")
+    page.wait_for_timeout(500)
+    return page
+
+
 def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -> bool:
     """Download a file using Playwright's browser context to bypass WAF.
 
@@ -779,16 +794,7 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
 
     # Strategy 1: Use page.request API (fetch with browser session/cookies, no UI)
     try:
-        page = ctx.new_page()
-        page.add_init_script(
-            'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-        )
-        # First navigate to the domain so cookies/session are established
-        parsed = urlparse(url)
-        origin = f"{parsed.scheme}://{parsed.netloc}"
-        page.goto(origin, timeout=15000, wait_until="domcontentloaded")
-        page.wait_for_timeout(500)
-
+        page = _new_browser_page(ctx, url)
         resp = page.request.get(url, timeout=120000)
         if resp.ok and len(resp.body()) > 0:
             dest_path.write_bytes(resp.body())
@@ -803,16 +809,7 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
 
     # Strategy 2: Trigger download via injected anchor element
     try:
-        page = ctx.new_page()
-        page.add_init_script(
-            'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
-        )
-        # Navigate to file's origin first
-        parsed = urlparse(url)
-        origin = f"{parsed.scheme}://{parsed.netloc}"
-        page.goto(origin, timeout=15000, wait_until="domcontentloaded")
-        page.wait_for_timeout(500)
-
+        page = _new_browser_page(ctx, url)
         # Escape the URL for JS
         safe_url = url.replace("'", "\\'")
         with page.expect_download(timeout=120000) as download_info:
@@ -843,6 +840,7 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
         page.add_init_script(
             'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
         )
+        # Navigate directly to the URL (bypasses origin setup for simpler direct fetch)
         resp = page.goto(url, timeout=120000, wait_until="load")
         if resp and resp.ok:
             body = resp.body()
