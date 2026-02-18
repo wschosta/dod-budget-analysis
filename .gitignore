@@ -1,5 +1,7 @@
 # Data files
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
 DoD_Budget_Documents/
 
 # Temp/working directories
