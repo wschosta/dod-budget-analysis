@@ -20,8 +20,12 @@ import pytest
 
 from build_budget_db import (
     build_database,
+    create_database,
     _get_last_checkpoint,
     _get_processed_files,
+    _file_needs_update,
+    _remove_file_data,
+    _register_data_source,
 )
 
 
@@ -281,6 +285,152 @@ class TestGracefulShutdown:
 
         assert "done" in phases
         assert "stopped" not in phases
+
+
+# ── _file_needs_update ────────────────────────────────────────────────────────
+
+class TestFileNeedsUpdate:
+    """Unit tests for _file_needs_update without running a full build."""
+
+    @pytest.fixture
+    def schema_conn(self, tmp_path):
+        db = tmp_path / "schema.db"
+        conn = create_database(db)
+        yield conn
+        conn.close()
+
+    def test_new_file_needs_update(self, schema_conn, tmp_path):
+        """File not in ingested_files → always needs update."""
+        f = tmp_path / "budget.xlsx"
+        f.write_bytes(b"x" * 100)
+        assert _file_needs_update(schema_conn, "FY2026/budget.xlsx", f) is True
+
+    def test_unchanged_file_no_update_needed(self, schema_conn, tmp_path):
+        """File with matching size and mtime → no update needed."""
+        f = tmp_path / "budget.xlsx"
+        f.write_bytes(b"x" * 100)
+        stat = f.stat()
+        schema_conn.execute(
+            "INSERT INTO ingested_files "
+            "(file_path, file_type, file_size, file_modified, ingested_at, row_count, status)"
+            " VALUES (?, ?, ?, ?, datetime('now'), 0, 'ok')",
+            ("FY2026/budget.xlsx", "xlsx", stat.st_size, stat.st_mtime)
+        )
+        schema_conn.commit()
+        assert _file_needs_update(schema_conn, "FY2026/budget.xlsx", f) is False
+
+    def test_changed_size_needs_update(self, schema_conn, tmp_path):
+        """File with different size → needs update."""
+        f = tmp_path / "budget.xlsx"
+        f.write_bytes(b"x" * 100)
+        stat = f.stat()
+        schema_conn.execute(
+            "INSERT INTO ingested_files "
+            "(file_path, file_type, file_size, file_modified, ingested_at, row_count, status)"
+            " VALUES (?, ?, ?, ?, datetime('now'), 0, 'ok')",
+            ("FY2026/budget.xlsx", "xlsx", stat.st_size + 1, stat.st_mtime)
+        )
+        schema_conn.commit()
+        assert _file_needs_update(schema_conn, "FY2026/budget.xlsx", f) is True
+
+
+# ── _remove_file_data ─────────────────────────────────────────────────────────
+
+class TestRemoveFileData:
+    """Unit tests for _remove_file_data."""
+
+    @pytest.fixture
+    def schema_conn(self, tmp_path):
+        db = tmp_path / "schema.db"
+        conn = create_database(db)
+        conn.row_factory = sqlite3.Row
+        yield conn
+        conn.close()
+
+    def test_remove_xlsx_deletes_budget_lines(self, schema_conn):
+        """Removing an xlsx file deletes its rows from budget_lines."""
+        schema_conn.execute(
+            "INSERT INTO budget_lines (source_file, exhibit_type, fiscal_year, "
+            "account, organization, budget_type, amount_unit, currency_year) "
+            "VALUES (?, 'p1', 'FY 2026', '2035', 'A', 'procurement', 'thousands', 'then-year')",
+            ("FY2026/budget.xlsx",)
+        )
+        schema_conn.commit()
+        count_before = schema_conn.execute(
+            "SELECT COUNT(*) FROM budget_lines WHERE source_file='FY2026/budget.xlsx'"
+        ).fetchone()[0]
+        assert count_before == 1
+
+        _remove_file_data(schema_conn, "FY2026/budget.xlsx", "xlsx")
+        schema_conn.commit()
+
+        count_after = schema_conn.execute(
+            "SELECT COUNT(*) FROM budget_lines WHERE source_file='FY2026/budget.xlsx'"
+        ).fetchone()[0]
+        assert count_after == 0
+
+    def test_remove_pdf_deletes_pdf_pages(self, schema_conn):
+        """Removing a pdf file deletes its rows from pdf_pages."""
+        schema_conn.execute(
+            "INSERT INTO pdf_pages (source_file, page_number, page_text, has_tables) "
+            "VALUES (?, 1, 'test content', 0)",
+            ("FY2026/doc.pdf",)
+        )
+        schema_conn.commit()
+        _remove_file_data(schema_conn, "FY2026/doc.pdf", "pdf")
+        schema_conn.commit()
+        count = schema_conn.execute(
+            "SELECT COUNT(*) FROM pdf_pages WHERE source_file='FY2026/doc.pdf'"
+        ).fetchone()[0]
+        assert count == 0
+
+    def test_remove_unknown_type_no_error(self, schema_conn):
+        """Unknown file type raises no exception."""
+        _remove_file_data(schema_conn, "FY2026/file.csv", "csv")  # no-op, no crash
+
+
+# ── _register_data_source ─────────────────────────────────────────────────────
+
+class TestRegisterDataSource:
+    """Unit tests for _register_data_source."""
+
+    @pytest.fixture
+    def schema_conn(self, tmp_path):
+        db = tmp_path / "schema.db"
+        conn = create_database(db)
+        yield conn
+        conn.close()
+
+    def test_registers_fy_dir(self, schema_conn, tmp_path):
+        """FY dirs with service subdirs are registered in data_sources."""
+        docs = tmp_path / "DoD_Budget_Documents"
+        army = docs / "FY2026" / "Army"
+        army.mkdir(parents=True)
+        (army / "p1_army.xlsx").write_bytes(b"x")
+
+        _register_data_source(schema_conn, docs)
+
+        rows = schema_conn.execute("SELECT COUNT(*) FROM data_sources").fetchone()[0]
+        assert rows >= 1
+
+    def test_skips_non_fy_dirs(self, schema_conn, tmp_path):
+        """Directories not starting with 'FY' are ignored."""
+        docs = tmp_path / "DoD_Budget_Documents"
+        unrelated = docs / "archives" / "Army"
+        unrelated.mkdir(parents=True)
+
+        _register_data_source(schema_conn, docs)
+
+        rows = schema_conn.execute("SELECT COUNT(*) FROM data_sources").fetchone()[0]
+        assert rows == 0
+
+    def test_empty_docs_dir(self, schema_conn, tmp_path):
+        """Empty docs directory → no rows inserted, no crash."""
+        docs = tmp_path / "empty_docs"
+        docs.mkdir()
+        _register_data_source(schema_conn, docs)
+        rows = schema_conn.execute("SELECT COUNT(*) FROM data_sources").fetchone()[0]
+        assert rows == 0
 
 
 if __name__ == "__main__":
