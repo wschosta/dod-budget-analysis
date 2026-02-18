@@ -11,10 +11,12 @@ Usage:
     python validate_budget_data.py --strict              # Non-zero exit on warnings
     python validate_budget_data.py --json                # Output as JSON
 
-Remaining TODOs:
+Status: Core validation checks implemented (1.B6-b, 1.B6-c, 1.B6-e, 1.B6-f, 1.B6-g)
+
+Remaining Phase 1 enhancements:
     1.B6-a: Check for missing fiscal-year coverage per service.
     1.B6-d: Detect column misalignment (text in numeric columns or vice versa).
-    1.B6-h: Wire validation into build_budget_db.py post-build step.
+    1.B6-h: Wire validation into build_budget_db.py post-build step (auto-validate after build)
 """
 
 import json

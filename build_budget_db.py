@@ -12,8 +12,10 @@ Usage:
     python build_budget_db.py --db mydb.sqlite # Custom database path
 
 ──────────────────────────────────────────────────────────────────────────────
-Roadmap TODOs for this file (Steps 1.B2 – 1.B5)
+Phase 1 Roadmap Tasks for this file (Steps 1.B2 – 1.B5)
 ──────────────────────────────────────────────────────────────────────────────
+**Status:** Foundation implementation complete. Below are enhancement tasks
+for robust parsing, normalization, and quality improvements.
 
 TODO 1.B2-a: Replace hard-coded _map_columns() with exhibit_catalog.py lookups.
     Import EXHIBIT_CATALOG and use its column_spec entries to drive column

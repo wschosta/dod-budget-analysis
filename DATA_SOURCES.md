@@ -3,10 +3,9 @@
 > Reference document for every URL pattern, document type, and fiscal-year
 > availability used by `dod_budget_downloader.py`.
 
-<!-- TODO 1.A5-a: Fill in each section below from live testing results.
-     Most of the raw information is in dod_budget_downloader.py's
-     SERVICE_PAGE_TEMPLATES and discover_*_files() functions — extract,
-     verify, and format here. -->
+**Status:** Partially documented (sources 1–6 verified); awaiting **Task 1.A5-a**
+to fill in complete live testing results and coverage matrix.
+Sections below reflect current source implementation in `dod_budget_downloader.py`.
 
 ---
 
@@ -82,9 +81,9 @@
 
 ## Potential Additional Sources
 
-<!-- TODO 1.A1-b: Investigate each of these. For any that have their own
-     budget materials page, add a full entry above and a new discover_*_files()
-     function in dod_budget_downloader.py. -->
+**Status:** Awaiting **Task 1.A1-b** (audit downloader coverage) to investigate.
+For any that have their own budget materials page, will add a full entry above
+and a new `discover_*_files()` function in `dod_budget_downloader.py`.
 
 | Agency | Possible URL | Status |
 |--------|-------------|--------|
@@ -111,9 +110,9 @@
 
 ## Fiscal Year Coverage Matrix
 
-<!-- TODO 1.A2-a: Fill this matrix after running the audit.
-     Run: python dod_budget_downloader.py --list --years all --sources all
-     and tabulate which (source, FY) combinations produce files. -->
+**Status:** Awaiting **Task 1.A2-a** (expand fiscal year coverage) to populate.
+To fill: Run `python dod_budget_downloader.py --list --years all --sources all`
+and tabulate which (source, FY) combinations produce files.
 
 | FY | Comptroller | Defense-Wide | Army | Navy | Air Force |
 |----|:-----------:|:------------:|:----:|:----:|:---------:|

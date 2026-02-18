@@ -1,11 +1,14 @@
 """
 API Layer Design — Step 2.C
 
+**Status:** Phase 2 Planning (Phase 1 currently in progress)
+
 Plans and TODOs for the REST API that will expose the budget database for
-programmatic access and power the front-end.
+programmatic access and power the front-end. This file documents the detailed
+design and task breakdown for API implementation in Phase 2.
 
 ──────────────────────────────────────────────────────────────────────────────
-TODOs — Step 2.C (API Layer)
+Phase 2 Tasks — Step 2.C (API Layer)
 ──────────────────────────────────────────────────────────────────────────────
 
 TODO 2.C1-a: Choose web framework and document the decision.

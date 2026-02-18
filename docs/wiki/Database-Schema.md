@@ -1,8 +1,7 @@
 # Database Schema
 
-<!-- TODO [Steps 2.A1–2.A5]: Expand after the production schema is finalized.
-     The current schema below reflects the development/prototype structure
-     from build_budget_db.py. -->
+> **Status:** Development/prototype schema (from `build_budget_db.py`).
+> **Future:** Steps 2.A1–2.A5 (Schema Design Phase) will finalize production schema.
 
 Documentation of the SQLite database schema used by the DoD Budget Analysis
 tool. The database is created by `build_budget_db.py` and queried by
@@ -77,11 +76,12 @@ Registry of download sources for provenance tracking.
 
 ## Indexes
 
-<!-- TODO: Document indexes after performance optimization (Step 4.C4). -->
-
 Currently the schema relies on FTS5 indexes for text search and SQLite's
 implicit primary key indexes. Additional indexes may be added as query
 patterns emerge.
+
+> **Future:** Step 4.C4 (Performance Optimization) will document additional
+> indexes after benchmarking identifies query hotspots.
 
 ---
 
@@ -108,8 +108,8 @@ PRAGMA synchronous = NORMAL;     -- Balance between safety and speed
 
 ## Migrations
 
-<!-- TODO [Step 2.A5]: Document migration strategy (Alembic or versioned SQL scripts). -->
-
 Currently the schema is created inline in `build_budget_db.py`'s
-`create_database()` function. A formal migration system will be added in
-Phase 2.
+`create_database()` function.
+
+> **Future:** Step 2.A5 (Schema Design Phase) will document and implement
+> a formal migration system (Alembic or versioned SQL scripts) for Phase 2.
