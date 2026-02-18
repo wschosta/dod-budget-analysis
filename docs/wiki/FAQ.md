@@ -1,6 +1,6 @@
 # Frequently Asked Questions
 
-<!-- TODO [Step 3.C3]: Populate with real user questions after soft launch. -->
+> **Current Status:** Phase 3.C, Step 3.C3 — Partial. Initial FAQ framework; real user questions to be added after soft launch.
 
 ---
 

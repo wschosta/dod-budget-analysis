@@ -1,10 +1,9 @@
 # Data Sources
 
-<!-- TODO [Step 1.A5]: Expand each section with full URL patterns, file counts
-     per fiscal year, and format details. -->
+Catalog of all DoD budget data sources used by the downloader (`dod_budget_downloader.py`).
 
-Catalog of all DoD budget data sources used by the downloader
-(`dod_budget_downloader.py`).
+> **Current Status:** Phase 1.A, Step 1.A5 — In Progress. Full coverage matrix needs completion.
+> See [DATA_SOURCES.md](../../DATA_SOURCES.md) in the root for detailed TODO items.
 
 ---
 
