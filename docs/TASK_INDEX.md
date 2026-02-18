@@ -54,8 +54,8 @@ otherwise noted.
 
 | Step | Task | Type | TODO File | Skeleton File(s) |
 |------|------|------|-----------|-------------------|
-| 1.C1 | Create test fixtures | DATA PROCESSING + USER INTERVENTION | [TODO](TODO_1C1_create_test_fixtures.md) | `tests/fixtures/` |
-| 1.C2 | Unit tests for parsing | AI-agent | [TODO](TODO_1C2_unit_tests_parsing.md) | `tests/test_parsing.py`, `tests/conftest.py` |
+| 1.C1 | Create test fixtures | AI-agent ✅ **Mostly Complete** (1.C1-e deferred) | [TODO](TODO_1C1_create_test_fixtures.md) | `tests/conftest.py` |
+| 1.C2 | Unit tests for parsing | AI-agent ✅ **Mostly Complete** (1.C2-e/f need working env) | [TODO](TODO_1C2_unit_tests_parsing.md) | `tests/test_parsing.py`, `tests/conftest.py` |
 | 1.C3 | Integration test: E2E pipeline | AI-agent ✅ **Complete** (schema test passing; full suite needs fpdf2 fix) | [TODO](TODO_1C3_integration_test_e2e.md) | `tests/test_pipeline.py` |
 
 ---

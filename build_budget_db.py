@@ -15,24 +15,16 @@ Usage:
 Phase 1 Roadmap Tasks for this file (Steps 1.B3 – 1.B5)
 ──────────────────────────────────────────────────────────────────────────────
 **Status:** Foundation + key enhancements implemented (1.B2-a year-agnostic
-column mapping, 1.B2-b column-mapping tests, 1.B2-c multi-row headers,
-1.B2-d FY normalization, 1.B3-a monetary normalization, 1.B4-a PE numbers,
-1.B4-b ORG_MAP expansion complete). Remaining tasks below.
-
-TODO 1.B3-b: Add a currency_year column to budget_lines.
-    Track whether amounts are in then-year dollars or constant dollars.  Parse
-    this from the exhibit header or sheet name where available.
+column mapping, 1.B2-c multi-row headers, 1.B2-d FY normalization,
+1.B3-a monetary normalization, 1.B3-b currency_year, 1.B4-a PE numbers,
+1.B4-b ORG_MAP expansion, 1.B4-c appropriation parsing complete).
+Remaining tasks below.
 
 TODO 1.B3-c: Distinguish Budget Authority, Appropriations, and Outlays.
     Add an 'amount_type' column (or separate columns) to budget_lines.  C-1
     already has authorization vs. appropriation; other exhibits may have TOA
     (Total Obligation Authority) vs. BA.  Map these distinctions during
     ingestion.
-
-TODO 1.B4-c: Parse appropriation title from account_title.
-    The account_title field often contains both an account code and a title
-    (e.g., "2035 Aircraft Procurement, Army").  Split these into separate
-    appropriation_code and appropriation_title fields.
 
 TODO 1.B5-a: Audit PDF extraction quality for common layouts.
     Run build_budget_db.py on a sample of PDFs from each service and manually

@@ -31,6 +31,8 @@ from build_budget_db import (
     _detect_amount_unit,
     _merge_header_rows,
     _normalise_fiscal_year,
+    _parse_appropriation,
+    _detect_currency_year,
 )
 from utils.common import sanitize_filename
 
@@ -472,3 +474,35 @@ def test_merge_header_rows_two_row_map_columns():
 ])
 def test_normalise_fiscal_year(raw, expected):
     assert _normalise_fiscal_year(raw) == expected
+
+
+# ── 1.B4-c: _parse_appropriation tests ───────────────────────────────────────
+
+@pytest.mark.parametrize("account_title, exp_code, exp_title", [
+    ("2035 Aircraft Procurement, Army",  "2035", "Aircraft Procurement, Army"),
+    ("1300 RDT&E, Army",                 "1300", "RDT&E, Army"),
+    ("2100 Military Construction, Army", "2100", "Military Construction, Army"),
+    ("No Code Title",                    None,   "No Code Title"),
+    ("",                                 None,   None),
+    (None,                               None,   None),
+    ("1234",                             None,   "1234"),   # only code, no title
+    ("ABC 1234 Title",                   None,   "ABC 1234 Title"),  # non-numeric prefix
+])
+def test_parse_appropriation(account_title, exp_code, exp_title):
+    code, title = _parse_appropriation(account_title)
+    assert code == exp_code
+    assert title == exp_title
+
+
+# ── 1.B3-b: _detect_currency_year tests ──────────────────────────────────────
+
+@pytest.mark.parametrize("sheet_name, filename, expected", [
+    ("FY 2026",          "p1_army.xlsx",             "then-year"),  # default
+    ("Constant Dollars", "r1.xlsx",                  "constant"),   # keyword in sheet
+    ("FY 2026",          "r1_constant_dollars.xlsx", "constant"),   # keyword in filename
+    ("Then-Year",        "p1.xlsx",                  "then-year"),  # explicit then-year
+    ("Then Year Prices", "m1.xlsx",                  "then-year"),  # alternate phrasing
+    ("",                 "budget.xlsx",              "then-year"),  # empty → default
+])
+def test_detect_currency_year(sheet_name, filename, expected):
+    assert _detect_currency_year(sheet_name, filename) == expected
