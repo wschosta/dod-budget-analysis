@@ -1,0 +1,84 @@
+name: Download Budget Documents
+
+on:
+  workflow_dispatch:
+    inputs:
+      years:
+        description: "Fiscal years to download (space-separated, e.g. '2025 2026' or 'all')"
+        required: false
+        default: "all"
+        type: string
+      sources:
+        description: "Data sources to download from (space-separated, e.g. 'comptroller army navy' or 'all')"
+        required: false
+        default: "all"
+        type: string
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m playwright install chromium
+
+      - name: Download budget documents
+        run: |
+          python dod_budget_downloader.py \
+            --years ${{ github.event.inputs.years }} \
+            --sources ${{ github.event.inputs.sources }} \
+            --output DoD_Budget_Documents \
+            --no-gui
+        timeout-minutes: 90
+
+      - name: Check if manifest exists
+        id: manifest_check
+        run: |
+          if [ -f "DoD_Budget_Documents/manifest.json" ]; then
+            echo "manifest_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "manifest_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload manifest as artifact
+        if: steps.manifest_check.outputs.manifest_exists == 'true'
+        uses: actions/upload-artifact@v3
+        with:
+          name: download-manifest-${{ github.run_id }}
+          path: DoD_Budget_Documents/manifest.json
+          retention-days: 30
+
+      - name: Upload logs (if any)
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: download-logs-${{ github.run_id }}
+          path: DoD_Budget_Documents/logs/
+          retention-days: 30
+        continue-on-error: true
+
+      - name: Report status
+        if: always()
+        run: |
+          echo "## Download Workflow Status"
+          echo ""
+          if [ -f "DoD_Budget_Documents/manifest.json" ]; then
+            echo "✅ Manifest generated successfully"
+            echo ""
+            echo "Manifest location: [download-manifest-${{ github.run_id }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          else
+            echo "⚠️ No manifest file created (check logs)"
+          fi
