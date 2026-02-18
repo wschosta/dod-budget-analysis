@@ -523,38 +523,10 @@ def test_detect_currency_year(sheet_name, filename, expected):
 #
 # See docs/TODO_1C2_unit_tests_parsing.md for full specification.
 
-# TODO 1.C2-b-extended [EASY, ~1200 tokens]: Add _map_columns tests for remaining
-#   exhibit types. Each is a simple parametrized test with a synthetic header row:
-#
-#   R-1 headers: ["Account", "Program Element", "Prior Year", "Current Year", "Estimate"]
-#     → assert "account" and "budget_activity" in mapping
-#   M-1 headers: ["Account", "Personnel Category", "Prior Year Enacted", "FY2026 Request Amount"]
-#     → assert "account" in mapping and at least one amount_ key
-#   O-1 headers: ["Account", "Budget Activity", "Budget Subactivity (BSA) Title", "FY2025 Enacted Amount"]
-#     → assert "sub_activity_title" in mapping
-#   RF-1 headers: ["Activity", "Prior Year Revenue", "Current Year Expenses", "Estimate Revenue"]
-#     → assert "account" in mapping (RF-1 maps "Activity" to account)
-#   Add also: test_detect_exhibit_type extended cases for p5/r2/r3/r4 filenames.
-#   No external data needed.
-
-# TODO 1.C2-pe [EASY, ~600 tokens]: Add tests for _extract_pe_number and _parse_appropriation.
-#   PE tests: "0602702E" → "0602702E", "0305116BB" → "0305116BB", "not a PE" → None,
-#             "Account 0602702E Army" → "0602702E" (embedded).
-#   Appropriation tests: "2035 Aircraft Procurement, Army" → ("2035", "Aircraft Procurement, Army"),
-#                        "Research Development" → (None, "Research Development"),
-#                        None → (None, None).
-#   Already importable from build_budget_db; no external data.
-
-# TODO 1.C2-f [EASY, ~500 tokens]: Add _sanitize_filename edge case tests.
-#   Test: URL query params stripped ("file.pdf?v=2" → "file.pdf"), special chars removed,
-#   leading/trailing whitespace trimmed, empty string → "unnamed".
-#   Import sanitize_filename from utils (already exported from utils/__init__.py).
-#   No external data needed.
-
-# TODO 1.C2-fy [EASY, ~400 tokens, DEPENDS ON 1.B2-d]: After _normalise_fiscal_year() is
-#   added to build_budget_db.py, add parametrized tests:
-#     ("FY2026", "FY 2026"), ("FY 2026", "FY 2026"), ("2026", "FY 2026"), ("fy2025", "FY 2025")
-#   Import _normalise_fiscal_year from build_budget_db (same pattern as other imports above).
+# DONE 1.C2-b-extended: _map_columns tests for R-1, O-1, M-1, RF-1 added at lines 179-243.
+# DONE 1.C2-pe: _extract_pe_number tests at lines 352-373; _parse_appropriation at 492-495.
+# DONE 1.C2-f: sanitize_filename edge case tests at lines 311-346.
+# DONE 1.C2-fy: _normalise_fiscal_year tests at lines 467-477.
 
 
 # ── TODO 1.B2-b: Catalog-driven column detection for detail exhibits ───────────

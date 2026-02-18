@@ -20,30 +20,9 @@ column mapping, 1.B2-c multi-row headers, 1.B2-d FY normalization,
 1.B4-b ORG_MAP expansion, 1.B4-c appropriation parsing complete).
 Remaining tasks below.
 
-TODO FIX-001 [Complexity: HIGH] [Tokens: ~3000] [User: NO]
-    CRITICAL BUG: ingest_excel_file() references undefined variable `rows`.
-    Lines ~664, ~668, ~669, ~685 use `rows[header_idx]` etc., but the local
-    variable is `first_rows` (collected from `rows_iter`).  This causes
-    NameError at runtime and breaks ALL Excel ingestion + pipeline tests.
-    Steps:
-      1. In ingest_excel_file(), replace `rows[header_idx]` → `first_rows[header_idx]`
-      2. Replace `len(rows)` → `len(first_rows)`
-      3. Replace `rows[header_idx + 1]` → `first_rows[header_idx + 1]`
-      4. Remove `data_rows = rows[data_start:]` — dead code, data comes
-         from `rows_iter` which is the live openpyxl iterator
-      5. Fix `_detect_amount_unit(rows, header_idx)` → pass `first_rows`
-      6. Run `pytest tests/test_pipeline.py tests/test_build_integration.py -v`
-    Success: test_full_excel_ingestion_pipeline and related tests pass.
-
-TODO FIX-002 [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Fix line-length violations (>100 chars) that fail precommit check.
-    Affected lines in this file: ~996 (105ch), ~1505 (107ch), ~1519 (106ch),
-    ~1575 (120ch).
-    Steps:
-      1. Find all lines over 100 chars with: grep -n '.\{101,\}' build_budget_db.py
-      2. Break each long line using Python line continuation or local vars
-      3. Run `pytest tests/test_precommit_checks.py::TestLineLength -v`
-    Success: test_line_length passes with 0 violations in this file.
+DONE FIX-001: ingest_excel_file() uses first_rows[header_idx] throughout; no
+    undefined `rows` variable — confirmed by passing test_full_excel_ingestion_pipeline.
+DONE FIX-002: No lines over 100 chars; precommit line-length check passes.
 
 DONE 1.B3-c: amount_type column added to budget_lines schema; C-1 rows get
     'authorization', all other exhibits default to 'budget_authority'.

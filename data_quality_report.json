@@ -1,0 +1,164 @@
+{
+  "timestamp": "2026-02-18T12:04:25.180773",
+  "database": "/tmp/pytest-of-root/pytest-10/test_db_excel_only0/test_budget_excel.sqlite",
+  "total_budget_lines": 7,
+  "row_counts_by_service_fy_exhibit": [
+    {
+      "service": "",
+      "fiscal_year": "FY 2026",
+      "exhibit_type": "p5",
+      "row_count": 1
+    },
+    {
+      "service": "",
+      "fiscal_year": "FY 2026",
+      "exhibit_type": "r2",
+      "row_count": 1
+    },
+    {
+      "service": "Army",
+      "fiscal_year": "FY 2026",
+      "exhibit_type": "m1",
+      "row_count": 1
+    },
+    {
+      "service": "Army",
+      "fiscal_year": "FY 2026",
+      "exhibit_type": "o1",
+      "row_count": 1
+    },
+    {
+      "service": "Army",
+      "fiscal_year": "FY 2026",
+      "exhibit_type": "p1",
+      "row_count": 2
+    },
+    {
+      "service": "Army",
+      "fiscal_year": "FY 2026",
+      "exhibit_type": "r1",
+      "row_count": 1
+    }
+  ],
+  "amount_column_stats": {
+    "amount_fy2024_actual": {
+      "null_count": 0,
+      "null_pct": 0.0,
+      "zero_count": 2,
+      "zero_pct": 28.6
+    },
+    "amount_fy2025_enacted": {
+      "null_count": 0,
+      "null_pct": 0.0,
+      "zero_count": 2,
+      "zero_pct": 28.6
+    },
+    "amount_fy2025_supplemental": {
+      "null_count": 0,
+      "null_pct": 0.0,
+      "zero_count": 7,
+      "zero_pct": 100.0
+    },
+    "amount_fy2025_total": {
+      "null_count": 0,
+      "null_pct": 0.0,
+      "zero_count": 7,
+      "zero_pct": 100.0
+    },
+    "amount_fy2026_request": {
+      "null_count": 0,
+      "null_pct": 0.0,
+      "zero_count": 2,
+      "zero_pct": 28.6
+    },
+    "amount_fy2026_reconciliation": {
+      "null_count": 0,
+      "null_pct": 0.0,
+      "zero_count": 7,
+      "zero_pct": 100.0
+    },
+    "amount_fy2026_total": {
+      "null_count": 0,
+      "null_pct": 0.0,
+      "zero_count": 7,
+      "zero_pct": 100.0
+    }
+  },
+  "validation_summary": {
+    "total_checks": 8,
+    "total_warnings": 2,
+    "total_failures": 0,
+    "checks": [
+      {
+        "name": "database_stats",
+        "status": "pass",
+        "message": "7 budget lines, 0 PDF pages, 8 files",
+        "details": {
+          "budget_lines": 7,
+          "pdf_pages": 0,
+          "ingested_files": 8
+        }
+      },
+      {
+        "name": "duplicate_rows",
+        "status": "pass",
+        "message": "No duplicates found",
+        "details": []
+      },
+      {
+        "name": "null_heavy_rows",
+        "status": "warn",
+        "message": "2 row(s) (28.6%) have all-null/zero amounts",
+        "details": [
+          {
+            "exhibit_type": "p5",
+            "count": 1
+          },
+          {
+            "exhibit_type": "r2",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "name": "unknown_exhibit_types",
+        "status": "warn",
+        "message": "2 unknown exhibit type(s) found",
+        "details": [
+          {
+            "exhibit_type": "p5",
+            "count": 1
+          },
+          {
+            "exhibit_type": "r2",
+            "count": 1
+          }
+        ]
+      },
+      {
+        "name": "value_ranges",
+        "status": "pass",
+        "message": "All values within expected range",
+        "details": []
+      },
+      {
+        "name": "row_count_consistency",
+        "status": "pass",
+        "message": "All row counts consistent",
+        "details": []
+      },
+      {
+        "name": "fiscal_year_coverage",
+        "status": "pass",
+        "message": "All orgs have consistent fiscal year coverage",
+        "details": []
+      },
+      {
+        "name": "column_types",
+        "status": "pass",
+        "message": "All amount columns contain numeric values",
+        "details": []
+      }
+    ]
+  }
+}

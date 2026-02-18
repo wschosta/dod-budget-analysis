@@ -1,0 +1,115 @@
+"""
+GET /api/v1/download endpoint (Step 2.C4-a).
+
+Streams large result sets as CSV or JSON without loading everything into memory.
+Accepts the same filter parameters as /budget-lines.
+"""
+
+import csv
+import io
+import json
+import sqlite3
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
+
+from api.database import get_db
+
+router = APIRouter(prefix="/download", tags=["download"])
+
+_DOWNLOAD_COLUMNS = [
+    "id", "source_file", "exhibit_type", "sheet_name", "fiscal_year",
+    "account", "account_title", "organization_name",
+    "budget_activity_title", "sub_activity_title",
+    "line_item", "line_item_title", "pe_number",
+    "appropriation_code", "appropriation_title",
+    "amount_fy2024_actual", "amount_fy2025_enacted", "amount_fy2025_supplemental",
+    "amount_fy2025_total", "amount_fy2026_request", "amount_fy2026_reconciliation",
+    "amount_fy2026_total", "amount_type", "amount_unit", "currency_year",
+]
+
+_ALLOWED_SORT = {"id", "source_file", "exhibit_type", "fiscal_year",
+                 "organization_name", "amount_fy2026_request"}
+
+
+def _iter_rows(conn: sqlite3.Connection, sql: str, params: list[Any]):
+    """Yield rows one at a time to enable streaming."""
+    cur = conn.execute(sql, params)
+    while True:
+        batch = cur.fetchmany(500)
+        if not batch:
+            break
+        yield from batch
+
+
+@router.get("", summary="Download search results as CSV or JSON")
+def download(
+    fmt: str = Query("csv", pattern="^(csv|json)$", description="Output format"),
+    fiscal_year: list[str] | None = Query(None),
+    service: list[str] | None = Query(None),
+    exhibit_type: list[str] | None = Query(None),
+    pe_number: list[str] | None = Query(None),
+    limit: int = Query(
+        10_000, ge=1, le=100_000,
+        description="Max rows to export (default 10,000)",
+    ),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> StreamingResponse:
+    """Stream budget line items as CSV or JSON (newline-delimited)."""
+    # Build WHERE clause
+    conditions: list[str] = []
+    params: list[Any] = []
+
+    if fiscal_year:
+        ph = ",".join("?" * len(fiscal_year))
+        conditions.append(f"fiscal_year IN ({ph})")
+        params.extend(fiscal_year)
+    if service:
+        sub = " OR ".join("organization_name LIKE ?" for _ in service)
+        conditions.append(f"({sub})")
+        params.extend(f"%{s}%" for s in service)
+    if exhibit_type:
+        ph = ",".join("?" * len(exhibit_type))
+        conditions.append(f"exhibit_type IN ({ph})")
+        params.extend(exhibit_type)
+    if pe_number:
+        ph = ",".join("?" * len(pe_number))
+        conditions.append(f"pe_number IN ({ph})")
+        params.extend(pe_number)
+
+    where = "WHERE " + " AND ".join(conditions) if conditions else ""
+    col_list = ", ".join(_DOWNLOAD_COLUMNS)
+    sql = f"SELECT {col_list} FROM budget_lines {where} LIMIT {limit}"
+
+    if fmt == "csv":
+        def csv_stream():
+            buf = io.StringIO()
+            writer = csv.DictWriter(buf, fieldnames=_DOWNLOAD_COLUMNS)
+            writer.writeheader()
+            yield buf.getvalue()
+            for row in _iter_rows(conn, sql, params):
+                buf.seek(0)
+                buf.truncate()
+                writer.writerow(dict(zip(_DOWNLOAD_COLUMNS, row)))
+                yield buf.getvalue()
+
+        return StreamingResponse(
+            csv_stream(),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=budget_lines.csv"},
+        )
+
+    # JSON newline-delimited (NDJSON)
+    def json_stream():
+        for row in _iter_rows(conn, sql, params):
+            d = dict(zip(_DOWNLOAD_COLUMNS, row))
+            yield json.dumps(d, default=str) + "\n"
+
+    return StreamingResponse(
+        json_stream(),
+        media_type="application/x-ndjson",
+        headers={
+            "Content-Disposition": "attachment; filename=budget_lines.ndjson"
+        },
+    )
