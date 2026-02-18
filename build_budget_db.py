@@ -658,15 +658,15 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
             if header_idx is not None:
                 break
 
-        if header_idx is None or len(first_rows) < 3:
+        if header_idx is None:
             continue
 
-        headers = rows[header_idx]
+        headers = first_rows[header_idx]
         # Detect and merge two-row headers (Step 1.B2-c): some exhibits split
         # "FY 2026" and "Request Amount" across consecutive rows.
         data_start = header_idx + 1
-        if header_idx + 1 < len(rows):
-            merged = _merge_header_rows(headers, rows[header_idx + 1])
+        if header_idx + 1 < len(first_rows):
+            merged = _merge_header_rows(headers, first_rows[header_idx + 1])
             if merged != list(headers):
                 headers = merged
                 data_start = header_idx + 2  # sub-header row consumed
@@ -682,10 +682,8 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
         # Detect currency year for this sheet (TODO 1.B3-b)
         currency_year = _detect_currency_year(sheet_name, file_path.name)
 
-        data_rows = rows[data_start:]
-
         # Detect source unit and compute normalisation multiplier (Step 1.B3-a/c)
-        amount_unit = _detect_amount_unit(rows, header_idx)
+        amount_unit = _detect_amount_unit(first_rows, header_idx)
         # All stored amounts must be in thousands; multiply millions-denominated
         # values by 1000 before inserting (Step 1.B3-c)
         unit_multiplier = 1000.0 if amount_unit == "millions" else 1.0
@@ -993,7 +991,8 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
             "(file_path, file_type, file_size, file_modified,"
             " ingested_at, row_count, status) "
             "VALUES (?,?,?,?,datetime('now'),?,?)",
-            (relative_path, "pdf", file_path.stat().st_size, file_path.stat().st_mtime, 0, f"error: {e}")
+            (relative_path, "pdf", file_path.stat().st_size,
+             file_path.stat().st_mtime, 0, f"error: {e}")
         )
         return 0
 
@@ -1502,7 +1501,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 """)
                 conn.execute("""
                     CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN
-                        INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data)
+                        INSERT INTO pdf_pages_fts(
+                            pdf_pages_fts, rowid, page_text, source_file, table_data)
                         VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data);
                     END
                 """)
@@ -1516,7 +1516,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 )
                 conn.execute(
                     "CREATE TRIGGER IF NOT EXISTS pdf_pages_ad AFTER DELETE ON pdf_pages BEGIN "
-                    "INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data) "
+                    "INSERT INTO pdf_pages_fts("
+                    "pdf_pages_fts, rowid, page_text, source_file, table_data) "
                     "VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data); END"
                 )
                 conn.commit()
@@ -1572,7 +1573,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         UPDATE data_sources SET last_updated = datetime('now')
         WHERE source_id IN (
             SELECT DISTINCT
-                substr(file_path, 1, instr(substr(file_path, 1+instr(file_path, '/')), '/') + instr(file_path, '/') - 1)
+                substr(file_path, 1,
+                    instr(substr(file_path, 1+instr(file_path, '/')), '/')
+                    + instr(file_path, '/') - 1)
             FROM ingested_files
         )
     """)

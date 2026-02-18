@@ -620,9 +620,33 @@ class GuiProgressTracker:
 
         self._root.after(150, self._poll)
 
+    def _cleanup_vars(self):
+        """Delete StringVar references on the GUI thread before destroying root.
+
+        StringVar.__del__ calls into the Tcl interpreter. If Python's garbage
+        collector runs these destructors from the main thread (e.g. at interpreter
+        shutdown) after the GUI thread has exited, tkinter raises:
+            RuntimeError: main thread is not in main loop
+        Explicitly deleting the attributes here and forcing a GC cycle ensures
+        the destructors run on the GUI thread while the Tcl interpreter is still
+        valid.
+        """
+        import gc
+        for attr in ('_src_var', '_overall_lbl', '_stats_var',
+                     '_file_lbl', '_file_stats_var', '_count_var'):
+            if hasattr(self, attr):
+                delattr(self, attr)
+        gc.collect()
+
     def _on_close(self):
         """Handle window close: set the closed flag and destroy the root widget."""
         self._closed = True
+        self._cleanup_vars()
+        self._root.destroy()
+
+    def _do_close(self):
+        """Destroy the root window on the GUI thread after cleaning up StringVars."""
+        self._cleanup_vars()
         self._root.destroy()
 
     def set_source(self, year: str, source: str):
@@ -754,7 +778,7 @@ class GuiProgressTracker:
         if not self._closed and hasattr(self, '_root'):
             self._closed = True
             try:
-                self._root.after(0, self._root.destroy)
+                self._root.after(0, self._do_close)
             except Exception:
                 pass
 
@@ -821,7 +845,9 @@ def write_manifest(output_dir: Path, all_files: dict, manifest_path: Path) -> No
     _manifest = entries
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     with open(manifest_path, "w", encoding="utf-8") as fh:
-        json.dump({"generated_at": datetime.now(timezone.utc).isoformat(), "files": entries}, fh, indent=2)
+        json.dump(
+            {"generated_at": datetime.now(timezone.utc).isoformat(), "files": entries},
+            fh, indent=2)
 
 
 def update_manifest_entry(url: str, status: str, file_size: int,
@@ -983,7 +1009,8 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
             for (const a of allLinks) {{
                 const href = a.href;
                 let path, host;
-                try {{ const u = new URL(href); path = u.pathname.toLowerCase(); host = u.hostname.toLowerCase(); }} catch {{ continue; }}
+                try {{ const u = new URL(href); path = u.pathname.toLowerCase();
+                    host = u.hostname.toLowerCase(); }} catch {{ continue; }}
                 if (ignoredHosts.has(host)) continue;
                 if (!exts.some(e => path.endsWith(e))) continue;
                 if (tf_arg && !href.toLowerCase().includes(tf_arg.toLowerCase())) continue;
@@ -992,7 +1019,8 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
                 const text = a.textContent.trim();
                 const filename = decodeURIComponent(path.split('/').pop());
                 const ext = '.' + filename.split('.').pop().toLowerCase();
-                files.push({{ name: text || filename, url: href, filename: filename, extension: ext }});
+                files.push({{ name: text || filename, url: href,
+                    filename: filename, extension: ext }});
             }}
             return files;
         }}""", [list(DOWNLOADABLE_EXTENSIONS), text_filter])
@@ -1443,7 +1471,8 @@ def discover_navy_archive_files(_session: requests.Session, year: str) -> list[d
 # ── Air Force (browser required) ─────────────────────────────────────────────
 
 def discover_airforce_files(_session: requests.Session, year: str) -> list[dict]:
-    """Discover US Air Force/Space Force budget files for a given fiscal year using a headless browser.
+    """Discover US Air Force/Space Force budget files for a given fiscal year
+    using a headless browser.
 
     Args:
         _session: Unused (browser handles HTTP); kept for interface consistency.
