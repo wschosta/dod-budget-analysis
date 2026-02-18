@@ -624,3 +624,98 @@ def test_vacuum_database(tmp_path):
     conn.commit()
     conn.close()
     vacuum_database(db_path)  # should not raise
+
+
+# ── config utilities (utils/config.py) ───────────────────────────────────────
+
+from utils.config import Config, KnownValues, ColumnMapping, FilePatterns
+
+
+def test_config_to_dict():
+    cfg = Config()
+    cfg.foo = "bar"
+    cfg.num = 42
+    d = cfg.to_dict()
+    assert d["foo"] == "bar"
+    assert d["num"] == 42
+
+
+def test_config_from_dict():
+    data = {"alpha": 1, "beta": "two"}
+    cfg = Config.from_dict(data)
+    assert cfg.alpha == 1
+    assert cfg.beta == "two"
+
+
+def test_config_save_and_load_json(tmp_path):
+    cfg = Config()
+    cfg.key = "value"
+    cfg.number = 99
+    path = tmp_path / "settings.json"
+    cfg.save_json(path)
+    loaded = Config.load_json(path)
+    assert loaded.key == "value"
+    assert int(loaded.number) == 99
+
+
+def test_known_values_is_valid_org():
+    assert KnownValues.is_valid_org("Army") is True
+    assert KnownValues.is_valid_org("Navy") is True
+    assert KnownValues.is_valid_org("UnknownOrg") is False
+
+
+def test_known_values_is_valid_exhibit_type():
+    assert KnownValues.is_valid_exhibit_type("p1") is True
+    assert KnownValues.is_valid_exhibit_type("P1") is True   # case-insensitive
+    assert KnownValues.is_valid_exhibit_type("zz") is False
+
+
+def test_known_values_get_exhibit_description():
+    desc = KnownValues.get_exhibit_description("p1")
+    assert desc is not None
+    assert "Procurement" in desc
+    assert KnownValues.get_exhibit_description("nonexistent") is None
+
+
+def test_known_values_get_org_code():
+    assert KnownValues.get_org_code("Army") == "A"
+    assert KnownValues.get_org_code("Navy") == "N"
+    assert KnownValues.get_org_code("Unknown") is None
+
+
+def test_column_mapping_get_mapping_m1():
+    mapping = ColumnMapping.get_mapping("m1")
+    assert "account" in mapping
+
+
+def test_column_mapping_get_mapping_p1():
+    mapping = ColumnMapping.get_mapping("p1")
+    assert "account" in mapping
+
+
+def test_column_mapping_get_mapping_unknown():
+    mapping = ColumnMapping.get_mapping("zz_unknown")
+    assert mapping == {}
+
+
+def test_column_mapping_normalize_header():
+    result = ColumnMapping.normalize_header("  FY2026  Request\nAmount  ")
+    assert "fy2026" in result
+    assert "\n" not in result
+    assert result == result.strip()
+
+
+def test_column_mapping_normalize_empty():
+    assert ColumnMapping.normalize_header("") == ""
+    assert ColumnMapping.normalize_header(None) == ""
+
+
+def test_file_patterns_is_budget_document():
+    assert FilePatterns.is_budget_document("budget_justification_fy2026.pdf") is True
+    assert FilePatterns.is_budget_document("random_file.xlsx") is False
+
+
+def test_file_patterns_get_fiscal_year():
+    assert FilePatterns.get_fiscal_year_from_filename("p1_fy2026.xlsx") == 2026
+    assert FilePatterns.get_fiscal_year_from_filename("budget_2025_army.pdf") == 2025
+    assert FilePatterns.get_fiscal_year_from_filename("no_year_here.pdf") is None
