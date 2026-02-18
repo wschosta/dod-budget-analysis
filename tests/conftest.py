@@ -239,7 +239,7 @@ _C1_ROWS = [
      "P-2345", "Barracks Replacement, Fort Bragg", 45_000.0, 30_000.0),
 ]
 
-# TODO TEST-001: P-5 Procurement Detail fixtures (columns match p5 header above)
+# DONE TEST-001: P-5 Procurement Detail fixtures (columns match p5 header above)
 _P5_ROWS = [
     # account, pe, line_item, title, unit, py_qty, cy_qty, est_qty,
     # py_unit_cost, cy_unit_cost, est_unit_cost, justification
@@ -251,7 +251,7 @@ _P5_ROWS = [
      18_000.0, 18_500.0, 19_000.0, "Replaces aging L-model fleet."),
 ]
 
-# TODO TEST-001: R-2 RDT&E Detail Schedule fixtures
+# DONE TEST-001: R-2 RDT&E Detail Schedule fixtures
 _R2_ROWS = [
     # account, pe, sub_element, title, prior_year, current_year, estimate,
     # metric, planned_achievement
@@ -273,7 +273,7 @@ def fixtures_dir(tmp_path_factory):
     """
     d = tmp_path_factory.mktemp("budget_fixtures")
 
-    # TODO 1.C1-a: Excel fixtures (summary exhibits)
+    # DONE 1.C1-a: Excel fixtures (summary exhibits)
     _create_exhibit_xlsx(d / "p1_display.xlsx", "p1", _P1_ROWS)
     _create_exhibit_xlsx(d / "r1_display.xlsx", "r1", _R1_ROWS)
     _create_exhibit_xlsx(d / "c1_display.xlsx", "c1", _C1_ROWS)
@@ -284,7 +284,7 @@ def fixtures_dir(tmp_path_factory):
     _create_exhibit_xlsx(d / "p5_display.xlsx", "p5", _P5_ROWS)
     _create_exhibit_xlsx(d / "r2_display.xlsx", "r2", _R2_ROWS)
 
-    # TODO 1.C1-b: PDF fixtures
+    # DONE 1.C1-b: PDF fixtures
     _create_sample_pdf(d / "text_only.pdf", title="Budget Overview FY2026",
                        include_table=False)
     _create_sample_pdf(d / "with_table.pdf", title="RDT&E Justification FY2026",

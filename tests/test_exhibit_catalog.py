@@ -181,7 +181,7 @@ def test_describe_catalog_contains_column_counts():
     assert "columns" in result
 
 
-# ── TODO 1.B1-f: All catalog entries return valid mappings ────────────────────
+# ── DONE 1.B1-f: All catalog entries return valid mappings ────────────────────
 
 def _build_realistic_header(exhibit_key: str) -> list[str]:
     """Build a synthetic header row using the first pattern from each column spec."""
