@@ -261,6 +261,26 @@ def test_map_columns_multiline_headers():
     assert "amount_fy2026_request" in mapping
 
 
+def test_map_columns_year_agnostic():
+    """Year-agnostic detection works for any fiscal year (Step 1.B2-a)."""
+    headers = [
+        "Account", "Account Title",
+        "FY2022 Actual\nAmount",
+        "FY2023 Enacted\nAmount",
+        "FY2023 Supplemental\nAmount",
+        "FY2023 Total\nAmount",
+        "FY2024 Request\nAmount",
+        "FY2024 Reconciliation\nAmount",
+    ]
+    mapping = _map_columns(headers, "p1")
+    assert "amount_fy2022_actual" in mapping
+    assert "amount_fy2023_enacted" in mapping
+    assert "amount_fy2023_supplemental" in mapping
+    assert "amount_fy2023_total" in mapping
+    assert "amount_fy2024_request" in mapping
+    assert "amount_fy2024_reconciliation" in mapping
+
+
 def test_map_columns_case_insensitive():
     """Column matching is case-insensitive."""
     headers = [

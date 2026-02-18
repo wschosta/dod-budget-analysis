@@ -33,22 +33,13 @@ KNOWN_EXHIBIT_TYPES = {"m1", "o1", "p1", "p1r", "r1", "rf1", "c1"}
 KNOWN_ORGS = {"Army", "Navy", "Air Force", "Space Force",
               "Defense-Wide", "Marine Corps", "Joint Staff"}
 
-# Amount columns in the budget_lines table
-# TODO 1.B2-a-followup [EASY, ~600 tokens, DEPENDS ON 1.B2-a]: After making
-#   _map_columns() year-agnostic, replace this hardcoded list with a dynamic query
-#   inside each check function that uses it:
-#     cols = conn.execute("PRAGMA table_info(budget_lines)").fetchall()
-#     amount_cols = [c[1] for c in cols if c[1].startswith("amount_fy")]
-#   This makes the validator automatically adapt when new fiscal year columns are added.
-AMOUNT_COLUMNS = [
-    "amount_fy2024_actual",
-    "amount_fy2025_enacted",
-    "amount_fy2025_supplemental",
-    "amount_fy2025_total",
-    "amount_fy2026_request",
-    "amount_fy2026_reconciliation",
-    "amount_fy2026_total",
-]
+# Amount columns in the budget_lines table — queried dynamically from the
+# DB schema (Step 1.B2-a) so the validator automatically adapts when new
+# fiscal year columns are added without requiring code changes here.
+def _get_amount_columns(conn: sqlite3.Connection) -> list[str]:
+    """Return all amount_fy* columns present in budget_lines schema."""
+    cols = conn.execute("PRAGMA table_info(budget_lines)").fetchall()
+    return [c[1] for c in cols if c[1].startswith("amount_fy")]
 
 
 # ── Individual checks ────────────────────────────────────────────────────────
@@ -121,8 +112,11 @@ def check_duplicates(conn: sqlite3.Connection) -> list[dict]:
 def check_zero_amounts(conn: sqlite3.Connection) -> list[dict]:
     """Find line items where every amount column is NULL or zero."""
     issues = []
+    amount_cols = _get_amount_columns(conn)
+    if not amount_cols:
+        return issues
     null_checks = " AND ".join(
-        f"(COALESCE({col}, 0) = 0)" for col in AMOUNT_COLUMNS
+        f"(COALESCE({col}, 0) = 0)" for col in amount_cols
     )
     rows = conn.execute(f"""
         SELECT source_file, exhibit_type, account, account_title,

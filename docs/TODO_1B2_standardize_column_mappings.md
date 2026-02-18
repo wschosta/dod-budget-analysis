@@ -1,6 +1,6 @@
 # Step 1.B2 — Standardize Column Mappings
 
-**Status:** Not started
+**Status:** In Progress (1.B2-a and validate_budget_db.py followup done; 1.B2-b depends on 1.B1; 1.B2-c, 1.B2-d, 1.B2-e, 1.B2-f remain)
 **Type:** Code modification + Tests
 **Depends on:** 1.B1 (exhibit catalog for column specs)
 

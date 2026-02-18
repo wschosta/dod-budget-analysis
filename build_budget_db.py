@@ -521,61 +521,36 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
         elif h == "facility category title":
             mapping.setdefault("sub_activity", i)
 
-    # TODO 1.B2-a [MEDIUM, ~2000 tokens]: Make amount-column detection year-agnostic.
-    #   Replace the three hardcoded "fy2024/fy2025/fy2026" blocks below with a regex
-    #   loop over any "FY20XX" pattern found in headers. Use FISCAL_YEAR from
-    #   utils/patterns.py. Canonical column names: amount_fyYYYY_<type>. Update
-    #   validate_budget_db.py AMOUNT_COLUMNS (currently hardcoded) to query actual
-    #   column names from the DB schema instead. No external data needed.
-
-    # Amount columns — match by pattern
+    # Amount columns — year-agnostic regex detection (Step 1.B2-a).
+    # Matches any "FY YYYY" or "FYXXXX" header and classifies by sub-type
+    # keyword.  Canonical column names: amount_fyYYYY_<type>.
+    _FY_RE = re.compile(r"fy\s*(\d{4})", re.IGNORECASE)
     for i, h in enumerate(h_lower):
-        if "fy2024" in h.replace(" ", "") or "fy 2024" in h:
+        m = _FY_RE.search(h)
+        if not m:
+            continue
+        year = m.group(1)
+        if "quantity" in h:
             if "actual" in h:
-                if "quantity" in h:
-                    mapping["quantity_fy2024"] = i
-                elif "amount" in h or "actual" in h:
-                    mapping.setdefault("amount_fy2024_actual", i)
-        elif "fy2025" in h.replace(" ", "") or "fy 2025" in h:
-            if "enacted" in h:
-                if "quantity" in h:
-                    mapping["quantity_fy2025"] = i
-                elif "amount" in h or "enacted" in h:
-                    mapping.setdefault("amount_fy2025_enacted", i)
-            elif "supplemental" in h:
-                mapping.setdefault("amount_fy2025_supplemental", i)
-            elif "total" in h:
-                mapping.setdefault("amount_fy2025_total", i)
-        elif "fy2026" in h.replace(" ", "") or "fy 2026" in h:
-            if "reconcil" in h:
-                if "quantity" in h:
-                    pass
-                elif "amount" in h or "reconcil" in h:
-                    mapping.setdefault("amount_fy2026_reconciliation", i)
-            elif "total" in h:
-                if "quantity" in h:
-                    mapping["quantity_fy2026_total"] = i
-                elif "amount" in h or "total" in h:
-                    mapping.setdefault("amount_fy2026_total", i)
+                mapping.setdefault(f"quantity_fy{year}", i)
             elif "request" in h or "disc" in h:
-                if "quantity" in h:
-                    mapping["quantity_fy2026_request"] = i
-                elif "amount" in h or "request" in h or "disc" in h:
-                    mapping.setdefault("amount_fy2026_request", i)
-
-    # For sheets with only one amount column (single FY views),
-    # try to pick up the lone numeric column
-    amount_fields = [k for k in mapping if k.startswith("amount_")]
-    if not amount_fields:
-        for i, h in enumerate(h_lower):
-            if "fy 2024" in h and "actual" in h:
-                mapping["amount_fy2024_actual"] = i
-            elif "fy 2025" in h and "enacted" in h:
-                mapping["amount_fy2025_enacted"] = i
-            elif "fy 2026" in h and ("request" in h or "disc" in h):
-                mapping["amount_fy2026_request"] = i
-            elif "fy 2026" in h and "total" in h:
-                mapping["amount_fy2026_total"] = i
+                mapping.setdefault(f"quantity_fy{year}_request", i)
+            elif "total" in h:
+                mapping.setdefault(f"quantity_fy{year}_total", i)
+            else:
+                mapping.setdefault(f"quantity_fy{year}", i)
+        elif "actual" in h:
+            mapping.setdefault(f"amount_fy{year}_actual", i)
+        elif "enacted" in h or "approp" in h:
+            mapping.setdefault(f"amount_fy{year}_enacted", i)
+        elif "supplemental" in h:
+            mapping.setdefault(f"amount_fy{year}_supplemental", i)
+        elif "reconcil" in h:
+            mapping.setdefault(f"amount_fy{year}_reconciliation", i)
+        elif "total" in h:
+            mapping.setdefault(f"amount_fy{year}_total", i)
+        elif "request" in h or "disc" in h:
+            mapping.setdefault(f"amount_fy{year}_request", i)
 
     # Authorization/appropriation amounts (C-1 exhibit)
     for i, h in enumerate(h_lower):
