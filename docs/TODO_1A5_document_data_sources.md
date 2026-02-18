@@ -1,6 +1,6 @@
 # Step 1.A5 — Document All Data Sources
 
-**Status:** Not started
+**Status:** Complete (1.A5-a and 1.A5-b done; 1.A5-c deferred — requires audit results from 1.A1)
 **Type:** Documentation (AI-agent completable)
 **Depends on:** 1.A1 (audit), 1.A2 (FY coverage) — but can start now
 

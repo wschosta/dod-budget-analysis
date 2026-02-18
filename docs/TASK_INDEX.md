@@ -32,7 +32,7 @@ otherwise noted.
 | 1.A2 | Expand fiscal-year coverage | ENVIRONMENT TESTING | [TODO](TODO_1A2_expand_fiscal_year_coverage.md) | — |
 | 1.A3 | Harden download reliability | AI-agent ✅ **Complete** (1.A3-e skipped — needs live WAF) | [TODO](TODO_1A3_harden_download_reliability.md) | `dod_budget_downloader.py` |
 | 1.A4 | Automate download scheduling | AI-agent ✅ **Complete** | [TODO](TODO_1A4_automate_download_scheduling.md) | `scripts/scheduled_download.py`, `.github/workflows/download.yml` |
-| 1.A5 | Document all data sources | AI-agent | [TODO](TODO_1A5_document_data_sources.md) | `docs/wiki/Data-Sources.md` |
+| 1.A5 | Document all data sources | AI-agent ✅ **Complete** (1.A5-c deferred — needs audit) | [TODO](TODO_1A5_document_data_sources.md) | `DATA_SOURCES.md`, `docs/wiki/Data-Sources.md` |
 | 1.A6 | Retry failed downloads | AI-agent ✅ **Complete** | [TODO](TODO_1A6_retry_failed_downloads.md) | `dod_budget_downloader.py` |
 
 ---
