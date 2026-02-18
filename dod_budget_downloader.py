@@ -748,8 +748,8 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
 
         # Extract links via JavaScript in the browser
         js_filter = f"'{text_filter}'" if text_filter else "null"
-        raw = page.evaluate(f"""() => {{
-            const tf = {js_filter};
+        raw = page.evaluate(f"""(exts, tf) => {{
+            const tf_arg = tf;
             const allLinks = Array.from(document.querySelectorAll('a[href]'));
             const files = [];
             const seen = new Set();
@@ -759,9 +759,8 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
                 let path, host;
                 try {{ const u = new URL(href); path = u.pathname.toLowerCase(); host = u.hostname.toLowerCase(); }} catch {{ continue; }}
                 if (ignoredHosts.has(host)) continue;
-                const exts = ['.pdf', '.xlsx', '.xls', '.zip', '.csv'];
                 if (!exts.some(e => path.endsWith(e))) continue;
-                if (tf && !href.toLowerCase().includes(tf.toLowerCase())) continue;
+                if (tf_arg && !href.toLowerCase().includes(tf_arg.toLowerCase())) continue;
                 if (seen.has(path)) continue;
                 seen.add(path);
                 const text = a.textContent.trim();
@@ -770,7 +769,7 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
                 files.push({{ name: text || filename, url: href, filename: filename, extension: ext }});
             }}
             return files;
-        }}""")
+        }}""", list(DOWNLOADABLE_EXTENSIONS), text_filter)
 
         return [_clean_file_entry(f) for f in raw]
 
