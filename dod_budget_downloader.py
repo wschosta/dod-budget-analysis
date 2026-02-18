@@ -263,6 +263,8 @@ class ProgressTracker:
         self.current_year = ""
         self.term_width = shutil.get_terminal_size((80, 24)).columns
         self._last_progress_time = 0.0
+        # Structured failure tracking (TODO 1.A6-a)
+        self._failed_files: list[dict] = []
 
     @property
     def processed(self) -> int:
@@ -350,6 +352,19 @@ class ProgressTracker:
         print(f"\r{line:<{self.term_width}}")
         self.print_overall()
 
+    def file_failed(self, url: str, dest: Path, error: str, use_browser: bool = False):
+        """Record detailed failure information for later retry (TODO 1.A6-a)."""
+        self._failed_files.append({
+            "url": url,
+            "dest": str(dest),
+            "filename": dest.name,
+            "error": str(error),
+            "source": self.current_source,
+            "year": self.current_year,
+            "use_browser": use_browser,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
 
 # ── GUI Progress Tracker ─────────────────────────────────────────────────────
 
@@ -373,6 +388,8 @@ class GuiProgressTracker:
         self._file_start = 0.0
         self._log_lines: list[str] = []
         self._failure_lines: list[str] = []
+        # Structured failure tracking (TODO 1.A6-a)
+        self._failed_files: list[dict] = []
 
         self._closed = False
         self._ready = threading.Event()
@@ -570,6 +587,19 @@ class GuiProgressTracker:
         self._file_downloaded = 0
         self._file_total = 0
 
+    def file_failed(self, url: str, dest: Path, error: str, use_browser: bool = False):
+        """Record detailed failure information for later retry (TODO 1.A6-a)."""
+        self._failed_files.append({
+            "url": url,
+            "dest": str(dest),
+            "filename": dest.name,
+            "error": str(error),
+            "source": self.current_source,
+            "year": self.current_year,
+            "use_browser": use_browser,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
     def show_completion_dialog(self, summary: str):
         """Replace the progress window with a completion dialog.
 
@@ -721,6 +751,34 @@ def update_manifest_entry(url: str, status: str, file_size: int,
             )
     except OSError:
         pass  # Non-fatal: manifest update failures don't block downloads
+
+
+def write_failed_downloads(tracker: ProgressTracker | GuiProgressTracker | None,
+                          output_dir: Path) -> None:
+    """Write failed downloads to a structured JSON file for retry (TODO 1.A6-a).
+
+    Schema: {"failed": [...], "summary": {timestamp, count}}
+    """
+    if not tracker or not hasattr(tracker, '_failed_files'):
+        return
+
+    if not tracker._failed_files:
+        return
+
+    failed_path = output_dir / "failed_downloads.json"
+    try:
+        failed_data = {
+            "failed": tracker._failed_files,
+            "summary": {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "count": len(tracker._failed_files),
+            }
+        }
+        failed_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(failed_path, "w", encoding="utf-8") as fh:
+            json.dump(failed_data, fh, indent=2)
+    except OSError:
+        pass  # Non-fatal: failure log writing doesn't block completion
 
 
 # ── Session ────────────────────────────────────────────────────────────────────
@@ -894,13 +952,14 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
     # Strategy 2: Trigger download via injected anchor element
     try:
         page = _new_browser_page(ctx, url)
-        # Escape the URL for JS
+        # Escape the URL and filename for JS
         safe_url = url.replace("'", "\\'")
+        safe_name = dest_path.name.replace("'", "\\'")
         with page.expect_download(timeout=120000) as download_info:
             page.evaluate(f"""() => {{
                 const a = document.createElement('a');
                 a.href = '{safe_url}';
-                a.download = '{dest_path.name.replace("'", "\\'")}';
+                a.download = '{safe_name}';
                 a.style.display = 'none';
                 document.body.appendChild(a);
                 a.click();
@@ -1184,6 +1243,8 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
         file_hash = _compute_sha256(dest_path) if ok and dest_path.exists() else None
         if _tracker:
             _tracker.file_done(fname, size, "ok" if ok else "fail")
+            if not ok:
+                _tracker.file_failed(url, dest_path, "Browser download failed", use_browser=True)
         update_manifest_entry(url, "ok" if ok else "fail", size, file_hash)
         return ok
 
@@ -1232,6 +1293,7 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
 
     if _tracker:
         _tracker.file_done(fname, 0, "fail")
+        _tracker.file_failed(url, dest_path, last_exc, use_browser=False)
     else:
         print(f"\r    [FAIL] {fname}: {last_exc}          ")
     update_manifest_entry(url, "fail", 0, None)
@@ -1469,9 +1531,77 @@ def download_all(
         )
         _tracker.show_completion_dialog(summary_str)
 
+    # Write failed downloads file for retry (TODO 1.A6-a)
+    if _tracker:
+        write_failed_downloads(_tracker, output_dir)
+
     _tracker = None
     _close_browser()
     return summary
+
+
+def retry_failed_downloads(failed_path: Path, output_dir: Path, no_gui: bool = False,
+                          delay: float = 0.5) -> None:
+    """Retry previously failed downloads from a failed_downloads.json file (TODO 1.A6-b).
+
+    Reads failed download records, rebuilds the file list, and re-runs the download
+    pipeline. Only re-failed entries are written to a new failed_downloads.json.
+    """
+    if not failed_path.exists():
+        print(f"ERROR: Failed downloads file not found: {failed_path}")
+        sys.exit(1)
+
+    try:
+        with open(failed_path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+            failed_list = data.get("failed", [])
+    except Exception as e:
+        print(f"ERROR: Could not read failed downloads file: {e}")
+        sys.exit(1)
+
+    if not failed_list:
+        print("No failed downloads to retry.")
+        sys.exit(0)
+
+    print(f"Retrying {len(failed_list)} previously failed download(s)...")
+
+    # Rebuild all_files dict from failure records
+    all_files = {}
+    browser_labels = set()
+    for failure in failed_list:
+        year = failure.get("year", "unknown")
+        source = failure.get("source", "unknown")
+        if year not in all_files:
+            all_files[year] = {}
+        if source not in all_files[year]:
+            all_files[year][source] = []
+
+        file_info = {
+            "url": failure["url"],
+            "filename": failure["filename"],
+            "dest": failure["dest"],
+        }
+        all_files[year][source].append(file_info)
+
+        # Track which sources need browser
+        if failure.get("use_browser"):
+            browser_labels.add(source)
+
+    # Run download_all with rebuilt file list
+    session = get_session()
+    summary = download_all(
+        all_files,
+        output_dir,
+        browser_labels,
+        overwrite=True,  # Always overwrite to retry
+        delay=delay,
+        extract_zips=False,  # Don't re-extract ZIPs
+        use_gui=not no_gui,
+    )
+
+    print(f"\nRetry complete: {summary['downloaded']} re-downloaded, "
+          f"{summary['failed']} still failed")
+    sys.exit(0 if summary['failed'] == 0 else 1)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -1519,7 +1649,16 @@ def main():
         "--extract-zips", action="store_true", dest="extract_zips",
         help="Extract ZIP archives after downloading them",
     )
+    parser.add_argument(
+        "--retry-failures", type=Path, default=None,
+        help="Retry previously failed downloads from failed_downloads.json (TODO 1.A6-b)",
+    )
     args = parser.parse_args()
+
+    # ── Handle --retry-failures (TODO 1.A6-b) ──
+    if args.retry_failures:
+        retry_failed_downloads(args.retry_failures, args.output, args.no_gui, args.delay)
+        return
 
     session = get_session()
 
