@@ -51,15 +51,17 @@ from pathlib import Path
 class RefreshWorkflow:
     """Orchestrates the complete data refresh pipeline."""
 
-    def __init__(self, verbose=False, dry_run=False):
+    def __init__(self, verbose=False, dry_run=False, workers=4):
         """Initialize workflow state.
 
         Args:
             verbose: If True, emit detailed stage output.
             dry_run: If True, log commands without executing them.
+            workers: Number of concurrent HTTP download threads.
         """
         self.verbose = verbose
         self.dry_run = dry_run
+        self.workers = workers
         self.start_time = None
         self.results = {}
 
@@ -110,7 +112,8 @@ class RefreshWorkflow:
         self.log("STAGE 1: DOWNLOAD BUDGET DOCUMENTS")
         self.log("=" * 60)
 
-        cmd = ["python", "dod_budget_downloader.py"]
+        cmd = ["python", "dod_budget_downloader.py", "--no-gui",
+               "--workers", str(self.workers)]
         if years:
             cmd.extend(["--years"] + [str(y) for y in years])
         if sources:
@@ -284,10 +287,17 @@ Examples:
         action="store_true",
         help="Verbose output with detailed progress",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=4,
+        help="Number of concurrent HTTP download threads (default: 4)",
+    )
 
     args = parser.parse_args()
 
-    workflow = RefreshWorkflow(verbose=args.verbose, dry_run=args.dry_run)
+    workflow = RefreshWorkflow(verbose=args.verbose, dry_run=args.dry_run,
+                              workers=args.workers)
     exit_code = workflow.run(args.years or [2026], args.sources or ["all"])
     sys.exit(exit_code)
 
