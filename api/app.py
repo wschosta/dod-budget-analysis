@@ -21,7 +21,10 @@ OpenAPI docs available at http://localhost:8000/docs after starting.
     Dependencies added to requirements.txt: fastapi>=0.109, uvicorn[standard]>=0.25
 """
 
+import logging
 import sqlite3
+import time
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -30,6 +33,23 @@ from fastapi.responses import JSONResponse
 
 from api.database import get_db_path
 from api.routes import aggregations, budget_lines, download, reference, search
+
+# ── Request logging (4.C3-a) ─────────────────────────────────────────────────
+_logger = logging.getLogger("dod_budget_api")
+logging.basicConfig(
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    level=logging.INFO,
+)
+
+# ── Rate limiting state (4.C4-a) ─────────────────────────────────────────────
+# Simple fixed-window per-IP rate limiter (no Redis needed for single-process).
+# Limits: search=60/min, download=10/min, others=120/min.
+_RATE_LIMITS: dict[str, int] = {
+    "/api/v1/search":   60,
+    "/api/v1/download": 10,
+}
+_DEFAULT_RATE_LIMIT = 120          # requests per minute for all other endpoints
+_rate_counters: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
 
 
 @asynccontextmanager
@@ -67,6 +87,47 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         docs_url="/docs",
         redoc_url="/redoc",
     )
+
+    # ── Request logging + rate limiting middleware (4.C3-a, 4.C4-a) ──────────
+
+    @app.middleware("http")
+    async def log_and_rate_limit(request: Request, call_next):
+        """Log each request and enforce per-IP rate limits."""
+        start = time.monotonic()
+        client_ip = request.client.host if request.client else "unknown"
+        path = request.url.path
+
+        # Rate limiting
+        limit = _RATE_LIMITS.get(path, _DEFAULT_RATE_LIMIT)
+        now = time.time()
+        window_start = now - 60.0
+        hits = _rate_counters[client_ip][path]
+        # Prune timestamps outside the window
+        _rate_counters[client_ip][path] = [t for t in hits if t > window_start]
+        if len(_rate_counters[client_ip][path]) >= limit:
+            _logger.warning(
+                "rate_limited ip=%s path=%s limit=%d", client_ip, path, limit
+            )
+            return JSONResponse(
+                status_code=429,
+                content={"error": "Too many requests", "status_code": 429},
+                headers={"Retry-After": "60"},
+            )
+        _rate_counters[client_ip][path].append(now)
+
+        # Dispatch and log
+        response = await call_next(request)
+        duration_ms = (time.monotonic() - start) * 1000
+        _logger.info(
+            "method=%s path=%s status=%d duration_ms=%.1f ip=%s",
+            request.method, path, response.status_code, duration_ms, client_ip,
+        )
+        if duration_ms > 500:
+            _logger.warning(
+                "slow_query method=%s path=%s duration_ms=%.1f",
+                request.method, path, duration_ms,
+            )
+        return response
 
     # ── Error handling middleware (2.C5-b) ────────────────────────────────────
 

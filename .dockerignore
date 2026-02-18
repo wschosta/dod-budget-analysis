@@ -1,0 +1,38 @@
+# DoD Budget — Docker build context exclusions
+
+# Development / test artifacts
+tests/
+docs/
+scripts/
+*.md
+!README.md
+
+# Version control
+.git/
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ruff_cache/
+
+# Environment / secrets
+.env
+.env.*
+*.env
+
+# Large data files (mount at runtime or build with multi-stage)
+DoD_Budget_Documents/
+*.sqlite
+*.db
+manifest.json
+refresh_report.json
+data_quality_report.json
+
+# IDE / OS
+.vscode/
+.idea/
+*.DS_Store
