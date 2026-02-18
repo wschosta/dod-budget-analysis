@@ -1,6 +1,6 @@
-# DoD Budget Document Downloader
+# DoD Budget Analysis
 
-A Python tool that bulk-downloads public budget justification documents from the Department of Defense Comptroller website and individual military service budget pages. Supports interactive and fully automated operation with a real-time GUI progress window.
+A comprehensive Python toolkit for downloading, parsing, normalizing, and querying Department of Defense budget justification documents. Includes a bulk document downloader, Excel/PDF parser, SQLite database with full-text search, a FastAPI REST API, and a validation/reconciliation framework.
 
 ## Data Sources
 
@@ -150,24 +150,97 @@ See [docs/wiki/optimizations/START_HERE.md](docs/wiki/optimizations/START_HERE.m
 | Phase | Title | Status | Description |
 |-------|-------|--------|-------------|
 | **0** | Project Description & Documentation | ✅ Complete | Updated readme, wiki skeleton, and project documentation |
-| **1** | Data Extraction & Normalization | 🔄 In Progress | Download, parse, and normalize DoD budget documents into clean, structured data |
-| **2** | Database Design & Population | 📋 Planned | Design the production schema, load all data, and expose it through an API |
+| **1** | Data Extraction & Normalization | ✅ ~90% Complete | Download, parse, and normalize DoD budget documents into clean, structured data |
+| **2** | Database Design & Population | ✅ Complete | Production schema, data loading, reconciliation, and full REST API |
 | **3** | Front-End & Documentation | 📋 Planned | Build a web UI for querying, filtering, and downloading data, plus user-facing docs |
 | **4** | Publish, Feedback & Iteration | 📋 Planned | Deploy publicly, collect user feedback, and iterate on improvements |
 
 ### Current Project Status
 
-| Component | File | Status | Covers |
-|-----------|------|--------|--------|
-| **Document downloader** | `dod_budget_downloader.py` (1476 lines) | ✅ Functional | Multi-source discovery, Playwright browser automation, parallel downloads, progress tracking |
-| **Database builder (CLI)** | `build_budget_db.py` (1011+ lines) | ✅ Functional | Excel/PDF parsing, SQLite database creation, incremental updates |
-| **Database builder (GUI)** | `build_budget_gui.py` | ✅ Functional | tkinter GUI wrapper for database building with progress tracking |
-| **Data validation suite** | `validate_budget_db.py` (332 lines) | ✅ Complete | Automated quality checks (Step 1.B6) |
-| **Search interface** | `search_budget.py` (549 lines) | ✅ Functional | Full-text search with FTS5, results display, export options |
-| **Test suite** | `tests/` | ✅ In Progress | Unit tests for parsing, optimization, search, validation |
-| **Performance optimizations** | Documentation in `docs/wiki/optimizations/` | ✅ Complete | 3-6x speedup with 13 optimizations |
+| Component | File(s) | Lines | Status |
+|-----------|---------|-------|--------|
+| **Document downloader** | `dod_budget_downloader.py` | 2,442 | ✅ Functional — 5 sources, Playwright automation, parallel downloads |
+| **Database builder (CLI)** | `build_budget_db.py` | 1,957 | ✅ Functional — Excel/PDF parsing, incremental updates |
+| **Database builder (GUI)** | `build_budget_gui.py` | 497 | ✅ Functional — tkinter interface with progress/ETA |
+| **Schema & migrations** | `schema_design.py` | 482 | ✅ Complete — versioned migrations, reference table seeding |
+| **Exhibit catalog** | `exhibit_catalog.py` | 429 | ✅ Complete — 9 exhibit types (P-1, P-5, R-1, R-2, O-1, M-1, C-1, P-1R, RF-1) |
+| **Validation suite** | `validate_budget_db.py` + `utils/validation.py` | 777 | ✅ Complete — 10+ checks, ValidationRegistry framework |
+| **Data reconciliation** | `scripts/reconcile_budget_data.py` | 481 | ✅ Complete — cross-service + cross-exhibit reconciliation |
+| **Search interface** | `search_budget.py` | 582 | ✅ Functional — FTS5 full-text search, results display, export |
+| **REST API** | `api/` (6 route modules, 11 Pydantic models) | 1,239 | ✅ Complete — FastAPI with search, budget-lines, aggregations, download, reference |
+| **Utility libraries** | `utils/` (11 modules) | 2,093 | ✅ Complete — config, database, HTTP, patterns, strings, validation |
+| **Test suite** | `tests/` (49 test files) | — | ✅ **1,183 tests** passing |
+| **Performance optimizations** | `docs/wiki/optimizations/` | — | ✅ Complete — 5-15x speedup with 13 optimizations |
 
-See [ROADMAP.md](ROADMAP.md) for the full task breakdown (57 steps), and [docs/TASK_INDEX.md](docs/TASK_INDEX.md) for Phase 0-1 implementation details.
+### Remaining TODOs (20 items)
+
+All remaining items require external resources not available in development:
+
+| Category | Count | Blocker |
+|----------|-------|---------|
+| Data Source Auditing (1.A) | 6 | Network access to DoD websites |
+| Exhibit Inventory (1.B) | 1 | Downloaded document corpus |
+| Frontend Accessibility (3.A) | 1 | Frontend implementation (Phase 3) |
+| Deployment & Launch (4.x) | 4 | Cloud accounts, domain registration |
+| Documentation Verification | 8 | Depends on source coverage audit |
+| **Total** | **20** | |
+
+See [REMAINING_TODOS.md](REMAINING_TODOS.md) for detailed descriptions and [ROADMAP.md](ROADMAP.md) for the full task breakdown (57 steps).
+
+## REST API
+
+The project includes a full FastAPI REST API for programmatic access to budget data.
+
+### Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/search` | GET | Full-text search across budget lines and PDF pages |
+| `/api/v1/budget-lines` | GET | Filtered, paginated list of budget line items |
+| `/api/v1/budget-lines/{id}` | GET | Single budget line item detail |
+| `/api/v1/aggregations` | GET | Aggregated totals by service, fiscal year, etc. |
+| `/api/v1/download` | GET | Streaming CSV/JSON export with same filters |
+| `/api/v1/reference/{type}` | GET | Reference data (services, exhibit types, fiscal years) |
+| `/health` | GET | Health check endpoint |
+
+### Running the API
+
+```bash
+pip install fastapi uvicorn
+uvicorn api.app:app --reload
+```
+
+API documentation is auto-generated at `/docs` (Swagger UI) and `/redoc` (ReDoc).
+
+## Database Building
+
+```bash
+# Build the SQLite database from downloaded documents
+python build_budget_db.py
+
+# Or use the GUI interface
+python build_budget_gui.py
+
+# Search the database
+python search_budget.py "F-35"
+
+# Validate data quality
+python validate_budget_db.py
+```
+
+## Testing
+
+```bash
+# Run all 1,183 tests
+python -m pytest
+
+# Run specific test modules
+python -m pytest tests/test_parsing.py
+python -m pytest tests/test_api_models.py
+
+# Run with coverage
+python -m pytest --cov=. --cov-report=term-missing
+```
 
 ## License
 

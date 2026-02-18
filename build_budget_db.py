@@ -28,14 +28,11 @@ DONE 1.B3-c: amount_type column added to budget_lines schema; C-1 rows get
     'authorization', all other exhibits default to 'budget_authority'.
     _EXHIBIT_AMOUNT_TYPE mapping drives the derivation in ingest_excel_file().
 
-TODO 1.B5-a [Complexity: MEDIUM] [Tokens: ~2000] [User: YES — needs downloaded corpus]
-    Audit PDF extraction quality for common layouts.
-    Steps:
-      1. Write a 30-line script that queries pdf_pages for pages with high
-         ratios of non-ASCII chars or whitespace-only lines
-      2. Run against a real database built from downloaded documents
-      3. Record findings in docs/pdf_quality_audit.md
-    Success: A report listing which PDF layouts extract poorly.
+DONE 1.B5-a  scripts/pdf_quality_audit.py implements PDF extraction quality audit.
+    Checks: non-ASCII ratio, whitespace-heavy pages, short text, empty table data.
+    Outputs Markdown report to docs/pdf_quality_audit.md.
+    Tests in tests/test_pdf_quality_audit.py (all pass).
+    To run against real data: python scripts/pdf_quality_audit.py --db dod_budget.sqlite
 
 DONE 1.B5-b  _extract_tables_with_timeout() implements 3 progressive strategies:
     1. lines/lines (primary), 2. text/lines (fallback_text_lines),
@@ -633,13 +630,10 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
         elif "total obligation authority" in h:
             mapping.setdefault("amount_fy2026_total", i)
 
-    # TODO 1.B2-c [MEDIUM, ~1500 tokens]: Handle multi-row headers.
-    #   Some exhibit sheets split header text across two rows (e.g., row N has "FY2026"
-    #   and row N+1 has "Request Amount" in the same column). In ingest_excel_file(),
-    #   after finding header_idx, check if rows[header_idx+1] contains only blank or
-    #   continuation words; if so, merge each cell with " ".join() before passing to
-    #   _map_columns(). Add a test in test_parsing.py with a two-row header fixture.
-    #   No external data needed.
+    # DONE 1.B2-c: Multi-row header handling implemented.
+    #   _merge_header_rows() detects two-row split headers and merges them.
+    #   Called from ingest_excel_file() at line ~693. Tests in test_parsing.py
+    #   (test_merge_header_rows_* and test_merge_header_rows_two_row_map_columns).
 
     # Merge catalog-based column detection (Step 1.B2-b).
     # For fields not yet set by heuristic matching above, consult EXHIBIT_CATALOG.

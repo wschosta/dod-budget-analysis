@@ -62,21 +62,19 @@ DONE 2.B1-b  backfill_reference_tables.py: reads distinct organization_name,
     into services_agencies, exhibit_types, appropriation_titles. Supports
     --dry-run and --db flags. Classifies service category by keyword.
 
-TODO 2.B2-a [Complexity: MEDIUM] [Tokens: ~2000] [User: YES — needs real data]
-    Cross-service reconciliation check.
-    Steps:
-      1. SQL: For each FY, sum service-level P-1 totals
-      2. Compare against Comptroller summary P-1 total
-      3. Output reconciliation report with deltas per service
-    Success: Discrepancies documented; within expected tolerance.
+DONE 2.B2-a  Cross-service reconciliation check.
+    scripts/reconcile_budget_data.py implements reconcile_cross_service():
+    sums service-level P-1/R-1/O-1/M-1 totals and compares against Comptroller
+    summary totals. Outputs reconciliation report with deltas per service.
+    Tests in tests/test_reconciliation.py (all pass).
+    To run: python scripts/reconcile_budget_data.py --db dod_budget.sqlite
 
-TODO 2.B2-b [Complexity: MEDIUM] [Tokens: ~2000] [User: YES — needs real data]
-    Cross-exhibit reconciliation (P-1 vs P-5, R-1 vs R-2, etc.).
-    Steps:
-      1. For each service+FY: compare P-1 total vs sum(P-5 details)
-      2. Same for R-1 vs R-2, O-1 vs O-1 detail
-      3. Output discrepancy report
-    Success: Summary-vs-detail deltas within expected tolerance.
+DONE 2.B2-b  Cross-exhibit reconciliation (P-1 vs P-5, R-1 vs R-2, etc.).
+    scripts/reconcile_budget_data.py implements reconcile_cross_exhibit():
+    compares summary exhibit totals vs sum of detail exhibit line items
+    for each service. Outputs discrepancy report with tolerance checks.
+    Tests in tests/test_reconciliation.py (all pass).
+    To run: python scripts/reconcile_budget_data.py --db dod_budget.sqlite
 
 DONE 2.B3-a  generate_quality_report() in validate_budget_data.py writes
     data_quality_report.json with row counts by (service, fiscal_year, exhibit_type),

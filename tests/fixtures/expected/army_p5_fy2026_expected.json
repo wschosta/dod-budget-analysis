@@ -1,0 +1,22 @@
+{
+  "source_file": "army_p5_fy2026.xlsx",
+  "exhibit_type": "p5",
+  "service": "Army",
+  "row_count": 2,
+  "columns_detected": [
+    "program_element",
+    "line_item_number",
+    "line_item_title",
+    "unit",
+    "prior_year_qty",
+    "estimate_qty",
+    "prior_year_unit_cost",
+    "estimate_unit_cost",
+    "justification"
+  ],
+  "sample_values": {
+    "line_item_number": "LIN-001",
+    "unit": "Each",
+    "estimate_unit_cost": 58000.0
+  }
+}

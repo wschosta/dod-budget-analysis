@@ -36,7 +36,7 @@ from utils.common import sanitize_filename
 from exhibit_catalog import find_matching_columns
 
 
-# ── TODO 1.C2-a: _detect_exhibit_type ────────────────────────────────────────
+# ── DONE 1.C2-a: _detect_exhibit_type ────────────────────────────────────────
 
 @pytest.mark.parametrize("filename, expected", [
     ("p1_display.xlsx", "p1"),
@@ -60,7 +60,7 @@ def test_detect_exhibit_type(filename, expected):
     assert _detect_exhibit_type(filename) == expected
 
 
-# ── TODO 1.C2-c: _safe_float ─────────────────────────────────────────────────
+# ── DONE 1.C2-c: _safe_float ─────────────────────────────────────────────────
 
 @pytest.mark.parametrize("val, expected", [
     (None, 0.0),      # None -> default 0.0
@@ -80,7 +80,7 @@ def test_safe_float(val, expected):
     assert _safe_float(val) == expected
 
 
-# ── TODO 1.C2-d: _determine_category ─────────────────────────────────────────
+# ── DONE 1.C2-d: _determine_category ─────────────────────────────────────────
 
 @pytest.mark.parametrize("path_str, expected", [
     ("DoD_Budget_Documents/FY2026/Comptroller/file.pdf", "Comptroller"),
@@ -98,7 +98,7 @@ def test_determine_category(path_str, expected):
     assert _determine_category(Path(path_str)) == expected
 
 
-# ── TODO 1.C2-e: _extract_table_text ─────────────────────────────────────────
+# ── DONE 1.C2-e: _extract_table_text ─────────────────────────────────────────
 
 def test_extract_table_text_basic():
     tables = [[
@@ -129,7 +129,7 @@ def test_extract_table_text_multiple_tables():
     assert len(lines) == 2
 
 
-# ── TODO 1.C2-b (partial): _map_columns basic coverage ───────────────────────
+# ── DONE 1.C2-b: _map_columns basic coverage ─────────────────────────────────
 
 def test_map_columns_p1_headers():
     """Test that _map_columns finds standard P-1 column mappings."""
@@ -517,7 +517,7 @@ def test_detect_currency_year(sheet_name, filename, expected):
 # REMAINING tasks (per docs/TODO_1C2_unit_tests_parsing.md):
 #   - 1.C2-b-extended: Additional _map_columns tests for R, M, O, RF exhibits
 #   - 1.C2-f: _sanitize_filename edge case testing
-#   - 1.C2-g: Clean up legacy TODO comments in related test files
+#   - 1.C2-g: DONE — Legacy TODO comments cleaned up across test files
 #
 # See docs/TODO_1C2_unit_tests_parsing.md for full specification.
 
@@ -527,7 +527,7 @@ def test_detect_currency_year(sheet_name, filename, expected):
 # DONE 1.C2-fy: _normalise_fiscal_year tests at lines 467-477.
 
 
-# ── TODO 1.B2-b: Catalog-driven column detection for detail exhibits ───────────
+# ── DONE 1.B2-b: Catalog-driven column detection for detail exhibits ──────────
 
 class TestCatalogFindMatchingColumns:
     """Tests for find_matching_columns() covering p5, r2, r3, r4 exhibit types."""
