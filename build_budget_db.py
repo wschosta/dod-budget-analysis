@@ -1154,7 +1154,7 @@ def _mark_session_complete(conn: sqlite3.Connection, session_id: str, notes: str
 def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                    progress_callback=None, resume: bool = False,
                    checkpoint_interval: int = 10,
-                   stop_event=None):
+                   stop_event=None, workers: int = 1):
     """Build or incrementally update the budget database.
 
     Args:
@@ -1170,6 +1170,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         checkpoint_interval: Save a checkpoint every N files (default 10).
         stop_event: Optional threading.Event; when set, the build saves a
             checkpoint and exits cleanly (graceful shutdown).
+        workers: Number of parallel workers (currently reserved for future
+            parallel processing; default 1 keeps sequential behaviour).
     """
     # ── Metrics state shared across the build ─────────────────────────────
     _metrics = {
