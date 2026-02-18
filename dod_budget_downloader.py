@@ -226,9 +226,25 @@ SERVICE_PAGE_TEMPLATES = {
 
 # ── Progress Tracker ──────────────────────────────────────────────────────────
 
-# TODO: Extract shared helper methods (_format_bytes, _elapsed) from ProgressTracker
-# and GuiProgressTracker into a base class or module-level utilities to eliminate
-# the duplicated implementations in both classes.
+def _format_bytes(b: int) -> str:
+    """Format bytes into human-readable size string."""
+    if b < 1024 * 1024:
+        return f"{b / 1024:.0f} KB"
+    if b < 1024 * 1024 * 1024:
+        return f"{b / (1024 * 1024):.1f} MB"
+    return f"{b / (1024 * 1024 * 1024):.2f} GB"
+
+
+def _elapsed(start_time: float) -> str:
+    """Format elapsed time from start_time to now as human-readable string."""
+    secs = int(time.time() - start_time)
+    m, s = divmod(secs, 60)
+    h, m = divmod(m, 60)
+    if h:
+        return f"{h}h {m:02d}m {s:02d}s"
+    return f"{m}m {s:02d}s"
+
+
 class ProgressTracker:
     """Tracks overall download session progress and renders status bars."""
 
@@ -248,21 +264,6 @@ class ProgressTracker:
     def processed(self) -> int:
         return self.completed + self.skipped + self.failed
 
-    def _elapsed(self) -> str:
-        secs = int(time.time() - self.start_time)
-        m, s = divmod(secs, 60)
-        h, m = divmod(m, 60)
-        if h:
-            return f"{h}h {m:02d}m {s:02d}s"
-        return f"{m}m {s:02d}s"
-
-    def _format_bytes(self, b: int) -> str:
-        if b < 1024 * 1024:
-            return f"{b / 1024:.0f} KB"
-        if b < 1024 * 1024 * 1024:
-            return f"{b / (1024 * 1024):.1f} MB"
-        return f"{b / (1024 * 1024 * 1024):.2f} GB"
-
     def _bar(self, fraction: float, width: int = 30) -> str:
         filled = int(width * fraction)
         return f"[{'#' * filled}{'-' * (width - filled)}]"
@@ -276,8 +277,8 @@ class ProgressTracker:
         frac = self.processed / self.total_files if self.total_files else 0
         pct = frac * 100
         bar = self._bar(frac, 25)
-        dl = self._format_bytes(self.total_bytes)
-        elapsed = self._elapsed()
+        dl = _format_bytes(self.total_bytes)
+        elapsed = _elapsed(self.start_time)
         remaining = self.total_files - self.processed
         line = (
             f"\r  Overall: {bar} {pct:5.1f}%  "
@@ -299,7 +300,7 @@ class ProgressTracker:
         self._last_progress_time = now
 
         if total <= 0:
-            print(f"\r    Downloading {filename}... {self._format_bytes(downloaded)}",
+            print(f"\r    Downloading {filename}... {_format_bytes(downloaded)}",
                   end="", flush=True)
             return
 
@@ -308,7 +309,7 @@ class ProgressTracker:
         bar = self._bar(frac, 20)
         elapsed = time.time() - file_start
         speed = downloaded / elapsed if elapsed > 0 else 0
-        speed_str = f"{self._format_bytes(int(speed))}/s"
+        speed_str = f"{_format_bytes(int(speed))}/s"
         eta = ""
         if speed > 0:
             remaining_bytes = total - downloaded
@@ -321,7 +322,7 @@ class ProgressTracker:
         name = filename[:40] + "..." if len(filename) > 43 else filename
         line = (
             f"\r    {name}  {bar} {pct:5.1f}%  "
-            f"{self._format_bytes(downloaded)}/{self._format_bytes(total)}  "
+            f"{_format_bytes(downloaded)}/{_format_bytes(total)}  "
             f"{speed_str}  {eta}"
         )
         print(f"{line:<{self.term_width}}", end="", flush=True)
@@ -340,7 +341,7 @@ class ProgressTracker:
         elif status == "fail":
             self.failed += 1
 
-        size_str = self._format_bytes(size) if size > 0 else ""
+        size_str = _format_bytes(size) if size > 0 else ""
         line = f"    [{tag}] {filename} ({size_str})" if size_str else f"    [{tag}] {filename}"
         print(f"\r{line:<{self.term_width}}")
         self.print_overall()
@@ -379,21 +380,6 @@ class GuiProgressTracker:
     @property
     def processed(self) -> int:
         return self.completed + self.skipped + self.failed
-
-    def _format_bytes(self, b: int) -> str:
-        if b < 1024 * 1024:
-            return f"{b / 1024:.0f} KB"
-        if b < 1024 * 1024 * 1024:
-            return f"{b / (1024 * 1024):.1f} MB"
-        return f"{b / (1024 * 1024 * 1024):.2f} GB"
-
-    def _elapsed(self) -> str:
-        secs = int(time.time() - self.start_time)
-        m, s = divmod(secs, 60)
-        h, m = divmod(m, 60)
-        if h:
-            return f"{h}h {m:02d}m {s:02d}s"
-        return f"{m}m {s:02d}s"
 
     def _run_gui(self):
         import tkinter as tk
@@ -494,8 +480,8 @@ class GuiProgressTracker:
         self._overall_lbl.set(
             f"{frac*100:.1f}%  -  {self.processed} / {self.total_files} files")
         self._stats_var.set(
-            f"{self._format_bytes(self.total_bytes)} downloaded  |  "
-            f"{self._elapsed()} elapsed  |  "
+            f"{_format_bytes(self.total_bytes)} downloaded  |  "
+            f"{_elapsed(self.start_time)} elapsed  |  "
             f"{self.total_files - self.processed} remaining")
         self._count_var.set(
             f"Downloaded: {self.completed}    "
@@ -516,14 +502,14 @@ class GuiProgressTracker:
                 self._file_bar["value"] = file_frac * 100
                 elapsed = time.time() - self._file_start
                 speed = dl / elapsed if elapsed > 0 else 0
-                speed_str = f"{self._format_bytes(int(speed))}/s"
+                speed_str = f"{_format_bytes(int(speed))}/s"
                 self._file_lbl.set(fname)
                 self._file_stats_var.set(
-                    f"{self._format_bytes(dl)} / {self._format_bytes(total)}  "
+                    f"{_format_bytes(dl)} / {_format_bytes(total)}  "
                     f"  {speed_str}")
             else:
                 self._file_bar["value"] = 0
-                self._file_lbl.set(f"{fname}  ({self._format_bytes(dl)})")
+                self._file_lbl.set(f"{fname}  ({_format_bytes(dl)})")
                 self._file_stats_var.set("")
 
         # Log lines
@@ -569,7 +555,7 @@ class GuiProgressTracker:
         elif status == "fail":
             self.failed += 1
 
-        size_str = f" ({self._format_bytes(size)})" if size > 0 else ""
+        size_str = f" ({_format_bytes(size)})" if size > 0 else ""
         log_entry = f"[{tag}] {filename}{size_str}"
         self._log_lines.append(log_entry)
         if status == "fail":
