@@ -69,11 +69,7 @@ class BuildProgressWindow:
         self.build_thread: threading.Thread | None = None
         self.start_time: float | None = None
         self.running = False
-<<<<<<< HEAD
         self.stop_event: threading.Event | None = None
-=======
-        self.cancel_event: threading.Event = threading.Event()
->>>>>>> 67b4c24b81fefe0020e593b119f5aa3383abb98b
 
         self._build_ui()
         self._poll_queue()
