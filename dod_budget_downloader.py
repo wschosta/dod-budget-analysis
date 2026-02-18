@@ -937,8 +937,8 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
         except Exception:
             # If page load times out, proceed with what we have
             pass
-        elapsed = int((time.time() - start) * 1000)
-        _timeout_mgr.record_time(url, elapsed)
+        elapsed_ms = int((time.time() - start) * 1000)
+        _timeout_mgr.record_time(url, elapsed_ms)
 
         if expand_all:
             btn = page.query_selector("text=Expand All")
@@ -1239,6 +1239,11 @@ def _save_cache(cache_key: str, files: list[dict]):
 
 
 def discover_fiscal_years(session: requests.Session) -> dict[str, str]:
+    """Discover available fiscal years from the comptroller budget materials page.
+
+    Returns a dict mapping year strings (e.g. '2026') to their absolute URLs.
+    Results are cached globally after the first successful request.
+    """
     global _fiscal_years_cache
     # Optimization: Cache fiscal years discovery
     if _fiscal_years_cache is not None:
@@ -1262,6 +1267,11 @@ def discover_fiscal_years(session: requests.Session) -> dict[str, str]:
 
 def discover_comptroller_files(session: requests.Session, year: str,
                                page_url: str) -> list[dict]:
+    """Discover downloadable budget files from the Comptroller page for a given year.
+
+    Scans the page at `page_url` for Excel/PDF links, normalises them,
+    and returns a list of file-info dicts. Results are cached by year.
+    """
     global _refresh_cache
     # Optimization: Check cache before fetching
     cache_key = _get_cache_key("comptroller", year)
@@ -1283,6 +1293,10 @@ def discover_comptroller_files(session: requests.Session, year: str,
 # ── Defense Wide ──────────────────────────────────────────────────────────────
 
 def discover_defense_wide_files(session: requests.Session, year: str) -> list[dict]:
+    """Discover downloadable budget files from the Defense-Wide page for a given year.
+
+    Returns a list of file-info dicts. Results are cached by year.
+    """
     global _refresh_cache
     # Optimization: Check cache before fetching
     cache_key = _get_cache_key("defense-wide", year)
@@ -1309,6 +1323,10 @@ def discover_defense_wide_files(session: requests.Session, year: str) -> list[di
 # ── Army (browser required) ──────────────────────────────────────────────────
 
 def discover_army_files(_session: requests.Session, year: str) -> list[dict]:
+    """Discover Army budget files for a given year using a browser-driven crawl.
+
+    Returns a list of file-info dicts. Results are cached by year.
+    """
     global _refresh_cache
     # Optimization: Check cache before fetching
     cache_key = _get_cache_key("army", year)
@@ -1328,6 +1346,10 @@ def discover_army_files(_session: requests.Session, year: str) -> list[dict]:
 # ── Navy (browser required) ──────────────────────────────────────────────────
 
 def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
+    """Discover Navy budget files for a given year using a browser-driven crawl.
+
+    Returns a list of file-info dicts. Results are cached by year.
+    """
     global _refresh_cache
     # Optimization: Check cache before fetching
     cache_key = _get_cache_key("navy", year)
@@ -1347,6 +1369,10 @@ def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
 # ── Navy Archive (browser required) ────────────────────────────────────────────
 
 def discover_navy_archive_files(_session: requests.Session, year: str) -> list[dict]:
+    """Discover archived Navy budget files for a given year via browser crawl.
+
+    Returns a list of file-info dicts. Results are cached by year.
+    """
     global _refresh_cache
     # Optimization: Check cache before fetching
     cache_key = _get_cache_key("navy-archive", year)
@@ -1366,6 +1392,11 @@ def discover_navy_archive_files(_session: requests.Session, year: str) -> list[d
 # ── Air Force (browser required) ─────────────────────────────────────────────
 
 def discover_airforce_files(_session: requests.Session, year: str) -> list[dict]:
+    """Discover Air Force budget files for a given year via browser crawl.
+
+    Uses Playwright with expand-all to surface links behind JS-rendered menus.
+    Returns a list of file-info dicts. Results are cached by year.
+    """
     global _refresh_cache
     # Optimization: Check cache before fetching
     cache_key = _get_cache_key("airforce", year)
@@ -1465,6 +1496,12 @@ def _get_chunk_size(total_size: int) -> int:
 
 def download_file(session: requests.Session, url: str, dest_path: Path,
                   overwrite: bool = False, use_browser: bool = False) -> bool:
+    """Download a single file from `url` to `dest_path`.
+
+    Skips if the file already exists and is unchanged (ETag/size check).
+    Verifies magic bytes after download. Retries with browser if direct
+    download fails. Returns True on success, False on failure.
+    """
     global _tracker
     fname = dest_path.name
 
