@@ -942,7 +942,7 @@ def _mark_session_complete(conn: sqlite3.Connection, session_id: str, notes: str
 
 
 def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
-                   progress_callback=None, resume: bool = False):
+                   progress_callback=None, resume: bool = False, cancel_event=None):
     """Build or incrementally update the budget database.
 
     Args:
@@ -953,6 +953,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             where phase is 'scan', 'excel', 'pdf', 'index', or 'done',
             current/total are progress counts, and detail is a status string.
         resume: If True, attempt to resume from last checkpoint.
+        cancel_event: Optional threading.Event that, when set, signals the build
+            to stop gracefully at the next checkpoint.
     """
     def _progress(phase, current, total, detail=""):
         if progress_callback:
@@ -995,6 +997,12 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     total_budget_rows = 0
     skipped_xlsx = 0
     for xi, xlsx in enumerate(xlsx_files):
+        # Check for cancellation
+        if cancel_event and cancel_event.is_set():
+            print("\n  Build cancelled by user")
+            conn.close()
+            return
+
         rel_path = str(xlsx.relative_to(docs_dir))
         if not rebuild and not _file_needs_update(conn, rel_path, xlsx):
             skipped_xlsx += 1
@@ -1049,6 +1057,11 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
     try:
         for i, pdf in enumerate(pdf_files):
+            # Check for cancellation
+            if cancel_event and cancel_event.is_set():
+                print("\n  Build cancelled by user")
+                break
+
             rel_path = str(pdf.relative_to(docs_dir))
             if not rebuild and not _file_needs_update(conn, rel_path, pdf):
                 skipped_pdf += 1
