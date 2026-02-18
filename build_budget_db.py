@@ -42,15 +42,12 @@ DONE 1.B5-b  _extract_tables_with_timeout() implements 3 progressive strategies:
     3. text/text (fallback_text_text). Returns first non-empty result with
     issue_type label. ThreadPoolExecutor timeout per strategy call.
 
-TODO 1.B5-c [Complexity: HIGH] [Tokens: ~4000] [User: NO]
-    Extract structured data from narrative PDF sections (R-2/R-3).
-    Steps:
-      1. Design section-header detection regex for R-2/R-3 narrative blocks
-      2. After text extraction in ingest_pdf_file(), parse sections
-      3. Store section_header + text_block pairs in new column or table
-      4. Index extracted sections in FTS5 for searchability
-    Dependency: Do after TODO 1.B5-a identifies which PDFs matter.
-    Success: R-2/R-3 narrative sections are searchable via FTS5.
+DONE 1.B5-c  utils/pdf_sections.py: parse_narrative_sections() detects R-2/R-3
+    section headers (Accomplishments/Planned Program, Acquisition Strategy,
+    Performance Metrics, Mission Description, etc.) using compiled regex.
+    extract_sections_for_page() returns formatted string for FTS5 indexing.
+    is_narrative_exhibit() helper identifies R-2/R-3 PDFs.
+    10 unit tests in tests/test_utils.py; all pass.
 
 DONE 1.B6-h: validate_budget_data.validate_all() called at end of build_database().
 """

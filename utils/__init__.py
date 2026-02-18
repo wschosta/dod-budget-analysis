@@ -86,6 +86,14 @@ from utils.manifest import (
     compute_file_hash,
 )
 
+# PDF narrative section parser (1.B5-c)
+from utils.pdf_sections import (
+    parse_narrative_sections,
+    extract_sections_for_page,
+    is_narrative_exhibit,
+    SECTION_PATTERN,
+)
+
 __all__ = [
     # Common
     "format_bytes",
@@ -152,4 +160,9 @@ __all__ = [
     "Manifest",
     "ManifestEntry",
     "compute_file_hash",
+    # PDF sections
+    "parse_narrative_sections",
+    "extract_sections_for_page",
+    "is_narrative_exhibit",
+    "SECTION_PATTERN",
 ]
