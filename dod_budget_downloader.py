@@ -162,10 +162,7 @@ Usage:
 """
 
 import argparse
-<<<<<<< HEAD
-=======
 import hashlib
->>>>>>> 7ad013903c7c264171d055155b087b2a05f12088
 import json
 import os
 import re
@@ -174,11 +171,7 @@ import sys
 import threading
 import time
 import zipfile
-<<<<<<< HEAD
-from datetime import datetime
-=======
 from datetime import datetime, timezone
->>>>>>> 7ad013903c7c264171d055155b087b2a05f12088
 from pathlib import Path
 from urllib.parse import urljoin, urlparse, unquote
 
@@ -712,10 +705,9 @@ class GuiProgressTracker:
 # Global tracker, set during main()
 _tracker: ProgressTracker | GuiProgressTracker | None = None
 
-<<<<<<< HEAD
 # Optimization: Global session reuse for connection pooling
 _global_session = None
-=======
+
 # ── Manifest (TODO 1.A3-a & 1.A3-b) ─────────────────────────────────────────
 
 # In-memory manifest; written to disk by write_manifest() / update_manifest_entry()
@@ -794,7 +786,6 @@ def update_manifest_entry(url: str, status: str, file_size: int,
             )
     except OSError:
         pass  # Non-fatal: manifest update failures don't block downloads
->>>>>>> 7ad013903c7c264171d055155b087b2a05f12088
 
 
 # ── Session ────────────────────────────────────────────────────────────────────
@@ -998,11 +989,12 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
         page = _new_browser_page(ctx, url)
         # Escape the URL for JS
         safe_url = url.replace("'", "\\'")
+        safe_filename = dest_path.name.replace("'", "\\'")
         with page.expect_download(timeout=120000) as download_info:
             page.evaluate(f"""() => {{
                 const a = document.createElement('a');
                 a.href = '{safe_url}';
-                a.download = '{dest_path.name.replace("'", "\\'")}';
+                a.download = '{safe_filename}';
                 a.style.display = 'none';
                 document.body.appendChild(a);
                 a.click();
@@ -1472,18 +1464,13 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
             downloaded = resume_from
             dest_path.parent.mkdir(parents=True, exist_ok=True)
 
-<<<<<<< HEAD
             # Optimization: Adaptive chunk sizing based on file size
             chunk_size = _get_chunk_size(total_size)
 
+            # Compute SHA-256 while streaming (no extra I/O pass)
+            sha256 = hashlib.sha256()
             with open(dest_path, mode) as f:
                 for chunk in resp.iter_content(chunk_size=chunk_size):
-=======
-            # TODO 1.A3-b: compute SHA-256 while streaming (no extra I/O pass)
-            sha256 = hashlib.sha256()
-            with open(dest_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=8192):
->>>>>>> 7ad013903c7c264171d055155b087b2a05f12088
                     f.write(chunk)
                     sha256.update(chunk)
                     downloaded += len(chunk)
