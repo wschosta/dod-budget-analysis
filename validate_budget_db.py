@@ -25,9 +25,10 @@ DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 from exhibit_catalog import list_all_exhibit_types  # noqa: E402
 KNOWN_EXHIBIT_TYPES = set(list_all_exhibit_types())
 
-# Known organizations (from build_budget_db.py ORG_MAP values)
-KNOWN_ORGS = {"Army", "Navy", "Air Force", "Space Force",
-              "Defense-Wide", "Marine Corps", "Joint Staff"}
+# Known organizations — imported from build_budget_db.py so it stays in sync
+# with ORG_MAP (Step 1.B4-b).
+from build_budget_db import ORG_MAP as _ORG_MAP  # noqa: E402
+KNOWN_ORGS = set(_ORG_MAP.values())
 
 # Amount columns in the budget_lines table — queried dynamically from the
 # DB schema (Step 1.B2-a) so the validator automatically adapts when new

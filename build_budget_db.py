@@ -12,29 +12,12 @@ Usage:
     python build_budget_db.py --db mydb.sqlite # Custom database path
 
 ──────────────────────────────────────────────────────────────────────────────
-Phase 1 Roadmap Tasks for this file (Steps 1.B2 – 1.B5)
+Phase 1 Roadmap Tasks for this file (Steps 1.B3 – 1.B5)
 ──────────────────────────────────────────────────────────────────────────────
-**Status:** Foundation implementation complete. Below are enhancement tasks
-for robust parsing, normalization, and quality improvements.
-
-TODO 1.B2-a: Replace hard-coded _map_columns() with exhibit_catalog.py lookups.
-    Import EXHIBIT_CATALOG and use its column_spec entries to drive column
-    detection.  Fall back to the current heuristic matching only for unknown
-    exhibit types.  This makes column mapping data-driven instead of code-driven.
-    Dependency: exhibit_catalog.py TODO 1.B1-b must be done first.
-
-TODO 1.B2-b: Add unit tests for _map_columns() covering every exhibit type.
-    For each exhibit in EXHIBIT_CATALOG, create a sample header row and assert
-    that _map_columns returns the expected field→index mapping.
-    File: tests/test_parsing.py (see Step 1.C TODOs).
-
-TODO 1.B3-a: Normalize all monetary values to thousands of dollars.
-    Audit the downloaded exhibits to determine which use whole dollars vs.
-    thousands vs. millions.  Add a multiplier field to EXHIBIT_CATALOG and
-    apply it during ingestion.
-    Token-efficient tip: run a quick script that samples the first few data rows
-    from each exhibit and checks magnitude — values > 1M likely are in whole
-    dollars and need dividing by 1000.
+**Status:** Foundation + key enhancements implemented (1.B2-a year-agnostic
+column mapping, 1.B2-b column-mapping tests, 1.B2-c multi-row headers,
+1.B2-d FY normalization, 1.B3-a monetary normalization, 1.B4-a PE numbers,
+1.B4-b ORG_MAP expansion complete). Remaining tasks below.
 
 TODO 1.B3-b: Add a currency_year column to budget_lines.
     Track whether amounts are in then-year dollars or constant dollars.  Parse
@@ -45,16 +28,6 @@ TODO 1.B3-c: Distinguish Budget Authority, Appropriations, and Outlays.
     already has authorization vs. appropriation; other exhibits may have TOA
     (Total Obligation Authority) vs. BA.  Map these distinctions during
     ingestion.
-
-TODO 1.B4-a: Parse Program Element (PE) numbers into a dedicated column.
-    PE numbers follow a pattern like "0602702E".  Extract from the line_item or
-    account fields using regex r'\\d{7}[A-Z]' and store in a new pe_number
-    column for direct querying.
-
-TODO 1.B4-b: Normalize budget activity codes.
-    Budget activity codes are currently stored as raw text from the spreadsheet.
-    Standardize to a consistent format (e.g., "01", "02") and add a reference
-    table mapping codes to descriptions per appropriation.
 
 TODO 1.B4-c: Parse appropriation title from account_title.
     The account_title field often contains both an account code and a title
@@ -112,10 +85,28 @@ import pdfplumber
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 DOCS_DIR = Path("DoD_Budget_Documents")
 
-# Map organization codes to names
+# Map organization codes to names (Step 1.B4-b)
+# Single-letter codes from exhibit filename prefixes; longer codes from spreadsheet
+# Organization column cells.  Unknown codes are stored as-is.
 ORG_MAP = {
+    # Single-letter codes (filename-level)
     "A": "Army", "N": "Navy", "F": "Air Force", "S": "Space Force",
     "D": "Defense-Wide", "M": "Marine Corps", "J": "Joint Staff",
+    # Multi-letter / full codes found in Organization column cells
+    "SOCOM": "SOCOM", "USSOCOM": "SOCOM",
+    "DISA":  "DISA",
+    "DLA":   "DLA",
+    "MDA":   "MDA",
+    "DHA":   "DHA",  # Defense Health Agency
+    "NGB":   "NGB",  # National Guard Bureau
+    "DARPA": "DARPA",
+    "NSA":   "NSA",
+    "DIA":   "DIA",
+    "NRO":   "NRO",
+    "NGA":   "NGA",
+    "DTRA":  "DTRA",  # Defense Threat Reduction Agency
+    "DCSA":  "DCSA",  # Defense Counterintelligence and Security Agency
+    "WHS":   "WHS",   # Washington Headquarters Services
 }
 
 # Map exhibit type prefixes to readable names (Step 1.B1-g)
@@ -705,12 +696,8 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path) -> int:
                 continue
 
             org_code = str(row[col_map["organization"]]).strip() if col_map.get("organization") is not None and col_map["organization"] < len(row) and row[col_map["organization"]] else ""
-            org_name = ORG_MAP.get(org_code, org_code)
-            # TODO 1.B4-b [EASY, ~800 tokens]: Extend ORG_MAP (defined around line 140)
-            #   to cover additional DoD organizations: SOCOM, DISA, DLA, MDA, DHA, NGB.
-            #   Also add a fallback: if org_code is a case-insensitive substring of any
-            #   known org name, map it. Unknown codes currently land in the DB unlabelled,
-            #   showing up as unknown in validate_budget_db.py. No external data needed.
+            # Lookup by exact code first, then by uppercase match (Step 1.B4-b)
+            org_name = ORG_MAP.get(org_code) or ORG_MAP.get(org_code.upper(), org_code)
 
             # Extract PE number from line_item or account fields (Step 1.B4-a implementation)
             line_item_val = get_str(row, "line_item")
