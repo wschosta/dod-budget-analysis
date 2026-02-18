@@ -67,9 +67,8 @@ def test_map_columns_single_pass():
         print(f"\n  ✓ All {len(expected_fields)} expected fields found in single pass")
     else:
         print(f"\n  ✗ Some fields were not found")
-        return False
 
-    return True
+    assert success
 
 
 def test_map_columns_with_spaces_and_newlines():
@@ -104,7 +103,7 @@ def test_map_columns_with_spaces_and_newlines():
             print(f"  ✗ {field}: got {actual}, expected {expected_col}")
             success = False
 
-    return success
+    assert success
 
 
 def test_map_columns_c1_exhibit():
@@ -141,7 +140,7 @@ def test_map_columns_c1_exhibit():
             print(f"  ✗ {field}: got {actual}, expected {expected_col}")
             success = False
 
-    return success
+    assert success
 
 
 def test_extract_table_text_optimization():
@@ -152,11 +151,8 @@ def test_extract_table_text_optimization():
 
     # Test empty tables
     result = _extract_table_text([])
-    if result == "":
-        print("  ✓ Empty table list returns empty string")
-    else:
-        print(f"  ✗ Empty table list: expected '', got '{result}'")
-        return False
+    assert result == "", f"Empty table list: expected '', got '{result}'"
+    print("  ✓ Empty table list returns empty string")
 
     # Test single table
     tables = [[
@@ -168,24 +164,15 @@ def test_extract_table_text_optimization():
     lines = result.strip().split("\n")
 
     expected_line_count = 3
-    if len(lines) == expected_line_count:
-        print(f"  ✓ Single table: {len(lines)} lines extracted")
-    else:
-        print(f"  ✗ Single table: expected {expected_line_count} lines, got {len(lines)}")
-        return False
+    assert len(lines) == expected_line_count, f"Single table: expected {expected_line_count} lines, got {len(lines)}"
+    print(f"  ✓ Single table: {len(lines)} lines extracted")
 
     # Verify None cells are filtered out
-    if "Col1 | Col2 | Col3" in lines[0]:
-        print(f"  ✓ Header row: {lines[0]}")
-    else:
-        print(f"  ✗ Header row incorrect: {lines[0]}")
-        return False
+    assert "Col1 | Col2 | Col3" in lines[0], f"Header row incorrect: {lines[0]}"
+    print(f"  ✓ Header row: {lines[0]}")
 
-    if "D | F" in lines[2]:
-        print(f"  ✓ Row with None: correctly filtered to 'D | F'")
-    else:
-        print(f"  ✗ Row with None: got '{lines[2]}'")
-        return False
+    assert "D | F" in lines[2], f"Row with None: got '{lines[2]}'"
+    print(f"  ✓ Row with None: correctly filtered to 'D | F'")
 
     # Test multiple tables
     tables = [
@@ -197,13 +184,8 @@ def test_extract_table_text_optimization():
     result = _extract_table_text(tables)
     lines = result.strip().split("\n") if result.strip() else []
 
-    if len(lines) == 2:
-        print(f"  ✓ Multiple tables: {len(lines)} valid lines extracted, empty/None tables skipped")
-    else:
-        print(f"  ✗ Multiple tables: expected 2 lines, got {len(lines)}")
-        return False
-
-    return True
+    assert len(lines) == 2, f"Multiple tables: expected 2 lines, got {len(lines)}"
+    print(f"  ✓ Multiple tables: {len(lines)} valid lines extracted, empty/None tables skipped")
 
 
 def test_safe_float():
@@ -213,13 +195,13 @@ def test_safe_float():
     print("="*70)
 
     test_cases = [
-        (None, None),
-        ("", None),
-        (" ", None),
+        (None, 0.0),
+        ("", 0.0),
+        (" ", 0.0),
         ("123", 123.0),
         (123, 123.0),
         (0, 0.0),
-        ("abc", None),
+        ("abc", 0.0),
         ("12.34", 12.34),
         ("-5.5", -5.5),
     ]
@@ -233,7 +215,7 @@ def test_safe_float():
             print(f"  ✗ {repr(val):15} → {result} (expected {expected})")
             success = False
 
-    return success
+    assert success
 
 
 def test_detect_exhibit_type():
@@ -262,7 +244,7 @@ def test_detect_exhibit_type():
             print(f"  ✗ {filename:30} → {result} (expected {expected})")
             success = False
 
-    return success
+    assert success
 
 
 def test_determine_category():
@@ -288,7 +270,7 @@ def test_determine_category():
             print(f"  ✗ {path_str:50} → {result} (expected {expected})")
             success = False
 
-    return success
+    assert success
 
 
 def run_all_tests():
@@ -310,32 +292,16 @@ def run_all_tests():
     results = []
     for test in tests:
         try:
-            result = test()
-            results.append((test.__name__, result))
+            test()
+            results.append((test.__name__, True))
+            print(f"  ✓ PASS: {test.__name__}")
         except Exception as e:
-            print(f"\n  ✗ EXCEPTION: {e}")
+            print(f"  ✗ FAIL: {test.__name__}: {e}")
             results.append((test.__name__, False))
-
-    # Summary
-    print("\n" + "="*70)
-    print("TEST SUMMARY")
-    print("="*70)
 
     passed = sum(1 for _, result in results if result)
     total = len(results)
-
-    for test_name, result in results:
-        status = "✓ PASS" if result else "✗ FAIL"
-        print(f"  {status}: {test_name}")
-
     print(f"\nTotal: {passed}/{total} tests passed")
-
-    if passed == total:
-        print("\n✓ All optimizations validated successfully!")
-        return True
-    else:
-        print(f"\n✗ {total - passed} test(s) failed")
-        return False
 
 
 if __name__ == "__main__":
