@@ -113,6 +113,7 @@ _PE_PATTERN = PE_NUMBER
 
 import openpyxl
 import pdfplumber
+from exhibit_catalog import find_matching_columns as _catalog_find_matching_columns
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -540,6 +541,18 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
     #   continuation words; if so, merge each cell with " ".join() before passing to
     #   _map_columns(). Add a test in test_parsing.py with a two-row header fixture.
     #   No external data needed.
+
+    # Merge catalog-based column detection (Step 1.B2-b).
+    # For fields not yet set by heuristic matching above, consult EXHIBIT_CATALOG.
+    # The heuristic mapping wins for any field it already identified; the catalog
+    # fills in gaps for exhibit types with well-defined column specs (p5, r2, r3, r4,
+    # and the summary exhibits already handled above).
+    catalog_mapping = _catalog_find_matching_columns(exhibit_type, list(headers))
+    # catalog_mapping: col_index → field_name; invert to field_name → col_index
+    already_mapped_fields = set(mapping.values())
+    for col_idx, field_name in catalog_mapping.items():
+        if field_name not in already_mapped_fields:
+            mapping.setdefault(field_name, col_idx)
 
     return mapping
 

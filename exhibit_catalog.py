@@ -48,14 +48,6 @@ TODO 1.B1-f: Build EXHIBIT_CATALOG dict mapping exhibit_type_key →
     Export it so build_budget_db.py can import and use it in _map_columns().
 """
 
-# TODO 1.B2-b [HARD, ~4000 tokens]: Connect EXHIBIT_CATALOG to _map_columns() in
-#   build_budget_db.py. Recommended approach (Option A — least risk):
-#     1. In build_budget_db.py add: from exhibit_catalog import find_matching_columns
-#     2. At the END of _map_columns(), call find_matching_columns(exhibit_type, headers)
-#        and merge: catalog wins for unset fields, existing mapping wins for set ones.
-#     3. Add tests for p5/r2/r3/r4 exhibit column detection in test_parsing.py.
-#   ⚠️ Full correctness verification requires real downloaded xlsx files (user to run).
-
 EXHIBIT_CATALOG = {
     "p1": {
         "name": "Procurement (P-1)",
@@ -177,20 +169,20 @@ EXHIBIT_CATALOG = {
              "description": "Line Item Number (unique within account)"},
             {"field": "line_item_title", "header_patterns": ["Title", "Item Title"], "dtype": "text",
              "description": "Description of the procurement item"},
-            {"field": "unit", "header_patterns": ["Unit", "UOM", "Unit of Measure"], "dtype": "text",
+            {"field": "prior_year_unit_cost", "header_patterns": ["Prior Year Unit Cost"], "dtype": "currency_thousands",
+             "description": "Prior year unit cost in thousands"},
+            {"field": "current_year_unit_cost", "header_patterns": ["Current Year Unit Cost"], "dtype": "currency_thousands",
+             "description": "Current year unit cost in thousands"},
+            {"field": "estimate_unit_cost", "header_patterns": ["Estimate Unit Cost"], "dtype": "currency_thousands",
+             "description": "Budget estimate unit cost in thousands"},
+            {"field": "unit", "header_patterns": ["Unit of Measure", "UOM", "Unit"], "dtype": "text",
              "description": "Unit of measure (e.g., 'Each', 'Lot', 'Program')"},
             {"field": "prior_year_qty", "header_patterns": ["Prior Year Quantity", "PY Qty"], "dtype": "integer",
              "description": "Prior year quantity"},
-            {"field": "prior_year_unit_cost", "header_patterns": ["Prior Year Unit Cost"], "dtype": "currency_thousands",
-             "description": "Prior year unit cost in thousands"},
             {"field": "current_year_qty", "header_patterns": ["Current Year Quantity", "CY Qty"], "dtype": "integer",
              "description": "Current year quantity"},
-            {"field": "current_year_unit_cost", "header_patterns": ["Current Year Unit Cost"], "dtype": "currency_thousands",
-             "description": "Current year unit cost in thousands"},
             {"field": "estimate_qty", "header_patterns": ["Estimate Quantity", "Est Qty"], "dtype": "integer",
              "description": "Budget estimate quantity"},
-            {"field": "estimate_unit_cost", "header_patterns": ["Estimate Unit Cost"], "dtype": "currency_thousands",
-             "description": "Budget estimate unit cost in thousands"},
             {"field": "justification", "header_patterns": ["Justification", "Justification Text"], "dtype": "text",
              "description": "Narrative justification for the line item"},
         ],
@@ -218,10 +210,10 @@ EXHIBIT_CATALOG = {
              "description": "Budget estimate in thousands"},
             {"field": "performance_metric", "header_patterns": ["Metric", "Performance", "Key Metric"], "dtype": "text",
              "description": "Key performance metric or milestone"},
-            {"field": "current_achievement", "header_patterns": ["Current Achievement", "Achievement"], "dtype": "text",
-             "description": "Current year achievement or status"},
             {"field": "planned_achievement", "header_patterns": ["Planned Achievement", "Planned"], "dtype": "text",
              "description": "Planned achievement for budget estimate year"},
+            {"field": "current_achievement", "header_patterns": ["Current Achievement", "Achievement"], "dtype": "text",
+             "description": "Current year achievement or status"},
         ],
         "known_variations": [
             "R-2 often includes narrative justification sections below tabular data",

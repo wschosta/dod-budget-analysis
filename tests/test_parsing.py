@@ -28,6 +28,7 @@ from build_budget_db import (
     _determine_category,
     _map_columns,
 )
+from exhibit_catalog import find_matching_columns
 
 
 # ── TODO 1.C2-a: _detect_exhibit_type ────────────────────────────────────────
@@ -213,3 +214,218 @@ def test_map_columns_empty_headers():
 #   added to build_budget_db.py, add parametrized tests:
 #     ("FY2026", "FY 2026"), ("FY 2026", "FY 2026"), ("2026", "FY 2026"), ("fy2025", "FY 2025")
 #   Import _normalise_fiscal_year from build_budget_db (same pattern as other imports above).
+
+
+# ── TODO 1.B2-b: Catalog-driven column detection for detail exhibits ───────────
+
+class TestCatalogFindMatchingColumns:
+    """Tests for find_matching_columns() covering p5, r2, r3, r4 exhibit types."""
+
+    def test_p5_basic_columns(self):
+        """P-5 exhibit: line item number, title, quantity, and justification columns."""
+        headers = [
+            "Account",
+            "Program Element",
+            "Line Item",
+            "Item Title",
+            "Unit",
+            "Prior Year Quantity",
+            "Estimate Quantity",
+            "Justification",
+        ]
+        result = find_matching_columns("p5", headers)
+        # col_idx → field_name; collect matched field names
+        fields = set(result.values())
+        assert "program_element" in fields
+        assert "line_item_number" in fields
+        assert "line_item_title" in fields
+        assert "unit" in fields
+        assert "prior_year_qty" in fields
+        assert "estimate_qty" in fields
+        assert "justification" in fields
+
+    def test_p5_unit_cost_columns(self):
+        """P-5: unit cost columns should be detected."""
+        headers = [
+            "Account",
+            "PE",
+            "LIN",
+            "Title",
+            "Unit of Measure",
+            "Prior Year Unit Cost",
+            "Current Year Unit Cost",
+            "Estimate Unit Cost",
+        ]
+        result = find_matching_columns("p5", headers)
+        fields = set(result.values())
+        assert "prior_year_unit_cost" in fields
+        assert "current_year_unit_cost" in fields
+        assert "estimate_unit_cost" in fields
+
+    def test_r2_basic_columns(self):
+        """R-2 exhibit: program element, title, and amount columns."""
+        headers = [
+            "PE",
+            "Program Title",
+            "Prior Year",
+            "Current Year",
+            "Estimate",
+            "Key Metric",
+            "Achievement",
+        ]
+        result = find_matching_columns("r2", headers)
+        fields = set(result.values())
+        assert "program_element" in fields
+        assert "title" in fields
+        assert "prior_year_amount" in fields
+        assert "current_year_amount" in fields
+        assert "estimate_amount" in fields
+        assert "performance_metric" in fields
+        assert "current_achievement" in fields
+
+    def test_r2_sub_element_column(self):
+        """R-2: sub-element column should be detected."""
+        headers = [
+            "Program Element",
+            "Sub-Element",
+            "Title",
+            "Prior Year",
+            "Current Year",
+            "Estimate",
+        ]
+        result = find_matching_columns("r2", headers)
+        fields = set(result.values())
+        assert "sub_element" in fields
+
+    def test_r3_basic_columns(self):
+        """R-3 exhibit: project number, title, and development approach."""
+        headers = [
+            "PE",
+            "Project Number",
+            "Project Title",
+            "Prior Year",
+            "Current Year",
+            "Estimate",
+            "Development Approach",
+            "Schedule",
+        ]
+        result = find_matching_columns("r3", headers)
+        fields = set(result.values())
+        assert "program_element" in fields
+        assert "project_number" in fields
+        assert "project_title" in fields
+        assert "prior_year_amount" in fields
+        assert "estimate_amount" in fields
+        assert "development_approach" in fields
+        assert "schedule_summary" in fields
+
+    def test_r4_basic_columns(self):
+        """R-4 exhibit: program element, line item, amount, and narrative."""
+        headers = [
+            "PE",
+            "Line Item",
+            "Total",
+            "Narrative",
+        ]
+        result = find_matching_columns("r4", headers)
+        fields = set(result.values())
+        assert "program_element" in fields
+        assert "line_item" in fields
+        assert "amount" in fields
+        assert "narrative" in fields
+
+    def test_r4_justification_column(self):
+        """R-4: 'Justification' header should map to narrative field."""
+        headers = ["PE", "Item", "Amount", "Justification"]
+        result = find_matching_columns("r4", headers)
+        fields = set(result.values())
+        assert "narrative" in fields
+
+    def test_unknown_exhibit_returns_empty(self):
+        """Unknown exhibit type returns empty mapping without error."""
+        result = find_matching_columns("zz99", ["Account", "Title"])
+        assert result == {}
+
+    def test_empty_headers_returns_empty(self):
+        """Empty header list returns empty mapping without error."""
+        result = find_matching_columns("p5", [])
+        assert result == {}
+
+    def test_none_headers_handled(self):
+        """None values in header row are treated as empty strings."""
+        headers = [None, "PE", None, "Line Item"]
+        result = find_matching_columns("p5", headers)
+        fields = set(result.values())
+        assert "program_element" in fields
+        assert "line_item_number" in fields
+
+
+class TestMapColumnsWithCatalogMerge:
+    """Tests that _map_columns() correctly merges catalog columns for detail exhibits."""
+
+    def test_p5_catalog_fields_merged(self):
+        """_map_columns for a p5 file picks up catalog-only fields (e.g. line_item_number)."""
+        headers = [
+            "Account",
+            "Program Element",
+            "LIN",
+            "Title",
+            "Unit",
+            "Prior Year Quantity",
+            "Estimate Quantity",
+            "Justification",
+        ]
+        mapping = _map_columns(headers, "p5")
+        # Catalog should add these fields not covered by heuristics
+        assert "line_item_number" in mapping
+        assert "unit" in mapping
+        assert "prior_year_qty" in mapping
+        assert "estimate_qty" in mapping
+        assert "justification" in mapping
+
+    def test_r2_catalog_fields_merged(self):
+        """_map_columns for an r2 file picks up catalog-specific fields."""
+        headers = [
+            "Account",
+            "Program Element",
+            "Sub-Element",
+            "Program Title",
+            "Prior Year",
+            "Current Year",
+            "Estimate",
+            "Planned Achievement",
+        ]
+        mapping = _map_columns(headers, "r2")
+        assert "sub_element" in mapping
+        assert "title" in mapping
+        assert "planned_achievement" in mapping
+
+    def test_heuristic_wins_over_catalog(self):
+        """Heuristic-matched fields are not overwritten by catalog matches."""
+        # account is matched by heuristic; catalog also has account-like fields
+        # for p1. The heuristic result (index 0) should be preserved.
+        headers = [
+            "Account",
+            "Account Title",
+            "Organization",
+            "Budget Activity",
+        ]
+        mapping = _map_columns(headers, "p1")
+        assert mapping["account"] == 0
+        assert mapping["account_title"] == 1
+
+    def test_r3_catalog_fields_merged(self):
+        """_map_columns for r3 picks up project_number and development_approach."""
+        headers = [
+            "Account",
+            "PE",
+            "Project No",
+            "Title",
+            "Prior Year",
+            "Current Year",
+            "Estimate",
+            "Development Approach",
+        ]
+        mapping = _map_columns(headers, "r3")
+        assert "project_number" in mapping
+        assert "development_approach" in mapping
