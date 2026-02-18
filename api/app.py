@@ -30,9 +30,12 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from api.database import get_db_path
 from api.routes import aggregations, budget_lines, download, reference, search
+from api.routes import frontend as frontend_routes
 
 # ── Request logging (4.C3-a) ─────────────────────────────────────────────────
 _logger = logging.getLogger("dod_budget_api")
@@ -181,6 +184,31 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     app.include_router(aggregations.router, prefix=prefix)
     app.include_router(reference.router,    prefix=prefix)
     app.include_router(download.router,     prefix=prefix)
+
+    # ── Static files + Jinja2 templates (3.A0-a) ──────────────────────────────
+    _here = Path(__file__).parent.parent  # project root
+
+    static_dir = _here / "static"
+    templates_dir = _here / "templates"
+
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    if templates_dir.exists():
+        templates = Jinja2Templates(directory=str(templates_dir))
+
+        # Custom filter: format dollar amounts (in $K) with comma separators
+        def fmt_amount(value) -> str:
+            try:
+                return f"{float(value):,.1f}"
+            except (TypeError, ValueError):
+                return "—"
+
+        templates.env.filters["fmt_amount"] = fmt_amount
+
+        # Wire templates into the frontend router
+        frontend_routes.set_templates(templates)
+        app.include_router(frontend_routes.router)
 
     return app
 
