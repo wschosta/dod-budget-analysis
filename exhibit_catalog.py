@@ -322,3 +322,102 @@ EXHIBIT_CATALOG = {
         "known_variations": [],
     },
 }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Helper Functions — For use by build_budget_db.py and other parsing modules
+# ──────────────────────────────────────────────────────────────────────────────
+
+def get_exhibit_spec(exhibit_type_key: str):
+    """
+    Retrieve the complete specification for an exhibit type.
+
+    Args:
+        exhibit_type_key: Lowercase exhibit type key (e.g., 'p1', 'r1', 'm1')
+
+    Returns:
+        Dict with 'name', 'description', 'column_spec', 'known_variations',
+        or None if not found.
+    """
+    return EXHIBIT_CATALOG.get(exhibit_type_key.lower())
+
+
+def get_column_spec_for_exhibit(exhibit_type_key: str):
+    """
+    Retrieve just the column specification for an exhibit type.
+
+    Args:
+        exhibit_type_key: Lowercase exhibit type key
+
+    Returns:
+        List of column specs or empty list if not found.
+    """
+    spec = get_exhibit_spec(exhibit_type_key)
+    return spec.get("column_spec", []) if spec else []
+
+
+def find_matching_columns(exhibit_type_key: str, header_row: list):
+    """
+    Match a header row against the known column specifications for an exhibit type.
+    Returns a mapping of column index → field name for columns that match.
+
+    Args:
+        exhibit_type_key: Lowercase exhibit type key
+        header_row: List of header cell values (strings)
+
+    Returns:
+        Dict mapping column_index (int) → field_name (str) for matched columns,
+        empty dict if no match found.
+    """
+    col_specs = get_column_spec_for_exhibit(exhibit_type_key)
+    if not col_specs:
+        return {}
+
+    matched_columns = {}
+    header_lower = [str(h).lower() if h else "" for h in header_row]
+
+    for col_idx, header_text in enumerate(header_lower):
+        for col_spec in col_specs:
+            patterns = col_spec.get("header_patterns", [])
+            for pattern in patterns:
+                if pattern.lower() in header_text:
+                    matched_columns[col_idx] = col_spec["field"]
+                    break
+            if col_idx in matched_columns:
+                break
+
+    return matched_columns
+
+
+def list_all_exhibit_types():
+    """
+    Return a list of all known exhibit type keys in the catalog.
+
+    Returns:
+        List of exhibit type keys (lowercase strings).
+    """
+    return sorted(EXHIBIT_CATALOG.keys())
+
+
+def describe_catalog():
+    """
+    Return a human-readable summary of all exhibits in the catalog.
+
+    Returns:
+        Formatted string with exhibit names, descriptions, and column counts.
+    """
+    lines = [
+        "=" * 80,
+        "DoD BUDGET EXHIBIT CATALOG",
+        "=" * 80,
+        ""
+    ]
+
+    for exhibit_type in list_all_exhibit_types():
+        spec = get_exhibit_spec(exhibit_type)
+        col_count = len(spec.get("column_spec", []))
+        lines.append(f"{exhibit_type.upper():6s} | {spec['name']:40s} | {col_count} columns")
+        lines.append(f"         {spec['description']}")
+        lines.append("")
+
+    return "\n".join(lines)
