@@ -27,28 +27,12 @@ Fixture creation tasks (STEP 1.C1 COMPLETE)
 Remaining TODOs
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO FIX-005 [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    Fix pyo3_runtime.PanicException in test_pipeline.py tests.
-    All 8 test_pipeline tests error with PanicException from pdfplumber
-    during test_db fixture creation (build_database processes PDF fixtures).
-    Steps:
-      1. Investigate: run build_database() on just the PDF fixtures manually
-         to see if the panic is in fpdf2 output or pdfplumber parsing
-      2. Option A: Generate simpler PDF fixtures that pdfplumber handles
-      3. Option B: Catch pyo3_runtime.PanicException in ingest_pdf_file()
-         and log as a warning instead of crashing
-      4. Option C: Create fixtures_dir_excel_only for tests that don't need PDF
-      5. Run pytest tests/test_pipeline.py -v to verify
-    Success: All 8 test_pipeline tests pass (or cleanly skip PDF-only tests).
+DONE FIX-005  test_pipeline.py PanicException resolved: PDF fixture generation
+    was simplified and pyo3 panic caught; all 8 pipeline tests now pass
+    or skip cleanly. test_db fixture uses test_db_excel_only for non-PDF tests.
 
-TODO FIX-006 [Complexity: LOW] [Tokens: ~500] [User: NO]
-    Fix test_rows_metric_increases_with_excel in test_build_integration.py.
-    Likely caused by the undefined `rows` variable bug (TODO FIX-001).
-    Steps:
-      1. First fix TODO FIX-001 in build_budget_db.py
-      2. Re-run: pytest tests/test_build_integration.py -v
-    Dependency: TODO FIX-001 must be fixed first.
-    Success: test_rows_metric_increases_with_excel passes.
+DONE FIX-006  test_rows_metric_increases_with_excel passes; FIX-001 (undefined rows)
+    was already resolved earlier. test_build_integration.py 22 pass, 7 skip.
 
 DONE TEST-001: _P5_ROWS, _R2_ROWS, and header patterns added; p5_display.xlsx
     and r2_display.xlsx generated in fixtures_dir.
