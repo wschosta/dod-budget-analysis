@@ -5,11 +5,12 @@ Downloads budget documents (PDFs, Excel files, ZIPs) from the DoD Comptroller
 website and service-specific budget pages for selected fiscal years.
 
 Sources:
-  - comptroller : Main DoD summary budget documents (comptroller.war.gov)
-  - defense-wide: Defense Wide budget justification books (comptroller.war.gov)
-  - army        : US Army budget materials (asafm.army.mil)
-  - navy        : US Navy/Marine Corps budget materials (secnav.navy.mil)
-  - airforce    : US Air Force & Space Force budget materials (saffm.hq.af.mil)
+  - comptroller  : Main DoD summary budget documents (comptroller.war.gov)
+  - defense-wide : Defense Wide budget justification books (comptroller.war.gov)
+  - army         : US Army budget materials (asafm.army.mil)
+  - navy         : US Navy/Marine Corps budget materials (secnav.navy.mil)
+  - navy-archive : US Navy archive alternate source (secnav.navy.mil/fmc/fmb)
+  - airforce     : US Air Force & Space Force budget materials (saffm.hq.af.mil)
 
 Requirements:
   pip install requests beautifulsoup4 playwright
