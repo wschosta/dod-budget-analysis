@@ -15,6 +15,9 @@ import sqlite3
 import sys
 from pathlib import Path
 
+# Shared utilities: Import from utils package for consistency across codebase
+from utils import get_connection
+
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 
 # Known exhibit types (from build_budget_db.py)
@@ -34,16 +37,6 @@ AMOUNT_COLUMNS = [
     "amount_fy2026_reconciliation",
     "amount_fy2026_total",
 ]
-
-
-def get_connection(db_path: Path) -> sqlite3.Connection:
-    if not db_path.exists():
-        print(f"ERROR: Database not found: {db_path}")
-        print("Run 'python build_budget_db.py' first to build the database.")
-        sys.exit(1)
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    return conn
 
 
 # ── Individual checks ────────────────────────────────────────────────────────

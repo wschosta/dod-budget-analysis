@@ -24,44 +24,10 @@ import sys
 import textwrap
 from pathlib import Path
 
+# Shared utilities: Import from utils package for consistency across codebase
+from utils import get_connection, sanitize_fts5_query
+
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
-
-
-# FTS5 operator keywords that should be treated as literal text in user queries
-_FTS5_KEYWORDS = {"AND", "OR", "NOT", "NEAR"}
-
-# Characters that have special meaning in FTS5 query syntax
-_FTS5_SPECIAL_CHARS = re.compile(r'[\"()*:^+]')
-
-
-def _sanitize_fts5_query(query: str) -> str:
-    """Sanitize user input for safe use in an FTS5 MATCH expression.
-
-    Strips FTS5 special characters, removes standalone operator keywords,
-    and wraps each term in double quotes so FTS5 treats them as literals.
-    Returns terms joined with OR for broad matching.
-    """
-    # Strip characters that act as FTS5 operators
-    cleaned = _FTS5_SPECIAL_CHARS.sub(" ", query)
-    # Split into individual terms
-    terms = cleaned.split()
-    # Drop FTS5 boolean keywords (case-insensitive) and empty/dash-only terms
-    terms = [t for t in terms if t.upper() not in _FTS5_KEYWORDS
-             and t.strip("-")]
-    if not terms:
-        return ""
-    # Wrap each term in double quotes to force literal matching
-    return " OR ".join(f'"{t}"' for t in terms)
-
-
-def get_connection(db_path: Path) -> sqlite3.Connection:
-    if not db_path.exists():
-        print(f"ERROR: Database not found: {db_path}")
-        print("Run 'python build_budget_db.py' first to build the database.")
-        sys.exit(1)
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    return conn
 
 
 # ── Summary / Stats ───────────────────────────────────────────────────────────
@@ -166,7 +132,7 @@ def search_budget_lines(conn: sqlite3.Connection, query: str,
             )
         """)
         # Convert natural language to FTS5 query (sanitized)
-        fts_query = _sanitize_fts5_query(query)
+        fts_query = sanitize_fts5_query(query)
         if not fts_query:
             return []
         params.append(fts_query)
@@ -211,7 +177,7 @@ def search_pdf_pages(conn: sqlite3.Connection, query: str,
                 WHERE pdf_pages_fts MATCH ?
             )
         """)
-        fts_query = _sanitize_fts5_query(query)
+        fts_query = sanitize_fts5_query(query)
         if not fts_query:
             return []
         params.append(fts_query)

@@ -179,6 +179,10 @@ import requests
 import socket
 from bs4 import BeautifulSoup
 
+# Shared utilities: Import from utils package for consistency across codebase
+from utils import format_bytes, elapsed, sanitize_filename
+from utils.patterns import DOWNLOADABLE_EXTENSIONS
+
 # Optimization: Try to use lxml parser (3-5x faster), fall back to html.parser
 try:
     import lxml
@@ -186,8 +190,8 @@ try:
 except ImportError:
     PARSER = "html.parser"
 
-# Optimization: Pre-compile extension regex pattern
-DOWNLOADABLE_PATTERN = re.compile(r'\.(pdf|xlsx?|xls|zip|csv)$', re.IGNORECASE)
+# Optimization: Pre-compile extension regex pattern (now from utils.patterns)
+DOWNLOADABLE_PATTERN = DOWNLOADABLE_EXTENSIONS
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 global tracker
@@ -244,23 +248,9 @@ SERVICE_PAGE_TEMPLATES = {
 
 # ── Progress Tracker ──────────────────────────────────────────────────────────
 
-def _format_bytes(b: int) -> str:
-    """Format bytes into human-readable size string."""
-    if b < 1024 * 1024:
-        return f"{b / 1024:.0f} KB"
-    if b < 1024 * 1024 * 1024:
-        return f"{b / (1024 * 1024):.1f} MB"
-    return f"{b / (1024 * 1024 * 1024):.2f} GB"
-
-
-def _elapsed(start_time: float) -> str:
-    """Format elapsed time from start_time to now as human-readable string."""
-    secs = int(time.time() - start_time)
-    m, s = divmod(secs, 60)
-    h, m = divmod(m, 60)
-    if h:
-        return f"{h}h {m:02d}m {s:02d}s"
-    return f"{m}m {s:02d}s"
+# format_bytes and elapsed are now imported from utils.common
+# This consolidates utilities across the codebase for easier maintenance
+# and ensures consistent behavior across all tools.
 
 
 # Optimization: Adaptive timeout management based on response history
@@ -343,14 +333,14 @@ class ProgressTracker:
         frac = self.processed / self.total_files if self.total_files else 0
         pct = frac * 100
         bar = self._bar(frac, 25)
-        dl = _format_bytes(self.total_bytes)
-        elapsed = _elapsed(self.start_time)
+        dl = format_bytes(self.total_bytes)
+        elapsed_str = elapsed(self.start_time)
         remaining = self.total_files - self.processed
         line = (
             f"\r  Overall: {bar} {pct:5.1f}%  "
             f"{self.processed}/{self.total_files} files  "
             f"{dl} downloaded  "
-            f"{elapsed} elapsed  "
+            f"{elapsed_str} elapsed  "
             f"({remaining} remaining)"
         )
         # Pad to terminal width to clear previous line
@@ -366,16 +356,16 @@ class ProgressTracker:
         self._last_progress_time = now
 
         if total <= 0:
-            print(f"\r    Downloading {filename}... {_format_bytes(downloaded)}",
+            print(f"\r    Downloading {filename}... {format_bytes(downloaded)}",
                   end="", flush=True)
             return
 
         frac = downloaded / total
         pct = frac * 100
         bar = self._bar(frac, 20)
-        elapsed = time.time() - file_start
-        speed = downloaded / elapsed if elapsed > 0 else 0
-        speed_str = f"{_format_bytes(int(speed))}/s"
+        file_elapsed = time.time() - file_start
+        speed = downloaded / file_elapsed if file_elapsed > 0 else 0
+        speed_str = f"{format_bytes(int(speed))}/s"
         eta = ""
         if speed > 0:
             remaining_bytes = total - downloaded
@@ -388,7 +378,7 @@ class ProgressTracker:
         name = filename[:40] + "..." if len(filename) > 43 else filename
         line = (
             f"\r    {name}  {bar} {pct:5.1f}%  "
-            f"{_format_bytes(downloaded)}/{_format_bytes(total)}  "
+            f"{format_bytes(downloaded)}/{format_bytes(total)}  "
             f"{speed_str}  {eta}"
         )
         print(f"{line:<{self.term_width}}", end="", flush=True)
@@ -407,7 +397,7 @@ class ProgressTracker:
         elif status == "fail":
             self.failed += 1
 
-        size_str = _format_bytes(size) if size > 0 else ""
+        size_str = format_bytes(size) if size > 0 else ""
         line = f"    [{tag}] {filename} ({size_str})" if size_str else f"    [{tag}] {filename}"
         print(f"\r{line:<{self.term_width}}")
         self.print_overall()
@@ -546,8 +536,8 @@ class GuiProgressTracker:
         self._overall_lbl.set(
             f"{frac*100:.1f}%  -  {self.processed} / {self.total_files} files")
         self._stats_var.set(
-            f"{_format_bytes(self.total_bytes)} downloaded  |  "
-            f"{_elapsed(self.start_time)} elapsed  |  "
+            f"{format_bytes(self.total_bytes)} downloaded  |  "
+            f"{elapsed(self.start_time)} elapsed  |  "
             f"{self.total_files - self.processed} remaining")
         self._count_var.set(
             f"Downloaded: {self.completed}    "
@@ -566,16 +556,16 @@ class GuiProgressTracker:
             if total > 0:
                 file_frac = dl / total
                 self._file_bar["value"] = file_frac * 100
-                elapsed = time.time() - self._file_start
-                speed = dl / elapsed if elapsed > 0 else 0
-                speed_str = f"{_format_bytes(int(speed))}/s"
+                file_elapsed = time.time() - self._file_start
+                speed = dl / file_elapsed if file_elapsed > 0 else 0
+                speed_str = f"{format_bytes(int(speed))}/s"
                 self._file_lbl.set(fname)
                 self._file_stats_var.set(
-                    f"{_format_bytes(dl)} / {_format_bytes(total)}  "
+                    f"{format_bytes(dl)} / {format_bytes(total)}  "
                     f"  {speed_str}")
             else:
                 self._file_bar["value"] = 0
-                self._file_lbl.set(f"{fname}  ({_format_bytes(dl)})")
+                self._file_lbl.set(f"{fname}  ({format_bytes(dl)})")
                 self._file_stats_var.set("")
 
         # Log lines
@@ -621,7 +611,7 @@ class GuiProgressTracker:
         elif status == "fail":
             self.failed += 1
 
-        size_str = f" ({_format_bytes(size)})" if size > 0 else ""
+        size_str = f" ({format_bytes(size)})" if size > 0 else ""
         log_entry = f"[{tag}] {filename}{size_str}"
         self._log_lines.append(log_entry)
         if status == "fail":
@@ -1039,7 +1029,7 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
 
 def _clean_file_entry(f: dict) -> dict:
     """Sanitize a file entry dict."""
-    f["filename"] = _sanitize_filename(f["filename"])
+    f["filename"] = sanitize_filename(f["filename"])
     return f
 
 
@@ -1087,20 +1077,14 @@ def _extract_downloadable_links(soup: BeautifulSoup, page_url: str,
         files.append({
             "name": link_text if link_text else filename,
             "url": full_url,
-            "filename": _sanitize_filename(filename),
+            "filename": sanitize_filename(filename),
             "extension": ext,
         })
 
     return files
 
 
-def _sanitize_filename(name: str) -> str:
-    """Remove invalid filesystem characters and URL query parameters from filename."""
-    if "?" in name:
-        name = name.split("?")[0]
-    for ch in '<>:"/\\|?*':
-        name = name.replace(ch, "_")
-    return name
+# sanitize_filename is now imported from utils.common for consistency
 
 
 def _is_browser_source(source: str) -> bool:
@@ -1717,17 +1701,17 @@ def download_all(
     }
 
     if isinstance(_tracker, GuiProgressTracker):
-        total_dl = _format_bytes(_tracker.total_bytes)
-        elapsed = _elapsed(_tracker.start_time)
+        total_dl = format_bytes(_tracker.total_bytes)
+        elapsed_str = elapsed(_tracker.start_time)
         _tracker._log_lines.append(
             f"\n--- Complete: {_tracker.completed} downloaded, "
             f"{_tracker.skipped} skipped, {_tracker.failed} failed "
-            f"({total_dl}, {elapsed}) ---")
+            f"({total_dl}, {elapsed_str}) ---")
         time.sleep(0.3)
         summary_str = (
             f"Downloaded: {_tracker.completed}   Skipped: {_tracker.skipped}   "
             f"Failed: {_tracker.failed}\n"
-            f"Total size: {total_dl}   Elapsed: {elapsed}"
+            f"Total size: {total_dl}   Elapsed: {elapsed_str}"
         )
         _tracker.show_completion_dialog(summary_str)
 
@@ -1906,7 +1890,7 @@ def main():
 
     # ── Terminal summary (GUI summary is shown inside download_all) ──
     if args.no_gui:
-        total_dl = _format_bytes(summary["total_bytes"])
+        total_dl = format_bytes(summary["total_bytes"])
         print(f"\n\n{'='*70}")
         print(f"  Download Complete")
         print(f"{'='*70}")
