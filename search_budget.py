@@ -66,7 +66,7 @@ def get_connection(db_path: Path) -> sqlite3.Connection:
 
 # ── Summary / Stats ───────────────────────────────────────────────────────────
 
-def show_summary(conn: sqlite3.Connection):
+def show_summary(conn: sqlite3.Connection) -> None:
     """Show database summary statistics."""
     print("=" * 65)
     print("  DoD BUDGET DATABASE SUMMARY")
@@ -125,7 +125,7 @@ def show_summary(conn: sqlite3.Connection):
         print(f"  {(r['account_title'] or '')[:45]:<45} {r['total']:>15,.0f}")
 
 
-def show_sources(conn: sqlite3.Connection):
+def show_sources(conn: sqlite3.Connection) -> None:
     """Show data source tracking information."""
     print("=" * 80)
     print("  DATA SOURCES")
@@ -235,14 +235,14 @@ def search_pdf_pages(conn: sqlite3.Connection, query: str,
 
 # ── Display ───────────────────────────────────────────────────────────────────
 
-def _fmt_amount(val):
+def _fmt_amount(val: float | None) -> str:
     """Format a dollar amount in thousands."""
     if val is None:
         return "-"
     return f"${val:,.0f}"
 
 
-def display_budget_results(results: list, query: str):
+def display_budget_results(results: list, query: str) -> None:
     """Display budget line item search results."""
     if not results:
         print(f"\n  No budget line items found for: '{query}'")
@@ -274,7 +274,7 @@ def display_budget_results(results: list, query: str):
         print(f"    Source: {r['source_file']}")
 
 
-def display_pdf_results(results: list, query: str):
+def display_pdf_results(results: list, query: str) -> None:
     """Display PDF search results with context snippets."""
     if not results:
         print(f"\n  No PDF content found for: '{query}'")
@@ -347,7 +347,7 @@ def _extract_snippet(text: str, query: str, max_len: int = 300) -> str:
 
 # ── Interactive Mode ──────────────────────────────────────────────────────────
 
-def interactive_mode(conn: sqlite3.Connection):
+def interactive_mode(conn: sqlite3.Connection) -> None:
     """Interactive search REPL."""
     print("=" * 65)
     print("  DoD BUDGET DATABASE - Interactive Search")
@@ -433,7 +433,7 @@ def interactive_mode(conn: sqlite3.Connection):
 
 # ── Export ────────────────────────────────────────────────────────────────────
 
-def export_results(budget_results: list, pdf_results: list, query: str, fmt: str):
+def export_results(budget_results: list, pdf_results: list, query: str, fmt: str) -> None:
     """Export search results to CSV or JSON files."""
     slug = re.sub(r'[^\w\-]', '_', query)[:30]
 
@@ -473,7 +473,7 @@ def export_results(budget_results: list, pdf_results: list, query: str, fmt: str
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Search the DoD budget database",
         formatter_class=argparse.RawDescriptionHelpFormatter,
