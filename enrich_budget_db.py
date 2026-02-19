@@ -156,30 +156,40 @@ def run_phase1(conn: sqlite3.Connection) -> int:
     """Aggregate all distinct PE numbers from budget_lines into pe_index."""
     print("\n  [Phase 1] Building pe_index from budget_lines...")
 
+    # Use a single aggregation pass to get all fields including most-common org.
+    # The correlated subquery was replaced with a pre-aggregated CTE to avoid
+    # one COUNT(*) per PE row (which scaled O(N*M) with thousands of PE numbers).
     rows = conn.execute("""
+        WITH org_ranked AS (
+            SELECT pe_number,
+                   organization_name,
+                   COUNT(*) AS cnt,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY pe_number
+                       ORDER BY COUNT(*) DESC
+                   ) AS rn
+            FROM budget_lines
+            WHERE pe_number IS NOT NULL AND pe_number != ''
+              AND organization_name IS NOT NULL
+            GROUP BY pe_number, organization_name
+        ),
+        best_org AS (
+            SELECT pe_number, organization_name FROM org_ranked WHERE rn = 1
+        )
         SELECT
-            pe_number,
-            -- Best title: prefer line_item_title, fall back to account_title
-            MAX(CASE WHEN line_item_title IS NOT NULL AND line_item_title != ''
-                     THEN line_item_title END) AS display_title,
-            -- Most common org
-            (SELECT organization_name FROM budget_lines b2
-             WHERE b2.pe_number = b.pe_number
-               AND b2.organization_name IS NOT NULL
-             GROUP BY organization_name
-             ORDER BY COUNT(*) DESC
-             LIMIT 1) AS org_name,
-            -- Budget type from first non-null budget_type
-            MAX(budget_type) AS budget_type,
-            -- All fiscal years as JSON array
-            json_group_array(DISTINCT fiscal_year)
-                FILTER (WHERE fiscal_year IS NOT NULL) AS fiscal_years,
-            -- All exhibit types as JSON array
-            json_group_array(DISTINCT exhibit_type)
-                FILTER (WHERE exhibit_type IS NOT NULL) AS exhibit_types
+            b.pe_number,
+            MAX(CASE WHEN b.line_item_title IS NOT NULL AND b.line_item_title != ''
+                     THEN b.line_item_title END) AS display_title,
+            bo.organization_name AS org_name,
+            MAX(b.budget_type) AS budget_type,
+            json_group_array(DISTINCT b.fiscal_year)
+                FILTER (WHERE b.fiscal_year IS NOT NULL) AS fiscal_years,
+            json_group_array(DISTINCT b.exhibit_type)
+                FILTER (WHERE b.exhibit_type IS NOT NULL) AS exhibit_types
         FROM budget_lines b
-        WHERE pe_number IS NOT NULL AND pe_number != ''
-        GROUP BY pe_number
+        LEFT JOIN best_org bo ON bo.pe_number = b.pe_number
+        WHERE b.pe_number IS NOT NULL AND b.pe_number != ''
+        GROUP BY b.pe_number
     """).fetchall()
 
     if not rows:
@@ -445,19 +455,62 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
         return 0
 
     print(f"  Tagging {len(to_tag)} PE(s)...")
+
+    # --- Pre-load structured fields for all untagged PEs in one query ---
+    # Replaces N individual SELECT LIMIT 1 queries (one per PE) with a
+    # single GROUP BY aggregation pass.
+    structured_fields: dict[str, tuple] = {}
+    placeholders = ",".join("?" * len(to_tag))
+    for row in conn.execute(f"""
+        SELECT pe_number,
+               MAX(budget_activity_title) AS ba_title,
+               MAX(appropriation_title)   AS approp_title,
+               MAX(organization_name)     AS org_name
+        FROM budget_lines
+        WHERE pe_number IN ({placeholders})
+        GROUP BY pe_number
+    """, to_tag).fetchall():
+        structured_fields[row[0]] = (row[1], row[2], row[3])
+
+    # --- Pre-load all description text for untagged PEs in one query ---
+    # Replaces N individual SELECT queries (one per PE) with a single pass.
+    desc_texts: dict[str, list[str]] = {}
+    for row in conn.execute(f"""
+        SELECT pe_number, description_text
+        FROM pe_descriptions
+        WHERE pe_number IN ({placeholders})
+          AND description_text IS NOT NULL
+    """, to_tag).fetchall():
+        desc_texts.setdefault(row[0], []).append(row[1])
+
     insert_buf: list[tuple] = []
     total_tags = 0
 
     for pe in to_tag:
-        # 3a: structured field tags
-        insert_buf.extend(_tags_from_structured(pe, conn))
+        # 3a: structured field tags (from pre-loaded dict, no DB query)
+        fields = structured_fields.get(pe)
+        if fields:
+            ba_title, approp_title, org_name = fields
+            if ba_title:
+                for pattern, tag in _BUDGET_ACTIVITY_TAGS:
+                    if pattern.search(ba_title):
+                        insert_buf.append((pe, tag, "structured", 1.0))
+                        break
+            if approp_title:
+                low = approp_title.lower()
+                for key, tag in _APPROP_TAGS.items():
+                    if key in low:
+                        insert_buf.append((pe, tag, "structured", 1.0))
+                        break
+            if org_name:
+                low = org_name.lower()
+                for key, tag in _ORG_TAGS.items():
+                    if key in low:
+                        insert_buf.append((pe, tag, "structured", 1.0))
+                        break
 
-        # 3b: keyword/taxonomy tags from description text
-        desc_rows = conn.execute("""
-            SELECT description_text FROM pe_descriptions
-            WHERE pe_number = ? AND description_text IS NOT NULL
-        """, (pe,)).fetchall()
-        combined_text = " ".join(r[0] for r in desc_rows if r[0])
+        # 3b: keyword/taxonomy tags from pre-loaded description text
+        combined_text = " ".join(desc_texts.get(pe, []))
         if combined_text:
             insert_buf.extend(_tags_from_keywords(pe, combined_text))
 
@@ -477,23 +530,12 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
         batch_size = 10
         for i in range(0, len(to_tag), batch_size):
             batch_pes = to_tag[i:i + batch_size]
-            # Collect text for each PE in batch
+            # Collect text from pre-loaded desc_texts — no DB queries
             pe_texts: dict[str, str] = {}
             for pe in batch_pes:
-                rows = conn.execute("""
-                    SELECT description_text FROM pe_descriptions
-                    WHERE pe_number = ? AND description_text IS NOT NULL
-                      AND section_header LIKE '%Accomplishments%'
-                    LIMIT 1
-                """, (pe,)).fetchall()
-                if not rows:
-                    rows = conn.execute("""
-                        SELECT description_text FROM pe_descriptions
-                        WHERE pe_number = ? AND description_text IS NOT NULL
-                        LIMIT 1
-                    """, (pe,)).fetchall()
-                if rows and rows[0][0]:
-                    pe_texts[pe] = rows[0][0]
+                texts = desc_texts.get(pe, [])
+                if texts:
+                    pe_texts[pe] = texts[0]  # first description segment
 
             if pe_texts:
                 llm_result = _tags_from_llm(pe_texts)
@@ -539,15 +581,6 @@ def run_phase4(conn: sqlite3.Connection) -> int:
         ).fetchall()
     }
 
-    desc_rows = conn.execute("""
-        SELECT pe_number, fiscal_year, source_file, page_start, description_text
-        FROM pe_descriptions
-        WHERE description_text IS NOT NULL
-    """).fetchall()
-
-    insert_buf: list[tuple] = []
-    total = 0
-
     # Build title index for name matching (phase 4b)
     # Only titles with >= 4 words are useful to avoid false positives
     title_index: list[tuple[str, re.Pattern]] = []
@@ -557,48 +590,66 @@ def run_phase4(conn: sqlite3.Connection) -> int:
         pe, title = row
         words = title.split()
         if len(words) >= 4:
-            # Match the first 4 words as a phrase
             phrase = r"\s+".join(re.escape(w) for w in words[:4])
             title_index.append((pe, re.compile(phrase, re.IGNORECASE)))
 
-    for pe_num, fy, source_file, page_start, text in desc_rows:
-        if (pe_num, source_file) in done_pairs:
-            continue
+    insert_buf: list[tuple] = []
+    total = 0
+    CHUNK = 500  # rows per DB fetch to bound memory use
 
-        # 4a: Explicit PE number references
-        for m in PE_NUMBER.finditer(text):
-            ref_pe = m.group()
-            if ref_pe == pe_num:
-                continue
-            if ref_pe not in known_pes:
-                continue
-            snippet = _context_window(text, m.start())
-            insert_buf.append((
-                pe_num, ref_pe, fy, source_file, page_start,
-                snippet, "explicit_pe_ref", 0.95,
-            ))
+    # Stream pe_descriptions in chunks instead of fetchall() to avoid loading
+    # potentially hundreds of MB of text into RAM at once.
+    cur = conn.execute("""
+        SELECT pe_number, fiscal_year, source_file, page_start, description_text
+        FROM pe_descriptions
+        WHERE description_text IS NOT NULL
+    """)
 
-        # 4b: Program name matching
-        for ref_pe, pattern in title_index:
-            if ref_pe == pe_num:
+    while True:
+        chunk = cur.fetchmany(CHUNK)
+        if not chunk:
+            break
+
+        for pe_num, fy, source_file, page_start, text in chunk:
+            if (pe_num, source_file) in done_pairs:
                 continue
-            m = pattern.search(text)
-            if m:
+
+            # 4a: Explicit PE number references
+            for m in PE_NUMBER.finditer(text):
+                ref_pe = m.group()
+                if ref_pe == pe_num:
+                    continue
+                if ref_pe not in known_pes:
+                    continue
                 snippet = _context_window(text, m.start())
                 insert_buf.append((
                     pe_num, ref_pe, fy, source_file, page_start,
-                    snippet, "name_match", 0.6,
+                    snippet, "explicit_pe_ref", 0.95,
                 ))
 
-    if insert_buf:
-        conn.executemany("""
-            INSERT INTO pe_lineage
-                (source_pe, referenced_pe, fiscal_year, source_file, page_number,
-                 context_snippet, link_type, confidence)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, insert_buf)
-        conn.commit()
-        total = len(insert_buf)
+            # 4b: Program name matching
+            for ref_pe, pattern in title_index:
+                if ref_pe == pe_num:
+                    continue
+                m = pattern.search(text)
+                if m:
+                    snippet = _context_window(text, m.start())
+                    insert_buf.append((
+                        pe_num, ref_pe, fy, source_file, page_start,
+                        snippet, "name_match", 0.6,
+                    ))
+
+        # Flush insert buffer every chunk to keep memory bounded
+        if insert_buf:
+            conn.executemany("""
+                INSERT INTO pe_lineage
+                    (source_pe, referenced_pe, fiscal_year, source_file,
+                     page_number, context_snippet, link_type, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, insert_buf)
+            conn.commit()
+            total += len(insert_buf)
+            insert_buf = []
 
     print(f"  Done. {total} lineage rows inserted.")
     return total
@@ -619,6 +670,14 @@ def enrich(
 
     conn = get_connection(db_path)
 
+    # Performance PRAGMAs for bulk enrichment operations
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA temp_store=MEMORY")
+    conn.execute("PRAGMA cache_size=-262144")      # 256MB cache
+    conn.execute("PRAGMA mmap_size=536870912")     # 512MB mmap
+    conn.execute("PRAGMA wal_autocheckpoint=0")    # manual checkpoint at end
+
     if rebuild:
         print("  --rebuild: dropping enrichment tables...")
         _drop_enrichment_tables(conn)
@@ -638,6 +697,7 @@ def enrich(
 
     elapsed = time.time() - t0
     print(f"\nEnrichment complete in {elapsed:.1f}s")
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # Summary counts
     for table in ("pe_index", "pe_descriptions", "pe_tags", "pe_lineage"):

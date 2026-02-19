@@ -336,7 +336,7 @@ def create_database(db_path: Path) -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_processed_files_session
             ON processed_files(session_id);
 
-        -- ── Enrichment tables (populated by enrich_budget_db.py) ──────────────
+        -- Enrichment tables (populated by enrich_budget_db.py)
 
         -- Canonical record per unique PE number, aggregating across years/exhibits
         CREATE TABLE IF NOT EXISTS pe_index (
@@ -1275,10 +1275,13 @@ def _create_session_id() -> str:
 def _save_checkpoint(conn: sqlite3.Connection, session_id: str, files_processed: int,
                      total_files: int, pages_processed: int, rows_inserted: int,
                      bytes_processed: int, last_file: str = None,
-                     last_file_status: str = None, notes: str = None) -> None:
+                     last_file_status: str = None, notes: str = None,
+                     commit: bool = True) -> None:
     """Save current build progress as a checkpoint.
 
     This allows resuming from a checkpoint without reprocessing files.
+    commit=True by default because checkpoints are explicit sync points;
+    pass commit=False when the caller will commit imminently anyway.
     """
     conn.execute("""
         INSERT INTO build_progress
@@ -1297,18 +1300,25 @@ def _save_checkpoint(conn: sqlite3.Connection, session_id: str, files_processed:
             checkpoint_time = datetime('now')
     """, (session_id, files_processed, total_files, pages_processed, rows_inserted,
           bytes_processed, last_file, last_file_status, notes))
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def _mark_file_processed(conn: sqlite3.Connection, session_id: str, file_path: str,
-                         file_type: str, rows_count: int = 0, pages_count: int = 0) -> None:
-    """Mark a file as processed in the current session."""
+                         file_type: str, rows_count: int = 0, pages_count: int = 0,
+                         commit: bool = False) -> None:
+    """Mark a file as processed in the current session.
+
+    commit=False (default) defers the commit to the caller's batch commit,
+    avoiding a WAL sync on every single file.
+    """
     conn.execute("""
         INSERT INTO processed_files
         (session_id, file_path, file_type, rows_count, pages_count, processed_at)
         VALUES (?, ?, ?, ?, ?, datetime('now'))
     """, (session_id, str(file_path), file_type, rows_count, pages_count))
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def _get_last_checkpoint(conn: sqlite3.Connection) -> dict | None:
@@ -1535,7 +1545,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                   {"rows": total_budget_rows,
                    "files_remaining": total_files - files_done_total})
 
-        # Track file as processed and checkpoint periodically
+        # Track file as processed; defer commit to batch boundary below
         _mark_file_processed(conn, session_id, rel_path, "excel", rows_count=rows)
         if files_done_total % checkpoint_interval == 0:
             remaining = total_files - files_done_total
@@ -1546,6 +1556,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             _save_checkpoint(conn, session_id, files_done_total, total_files,
                              _metrics["pages"], total_budget_rows,
                              stat.st_size, rel_path, "ok")
+        elif xi % 5 == 4 or xi == len(xlsx_files) - 1:
+            # Commit every 5 Excel files even outside checkpoint interval
+            conn.commit()
 
     conn.commit()
     if skipped_xlsx:
@@ -1756,7 +1769,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                         _save_checkpoint(conn, session_id, files_done_total,
                                          total_files, total_pdf_pages,
                                          total_budget_rows, stat.st_size,
-                                         rel_path, file_status)
+                                         rel_path, file_status,
+                                         commit=False)  # time-based commit below
 
                     if time.time() - last_commit_time > 2.0:
                         conn.commit()
@@ -1839,7 +1853,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             if files_done_total % checkpoint_interval == 0:
                 _save_checkpoint(conn, session_id, files_done_total, total_files,
                                  total_pdf_pages, total_budget_rows,
-                                 stat.st_size, rel_path, file_status)
+                                 stat.st_size, rel_path, file_status,
+                                 commit=False)  # time-based commit below
 
             if time.time() - last_commit_time > 2.0:
                 conn.commit()
@@ -1851,11 +1866,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             final_page_count = conn.execute("SELECT COUNT(*) FROM pdf_pages").fetchone()[0]
             if final_page_count > initial_page_count:
                 print("\n  Rebuilding full-text search indexes...")
-                conn.execute("DELETE FROM pdf_pages_fts;")
-                conn.execute("""
-                    INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data)
-                    SELECT id, page_text, source_file, table_data FROM pdf_pages;
-                """)
+                # FTS5 'rebuild' command repopulates the index from the content
+                # table in a single optimized pass — faster than DELETE+INSERT.
+                conn.execute("INSERT INTO pdf_pages_fts(pdf_pages_fts) VALUES('rebuild')")
                 conn.execute("""
                     CREATE TRIGGER IF NOT EXISTS pdf_pages_ai AFTER INSERT ON pdf_pages BEGIN
                         INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data)
@@ -1924,6 +1937,13 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         CREATE INDEX IF NOT EXISTS idx_bl_pe ON budget_lines(pe_number);
         CREATE INDEX IF NOT EXISTS idx_pp_source ON pdf_pages(source_file);
         CREATE INDEX IF NOT EXISTS idx_pp_category ON pdf_pages(source_category);
+        -- Composite indexes used by enrich_budget_db.py Phase 3 batch queries
+        CREATE INDEX IF NOT EXISTS idx_bl_pe_fields
+            ON budget_lines(pe_number, budget_activity_title,
+                            appropriation_title, organization_name);
+        CREATE INDEX IF NOT EXISTS idx_pe_desc_pe_text
+            ON pe_descriptions(pe_number)
+            WHERE description_text IS NOT NULL;
     """)
     conn.commit()
     _progress("index", 1, 1, "Indexes created")
