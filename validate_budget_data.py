@@ -53,9 +53,14 @@ KNOWN_EXHIBIT_TYPES = {"m1", "o1", "p1", "p1r", "r1", "rf1", "c1"}
 
 def check_database_stats(conn: sqlite3.Connection) -> dict:
     """Basic stats — not a validation, but useful context for the report."""
-    budget_count = conn.execute("SELECT COUNT(*) FROM budget_lines").fetchone()[0]
-    pdf_count = conn.execute("SELECT COUNT(*) FROM pdf_pages").fetchone()[0]
-    file_count = conn.execute("SELECT COUNT(*) FROM ingested_files").fetchone()[0]
+    # Single query instead of three separate COUNT(*) round-trips.
+    row = conn.execute("""
+        SELECT
+            (SELECT COUNT(*) FROM budget_lines)  AS budget_count,
+            (SELECT COUNT(*) FROM pdf_pages)     AS pdf_count,
+            (SELECT COUNT(*) FROM ingested_files) AS file_count
+    """).fetchone()
+    budget_count, pdf_count, file_count = row[0], row[1], row[2]
 
     if budget_count == 0 and pdf_count == 0:
         return {
@@ -149,19 +154,20 @@ def check_value_ranges(conn: sqlite3.Connection) -> dict:
     """1.B6-f: Flag extreme monetary values (likely unit-of-measure errors)."""
     threshold = 1_000_000_000  # $1T in thousands
     outliers = []
-    for col in AMOUNT_COLUMNS:
-        cur = conn.execute(f"""
-            SELECT source_file, exhibit_type, account, organization, {col}
-            FROM budget_lines
-            WHERE ABS({col}) > ?
-            LIMIT 10
-        """, (threshold,))
-        for row in cur.fetchall():
-            outliers.append({
-                "source_file": row[0], "exhibit_type": row[1],
-                "account": row[2], "organization": row[3],
-                "column": col, "value": row[4],
-            })
+    # Single UNION ALL query replaces 7 separate table scans.
+    union_parts = " UNION ALL ".join(
+        f"SELECT source_file, exhibit_type, account, organization,"
+        f" '{col}' AS col_name, {col} AS val"
+        f" FROM budget_lines WHERE ABS({col}) > {threshold}"
+        for col in AMOUNT_COLUMNS
+    )
+    cur = conn.execute(f"SELECT * FROM ({union_parts}) LIMIT 70")
+    for row in cur.fetchall():
+        outliers.append({
+            "source_file": row[0], "exhibit_type": row[1],
+            "account": row[2], "organization": row[3],
+            "column": row[4], "value": row[5],
+        })
     return {
         "name": "value_ranges",
         "status": "warn" if outliers else "pass",
@@ -244,24 +250,25 @@ def check_fiscal_year_coverage(conn: sqlite3.Connection) -> dict:
 def check_column_types(conn: sqlite3.Connection) -> dict:
     """1.B6-d: Detect text values stored in numeric amount columns."""
     misaligned = []
-    for col in AMOUNT_COLUMNS:
-        try:
-            cur = conn.execute(f"""
-                SELECT source_file, exhibit_type, {col}
-                FROM budget_lines
-                WHERE {col} IS NOT NULL
-                  AND TYPEOF({col}) NOT IN ('real', 'integer')
-                LIMIT 10
-            """)
-            for row in cur.fetchall():
-                misaligned.append({
-                    "source_file": row[0],
-                    "exhibit_type": row[1],
-                    "column": col,
-                    "value": row[2],
-                })
-        except Exception:
-            continue
+    # Single UNION ALL query replaces 7 separate table scans.
+    union_parts = " UNION ALL ".join(
+        f"SELECT source_file, exhibit_type, '{col}' AS col_name, {col} AS val"
+        f" FROM budget_lines"
+        f" WHERE {col} IS NOT NULL"
+        f"   AND TYPEOF({col}) NOT IN ('real', 'integer')"
+        for col in AMOUNT_COLUMNS
+    )
+    try:
+        cur = conn.execute(f"SELECT * FROM ({union_parts}) LIMIT 70")
+        for row in cur.fetchall():
+            misaligned.append({
+                "source_file": row[0],
+                "exhibit_type": row[1],
+                "column": row[2],
+                "value": row[3],
+            })
+    except Exception:
+        pass
 
     return {
         "name": "column_types",
@@ -385,17 +392,23 @@ def generate_quality_report(
         for r in cur.fetchall()
     ]
 
-    # 2. Null/zero percentages for each amount column
-    total_rows = conn.execute("SELECT COUNT(*) FROM budget_lines").fetchone()[0]
+    # 2. Null/zero percentages for each amount column.
+    # Single conditional-aggregation query replaces 14 separate COUNT(*) scans
+    # (2 per column × 7 columns).  All counts computed in one table pass.
+    agg_exprs = ", ".join(
+        f"SUM(CASE WHEN {col} IS NULL THEN 1 ELSE 0 END) AS {col}_null,"
+        f" SUM(CASE WHEN {col} = 0    THEN 1 ELSE 0 END) AS {col}_zero"
+        for col in AMOUNT_COLUMNS
+    )
+    agg_row = conn.execute(
+        f"SELECT COUNT(*) AS total, {agg_exprs} FROM budget_lines"
+    ).fetchone()
+    total_rows = agg_row[0]
     amount_stats: dict = {}
-    for col in AMOUNT_COLUMNS:
+    for i, col in enumerate(AMOUNT_COLUMNS):
+        null_ct = agg_row[1 + i * 2] or 0
+        zero_ct = agg_row[2 + i * 2] or 0
         if total_rows:
-            null_ct = conn.execute(
-                f"SELECT COUNT(*) FROM budget_lines WHERE {col} IS NULL"
-            ).fetchone()[0]
-            zero_ct = conn.execute(
-                f"SELECT COUNT(*) FROM budget_lines WHERE {col} = 0"
-            ).fetchone()[0]
             amount_stats[col] = {
                 "null_count": null_ct,
                 "null_pct": round(null_ct / total_rows * 100, 1),
