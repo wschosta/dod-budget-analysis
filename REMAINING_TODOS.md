@@ -84,11 +84,11 @@ without user intervention (except `OH MY` group items).
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| VIZ-001 | 3.B1-b | `templates/charts.html`, `api/routes/aggregations.py` | MEDIUM | ~2500 | Make chart FY columns dynamic |
-| VIZ-002 | 3.B1-c | `templates/charts.html` | LOW | ~1500 | Add error handling and loading indicators |
-| VIZ-003 | 3.B2-b | `templates/charts.html` | LOW | ~1500 | Add service filter to charts page |
-| VIZ-004 | 3.B3-b | `templates/charts.html`, `static/css/main.css` | MEDIUM | ~2000 | Add print-friendly chart styles |
-| VIZ-005 | 3.B4-a | `templates/charts.html` | MEDIUM | ~3000 | Add budget comparison interactive chart |
+| VIZ-001 | 3.B1-b | `templates/charts.html`, `api/routes/aggregations.py` | MEDIUM | ~2500 | ~~Make chart FY columns dynamic~~ ✅ DONE |
+| VIZ-002 | 3.B1-c | `templates/charts.html` | LOW | ~1500 | ~~Add error handling and loading indicators~~ ✅ DONE |
+| VIZ-003 | 3.B2-b | `templates/charts.html` | LOW | ~1500 | ~~Add service filter to charts page~~ ✅ DONE |
+| VIZ-004 | 3.B3-b | `templates/charts.html`, `static/css/main.css` | MEDIUM | ~2000 | ~~Add print-friendly chart styles~~ ✅ DONE |
+| VIZ-005 | 3.B4-a | `templates/charts.html` | MEDIUM | ~3000 | ~~Add budget comparison interactive chart~~ ✅ DONE |
 
 ---
 
