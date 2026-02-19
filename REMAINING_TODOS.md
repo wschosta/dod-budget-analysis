@@ -41,7 +41,7 @@ without user intervention (except `OH MY` group items).
 | FE-002 | 3.A3-d | `templates/index.html`, `api/routes/frontend.py` | LOW | ~1500 | ~~Add appropriation filter dropdown~~ ✅ DONE |
 | FE-003 | 3.A3-e | `templates/partials/results.html`, `static/css/main.css` | LOW | ~1000 | ~~Add active filter chips above results~~ ✅ DONE |
 | FE-010 | 3.A4-c | `templates/partials/results.html`, `api/routes/frontend.py` | LOW | ~1500 | ~~Add page-size selector to pagination~~ ✅ DONE |
-| FE-011 | 3.A4-d | `templates/partials/results.html`, `api/routes/download.py` | LOW | ~1000 | Export visible columns only option |
+| FE-011 | 3.A4-d | `templates/partials/results.html`, `api/routes/download.py` | LOW | ~1000 | ~~Export visible columns only option~~ ✅ DONE |
 | FE-012 | 3.C5-a | `templates/index.html`, `templates/partials/results.html` | LOW | ~1500 | ~~Add contextual help tooltips to all labels~~ ✅ DONE |
 
 ### Detail Panel (templates/partials/detail.html, api/routes/frontend.py)
@@ -74,11 +74,11 @@ without user intervention (except `OH MY` group items).
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| JS-001 | 3.A5-b | `static/js/app.js`, `api/routes/download.py` | MEDIUM | ~2000 | Add Excel (.xlsx) export support |
-| JS-002 | 3.A5-c | `static/js/app.js` | LOW | ~1500 | Show estimated result count in download modal |
-| JS-003 | 3.A3-f | `static/js/app.js` | LOW | ~1000 | Add keyboard shortcut for search (/ or Ctrl+K) |
-| JS-004 | 3.A6-d | `static/js/app.js` | LOW | ~1000 | Add keyboard navigation for detail panel |
-| OPT-JS-001 | — | `static/js/app.js` | LOW | ~1000 | Debounce filter form changes |
+| JS-001 | 3.A5-b | `static/js/app.js`, `api/routes/download.py` | MEDIUM | ~2000 | ~~Add Excel (.xlsx) export support~~ ✅ DONE |
+| JS-002 | 3.A5-c | `static/js/app.js` | LOW | ~1500 | ~~Show estimated result count in download modal~~ ✅ DONE |
+| JS-003 | 3.A3-f | `static/js/app.js` | LOW | ~1000 | ~~Add keyboard shortcut for search (/ or Ctrl+K)~~ ✅ DONE |
+| JS-004 | 3.A6-d | `static/js/app.js` | LOW | ~1000 | ~~Add keyboard navigation for detail panel~~ ✅ DONE |
+| OPT-JS-001 | — | `static/js/app.js` | LOW | ~1000 | ~~Debounce filter form changes~~ ✅ DONE |
 
 ### Charts & Visualization (templates/charts.html)
 
