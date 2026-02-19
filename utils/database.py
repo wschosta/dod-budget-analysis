@@ -230,14 +230,10 @@ def vacuum_database(db_path: Path) -> None:
 
 # ── OPT-DBUTIL-001: Dynamic schema introspection ──────────────────────────────
 
-_column_cache: Dict[str, List[str]] = {}
-
-
 def get_amount_columns(conn: sqlite3.Connection, table: str = "budget_lines") -> List[str]:
     """Return all amount_fy* columns present in the given table's schema.
 
-    Results are cached per connection so repeated calls within a session
-    are free.
+    Uses PRAGMA table_info which is essentially free, so no caching needed.
 
     Args:
         conn: SQLite connection.
@@ -246,15 +242,10 @@ def get_amount_columns(conn: sqlite3.Connection, table: str = "budget_lines") ->
     Returns:
         Sorted list of column names that start with "amount_fy".
     """
-    cache_key = f"{id(conn)}:{table}:amount"
-    if cache_key in _column_cache:
-        return _column_cache[cache_key]
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-    cols = sorted(
+    return sorted(
         r[1] for r in rows if r[1].startswith("amount_fy")
     )
-    _column_cache[cache_key] = cols
-    return cols
 
 
 def get_quantity_columns(conn: sqlite3.Connection, table: str = "budget_lines") -> List[str]:
@@ -267,15 +258,10 @@ def get_quantity_columns(conn: sqlite3.Connection, table: str = "budget_lines") 
     Returns:
         Sorted list of column names that start with "quantity_fy".
     """
-    cache_key = f"{id(conn)}:{table}:quantity"
-    if cache_key in _column_cache:
-        return _column_cache[cache_key]
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-    cols = sorted(
+    return sorted(
         r[1] for r in rows if r[1].startswith("quantity_fy")
     )
-    _column_cache[cache_key] = cols
-    return cols
 
 
 # ── OPT-DBUTIL-002: batch_upsert() for incremental updates ───────────────────

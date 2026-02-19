@@ -20,6 +20,9 @@ import time
 import traceback
 from pathlib import Path
 
+# Ensure project root is on the path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 # Import shared utilities
 from utils import (
     format_bytes,

@@ -74,8 +74,14 @@ from pathlib import Path
 
 import pytest
 
-# ── Stub pdfplumber (heavy dep, not needed for fixture generation) ─────────────
-sys.modules.setdefault("pdfplumber", types.ModuleType("pdfplumber"))
+# ── Ensure pdfplumber is properly imported early ──────────────────────────────
+# Importing the real module here (conftest.py runs before all test modules)
+# prevents other test files' setdefault stubs from shadowing the real package.
+try:
+    import pdfplumber  # noqa: F401
+except ImportError:
+    # Fall back to stub only if pdfplumber is genuinely unavailable
+    sys.modules.setdefault("pdfplumber", types.ModuleType("pdfplumber"))
 
 import openpyxl  # noqa: E402 — available in requirements-dev.txt
 
