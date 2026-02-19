@@ -1,29 +1,4 @@
-"""Common utility functions used across the DoD budget tools.
-
-──────────────────────────────────────────────────────────────────────────────
-TODOs for this file
-──────────────────────────────────────────────────────────────────────────────
-
-TODO OPT-UTIL-001 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Consolidate get_connection() with api/database.py connection logic.
-    Both this module and api/database.py create SQLite connections with
-    similar pragma settings. Unify into a single create_connection() function:
-      1. Add create_connection(path, read_only=False, pragmas=True) here
-      2. Accept read_only flag that opens with "?mode=ro" URI
-      3. Accept pragmas flag to apply WAL + NORMAL + cache settings
-      4. Have api/database.py import and use this function
-      5. Have build_budget_db.py use this for its DB connections too
-    Acceptance: Single connection factory; all callers use it; tests pass.
-
-TODO OPT-UTIL-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Add elapsed() variants for different display formats.
-    elapsed() returns a string like "1m 23s" but some callers need seconds
-    (for JSON logging) or milliseconds (for response headers). Steps:
-      1. Add elapsed_ms(start) -> int returning milliseconds
-      2. Add elapsed_sec(start) -> float returning seconds with 2 decimals
-      3. Keep existing elapsed() as the human-readable version
-    Acceptance: All three variants available; existing callers unchanged.
-"""
+"""Common utility functions used across the DoD budget tools."""
 
 import sqlite3
 import sys
@@ -58,6 +33,30 @@ def elapsed(start_time: float) -> str:
     return f"{m}m {s:02d}s"
 
 
+def elapsed_ms(start_time: float) -> int:
+    """Return elapsed time in milliseconds since start_time.
+
+    Args:
+        start_time: Start time as returned by time.monotonic() or time.time().
+
+    Returns:
+        Elapsed milliseconds as an integer.
+    """
+    return int((time.monotonic() - start_time) * 1000)
+
+
+def elapsed_sec(start_time: float) -> float:
+    """Return elapsed time in seconds since start_time, rounded to 2 decimals.
+
+    Args:
+        start_time: Start time as returned by time.monotonic() or time.time().
+
+    Returns:
+        Elapsed seconds as a float with 2 decimal places.
+    """
+    return round(time.monotonic() - start_time, 2)
+
+
 def sanitize_filename(name: str) -> str:
     """Remove invalid filesystem characters and URL query parameters from filename."""
     if "?" in name:
@@ -67,26 +66,59 @@ def sanitize_filename(name: str) -> str:
     return name
 
 
+def create_connection(
+    db_path: Path,
+    read_only: bool = False,
+    pragmas: bool = True,
+) -> sqlite3.Connection:
+    """Create a SQLite connection with optional read-only mode and pragmas.
+
+    This is the unified connection factory used by all modules. It replaces
+    the separate connection logic in utils/common.py and api/database.py.
+
+    Args:
+        db_path: Path to the SQLite database file.
+        read_only: If True, open in read-only URI mode. Prevents accidental
+                   writes and may enable SQLite read-path optimizations.
+        pragmas: If True, apply WAL + NORMAL synchronous + cache settings.
+
+    Returns:
+        sqlite3.Connection with row_factory set to sqlite3.Row.
+
+    Raises:
+        FileNotFoundError: If the database file does not exist.
+    """
+    if not db_path.exists():
+        raise FileNotFoundError(
+            f"Database not found: {db_path}. "
+            "Run 'python build_budget_db.py' to build it."
+        )
+    if read_only:
+        uri = f"file:{db_path}?mode=ro"
+        conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+    else:
+        conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    if pragmas:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.execute("PRAGMA temp_store=MEMORY")
+        conn.execute("PRAGMA cache_size=-64000")
+    return conn
+
+
 def get_connection(db_path: Path, cached: bool = False) -> sqlite3.Connection:
     """Get or create a SQLite connection.
 
     Args:
         db_path: Path to the SQLite database file.
-        cached: If True, cache and reuse connection. Use cached=True for bulk
-                operations (like build_budget_db.py) to avoid repeated open/close
-                overhead. Use cached=False (default) for CLI tools doing single
-                queries (like search_budget.py).
+        cached: Unused legacy parameter (kept for backward compatibility).
 
     Returns:
-        sqlite3.Connection with row_factory set to sqlite3.Row for dict-like access.
+        sqlite3.Connection with row_factory set to sqlite3.Row.
 
     Raises:
         SystemExit: If database file does not exist.
-
-    Performance Notes:
-        - Cached connections: ~20-30% faster for bulk operations with thousands
-          of transactions. Uses check_same_thread=False for thread safety.
-        - Non-cached connections: Suitable for one-off queries or CLI tools.
     """
     if not db_path.exists():
         print(f"ERROR: Database not found: {db_path}")

@@ -98,85 +98,85 @@ without user intervention (except `OH MY` group items).
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| SEARCH-001 | — | `api/routes/search.py` | MEDIUM | ~2500 | Add BM25 relevance scoring |
-| SEARCH-002 | — | `api/routes/search.py` | LOW | ~1500 | Add structured filter support (FY, service, exhibit) |
-| SEARCH-003 | — | `api/routes/search.py`, `utils/formatting.py` | LOW | ~1500 | Improve snippet generation with HTML highlighting |
-| SEARCH-004 | — | `api/routes/search.py` | MEDIUM | ~2000 | Add search suggestions/autocomplete endpoint |
+| SEARCH-001 | — | `api/routes/search.py` | MEDIUM | ~2500 | ~~Add BM25 relevance scoring~~ ✅ DONE |
+| SEARCH-002 | — | `api/routes/search.py` | LOW | ~1500 | ~~Add structured filter support (FY, service, exhibit)~~ ✅ DONE |
+| SEARCH-003 | — | `api/routes/search.py`, `utils/formatting.py` | LOW | ~1500 | ~~Improve snippet generation with HTML highlighting~~ ✅ DONE |
+| SEARCH-004 | — | `api/routes/search.py` | MEDIUM | ~2000 | ~~Add search suggestions/autocomplete endpoint~~ ✅ DONE |
 
 ### Aggregations API (api/routes/aggregations.py)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| AGG-001 | — | `api/routes/aggregations.py`, `api/models.py` | MEDIUM | ~2500 | Make aggregation FY columns dynamic |
-| AGG-002 | — | `api/routes/aggregations.py`, `api/models.py` | LOW | ~1500 | Add percentage and YoY delta calculations |
-| OPT-AGG-001 | — | `api/routes/aggregations.py` | LOW | ~1000 | Add server-side aggregation caching |
+| AGG-001 | — | `api/routes/aggregations.py`, `api/models.py` | MEDIUM | ~2500 | ~~Make aggregation FY columns dynamic~~ ✅ DONE |
+| AGG-002 | — | `api/routes/aggregations.py`, `api/models.py` | LOW | ~1500 | ~~Add percentage and YoY delta calculations~~ ✅ DONE |
+| OPT-AGG-001 | — | `api/routes/aggregations.py` | LOW | ~1000 | ~~Add server-side aggregation caching~~ ✅ DONE |
 
 ### Download API (api/routes/download.py)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| DL-001 | 3.A5-b | `api/routes/download.py` | MEDIUM | ~2500 | Add Excel (.xlsx) export format |
-| DL-002 | — | `api/routes/download.py` | LOW | ~1500 | Add keyword search filter to downloads |
-| DL-003 | — | `api/routes/download.py` | LOW | ~1000 | Add X-Total-Count header for progress tracking |
-| OPT-DL-001 | — | `api/routes/download.py` | MEDIUM | ~2000 | DRY: Use shared WHERE builder |
+| DL-001 | 3.A5-b | `api/routes/download.py` | MEDIUM | ~2500 | ~~Add Excel (.xlsx) export format~~ ✅ DONE |
+| DL-002 | — | `api/routes/download.py` | LOW | ~1500 | ~~Add keyword search filter to downloads~~ ✅ DONE |
+| DL-003 | — | `api/routes/download.py` | LOW | ~1000 | ~~Add X-Total-Count header for progress tracking~~ ✅ DONE |
+| OPT-DL-001 | — | `api/routes/download.py` | MEDIUM | ~2000 | ~~DRY: Use shared WHERE builder~~ ✅ DONE |
 
 ### App & Middleware (api/app.py)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| APP-001 | 4.C4-b | `api/app.py` | MEDIUM | ~2000 | Handle proxy/forwarded IPs in rate limiter |
-| APP-002 | 4.C4-c | `api/app.py` | LOW | ~1500 | Rate limit memory cleanup (prevent unbounded growth) |
-| APP-003 | 4.C3-b | `api/app.py` | LOW | ~1500 | Add structured JSON logging for production |
-| APP-004 | — | `api/app.py` | LOW | ~1500 | Add CORS middleware for external API consumers |
+| APP-001 | 4.C4-b | `api/app.py` | MEDIUM | ~2000 | ~~Handle proxy/forwarded IPs in rate limiter~~ ✅ DONE |
+| APP-002 | 4.C4-c | `api/app.py` | LOW | ~1500 | ~~Rate limit memory cleanup (prevent unbounded growth)~~ ✅ DONE |
+| APP-003 | 4.C3-b | `api/app.py` | LOW | ~1500 | ~~Add structured JSON logging for production~~ ✅ DONE |
+| APP-004 | — | `api/app.py` | LOW | ~1500 | ~~Add CORS middleware for external API consumers~~ ✅ DONE |
 
 ### Database (api/database.py)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| OPT-DB-001 | — | `api/database.py` | MEDIUM | ~2500 | Implement connection pooling |
-| OPT-DB-002 | — | `api/database.py` | LOW | ~1000 | Add read-only connection mode |
-| OPT-DB-003 | — | `api/database.py` | LOW | ~800 | Add friendly error on missing database |
+| OPT-DB-001 | — | `api/database.py` | MEDIUM | ~2500 | ~~Implement connection pooling~~ ✅ DONE |
+| OPT-DB-002 | — | `api/database.py` | LOW | ~1000 | ~~Add read-only connection mode~~ ✅ DONE |
+| OPT-DB-003 | — | `api/database.py` | LOW | ~800 | ~~Add friendly error on missing database~~ ✅ DONE |
 
 ### Shared Utilities (utils/)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| UTIL-001 | OPT-FE-001 | `utils/__init__.py`, new `utils/query.py` | MEDIUM | ~2500 | Create shared SQL query builder (DRY across 3 routes) |
-| UTIL-002 | — | `utils/__init__.py`, new `utils/cache.py` | LOW | ~1500 | Create lightweight in-memory TTL cache |
-| OPT-FE-001 | — | `api/routes/frontend.py` | MEDIUM | ~2000 | Extract _build_where() into shared utility |
-| OPT-FE-002 | — | `api/routes/frontend.py` | LOW | ~1500 | Cache reference data queries (TTL) |
-| OPT-FMT-001 | — | `utils/formatting.py`, `api/app.py` | LOW | ~1000 | Consolidate fmt_amount() (remove API inline duplicate) |
-| OPT-FMT-002 | — | `utils/formatting.py`, `api/routes/search.py` | LOW | ~1000 | Consolidate _snippet() into shared module |
-| OPT-UTIL-001 | — | `utils/common.py`, `api/database.py` | LOW | ~1500 | Consolidate get_connection() across modules |
-| OPT-UTIL-002 | — | `utils/common.py` | LOW | ~1000 | Add elapsed_ms() and elapsed_sec() variants |
-| OPT-DBUTIL-001 | — | `utils/database.py` | MEDIUM | ~2500 | Add dynamic schema introspection utility |
-| OPT-DBUTIL-002 | — | `utils/database.py` | LOW | ~1500 | Add batch_upsert() for incremental updates |
-| OPT-DBUTIL-003 | — | `utils/database.py` | LOW | ~1000 | Add QueryBuilder class for safe parameterized queries |
+| UTIL-001 | OPT-FE-001 | `utils/__init__.py`, new `utils/query.py` | MEDIUM | ~2500 | ~~Create shared SQL query builder (DRY across 3 routes)~~ ✅ DONE |
+| UTIL-002 | — | `utils/__init__.py`, new `utils/cache.py` | LOW | ~1500 | ~~Create lightweight in-memory TTL cache~~ ✅ DONE |
+| OPT-FE-001 | — | `api/routes/frontend.py` | MEDIUM | ~2000 | ~~Extract _build_where() into shared utility~~ ✅ DONE |
+| OPT-FE-002 | — | `api/routes/frontend.py` | LOW | ~1500 | ~~Cache reference data queries (TTL)~~ ✅ DONE |
+| OPT-FMT-001 | — | `utils/formatting.py`, `api/app.py` | LOW | ~1000 | ~~Consolidate fmt_amount() (remove API inline duplicate)~~ ✅ DONE |
+| OPT-FMT-002 | — | `utils/formatting.py`, `api/routes/search.py` | LOW | ~1000 | ~~Consolidate _snippet() into shared module~~ ✅ DONE |
+| OPT-UTIL-001 | — | `utils/common.py`, `api/database.py` | LOW | ~1500 | ~~Consolidate get_connection() across modules~~ ✅ DONE |
+| OPT-UTIL-002 | — | `utils/common.py` | LOW | ~1000 | ~~Add elapsed_ms() and elapsed_sec() variants~~ ✅ DONE |
+| OPT-DBUTIL-001 | — | `utils/database.py` | MEDIUM | ~2500 | ~~Add dynamic schema introspection utility~~ ✅ DONE |
+| OPT-DBUTIL-002 | — | `utils/database.py` | LOW | ~1500 | ~~Add batch_upsert() for incremental updates~~ ✅ DONE |
+| OPT-DBUTIL-003 | — | `utils/database.py` | LOW | ~1000 | ~~Add QueryBuilder class for safe parameterized queries~~ ✅ DONE |
 
 ### Schema & Data Model (schema_design.py)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| SCHEMA-001 | 2.A5-c | `schema_design.py` | MEDIUM | ~3000 | Add FY2027+ schema migration support |
-| SCHEMA-002a | 2.B1-a-1 | `schema_design.py` | MEDIUM | ~3000 | Create compatibility view for normalized tables |
-| SCHEMA-002b | 2.B1-a-2 | `build_budget_db.py`, `schema_design.py` | MEDIUM | ~3000 | Update build pipeline to write normalized tables |
-| SCHEMA-002c | 2.B1-a-3 | `api/routes/*.py` | MEDIUM | ~2000 | Migrate API routes to normalized tables |
-| SCHEMA-003 | — | `validate_budget_db.py` | LOW | ~1500 | Add database integrity check (PRAGMA + FTS sync) |
+| SCHEMA-001 | 2.A5-c | `schema_design.py` | MEDIUM | ~3000 | ~~Add FY2027+ schema migration support~~ ✅ DONE |
+| SCHEMA-002a | 2.B1-a-1 | `schema_design.py` | MEDIUM | ~3000 | ~~Create compatibility view for normalized tables~~ ✅ DONE |
+| SCHEMA-002b | 2.B1-a-2 | `build_budget_db.py`, `schema_design.py` | MEDIUM | ~3000 | ~~Update build pipeline to write normalized tables~~ ✅ DONE |
+| SCHEMA-002c | 2.B1-a-3 | `api/routes/*.py` | MEDIUM | ~2000 | ~~Migrate API routes to normalized tables~~ ✅ DONE |
+| SCHEMA-003 | — | `validate_budget_db.py` | LOW | ~1500 | ~~Add database integrity check (PRAGMA + FTS sync)~~ ✅ DONE |
 
 ### Validation (utils/validation.py)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| VAL-001 | — | `utils/validation.py` | MEDIUM | ~2500 | Add cross-exhibit consistency validation (P-1 vs P-5) |
-| VAL-002 | — | `utils/validation.py` | LOW | ~1500 | Add year-over-year outlier detection |
-| VAL-003 | — | `utils/validation.py`, `validate_budget_db.py` | LOW | ~1000 | Add validation result export to JSON |
+| VAL-001 | — | `utils/validation.py` | MEDIUM | ~2500 | ~~Add cross-exhibit consistency validation (P-1 vs P-5)~~ ✅ DONE |
+| VAL-002 | — | `utils/validation.py` | LOW | ~1500 | ~~Add year-over-year outlier detection~~ ✅ DONE |
+| VAL-003 | — | `utils/validation.py`, `validate_budget_db.py` | LOW | ~1000 | ~~Add validation result export to JSON~~ ✅ DONE |
 
 ### Configuration (utils/config.py)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| OPT-CFG-001 | — | `utils/config.py`, `api/app.py`, `api/database.py` | MEDIUM | ~2000 | Consolidate all env var config into Config class |
-| OPT-CFG-002 | — | `utils/config.py` | LOW | ~1000 | Make KnownValues.fiscal_years configurable |
+| OPT-CFG-001 | — | `utils/config.py`, `api/app.py`, `api/database.py` | MEDIUM | ~2000 | ~~Consolidate all env var config into Config class~~ ✅ DONE |
+| OPT-CFG-002 | — | `utils/config.py` | LOW | ~1000 | ~~Make KnownValues.fiscal_years configurable~~ ✅ DONE |
 
 ---
 
