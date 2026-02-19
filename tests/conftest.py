@@ -63,10 +63,10 @@ DONE TEST-003: tests/test_download_streaming.py created with format verification
 DONE TEST-004: tests/test_rate_limiter.py created with behavior tests.
 """
 
-# TODO [Group: BEAR] BEAR-001: Add dynamic FY schema tests — ALTER TABLE, idempotency, FTS triggers (~2,500 tokens)
-# TODO [Group: BEAR] BEAR-002: Add historical data compatibility tests (FY2017-2023 fixtures) (~2,500 tokens)
-# TODO [Group: BEAR] BEAR-003: Add validation integration tests with 7+ intentional data errors (~3,000 tokens)
-# TODO [Group: BEAR] BEAR-004: Add load testing for 100K-row datasets (~2,500 tokens)
+# DONE [Group: BEAR] BEAR-001: Dynamic FY schema tests — tests/test_bear_dynamic_schema.py (5 tests)
+# DONE [Group: BEAR] BEAR-002: Historical data compatibility tests — tests/test_bear_historical_compat.py (13 tests)
+# DONE [Group: BEAR] BEAR-003: Validation integration tests — tests/test_bear_validation_integration.py (9 tests)
+# DONE [Group: BEAR] BEAR-004: Load testing for 100K-row datasets — tests/test_bear_load.py (5 tests)
 
 import sys
 import types

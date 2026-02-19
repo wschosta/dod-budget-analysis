@@ -1,4 +1,4 @@
-# TODO [Group: BEAR] BEAR-009: Add Dockerfile/docker-compose lint-level validation tests (~1,500 tokens)
+# DONE [Group: BEAR] BEAR-009: Docker lint-level validation tests — tests/test_bear_docker.py (20 tests)
 # DoD Budget API — Dockerfile (Step 4.A1-a)
 #
 # Single-stage build (fast startup for development).

@@ -32,6 +32,7 @@ Thumbs.db
 data_quality_report.json
 refresh_progress.json
 failed_downloads.json
+profile_report.json
 
 # Claude Code
 .claude/

@@ -25,9 +25,9 @@ without user intervention (except `OH MY` group items).
 |-------|----------------|-----------|-----------------|------------|
 | LION | 37/37 ✅ | 0 remaining | ~17,000 | Yes — ALL DONE |
 | TIGER | 35/35 ✅ | 11 new | ~20,500 | Yes |
-| BEAR | 25/25 ✅ | 12 new | ~26,000 | Yes |
+| BEAR | 25/25 ✅ | 12/12 ✅ DONE | ~26,000 | Yes |
 | OH MY | — | 12 (unchanged) | ~18,500 | **No — needs human** |
-| **Total** | **87 done** | **45 new** | **~82,000** | |
+| **Total** | **87 done** | **45 new (12 BEAR done)** | **~82,000** | |
 
 **Instruction files:** See `LION_INSTRUCTIONS.md`, `TIGER_INSTRUCTIONS.md`, `BEAR_INSTRUCTIONS.md`, `OH_MY_INSTRUCTIONS.md` for prompt-ready agent instructions.
 
@@ -290,23 +290,23 @@ without user intervention (except `OH MY` group items).
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| BEAR-001 | 1.C2-h | `tests/test_bear_dynamic_schema.py` | MEDIUM | ~2,500 | Add dynamic FY schema tests (ALTER TABLE, idempotency, FTS triggers) |
-| BEAR-002 | 1.C2-i | `tests/test_bear_historical_compat.py` | MEDIUM | ~2,500 | Add historical data compatibility tests (FY2017-2023) |
-| BEAR-003 | 1.C3-i | `tests/test_bear_validation_integration.py` | MEDIUM | ~3,000 | Add validation integration tests with 7+ intentional data errors |
-| BEAR-004 | 4.C4-e | `tests/test_bear_load.py` | MEDIUM | ~2,500 | Add load testing for 100K-row datasets |
-| BEAR-008 | 2.A5-d | `tests/test_bear_migration.py` | MEDIUM | ~2,500 | Add database migration framework tests |
-| BEAR-009 | 4.A2-b | `tests/test_bear_docker.py` | LOW | ~1,500 | Add Dockerfile/docker-compose lint-level validation tests |
-| BEAR-010 | 2.B4-b | `tests/test_bear_refresh_e2e.py` | MEDIUM | ~2,500 | Add data refresh end-to-end test (dry-run, rollback, webhook) |
+| BEAR-001 | 1.C2-h | `tests/test_bear_dynamic_schema.py` | MEDIUM | ~2,500 | ~~Add dynamic FY schema tests (ALTER TABLE, idempotency, FTS triggers)~~ ✅ DONE |
+| BEAR-002 | 1.C2-i | `tests/test_bear_historical_compat.py` | MEDIUM | ~2,500 | ~~Add historical data compatibility tests (FY2017-2023)~~ ✅ DONE |
+| BEAR-003 | 1.C3-i | `tests/test_bear_validation_integration.py` | MEDIUM | ~3,000 | ~~Add validation integration tests with 7+ intentional data errors~~ ✅ DONE |
+| BEAR-004 | 4.C4-e | `tests/test_bear_load.py` | MEDIUM | ~2,500 | ~~Add load testing for 100K-row datasets~~ ✅ DONE |
+| BEAR-008 | 2.A5-d | `tests/test_bear_migration.py` | MEDIUM | ~2,500 | ~~Add database migration framework tests~~ ✅ DONE |
+| BEAR-009 | 4.A2-b | `tests/test_bear_docker.py` | LOW | ~1,500 | ~~Add Dockerfile/docker-compose lint-level validation tests~~ ✅ DONE |
+| BEAR-010 | 2.B4-b | `tests/test_bear_refresh_e2e.py` | MEDIUM | ~2,500 | ~~Add data refresh end-to-end test (dry-run, rollback, webhook)~~ ✅ DONE |
 
 ### CI/CD & Deployment Prep
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| BEAR-005 | 4.B4-b | `scripts/smoke_test.py` | LOW | ~2,000 | Add smoke test script for deployment verification |
-| BEAR-006 | 4.A3-b | `.github/workflows/ci.yml`, `pyproject.toml` | LOW | ~1,000 | Add CI coverage threshold enforcement (80%) |
-| BEAR-007 | 4.A3-c | `.github/workflows/deploy.yml` | MEDIUM | ~2,000 | Add CD deploy workflow template (GHCR + platform placeholder) |
-| BEAR-011 | 4.C4-f | `.github/workflows/ci.yml`, `scripts/profile_queries.py` | MEDIUM | ~2,500 | Add performance profiling to CI |
-| BEAR-012 | — | `scripts/hooks/pre-commit-hook.py`, `CONTRIBUTING.md` | LOW | ~1,000 | Update pre-commit hook for new file location |
+| BEAR-005 | 4.B4-b | `scripts/smoke_test.py` | LOW | ~2,000 | ~~Add smoke test script for deployment verification~~ ✅ DONE |
+| BEAR-006 | 4.A3-b | `.github/workflows/ci.yml`, `pyproject.toml` | LOW | ~1,000 | ~~Add CI coverage threshold enforcement (80%)~~ ✅ DONE |
+| BEAR-007 | 4.A3-c | `.github/workflows/deploy.yml` | MEDIUM | ~2,000 | ~~Add CD deploy workflow template (GHCR + platform placeholder)~~ ✅ DONE |
+| BEAR-011 | 4.C4-f | `.github/workflows/ci.yml`, `scripts/profile_queries.py` | MEDIUM | ~2,500 | ~~Add performance profiling to CI~~ ✅ DONE |
+| BEAR-012 | — | `scripts/hooks/pre-commit-hook.py`, `CONTRIBUTING.md` | LOW | ~1,000 | ~~Update pre-commit hook for new file location~~ ✅ DONE |
 
 ---
 
@@ -400,7 +400,7 @@ OH MY Dependencies (sequential) — remaining items:
 Previously completed:
   LION: ✅ ALL 27/27 DONE
   TIGER: ✅ ALL 35/35 DONE
-  BEAR: ✅ ALL 25/25 DONE
+  BEAR: ✅ ALL 25/25 DONE + 12/12 NEW DONE (BEAR-001 through BEAR-012)
 ```
 
 ---
