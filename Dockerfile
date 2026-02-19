@@ -5,6 +5,31 @@
 #
 # Build:  docker build -t dod-budget .
 # Run:    docker run -p 8000:8000 -v ./dod_budget.sqlite:/app/dod_budget.sqlite dod-budget
+#
+# ──────────────────────────────────────────────────────────────────────────────
+# Dockerfile TODOs
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# TODO DOCKER-001 [Group: BEAR] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+#     Add templates/ and static/ directories to COPY instructions.
+#     Currently the Dockerfile copies API and utility code but NOT the
+#     templates/ and static/ directories needed for the frontend.
+#     Steps:
+#       1. Add: COPY templates/ templates/
+#       2. Add: COPY static/ static/
+#       3. Also copy schema_design.py (needed for migrations)
+#       4. Verify: docker build && docker run && curl localhost:8000/
+#     Acceptance: Docker container serves frontend pages at /.
+#
+# TODO DOCKER-002 [Group: BEAR] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+#     Add production security hardening.
+#     Steps:
+#       1. Add --no-install-recommends to apt-get (if any apt-get added later)
+#       2. Add PYTHONDONTWRITEBYTECODE=1 and PYTHONUNBUFFERED=1 env vars
+#       3. Pin pip version in RUN pip install
+#       4. Add read-only filesystem: --read-only flag note in docs
+#       5. Add security scan step note (trivy, snyk)
+#     Acceptance: Dockerfile follows Docker security best practices.
 
 FROM python:3.12-slim
 

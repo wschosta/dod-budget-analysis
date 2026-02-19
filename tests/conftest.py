@@ -24,6 +24,83 @@ Fixture creation tasks (STEP 1.C1 COMPLETE)
     DONE — requirements-dev.txt already lists pytest, pytest-cov, fpdf2.
 
 ──────────────────────────────────────────────────────────────────────────────
+Testing Gap TODOs
+──────────────────────────────────────────────────────────────────────────────
+
+TODO TEST-001 [Group: BEAR] [Complexity: MEDIUM] [Tokens: ~3000] [User: NO]
+    Add end-to-end frontend route tests using FastAPI TestClient.
+    The frontend routes (/, /charts, /partials/results, /partials/detail/{id})
+    have limited test coverage. Steps:
+      1. Create tests/test_frontend_routes.py
+      2. Add fixtures: test_app with templates and test DB
+      3. Test GET / returns 200 with expected HTML structure
+      4. Test GET /charts returns 200 with chart canvas elements
+      5. Test GET /partials/results with various filter combinations
+      6. Test GET /partials/detail/{id} returns detail HTML
+      7. Test 404 for non-existent detail ID
+      8. Test filter persistence: query params reflected in form values
+    Acceptance: Frontend route tests cover all paths; all pass.
+
+TODO TEST-002 [Group: BEAR] [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
+    Add tests for chart data loading and edge cases.
+    The charts page fetches data from /api/v1/aggregations and
+    /api/v1/budget-lines — test that the data contract is correct. Steps:
+      1. Create tests/test_charts_data.py
+      2. Test /api/v1/aggregations?group_by=service returns expected structure
+      3. Test /api/v1/aggregations?group_by=fiscal_year returns all FYs
+      4. Test aggregation with empty database (0 rows)
+      5. Test aggregation with NULL group values
+      6. Test budget-lines sort_by=amount_fy2026_request&sort_dir=desc
+    Acceptance: All chart data contracts tested; edge cases covered.
+
+TODO TEST-003 [Group: BEAR] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add tests for download endpoint streaming behavior.
+    Steps:
+      1. Create tests/test_download_streaming.py
+      2. Test CSV output has correct headers and row count
+      3. Test NDJSON output is valid JSON per line
+      4. Test filter parameters correctly narrow results
+      5. Test limit parameter caps output rows
+      6. Test empty result set produces header-only CSV
+    Acceptance: Download tests verify format, filtering, and limits.
+
+TODO TEST-004 [Group: BEAR] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add tests for rate limiter behavior.
+    Steps:
+      1. Create tests/test_rate_limiter.py
+      2. Test that 61 requests to /api/v1/search returns 429
+      3. Test that /health is not rate limited (or has higher limit)
+      4. Test that different IPs have independent limits
+      5. Test Retry-After header is present on 429 responses
+    Acceptance: Rate limiter tests verify all limits and headers.
+
+TODO TEST-005 [Group: BEAR] [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
+    Add performance regression tests.
+    Steps:
+      1. Create tests/test_performance.py
+      2. Test that search on a 1000-row DB completes in < 100ms
+      3. Test that aggregation completes in < 200ms
+      4. Test that budget-lines pagination first page loads in < 50ms
+      5. Test that download streaming starts within < 200ms
+      6. Use pytest-benchmark or manual time.monotonic() assertions
+    Note: These are smoke tests, not comprehensive benchmarks. The goal is
+    to catch accidental O(n^2) regressions, not guarantee absolute speed.
+    Acceptance: Performance tests pass on CI; regressions caught early.
+
+TODO TEST-006 [Group: BEAR] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add tests for accessibility requirements.
+    Steps:
+      1. Create tests/test_accessibility.py
+      2. Parse HTML from GET / and verify:
+         - All <img> have alt attributes
+         - All form inputs have associated <label>
+         - data-tooltip attributes present on key elements
+         - ARIA live regions present on dynamic containers
+      3. Parse HTML from GET /charts and verify chart containers
+    Note: This is static analysis, not a full Lighthouse audit.
+    Acceptance: Accessibility checks pass on CI; missing attributes flagged.
+
+──────────────────────────────────────────────────────────────────────────────
 Remaining TODOs
 ──────────────────────────────────────────────────────────────────────────────
 

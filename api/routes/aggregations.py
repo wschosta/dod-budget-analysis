@@ -3,6 +3,40 @@ GET /api/v1/aggregations endpoint (Step 2.C3-c).
 
 Groups budget lines by a dimension and sums the amount columns.
 Supports optional pre-filter by fiscal_year, service, or exhibit_type.
+
+──────────────────────────────────────────────────────────────────────────────
+TODOs for this file
+──────────────────────────────────────────────────────────────────────────────
+
+TODO AGG-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
+    Make aggregation amount columns dynamic instead of hardcoded.
+    Currently the SQL hardcodes SUM(amount_fy2026_request), etc. When FY2027
+    columns are added, this endpoint breaks. Steps:
+      1. Query budget_lines table schema to discover amount_fy* columns
+      2. Build SUM() expressions dynamically for all found FY columns
+      3. Update AggregationRow model to use a dict for dynamic FY sums:
+         fy_totals: dict[str, float | None] instead of named fields
+      4. Cache the column discovery result (schema changes rarely)
+    Acceptance: Aggregations auto-include new FY columns without code changes.
+
+TODO AGG-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add percentage and delta calculations to aggregation output.
+    Users want to see year-over-year change and share-of-total. Steps:
+      1. Calculate total across all groups for each FY column
+      2. Add pct_of_total (float, 0-100) to each AggregationRow
+      3. Add yoy_change_pct (float, percent change from prior FY) if both
+         FY columns are present
+    Acceptance: Aggregation rows include percentage and YoY delta fields.
+
+TODO OPT-AGG-001 [Group: TIGER] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add server-side caching for expensive aggregation queries.
+    Aggregations over the full budget_lines table are slow on large datasets.
+    Steps:
+      1. Add in-memory cache keyed on (group_by, fiscal_year, service,
+         exhibit_type) tuple with 60-second TTL
+      2. Return cached result if available; run query and cache if not
+      3. Add Cache-Control: max-age=60 response header
+    Acceptance: Repeated aggregation queries return in <10ms after first hit.
 """
 
 import sqlite3

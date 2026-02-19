@@ -5,6 +5,31 @@ Provides reusable functions for:
 - Text snippet extraction and highlighting
 - Tabular report output
 - Data serialization for display
+
+──────────────────────────────────────────────────────────────────────────────
+TODOs for this file
+──────────────────────────────────────────────────────────────────────────────
+
+TODO OPT-FMT-001 [Group: TIGER] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Consolidate fmt_amount() between this module and api/app.py.
+    api/app.py defines its own inline fmt_amount() Jinja filter (line ~260)
+    that duplicates format_amount() from this module. Steps:
+      1. Make format_amount() compatible with Jinja filter signature
+         (single value arg, returns string)
+      2. In api/app.py, import from utils.formatting instead of defining inline
+      3. Ensure Jinja template usage still works (|fmt_amount filter)
+    Acceptance: Single format_amount() used everywhere; templates render same.
+
+TODO OPT-FMT-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Move _snippet() from api/routes/search.py into this module.
+    search.py has a _snippet() function for extracting text around search
+    matches. This functionality overlaps with extract_snippet() already in
+    this file. Steps:
+      1. Compare _snippet() and extract_snippet() — consolidate logic
+      2. Add highlight parameter to wrap matches in <mark> tags
+      3. Have search.py import extract_snippet from utils.formatting
+      4. Update tests to verify snippet with highlight mode
+    Acceptance: Single snippet function; search.py uses shared version.
 """
 
 from typing import Optional, List, Dict, Any

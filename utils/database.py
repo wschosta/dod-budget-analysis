@@ -5,6 +5,45 @@ Provides reusable functions for:
 - Batch insert operations
 - Common database queries and aggregations
 - Connection lifecycle management
+
+──────────────────────────────────────────────────────────────────────────────
+TODOs for this file
+──────────────────────────────────────────────────────────────────────────────
+
+TODO OPT-DBUTIL-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
+    Add dynamic schema introspection utility.
+    Multiple modules need to know which amount_fy* columns exist in
+    budget_lines (charts.html JS, aggregations.py, build_budget_db.py).
+    Steps:
+      1. Add get_amount_columns(conn) -> list[str] function that queries
+         PRAGMA table_info(budget_lines) and filters for amount_fy* columns
+      2. Add get_quantity_columns(conn) -> list[str] similarly
+      3. Cache the result per-connection (schema doesn't change mid-session)
+      4. Use this in aggregations.py to build dynamic SUM() clauses
+    Acceptance: Schema introspection returns current FY columns dynamically.
+
+TODO OPT-DBUTIL-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add batch_upsert() for incremental updates.
+    batch_insert() always INSERTs. For incremental builds where a file is
+    re-processed, we need INSERT OR REPLACE semantics. Steps:
+      1. Add batch_upsert(conn, table, columns, rows, conflict_columns)
+      2. Generate INSERT ... ON CONFLICT(conflict_cols) DO UPDATE SET ...
+      3. Use in build_budget_db.py for re-ingesting modified files
+    Acceptance: Re-ingesting a file updates existing rows instead of duplicating.
+
+TODO OPT-DBUTIL-003 [Group: TIGER] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add query_builder utility for safe parameterized queries.
+    Multiple files construct SQL strings with f-strings for column names
+    and WHERE clauses. While column names are validated against allow-lists,
+    a query builder would be cleaner. Steps:
+      1. Add QueryBuilder class with .select(), .where(), .order_by(),
+         .limit(), .offset() methods
+      2. Generate parameterized SQL with ? placeholders
+      3. Return (sql_string, params_list) tuple
+      4. Use in budget_lines.py, frontend.py, download.py
+    Note: This overlaps with OPT-FE-001 (shared WHERE builder). Consider
+    combining into a single utils/query.py module.
+    Acceptance: Query builder produces same SQL as current f-strings; tests pass.
 """
 
 import sqlite3

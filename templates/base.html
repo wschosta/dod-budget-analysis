@@ -1,3 +1,49 @@
+{#
+──────────────────────────────────────────────────────────────────────────────
+Base template TODOs (Step 3.A7 — Responsive Design & Accessibility)
+──────────────────────────────────────────────────────────────────────────────
+
+TODO 3.A7-c / FE-004 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add skip-to-content link for keyboard/screen reader accessibility.
+    Steps:
+      1. Add <a href="#main-content" class="skip-link">Skip to main content</a>
+         as first child of <body>
+      2. Add id="main-content" to the <main> element
+      3. Style .skip-link: visually hidden, visible on :focus
+         (position:absolute; left:-9999px; &:focus { left:1rem; top:1rem; })
+      4. Ensure <main> has tabindex="-1" so it can receive focus
+    Acceptance: Tab from top of page shows skip link; Enter jumps to content.
+
+TODO 3.A7-d / FE-005 [Group: LION] [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
+    Add ARIA live regions for HTMX dynamic content updates.
+    When HTMX swaps results, screen readers don't announce the change. Steps:
+      1. Add aria-live="polite" to #results-container in index.html
+      2. Add role="status" to #loading-indicator
+      3. Use htmx:beforeRequest/htmx:afterSwap to toggle aria-busy
+      4. Add role="search" to the filter form wrapper
+      5. Add aria-sort attributes to sortable <th> in results.html
+      6. Ensure download modal has role="dialog" and aria-labelledby
+    Acceptance: Screen readers announce result updates and loading states.
+
+TODO 3.A7-e / FE-008 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add SRI integrity hashes to CDN script tags.
+    HTMX and Chart.js load from unpkg/jsdelivr without integrity checks.
+    Steps:
+      1. Generate SRI hashes for both CDN scripts
+      2. Add integrity="sha384-..." to both <script> tags
+      3. Consider adding <link rel="preconnect"> hints for CDN domains
+      4. Alternative: self-host in /static/js/ to eliminate CDN dependency
+    Acceptance: Both CDN scripts have SRI integrity attributes.
+
+TODO 3.A7-f / FE-009 [Group: LION] [Complexity: LOW] [Tokens: ~800] [User: NO]
+    Add <meta name="description"> and Open Graph tags for SEO/sharing.
+    Steps:
+      1. Add <meta name="description" content="Search and explore DoD budget
+         justification data...">
+      2. Add og:title, og:description, og:type meta tags
+      3. Add <link rel="icon" href="/static/images/favicon.ico">
+    Acceptance: Social media previews show title and description.
+#}
 <!DOCTYPE html>
 <html lang="en">
 <head>

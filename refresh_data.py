@@ -24,6 +24,37 @@ DONE REFRESH-001: Stages 2 (build) and 3 (validate) now call Python functions
   since the downloader has heavy optional deps (Playwright, GUI).
 DONE REFRESH-002: --notify flag added; POSTs summary JSON to webhook URL on
   completion or failure.
+
+TODO REFRESH-003 [Group: BEAR] [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
+    Add automatic rollback on failed refresh.
+    If Stage 2 (build) or Stage 3 (validate) fails, the database may be in an
+    inconsistent state. Steps:
+      1. Before Stage 2, copy current DB to dod_budget.sqlite.bak
+      2. If Stage 2 or 3 fails, restore from backup
+      3. Log rollback event and include in notification webhook
+      4. Add --no-rollback flag to disable this for debugging
+    Acceptance: Failed refresh restores previous good database.
+
+TODO REFRESH-004 [Group: BEAR] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add refresh progress file for monitoring.
+    During long-running refreshes (can be 30+ minutes for full download),
+    there's no way to monitor progress externally. Steps:
+      1. Write refresh_progress.json at each stage transition
+      2. Include: current_stage, stage_status, elapsed_seconds, stage_detail
+      3. External monitors can poll this file (e.g., GitHub Actions, web UI)
+      4. Delete file on successful completion
+    Acceptance: Progress file updated during refresh; monitorable externally.
+
+TODO REFRESH-005 [Group: BEAR] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add --schedule flag for periodic refresh support.
+    Steps:
+      1. Add --schedule=daily|weekly|monthly argparse argument
+      2. Use Python's sched module or a simple sleep loop
+      3. Log next scheduled run time
+      4. Add --at-hour HH:MM to control time of day
+    NOTE: For production use, prefer cron/Task Scheduler/GH Actions over
+    this built-in scheduler. This is for simple local deployments.
+    Acceptance: --schedule=daily runs refresh once per day.
 """
 
 import argparse

@@ -2,6 +2,58 @@
  * DoD Budget Explorer — app.js
  * Handles: column toggles (3.A4-b), URL query params (3.A3-b),
  *          download link generation (3.A5-a), row selection (3.A6-a).
+ *
+ * ──────────────────────────────────────────────────────────────────────────
+ * JavaScript TODOs
+ * ──────────────────────────────────────────────────────────────────────────
+ *
+ * TODO 3.A5-b / JS-001 [Group: LION] [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
+ *     Add Excel (.xlsx) export support to download modal.
+ *     The wireframe shows CSV, JSON, and Excel download options but only
+ *     CSV and NDJSON are implemented. Steps:
+ *       1. Add a /api/v1/download?fmt=xlsx endpoint in api/routes/download.py
+ *          using openpyxl to generate .xlsx in a streaming fashion
+ *       2. Add a "Download Excel" button in the download modal (index.html)
+ *       3. Wire buildDownloadURL('xlsx') in this file
+ *       4. Add Content-Disposition header with .xlsx filename
+ *     Acceptance: Excel download produces valid .xlsx with filtered data.
+ *
+ * TODO 3.A5-c / JS-002 [Group: LION] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+ *     Show estimated result count and file size in download modal.
+ *     Currently the modal says "up to 50,000 rows" but doesn't show the
+ *     actual count for the current filter set. Steps:
+ *       1. When download modal opens, fetch current result count from
+ *          the #results-container .results-count text
+ *       2. Parse the count and display it in the modal
+ *       3. Estimate file size (~100 bytes/row for CSV, ~200 for JSON)
+ *       4. Update modal text: "4,527 matching rows (~450 KB CSV)"
+ *     Acceptance: Modal shows actual result count and estimated file size.
+ *
+ * TODO 3.A3-f / JS-003 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+ *     Add keyboard shortcut for search focus (Ctrl+K or /).
+ *     Steps:
+ *       1. Add keydown listener for '/' or 'Ctrl+K'
+ *       2. Focus the #q input and prevent default
+ *       3. Add visual hint near search box: "Press / to search"
+ *     Acceptance: Pressing / anywhere focuses the search input.
+ *
+ * TODO 3.A6-d / JS-004 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+ *     Add keyboard navigation for detail panel.
+ *     Steps:
+ *       1. After detail loads via HTMX, focus the detail panel heading
+ *       2. Add Escape key handler to close the detail panel
+ *       3. Add aria-expanded attribute to the selected table row
+ *     Acceptance: Keyboard users can navigate to and dismiss detail panel.
+ *
+ * TODO OPT-JS-001 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+ *     Debounce filter form changes to reduce API requests.
+ *     Currently every checkbox change fires an HTMX request immediately.
+ *     For multi-select changes (e.g., selecting 3 services), this sends 3
+ *     requests. Steps:
+ *       1. Add hx-trigger="change delay:300ms" to multi-select elements
+ *       2. Or use a "debounced form submission" pattern: collect changes
+ *          for 300ms before sending
+ *     Acceptance: Rapid filter changes produce one request, not many.
  */
 
 "use strict";

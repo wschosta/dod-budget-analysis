@@ -30,7 +30,7 @@ Usage Examples
 Roadmap TODOs for this file (Step 1.A)
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO 1.A1-a [Complexity: LOW] [Tokens: ~1500] [User: YES — needs network + live env]
+TODO 1.A1-a [Group: OH MY] [Complexity: LOW] [Tokens: ~1500] [User: YES — needs network + live env]
     Audit source coverage by running --list --years all --sources all.
     Steps:
       1. Run: python dod_budget_downloader.py --list --years all --sources all > coverage.txt
@@ -39,7 +39,7 @@ TODO 1.A1-a [Complexity: LOW] [Tokens: ~1500] [User: YES — needs network + liv
       4. Record gaps in DATA_SOURCES.md
     Success: A coverage matrix showing files per source per FY.
 
-TODO 1.A1-b [Complexity: MEDIUM] [Tokens: ~2500] [User: YES — needs web browsing]
+TODO 1.A1-b [Group: OH MY] [Complexity: MEDIUM] [Tokens: ~2500] [User: YES — needs web browsing]
     Identify missing DoD component sources. Agencies NOT currently covered:
       - Defense Logistics Agency (DLA)
       - Missile Defense Agency (MDA) — may have standalone exhibits on mda.mil
@@ -54,7 +54,7 @@ TODO 1.A1-b [Complexity: MEDIUM] [Tokens: ~2500] [User: YES — needs web browsi
       4. Record findings in DATA_SOURCES.md
     Success: Each agency is confirmed as covered or documented as gap.
 
-TODO 1.A1-c [Complexity: LOW] [Tokens: ~1000] [User: YES — needs network]
+TODO 1.A1-c [Group: OH MY] [Complexity: LOW] [Tokens: ~1000] [User: YES — needs network]
     Verify defense-wide discovery captures all J-Books.
     Steps:
       1. Run --list --years 2026 --sources defense-wide
@@ -62,7 +62,7 @@ TODO 1.A1-c [Complexity: LOW] [Tokens: ~1000] [User: YES — needs network]
       3. Add missing URL patterns to discover_defense_wide_files() if needed
     Success: All known J-Books appear in discovery output.
 
-TODO 1.A2-a [Complexity: LOW] [Tokens: ~1000] [User: YES — needs network]
+TODO 1.A2-a [Group: OH MY] [Complexity: LOW] [Tokens: ~1000] [User: YES — needs network]
     Test historical fiscal year reach back to FY2017.
     Steps:
       1. Run --list --years 2017 2018 2019 --sources comptroller
@@ -70,7 +70,7 @@ TODO 1.A2-a [Complexity: LOW] [Tokens: ~1000] [User: YES — needs network]
       3. If gaps found, check Wayback Machine / alternate archive URLs
     Success: Documents available for FY2017+ confirmed and documented.
 
-TODO 1.A2-b [Complexity: MEDIUM] [Tokens: ~2000] [User: YES — depends on 1.A2-a]
+TODO 1.A2-b [Group: OH MY] [Complexity: MEDIUM] [Tokens: ~2000] [User: YES — depends on 1.A2-a]
     Handle alternate URL patterns for older fiscal years.
     Dependency: TODO 1.A2-a must identify which years fail first.
     Steps:
@@ -79,7 +79,7 @@ TODO 1.A2-b [Complexity: MEDIUM] [Tokens: ~2000] [User: YES — depends on 1.A2-
       3. Test with --list --years <failing_year>
     Success: All FY2017+ years return non-empty discovery results.
 
-TODO 1.A2-c [Complexity: MEDIUM] [Tokens: ~2500] [User: YES — needs network]
+TODO 1.A2-c [Group: OH MY] [Complexity: MEDIUM] [Tokens: ~2500] [User: YES — needs network]
     Handle service-specific historical URL changes for FY2017-2020.
     Steps:
       1. Run --list --years 2017 2018 --sources army navy airforce

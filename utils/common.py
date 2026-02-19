@@ -1,4 +1,29 @@
-"""Common utility functions used across the DoD budget tools."""
+"""Common utility functions used across the DoD budget tools.
+
+──────────────────────────────────────────────────────────────────────────────
+TODOs for this file
+──────────────────────────────────────────────────────────────────────────────
+
+TODO OPT-UTIL-001 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Consolidate get_connection() with api/database.py connection logic.
+    Both this module and api/database.py create SQLite connections with
+    similar pragma settings. Unify into a single create_connection() function:
+      1. Add create_connection(path, read_only=False, pragmas=True) here
+      2. Accept read_only flag that opens with "?mode=ro" URI
+      3. Accept pragmas flag to apply WAL + NORMAL + cache settings
+      4. Have api/database.py import and use this function
+      5. Have build_budget_db.py use this for its DB connections too
+    Acceptance: Single connection factory; all callers use it; tests pass.
+
+TODO OPT-UTIL-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add elapsed() variants for different display formats.
+    elapsed() returns a string like "1m 23s" but some callers need seconds
+    (for JSON logging) or milliseconds (for response headers). Steps:
+      1. Add elapsed_ms(start) -> int returning milliseconds
+      2. Add elapsed_sec(start) -> float returning seconds with 2 decimals
+      3. Keep existing elapsed() as the human-readable version
+    Acceptance: All three variants available; existing callers unchanged.
+"""
 
 import sqlite3
 import sys

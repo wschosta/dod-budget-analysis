@@ -1,4 +1,26 @@
-{# Detail panel partial — loaded on row click (3.A6-a) #}
+{# Detail panel partial — loaded on row click (3.A6-a)
+
+TODO 3.A6-b / FE-006 [Group: LION] [Complexity: MEDIUM] [Tokens: ~3000] [User: NO]
+    Add "Related Items" section showing the same program across fiscal years.
+    The wireframe (docs/UI_WIREFRAMES.md section 7) shows Related Items with
+    FY links. Steps:
+      1. In detail_partial() in api/routes/frontend.py, query budget_lines for
+         rows matching same pe_number OR (organization_name + line_item_title)
+         across different fiscal_years
+      2. Pass related_items list to template context
+      3. Add "Related Fiscal Years" section after the Funding section below
+      4. Render each as: FY | Amount | hx-get link to load that detail
+      5. Handle case where no related items exist (hide section)
+    Acceptance: Detail panel shows the same program across available FYs.
+
+TODO 3.A6-c / FE-007 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add "Download This Item" and "Source Document" buttons to detail panel.
+    Steps:
+      1. Add download link calling /api/v1/download with item-specific filter
+      2. Add "View Original Document" link mapping source_file to DoD URL
+      3. Style buttons consistently with existing .btn classes
+    Acceptance: Users can download single item and link to source document.
+#}
 {% if item %}
 <div class="detail-panel" id="detail-panel">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem;flex-wrap:wrap">

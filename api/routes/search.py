@@ -3,6 +3,50 @@ GET /api/v1/search endpoint (Step 2.C3-a).
 
 Reuses FTS5 MATCH logic from search_budget.py.  Returns unified results with
 optional snippet highlighting for both budget lines and PDF pages.
+
+──────────────────────────────────────────────────────────────────────────────
+TODOs for this file
+──────────────────────────────────────────────────────────────────────────────
+
+TODO SEARCH-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
+    Add BM25 relevance scoring to search results.
+    Currently results are ordered by amount (DESC) rather than relevance.
+    FTS5 supports bm25() for ranking. Steps:
+      1. Use FTS5 rank function: SELECT *, bm25(budget_lines_fts) AS score
+      2. Add sort parameter: relevance (default), amount_desc, fiscal_year
+      3. Return score field in SearchResultItem
+      4. Update _BUDGET_SELECT and _PDF_SELECT to include rank
+    Acceptance: Search results ranked by relevance; score field populated.
+
+TODO SEARCH-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add structured filter support to search endpoint.
+    Currently search only accepts a text query and type filter. Add support
+    for fiscal_year, service, and exhibit_type filters (same as budget-lines).
+    Steps:
+      1. Add fiscal_year, service, exhibit_type Query parameters
+      2. Build WHERE clause filtering (similar to budget_lines.py)
+      3. Combine FTS MATCH with structured filters via subquery or JOIN
+    Acceptance: /api/v1/search?q=missile&service=Navy returns Navy results only.
+
+TODO SEARCH-003 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Improve snippet generation with HTML highlighting.
+    Currently _snippet() extracts text but doesn't highlight matching terms.
+    Steps:
+      1. After extracting the snippet, wrap matching terms in <mark> tags
+      2. Ensure the text is HTML-escaped first (prevent XSS), then apply marks
+      3. Return highlighted snippet for use in both API and frontend
+      4. Use utils/formatting.py highlight_terms() which already exists
+    Acceptance: Snippets have matching terms wrapped in <mark> tags.
+
+TODO SEARCH-004 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
+    Add search suggestions / autocomplete endpoint.
+    Steps:
+      1. Add GET /api/v1/search/suggest?q=miss&limit=5 endpoint
+      2. Query DISTINCT line_item_title, account_title, pe_number
+         WHERE column LIKE 'miss%' LIMIT 5
+      3. Return compact suggestion list for typeahead UI
+      4. Wire into frontend with HTMX hx-trigger="keyup changed delay:200ms"
+    Acceptance: Typing in search shows dropdown suggestions from the data.
 """
 
 import sqlite3

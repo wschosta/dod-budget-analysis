@@ -1,4 +1,33 @@
-{# Results table partial — rendered server-side and swapped by HTMX (3.A4-a) #}
+{# Results table partial — rendered server-side and swapped by HTMX (3.A4-a)
+
+TODO 3.A4-c / FE-010 [Group: LION] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add page-size selector to pagination controls.
+    The wireframe shows "Page size: [20 ▼] Go to page: [ ] [Go]" but the
+    current implementation has fixed 25-row pages. Steps:
+      1. Add a <select> with options 10, 25, 50, 100 before the pagination
+      2. Wire it to hx-get with page_size parameter
+      3. Update _parse_filters() and _query_results() to accept page_size
+      4. Persist selection in localStorage via app.js
+    Acceptance: Users can change results per page; selection persists.
+
+TODO 3.A4-d / FE-011 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add "Export visible columns only" option to download modal.
+    Currently download exports all columns regardless of column visibility
+    toggles. Steps:
+      1. Pass hidden column list from localStorage to download URL params
+      2. Update download endpoint to accept a columns parameter
+      3. Filter _DOWNLOAD_COLUMNS based on the parameter
+    Acceptance: CSV/JSON export respects column visibility preferences.
+
+TODO 3.A3-e / FE-003 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add "active filter chips" above the results table.
+    Render currently-applied filters as dismissible chips. Steps:
+      1. Before the results-panel div, render a filter-chips container
+      2. For each non-empty filter, show: "Service: Army [×]"
+      3. Clicking × removes that filter and re-fetches via HTMX
+      4. Add .filter-chip styles in main.css
+    Acceptance: Active filters shown as chips, individually removable.
+#}
 
 {% if items %}
 <div class="results-panel">
