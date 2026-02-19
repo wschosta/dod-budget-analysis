@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# TODO [Group: BEAR] BEAR-012: Update pre-commit hook for new file location + CONTRIBUTING.md reference (~1,000 tokens)
+# DONE [Group: BEAR] BEAR-012: Pre-commit hook updated for scripts/hooks/ location
 """
 Pre-commit hook for optimization tests
 
@@ -11,6 +11,9 @@ Install with:
 Or use with pre-commit framework:
     pip install pre-commit
     pre-commit install
+
+Location: scripts/hooks/pre-commit-hook.py
+The hook resolves the project root via parent.parent.parent (scripts/hooks/ -> project root).
 """
 
 import ast

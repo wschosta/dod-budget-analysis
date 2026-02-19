@@ -8,3 +8,14 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
+
+# DONE [Group: BEAR] BEAR-006: Coverage threshold enforcement
+[tool.coverage.run]
+source = ["api", "utils"]
+
+[tool.coverage.report]
+fail_under = 80
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING",
+]

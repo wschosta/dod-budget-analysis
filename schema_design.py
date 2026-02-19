@@ -440,7 +440,7 @@ def _current_version(conn: sqlite3.Connection) -> int:
         return 0
 
 
-# TODO [Group: BEAR] BEAR-008: Add database migration framework tests (~2,500 tokens)
+# DONE [Group: BEAR] BEAR-008: Database migration framework tests — tests/test_bear_migration.py (10 tests)
 
 def migrate(conn: sqlite3.Connection) -> int:
     """Apply all pending migrations in order.

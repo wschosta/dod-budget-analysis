@@ -42,7 +42,10 @@ pip install -r requirements-dev.txt
 python build_budget_db.py --help
 python build_budget_db.py        # writes dod_budget.sqlite in the project root
 
-# 5. Start the development API server
+# 5. (Optional) Install pre-commit hook
+cp scripts/hooks/pre-commit-hook.py .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+# 6. Start the development API server
 uvicorn api.app:app --reload --port 8000
 # Open http://localhost:8000 in your browser
 # OpenAPI docs: http://localhost:8000/docs
