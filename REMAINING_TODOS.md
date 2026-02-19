@@ -1,6 +1,6 @@
 # Remaining TODOs
 
-Updated: 2026-02-19
+Updated: 2026-02-19 (synced with actual implementation state)
 
 This document catalogs all TODO items across the codebase, organized by agent
 group assignment and priority. Each TODO is sized for an agent to work through
@@ -25,9 +25,9 @@ without user intervention (except `OH MY` group items).
 |-------|-------|-------------------|------------|
 | LION | 0 remaining (27/27 ✅ DONE) | ~32,300 | Yes |
 | TIGER | 0 remaining (35/35 ✅ DONE) | ~56,300 | Yes |
-| BEAR | 25 | ~39,500 | Yes |
+| BEAR | 0 remaining (25/25 ✅ DONE) | ~39,500 | Yes |
 | OH MY | 12 | ~18,500 | No |
-| **Total** | **94** | **~146,600** | |
+| **Total** | **94 tracked (82 ✅ DONE, 12 remaining)** | **~146,600** | |
 
 ---
 
@@ -186,57 +186,57 @@ without user intervention (except `OH MY` group items).
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| BUILD-001 | 1.A6-a | `build_budget_db.py` | MEDIUM | ~3000 | Implement structured failure log + `--retry-failures` |
-| BUILD-002 | 1.B3-d | `build_budget_db.py` | MEDIUM | ~4000 | Make fiscal year columns dynamic (auto ALTER TABLE) |
-| BUILD-003 | 1.B5-d | `build_budget_db.py` | LOW | ~2000 | Add configurable PDF extraction timeout per page |
-| OPT-BUILD-001 | — | `build_budget_db.py` | MEDIUM | ~3500 | Parallelize Excel ingestion with ProcessPoolExecutor |
+| BUILD-001 | 1.A6-a | `build_budget_db.py` | MEDIUM | ~3000 | ~~Implement structured failure log + `--retry-failures`~~ ✅ DONE |
+| BUILD-002 | 1.B3-d | `build_budget_db.py` | MEDIUM | ~4000 | ~~Make fiscal year columns dynamic (auto ALTER TABLE)~~ ✅ DONE |
+| BUILD-003 | 1.B5-d | `build_budget_db.py` | LOW | ~2000 | ~~Add configurable PDF extraction timeout per page~~ ✅ DONE |
+| OPT-BUILD-001 | — | `build_budget_db.py` | MEDIUM | ~3500 | ~~Parallelize Excel ingestion with ProcessPoolExecutor~~ ✅ DONE |
 
 ### Refresh Pipeline (refresh_data.py)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| REFRESH-003 | — | `refresh_data.py` | MEDIUM | ~2500 | Add automatic rollback on failed refresh |
-| REFRESH-004 | — | `refresh_data.py` | LOW | ~1500 | Add refresh progress file for external monitoring |
-| REFRESH-005 | — | `refresh_data.py` | LOW | ~1000 | Add `--schedule` flag for periodic refresh |
+| REFRESH-003 | — | `refresh_data.py` | MEDIUM | ~2500 | ~~Add automatic rollback on failed refresh~~ ✅ DONE |
+| REFRESH-004 | — | `refresh_data.py` | LOW | ~1500 | ~~Add refresh progress file for external monitoring~~ ✅ DONE |
+| REFRESH-005 | — | `refresh_data.py` | LOW | ~1000 | ~~Add `--schedule` flag for periodic refresh~~ ✅ DONE |
 
 ### Testing (tests/conftest.py, new test files)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| TEST-001 | — | new `tests/test_frontend_routes.py` | MEDIUM | ~3000 | End-to-end frontend route tests with TestClient |
-| TEST-002 | — | new `tests/test_charts_data.py` | MEDIUM | ~2500 | Chart data contract tests + edge cases |
-| TEST-003 | — | new `tests/test_download_streaming.py` | LOW | ~1500 | Download endpoint streaming tests |
-| TEST-004 | — | new `tests/test_rate_limiter.py` | LOW | ~1500 | Rate limiter behavior tests |
-| TEST-005 | — | new `tests/test_performance.py` | MEDIUM | ~2000 | Performance regression smoke tests |
-| TEST-006 | — | new `tests/test_accessibility.py` | LOW | ~1500 | Static accessibility checks on HTML output |
+| TEST-001 | — | `tests/test_frontend_routes.py` | MEDIUM | ~3000 | ~~End-to-end frontend route tests with TestClient~~ ✅ DONE |
+| TEST-002 | — | `tests/test_charts_data.py` | MEDIUM | ~2500 | ~~Chart data contract tests + edge cases~~ ✅ DONE |
+| TEST-003 | — | `tests/test_download_streaming.py` | LOW | ~1500 | ~~Download endpoint streaming tests~~ ✅ DONE |
+| TEST-004 | — | `tests/test_rate_limiter.py` | LOW | ~1500 | ~~Rate limiter behavior tests~~ ✅ DONE |
+| TEST-005 | — | `tests/test_performance.py` | MEDIUM | ~2000 | ~~Performance regression smoke tests~~ ✅ DONE |
+| TEST-006 | — | `tests/test_accessibility.py` | LOW | ~1500 | ~~Static accessibility checks on HTML output~~ ✅ DONE |
 
 ### Deployment & Docker
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| DEPLOY-001 | 4.C7-a | `deployment_design.py` | MEDIUM | ~2500 | Add /health/detailed metrics endpoint |
-| DEPLOY-002 | 4.C7-b | new `scripts/backup_db.py` | LOW | ~1500 | Add database backup script |
-| DEPLOY-003 | 4.C8-a | `api/app.py` | LOW | ~1500 | Add Content Security Policy headers |
-| DEPLOY-004 | 4.B4-a | `docker-compose.staging.yml` | MEDIUM | ~2000 | Add staging environment configuration |
-| DEPLOY-005 | 4.C6-b | new `CONTRIBUTING.md` | LOW | ~2000 | Write CONTRIBUTING.md with dev guidelines |
-| DOCKER-001 | — | `Dockerfile` | LOW | ~1000 | Add templates/ and static/ to COPY |
-| DOCKER-002 | — | `Dockerfile` | LOW | ~1000 | Add production security hardening |
-| DOCKER-003 | — | `docker-compose.yml` | LOW | ~1000 | Add templates/static volume mounts for hot-reload |
-| DOCKER-004 | — | `docker-compose.yml` | LOW | ~1000 | Remove deprecated version key |
+| DEPLOY-001 | 4.C7-a | `api/app.py` | MEDIUM | ~2500 | ~~Add /health/detailed metrics endpoint~~ ✅ DONE |
+| DEPLOY-002 | 4.C7-b | `scripts/backup_db.py` | LOW | ~1500 | ~~Add database backup script~~ ✅ DONE |
+| DEPLOY-003 | 4.C8-a | `api/app.py` | LOW | ~1500 | ~~Add Content Security Policy headers~~ ✅ DONE |
+| DEPLOY-004 | 4.B4-a | `docker-compose.staging.yml` | MEDIUM | ~2000 | ~~Add staging environment configuration~~ ✅ DONE |
+| DEPLOY-005 | 4.C6-b | `CONTRIBUTING.md` | LOW | ~2000 | ~~Write CONTRIBUTING.md with dev guidelines~~ ✅ DONE |
+| DOCKER-001 | — | `Dockerfile` | LOW | ~1000 | ~~Add templates/ and static/ to COPY~~ ✅ DONE |
+| DOCKER-002 | — | `Dockerfile` | LOW | ~1000 | ~~Add production security hardening~~ ✅ DONE |
+| DOCKER-003 | — | `docker-compose.yml` | LOW | ~1000 | ~~Add templates/static volume mounts for hot-reload~~ ✅ DONE |
+| DOCKER-004 | — | `docker-compose.yml` | LOW | ~1000 | ~~Remove deprecated version key~~ ✅ DONE |
 
 ### CI/CD (.github/workflows/)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| CI-001 | — | `.github/workflows/ci.yml` | LOW | ~1500 | Add test coverage reporting |
-| CI-002 | — | `.github/workflows/ci.yml` | LOW | ~1000 | Add mypy type checking step |
-| CI-003 | — | `.github/workflows/ci.yml` | LOW | ~1000 | Add Docker build validation step |
+| CI-001 | — | `.github/workflows/ci.yml` | LOW | ~1500 | ~~Add test coverage reporting~~ ✅ DONE |
+| CI-002 | — | `.github/workflows/ci.yml` | LOW | ~1000 | ~~Add mypy type checking step~~ ✅ DONE |
+| CI-003 | — | `.github/workflows/ci.yml` | LOW | ~1000 | ~~Add Docker build validation step~~ ✅ DONE |
 
 ### Documentation
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| DOC-001 | 3.C4-a | `docs/wiki/API-Reference.md` | MEDIUM | ~4000 | Populate API Reference with endpoint docs + examples |
+| DOC-001 | 3.C4-a | `docs/wiki/API-Reference.md` | MEDIUM | ~4000 | ~~Populate API Reference with endpoint docs + examples~~ ✅ DONE |
 
 ---
 
@@ -290,7 +290,7 @@ corpus, or community review.
 ## Dependency Graph
 
 ```
-OH MY Dependencies (sequential):
+OH MY Dependencies (sequential) — remaining items:
   1.A1-a ──► 1.A2-a ──► 1.A2-b
     │                      │
     ▼                      ▼
@@ -299,40 +299,24 @@ OH MY Dependencies (sequential):
 
   4.A3-a ──► 4.B2-a ──► 4.C1-a ──► 4.C6-a
 
-LION Suggested Order:
-  CSS-001,002,003 ──► FE-004 (skip link needs CSS-002)
-  FE-001,002 ──► FE-003 (chips need filters to exist)
-  FE-008,009 (independent, do early)
-  VIZ-002 ──► VIZ-001 ──► VIZ-003 (error handling before dynamic FY)
-
-TIGER Suggested Order:
-  UTIL-001,002 ──► OPT-FE-001,002 (shared utils before route refactors)
-  OPT-DBUTIL-001 ──► AGG-001 (schema introspection before dynamic agg)
-  SEARCH-001 ──► SEARCH-002 ──► SEARCH-003 (scoring before filters before snippets)
-  OPT-CFG-001 ──► APP-001,003 (config consolidation before middleware changes)
-  SCHEMA-001 ──► SCHEMA-002a ──► SCHEMA-002b ──► SCHEMA-002c
-
-BEAR Suggested Order:
-  DOCKER-001,004 ──► DOCKER-002,003 (basic fixes before hardening)
-  BUILD-003 ──► BUILD-001 ──► BUILD-002 (small fixes before big refactors)
-  TEST-001,003 ──► TEST-002 ──► TEST-004,005,006 (basic tests before advanced)
-  CI-001 ──► CI-002 ──► CI-003 (coverage before type checks before Docker)
-  DOC-001 (independent, can be done anytime)
+LION: ✅ ALL 27/27 DONE
+TIGER: ✅ ALL 35/35 DONE
+BEAR: ✅ ALL 25/25 DONE
 ```
 
 ---
 
 ## Cross-File Coordination Notes
 
-Some TODOs span files owned by different groups. Coordinate as follows:
+All cross-file coordination items have been resolved:
 
-| TODO | Primary Group | Touches Other Group's Files | Resolution |
-|------|--------------|----------------------------|------------|
-| FE-001 | LION | `api/routes/frontend.py` (TIGER) | LION implements frontend.py filter changes since they own the feature |
-| FE-006 | LION | `api/routes/frontend.py` (TIGER) | LION adds related items query to frontend.py |
-| JS-001/DL-001 | LION/TIGER | Both need xlsx export | TIGER implements DL-001 endpoint; LION wires JS-001 button |
-| VIZ-001 | LION | `api/routes/aggregations.py` (TIGER) | TIGER does AGG-001 first; LION adapts charts |
-| OPT-FE-001 | TIGER | Shared utility used by LION's frontend.py | TIGER creates utils/query.py; LION adopts it |
+| TODO | Primary Group | Resolution |
+|------|--------------|------------|
+| FE-001 | LION | ✅ DONE — filter changes implemented in frontend.py |
+| FE-006 | LION | ✅ DONE — related items query added to frontend.py |
+| JS-001/DL-001 | LION/TIGER | ✅ DONE — TIGER endpoint + LION button both implemented |
+| VIZ-001 | LION | ✅ DONE — aggregation dynamic FY + chart adaptation both done |
+| OPT-FE-001 | TIGER | ✅ DONE — utils/query.py created and adopted |
 
 ---
 

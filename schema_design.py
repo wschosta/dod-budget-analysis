@@ -1,7 +1,7 @@
 """
 Canonical Schema Design — Steps 2.A1 through 2.A5
 
-**Status:** Phase 2 Planning (Phase 1 currently in progress)
+**Status:** Phase 2 — Complete (schema, migrations, reference tables, FTS5 all implemented)
 
 This module defines the production-quality relational schema for the DoD
 budget database. The current build_budget_db.py uses a flat schema (one
