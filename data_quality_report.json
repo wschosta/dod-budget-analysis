@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-02-19T03:34:57.132007",
-  "database": "/tmp/pytest-of-root/pytest-14/test_stop_event_not_set_comple0/test.sqlite",
+  "timestamp": "2026-02-19T11:05:26.342906",
+  "database": "/tmp/pytest-of-root/pytest-1/test_stop_event_not_set_comple0/test.sqlite",
   "total_budget_lines": 4,
   "row_counts_by_service_fy_exhibit": [
     {

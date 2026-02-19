@@ -1,35 +1,34 @@
-{# Results table partial — rendered server-side and swapped by HTMX (3.A4-a)
-
-TODO 3.A4-c / FE-010 [Group: LION] [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add page-size selector to pagination controls.
-    The wireframe shows "Page size: [20 ▼] Go to page: [ ] [Go]" but the
-    current implementation has fixed 25-row pages. Steps:
-      1. Add a <select> with options 10, 25, 50, 100 before the pagination
-      2. Wire it to hx-get with page_size parameter
-      3. Update _parse_filters() and _query_results() to accept page_size
-      4. Persist selection in localStorage via app.js
-    Acceptance: Users can change results per page; selection persists.
-
-TODO 3.A4-d / FE-011 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Add "Export visible columns only" option to download modal.
-    Currently download exports all columns regardless of column visibility
-    toggles. Steps:
-      1. Pass hidden column list from localStorage to download URL params
-      2. Update download endpoint to accept a columns parameter
-      3. Filter _DOWNLOAD_COLUMNS based on the parameter
-    Acceptance: CSV/JSON export respects column visibility preferences.
-
-TODO 3.A3-e / FE-003 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Add "active filter chips" above the results table.
-    Render currently-applied filters as dismissible chips. Steps:
-      1. Before the results-panel div, render a filter-chips container
-      2. For each non-empty filter, show: "Service: Army [×]"
-      3. Clicking × removes that filter and re-fetches via HTMX
-      4. Add .filter-chip styles in main.css
-    Acceptance: Active filters shown as chips, individually removable.
-#}
-
 {% if items %}
+
+{# FE-003: Active filter chips #}
+{% if filters is defined %}
+{% set active = [] %}
+{% if filters.q %}{% set _ = active.append(("q", "Keyword", filters.q)) %}{% endif %}
+{% for fy in filters.fiscal_year %}{% set _ = active.append(("fiscal_year", "FY", fy)) %}{% endfor %}
+{% for svc in filters.service %}{% set _ = active.append(("service", "Service", svc)) %}{% endfor %}
+{% for et in filters.exhibit_type %}{% set _ = active.append(("exhibit_type", "Exhibit", et)) %}{% endfor %}
+{% for ac in filters.appropriation_code %}{% set _ = active.append(("appropriation_code", "Approp.", ac)) %}{% endfor %}
+{% if filters.min_amount %}{% set _ = active.append(("min_amount", "Min $K", filters.min_amount)) %}{% endif %}
+{% if filters.max_amount %}{% set _ = active.append(("max_amount", "Max $K", filters.max_amount)) %}{% endif %}
+{% if active %}
+<div class="active-filters" aria-label="Active filters">
+  {% for param, label, value in active %}
+  {% set new_qs = request.query_params | remove_filter_param(param, value) %}
+  <span class="filter-chip">
+    <span>{{ label }}: {{ value }}</span>
+    <a class="remove"
+       href="/partials/results{% if new_qs %}?{{ new_qs }}{% endif %}"
+       hx-get="/partials/results{% if new_qs %}?{{ new_qs }}{% endif %}"
+       hx-target="#results-container"
+       hx-push-url="true"
+       aria-label="Remove {{ label }}: {{ value }} filter"
+       title="Remove filter">×</a>
+  </span>
+  {% endfor %}
+</div>
+{% endif %}
+{% endif %}
+
 <div class="results-panel">
   <div class="results-header">
     <span class="results-count">
@@ -54,7 +53,7 @@ TODO 3.A3-e / FE-003 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
     <table>
       <thead>
         <tr>
-          <th>
+          <th {% if sort_by == "line_item_title" %}aria-sort="{{ 'ascending' if sort_dir == 'asc' else 'descending' }}"{% endif %}>
             {% set next_dir = "desc" if sort_by == "line_item_title" and sort_dir == "asc" else "asc" %}
             <a hx-get="/partials/results" hx-target="#results-container"
                hx-push-url="true"
@@ -64,7 +63,7 @@ TODO 3.A3-e / FE-003 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
               {% if sort_by == "line_item_title" %}<span class="sort-icon">{{ "▲" if sort_dir == "asc" else "▼" }}</span>{% endif %}
             </a>
           </th>
-          <th class="col-org">
+          <th class="col-org" {% if sort_by == "organization_name" %}aria-sort="{{ 'ascending' if sort_dir == 'asc' else 'descending' }}"{% endif %}>
             <a hx-get="/partials/results" hx-target="#results-container"
                hx-push-url="true"
                hx-vals='{"sort_by":"organization_name","sort_dir":"{% if sort_by == "organization_name" and sort_dir == "asc" %}desc{% else %}asc{% endif %}","page":"1"}'
@@ -77,7 +76,7 @@ TODO 3.A3-e / FE-003 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
           <th class="col-exhibit" data-tooltip="Budget exhibit type (R-2, P-5, O-1, etc.)">Exhibit</th>
           <th class="col-account" data-tooltip="Appropriation account code">Account</th>
           <th class="col-pe" data-tooltip="Program Element number — unique identifier for each R&amp;D program">PE #</th>
-          <th class="col-fy24 td-amount">
+          <th class="col-fy24 td-amount" data-tooltip="FY2024 actual expenditure in thousands of dollars ($K). Actual = amounts obligated by end of fiscal year.">
             <a hx-get="/partials/results" hx-target="#results-container"
                hx-push-url="true"
                hx-vals='{"sort_by":"amount_fy2024_actual","sort_dir":"{% if sort_by == "amount_fy2024_actual" and sort_dir == "desc" %}asc{% else %}desc{% endif %}","page":"1"}'
@@ -87,7 +86,7 @@ TODO 3.A3-e / FE-003 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
             </a>
           </th>
           <th class="col-fy25 td-amount" data-tooltip="FY2025 enacted amount in thousands of dollars ($K). Enacted = signed into law by Congress.">FY25 Enacted ($K)</th>
-          <th class="col-fy26 td-amount">
+          <th class="col-fy26 td-amount" data-tooltip="FY2026 budget request in thousands of dollars ($K). Request = President's budget submission to Congress.">
             <a hx-get="/partials/results" hx-target="#results-container"
                hx-push-url="true"
                hx-vals='{"sort_by":"amount_fy2026_request","sort_dir":"{% if sort_by == "amount_fy2026_request" and sort_dir == "desc" %}asc{% else %}desc{% endif %}","page":"1"}'
@@ -130,14 +129,25 @@ TODO 3.A3-e / FE-003 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
     </table>
   </div>
 
-  {# Pagination (3.A4-a) #}
-  {% if total_pages > 1 %}
+  {# FE-010: Page-size selector + Pagination (3.A4-a) #}
   <div class="pagination">
+    <label style="font-size:.8rem;color:var(--clr-gray-700);display:flex;align-items:center;gap:.25rem">
+      Rows:
+      <select id="page-size-select"
+              onchange="setPageSize(this.value)"
+              style="padding:.2rem .4rem;border-radius:4px;border:1px solid var(--clr-gray-200);font-size:.8rem">
+        {% for ps in [10, 25, 50, 100] %}
+        <option value="{{ ps }}" {% if ps == page_size %}selected{% endif %}>{{ ps }}</option>
+        {% endfor %}
+      </select>
+    </label>
+
+    {% if total_pages > 1 %}
     {% if page > 1 %}
     <button class="page-btn"
             hx-get="/partials/results" hx-target="#results-container"
             hx-push-url="true"
-            hx-vals='{"page":"{{ page - 1 }}"}'
+            hx-vals='{"page":"{{ page - 1 }}","page_size":"{{ page_size }}"}'
             hx-include="#filter-form">‹ Prev</button>
     {% endif %}
 
@@ -145,7 +155,7 @@ TODO 3.A3-e / FE-003 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
     <button class="page-btn {{ 'active' if p == page }}"
             hx-get="/partials/results" hx-target="#results-container"
             hx-push-url="true"
-            hx-vals='{"page":"{{ p }}"}'
+            hx-vals='{"page":"{{ p }}","page_size":"{{ page_size }}"}'
             hx-include="#filter-form">{{ p }}</button>
     {% endfor %}
 
@@ -153,11 +163,11 @@ TODO 3.A3-e / FE-003 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
     <button class="page-btn"
             hx-get="/partials/results" hx-target="#results-container"
             hx-push-url="true"
-            hx-vals='{"page":"{{ page + 1 }}"}'
+            hx-vals='{"page":"{{ page + 1 }}","page_size":"{{ page_size }}"}'
             hx-include="#filter-form">Next ›</button>
     {% endif %}
+    {% endif %}
   </div>
-  {% endif %}
 </div>
 
 {% else %}
