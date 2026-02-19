@@ -417,6 +417,17 @@ document.addEventListener("DOMContentLoaded", function () {
   // LION-010: Apply chart theme on init
   updateChartTheme();
 
+  // Mobile hamburger toggle
+  var hamburger = document.querySelector(".hamburger");
+  var navLinks = document.querySelector(".nav-links");
+  if (hamburger && navLinks) {
+    hamburger.addEventListener("click", function () {
+      var expanded = this.getAttribute("aria-expanded") === "true";
+      this.setAttribute("aria-expanded", String(!expanded));
+      navLinks.classList.toggle("open");
+    });
+  }
+
   restoreFiltersFromURL();
   applyHiddenCols(getHiddenCols());
   updateDownloadLinks();
@@ -459,4 +470,123 @@ document.addEventListener("DOMContentLoaded", function () {
     dlBtn.removeAttribute("onclick");
     dlBtn.addEventListener("click", openDownloadModal);
   }
+
+  // ── Search autocomplete ─────────────────────────────────────────────────
+  initAutocomplete();
+
+  // ── Saved searches ──────────────────────────────────────────────────────
+  renderSavedSearches();
 });
+
+// ── Autocomplete for keyword search ─────────────────────────────────────────
+
+function _escapeHtml(s) {
+  if (!s) return "";
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function initAutocomplete() {
+  var qInput = document.getElementById("q");
+  if (!qInput) return;
+
+  var dropdown = document.createElement("div");
+  dropdown.className = "autocomplete-dropdown";
+  dropdown.setAttribute("role", "listbox");
+  dropdown.id = "autocomplete-list";
+  qInput.parentNode.style.position = "relative";
+  qInput.parentNode.appendChild(dropdown);
+  qInput.setAttribute("role", "combobox");
+  qInput.setAttribute("aria-autocomplete", "list");
+  qInput.setAttribute("aria-owns", "autocomplete-list");
+
+  var acTimer = null;
+  qInput.addEventListener("input", function () {
+    clearTimeout(acTimer);
+    var val = qInput.value.trim();
+    if (val.length < 2) {
+      dropdown.innerHTML = "";
+      dropdown.style.display = "none";
+      return;
+    }
+    acTimer = setTimeout(function () {
+      fetch("/api/v1/search/suggest?q=" + encodeURIComponent(val) + "&limit=8")
+        .then(function (r) { return r.json(); })
+        .then(function (items) {
+          if (!items || !items.length) {
+            dropdown.style.display = "none";
+            return;
+          }
+          dropdown.innerHTML = items.map(function (item) {
+            return '<div class="autocomplete-item" role="option">' +
+              '<span class="autocomplete-value">' + _escapeHtml(item.value) + "</span>" +
+              '<span class="autocomplete-field">' + _escapeHtml((item.field || "").replace(/_/g, " ")) + "</span></div>";
+          }).join("");
+          dropdown.style.display = "block";
+        })
+        .catch(function () {
+          dropdown.style.display = "none";
+        });
+    }, 250);
+  });
+
+  dropdown.addEventListener("click", function (e) {
+    var item = e.target.closest(".autocomplete-item");
+    if (item) {
+      qInput.value = item.querySelector(".autocomplete-value").textContent;
+      dropdown.style.display = "none";
+      if (typeof htmx !== "undefined") htmx.trigger(qInput, "search");
+    }
+  });
+
+  qInput.addEventListener("blur", function () {
+    setTimeout(function () { dropdown.style.display = "none"; }, 200);
+  });
+}
+
+// ── Saved searches (localStorage) ───────────────────────────────────────────
+
+var SAVED_SEARCHES_KEY = "dod_saved_searches";
+
+function getSavedSearches() {
+  try { return JSON.parse(localStorage.getItem(SAVED_SEARCHES_KEY) || "[]"); }
+  catch (e) { return []; }
+}
+
+function saveCurrentSearch(name) {
+  if (!name) return;
+  var searches = getSavedSearches();
+  searches.push({
+    name: name,
+    query: window.location.search,
+    date: new Date().toISOString().slice(0, 10)
+  });
+  if (searches.length > 20) searches = searches.slice(-20);
+  localStorage.setItem(SAVED_SEARCHES_KEY, JSON.stringify(searches));
+  renderSavedSearches();
+}
+
+function deleteSavedSearch(index) {
+  var searches = getSavedSearches();
+  searches.splice(index, 1);
+  localStorage.setItem(SAVED_SEARCHES_KEY, JSON.stringify(searches));
+  renderSavedSearches();
+}
+
+function renderSavedSearches() {
+  var container = document.getElementById("saved-searches-list");
+  if (!container) return;
+  var searches = getSavedSearches();
+  if (!searches.length) {
+    container.innerHTML = '<p style="font-size:.78rem;color:var(--text-secondary)">No saved searches yet.</p>';
+    return;
+  }
+  container.innerHTML = searches.map(function (s, i) {
+    var qs = (s.query || "").replace(/^\?/, "");
+    return '<div class="saved-search-item">' +
+      '<a href="/?' + _escapeHtml(qs) + '" style="font-size:.82rem">' + _escapeHtml(s.name) + "</a>" +
+      '<span style="font-size:.7rem;color:var(--text-secondary);margin-left:.25rem">' + (s.date || "") + "</span>" +
+      '<button class="remove" onclick="deleteSavedSearch(' + i + ')" aria-label="Delete" ' +
+      'style="margin-left:auto;background:none;border:none;cursor:pointer;color:var(--clr-red);font-size:.85rem">&times;</button>' +
+      "</div>";
+  }).join("");
+}

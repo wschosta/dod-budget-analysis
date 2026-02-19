@@ -85,6 +85,30 @@
     <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-compare','comparison-chart.png')">Download as PNG</button>
   </div>
 
+  {# Treemap: Hierarchical budget breakdown #}
+  <div class="chart-card" id="card-treemap" style="grid-column: 1 / -1">
+    <h3>Budget Hierarchy: Service &gt; Appropriation</h3>
+    <div id="err-treemap" style="display:none" class="empty-state" role="alert"></div>
+    <canvas id="chart-treemap" height="300"></canvas>
+    <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-treemap','treemap.png')">Download as PNG</button>
+  </div>
+
+  {# Appropriation breakdown doughnut #}
+  <div class="chart-card" id="card-approp-pie">
+    <h3>Appropriation Breakdown</h3>
+    <div id="err-approp-pie" style="display:none" class="empty-state" role="alert"></div>
+    <canvas id="chart-approp-pie" height="250"></canvas>
+    <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-approp-pie','appropriation-pie.png')">Download as PNG</button>
+  </div>
+
+  {# YoY delta by service #}
+  <div class="chart-card" id="card-delta">
+    <h3>Year-over-Year Change by Service (%)</h3>
+    <div id="err-delta" style="display:none" class="empty-state" role="alert"></div>
+    <canvas id="chart-delta" height="200"></canvas>
+    <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-delta','yoy-delta.png')">Download as PNG</button>
+  </div>
+
 </div>
 </div>
 {% endblock %}
@@ -101,7 +125,7 @@ const COLORS = [
   '#0891b2','#c2410c','#065f46','#92400e','#1e1b4b',
 ];
 
-let chartService, chartYoY, chartTopN, chartCompare;
+let chartService, chartYoY, chartTopN, chartCompare, chartTreemap, chartAppropPie, chartDelta;
 
 // VIZ-001: Helper to extract FY amount columns dynamically from aggregation rows
 function extractFYColumns(rows) {
@@ -173,6 +197,9 @@ async function loadCharts() {
       loadServiceChart(fy),
       loadYoYChart(),
       loadTopNChart(fy),
+      loadTreemap(fy),
+      loadAppropPie(fy),
+      loadDeltaChart(fy),
     ]);
   } finally {
     setLoading(false);
@@ -438,6 +465,236 @@ async function loadComparison() {
     });
   } catch (err) {
     showError('err-compare', 'chart-compare', `Failed to load comparison: ${err.message}`);
+  }
+}
+
+// ── Treemap: Hierarchical budget breakdown ────────────────────────────────
+async function loadTreemap(fy) {
+  clearError('err-treemap', 'chart-treemap');
+  try {
+    let url = `${API}/aggregations/hierarchy`;
+    if (fy) url += `?fiscal_year=${fy}`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    if (!data.items || !data.items.length) {
+      showError('err-treemap', 'chart-treemap', 'No hierarchy data available.');
+      return;
+    }
+
+    // Assign colors by service
+    const services = [...new Set(data.items.map(i => i.service))];
+    const svcColorMap = {};
+    services.forEach((s, i) => svcColorMap[s] = COLORS[i % COLORS.length]);
+
+    const treeData = data.items.slice(0, 200).map(item => ({
+      service: item.service || 'Unknown',
+      approp: item.approp_title || item.approp || 'Unknown',
+      program: (item.program || 'Unknown').slice(0, 40),
+      v: item.amount || 0,
+    }));
+
+    if (chartTreemap) chartTreemap.destroy();
+
+    // Check if treemap controller is available
+    if (typeof Chart.controllers === 'undefined' || !Chart.registry.controllers.get('treemap')) {
+      showError('err-treemap', 'chart-treemap', 'Treemap plugin not loaded.');
+      return;
+    }
+
+    chartTreemap = new Chart(document.getElementById('chart-treemap'), {
+      type: 'treemap',
+      data: {
+        datasets: [{
+          tree: treeData,
+          key: 'v',
+          groups: ['service', 'approp'],
+          spacing: 1,
+          borderWidth: 1,
+          borderColor: 'rgba(0,0,0,.15)',
+          backgroundColor: function(ctx) {
+            if (!ctx.raw || !ctx.raw._data) return COLORS[0];
+            var svc = ctx.raw._data.service || ctx.raw._data.children?.[0]?.service;
+            return svcColorMap[svc] || COLORS[0];
+          },
+          labels: {
+            display: true,
+            align: 'left',
+            position: 'top',
+            color: '#fff',
+            font: { size: 11, weight: 'bold' },
+            formatter: function(ctx) {
+              if (!ctx.raw || !ctx.raw._data) return '';
+              return ctx.raw._data.approp || ctx.raw._data.service || '';
+            }
+          }
+        }]
+      },
+      options: {
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: function(items) {
+                if (!items.length || !items[0].raw || !items[0].raw._data) return '';
+                var d = items[0].raw._data;
+                return d.service + ' > ' + (d.approp || '');
+              },
+              label: function(item) {
+                if (!item.raw || !item.raw._data) return '';
+                var amt = (item.raw._data.v || 0) / 1000;
+                return '$' + amt.toLocaleString(undefined, {maximumFractionDigits: 0}) + 'M';
+              }
+            }
+          }
+        },
+        onClick: function(e, elements) {
+          if (elements.length && elements[0].element && elements[0].element.$context) {
+            var raw = elements[0].element.$context.raw;
+            if (raw && raw._data && raw._data.service) {
+              window.location.href = '/?service=' + encodeURIComponent(raw._data.service);
+            }
+          }
+        }
+      }
+    });
+  } catch (err) {
+    showError('err-treemap', 'chart-treemap', `Failed to load treemap: ${err.message}`);
+  }
+}
+
+// ── Appropriation breakdown doughnut ──────────────────────────────────────
+async function loadAppropPie(fy) {
+  clearError('err-approp-pie', 'chart-approp-pie');
+  try {
+    const resp = await fetch(aggURL('appropriation', fy));
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    if (!data.rows || !data.rows.length) {
+      showError('err-approp-pie', 'chart-approp-pie', 'No appropriation data.');
+      return;
+    }
+
+    const labels = data.rows.map(r => r.group_value || 'Unknown');
+    const cols = extractFYColumns(data.rows);
+    const reqCol = cols.find(c => c.includes('request')) || cols[cols.length - 1];
+    if (!reqCol) {
+      showError('err-approp-pie', 'chart-approp-pie', 'No amount data.');
+      return;
+    }
+    const amounts = data.rows.map(r => (r[reqCol] || 0) / 1000);
+
+    if (chartAppropPie) chartAppropPie.destroy();
+    chartAppropPie = new Chart(document.getElementById('chart-approp-pie'), {
+      type: 'doughnut',
+      data: {
+        labels: labels,
+        datasets: [{
+          data: amounts,
+          backgroundColor: COLORS.slice(0, labels.length),
+          borderWidth: 2,
+          borderColor: getComputedStyle(document.documentElement).getPropertyValue('--bg-surface').trim() || '#fff'
+        }]
+      },
+      options: {
+        plugins: {
+          legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              label: function(ctx) {
+                var total = ctx.dataset.data.reduce(function(a, b) { return a + b; }, 0);
+                var pct = total > 0 ? (ctx.parsed / total * 100).toFixed(1) : 0;
+                return ctx.label + ': $' + ctx.parsed.toLocaleString() + 'M (' + pct + '%)';
+              }
+            }
+          }
+        },
+        onHover: function(e, elements) {
+          e.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+        },
+        onClick: function(e, elements) {
+          if (elements.length) {
+            var idx = elements[0].index;
+            var approp = data.rows[idx].group_value;
+            if (approp) window.location.href = '/?appropriation_code=' + encodeURIComponent(approp);
+          }
+        }
+      }
+    });
+  } catch (err) {
+    showError('err-approp-pie', 'chart-approp-pie', `Failed: ${err.message}`);
+  }
+}
+
+// ── YoY delta by service (% change bar chart) ─────────────────────────────
+async function loadDeltaChart(fy) {
+  clearError('err-delta', 'chart-delta');
+  try {
+    const resp = await fetch(aggURL('service', fy));
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    if (!data.rows || !data.rows.length) {
+      showError('err-delta', 'chart-delta', 'No service data for delta chart.');
+      return;
+    }
+
+    // Filter to rows that have yoy_change_pct
+    const withDelta = data.rows.filter(r => r.yoy_change_pct != null);
+    if (!withDelta.length) {
+      showError('err-delta', 'chart-delta', 'No year-over-year data available.');
+      return;
+    }
+
+    const deltaLabels = withDelta.map(r => r.group_value || 'Unknown');
+    const deltaValues = withDelta.map(r => r.yoy_change_pct);
+    const deltaColors = deltaValues.map(v => v >= 0 ? '#16a34a' : '#dc2626');
+
+    if (chartDelta) chartDelta.destroy();
+    chartDelta = new Chart(document.getElementById('chart-delta'), {
+      type: 'bar',
+      data: {
+        labels: deltaLabels,
+        datasets: [{
+          label: 'YoY Change (%)',
+          data: deltaValues,
+          backgroundColor: deltaColors,
+          borderRadius: 4
+        }]
+      },
+      options: {
+        indexAxis: 'y',
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: function(ctx) {
+                return (ctx.parsed.x >= 0 ? '+' : '') + ctx.parsed.x.toFixed(1) + '%';
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            ticks: { callback: function(v) { return (v >= 0 ? '+' : '') + v + '%'; } },
+            grid: { color: 'rgba(128,128,128,.15)' }
+          }
+        },
+        onHover: function(e, elements) {
+          e.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+        },
+        onClick: function(e, elements) {
+          if (elements.length) {
+            var idx = elements[0].index;
+            window.location.href = '/?service=' + encodeURIComponent(deltaLabels[idx]);
+          }
+        }
+      }
+    });
+  } catch (err) {
+    showError('err-delta', 'chart-delta', `Failed: ${err.message}`);
   }
 }
 

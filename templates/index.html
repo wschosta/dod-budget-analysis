@@ -102,6 +102,9 @@
         {# LION-007: Share button — copies filtered URL to clipboard #}
         <button type="button" id="share-btn" class="btn btn-secondary btn-sm share-btn"
                 onclick="copyShareURL()" aria-label="Copy shareable URL">&#128279; Share</button>
+        <button type="button" class="btn btn-secondary btn-sm"
+                onclick="var name=prompt('Name this search:');if(name)saveCurrentSearch(name)"
+                aria-label="Save current search">&#9733; Save</button>
       </div>
     </form>
 
@@ -109,8 +112,16 @@
     <hr style="margin: 1rem 0; border-color: var(--clr-gray-200);">
     <button class="btn btn-secondary btn-sm" style="width:100%"
             onclick="document.getElementById('dl-modal').classList.add('open')">
-      ↓ Download Results
+      &darr; Download Results
     </button>
+
+    {# Saved searches #}
+    <div style="margin-top:.75rem">
+      <h3 style="font-size:.8rem;text-transform:uppercase;letter-spacing:.04em;color:var(--clr-gray-700);margin-bottom:.25rem">
+        Saved Searches
+      </h3>
+      <div id="saved-searches-list"></div>
+    </div>
   </aside>
 
   {# ── Results area ─────────────────────────────────────────────────────── #}
