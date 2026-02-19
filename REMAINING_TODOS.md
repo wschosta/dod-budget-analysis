@@ -55,10 +55,10 @@ without user intervention (except `OH MY` group items).
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| FE-004 | 3.A7-c | `templates/base.html`, `static/css/main.css` | LOW | ~1000 | Add skip-to-content link |
+| FE-004 | 3.A7-c | `templates/base.html`, `static/css/main.css` | LOW | ~1000 | ~~Add skip-to-content link~~ ✅ DONE |
 | FE-005 | 3.A7-d | `templates/base.html`, `templates/index.html` | MEDIUM | ~2000 | Add ARIA live regions for HTMX updates |
-| FE-008 | 3.A7-e | `templates/base.html` | LOW | ~1000 | Add SRI integrity hashes to CDN scripts |
-| FE-009 | 3.A7-f | `templates/base.html` | LOW | ~800 | Add meta description and Open Graph tags |
+| FE-008 | 3.A7-e | `templates/base.html` | LOW | ~1000 | ~~Add SRI integrity hashes to CDN scripts~~ ✅ DONE |
+| FE-009 | 3.A7-f | `templates/base.html` | LOW | ~800 | ~~Add meta description and Open Graph tags~~ ✅ DONE |
 
 ### CSS (static/css/main.css)
 
