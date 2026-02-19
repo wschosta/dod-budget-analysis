@@ -5,7 +5,7 @@ Pre-commit hook for optimization tests
 
 Ensures that optimization tests pass before committing.
 Install with:
-    cp .pre-commit-hook.py .git/hooks/pre-commit
+    cp scripts/hooks/pre-commit-hook.py .git/hooks/pre-commit
     chmod +x .git/hooks/pre-commit
 
 Or use with pre-commit framework:
@@ -25,8 +25,8 @@ def run_optimization_tests():
     """Run optimization tests before commit."""
     print("Running optimization tests...")
     result = subprocess.run(
-        [sys.executable, "run_optimization_tests.py", "--verbose"],
-        cwd=".",
+        [sys.executable, "scripts/run_optimization_tests.py", "--verbose"],
+        cwd=str(Path(__file__).resolve().parent.parent.parent),
     )
 
     if result.returncode != 0:

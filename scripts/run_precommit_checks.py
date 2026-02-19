@@ -10,8 +10,8 @@ Comprehensive checks to run before every commit:
 - Documentation completeness
 
 Usage:
-    python run_precommit_checks.py              # Run all checks
-    python run_precommit_checks.py --verbose    # Show detailed output
+    python scripts/run_precommit_checks.py              # Run all checks
+    python scripts/run_precommit_checks.py --verbose    # Show detailed output
 """
 
 import argparse
@@ -346,7 +346,7 @@ def main():
 
     def check_optimization_tests():
         result = __import__("subprocess").run(
-            [sys.executable, "run_optimization_tests.py"],
+            [sys.executable, str(Path(__file__).resolve().parent / "run_optimization_tests.py")],
             capture_output=True,
             text=True,
         )
