@@ -32,7 +32,7 @@ class TestComputeFileHash:
     def test_known_content(self, tmp_path):
         """SHA-256 of known content matches expected digest."""
         path = tmp_path / "test.txt"
-        path.write_text("hello world\n")
+        path.write_bytes(b"hello world\n")
         expected = hashlib.sha256(b"hello world\n").hexdigest()
         assert compute_file_hash(path) == expected
 

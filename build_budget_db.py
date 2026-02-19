@@ -11,9 +11,9 @@ Usage:
     python build_budget_db.py --rebuild        # Force full rebuild
     python build_budget_db.py --db mydb.sqlite # Custom database path
 
-──────────────────────────────────────────────────────────────────────────────
+---
 Phase 1 Roadmap Tasks for this file (Steps 1.B3 – 1.B5)
-──────────────────────────────────────────────────────────────────────────────
+---
 **Status:** Foundation + key enhancements implemented (1.B2-a year-agnostic
 column mapping, 1.B2-c multi-row headers, 1.B2-d FY normalization,
 1.B3-a monetary normalization, 1.B3-b currency_year, 1.B4-a PE numbers,
@@ -117,7 +117,7 @@ from datetime import datetime
 from pathlib import Path
 from concurrent.futures import (
     ThreadPoolExecutor, ProcessPoolExecutor, TimeoutError as FuturesTimeoutError,
-    as_completed,
+    wait, FIRST_COMPLETED,
 )
 import os
 
@@ -189,8 +189,9 @@ def create_database(db_path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA synchronous=NORMAL")
     # Additional performance pragmas for bulk operations
     conn.execute("PRAGMA temp_store=MEMORY")           # Use RAM for temp tables
-    conn.execute("PRAGMA cache_size=-64000")           # 64MB cache
-    conn.execute("PRAGMA mmap_size=30000000")          # Memory-mapped I/O
+    conn.execute("PRAGMA cache_size=-262144")          # 256MB cache (was 64MB)
+    conn.execute("PRAGMA mmap_size=536870912")         # 512MB memory-mapped I/O (was 30MB)
+    conn.execute("PRAGMA wal_autocheckpoint=0")        # Disable auto-checkpoint; manual at end
 
     conn.executescript("""
         -- Structured budget line items from Excel files
@@ -391,6 +392,63 @@ def create_database(db_path: Path) -> sqlite3.Connection:
         );
         CREATE INDEX IF NOT EXISTS idx_processed_files_session
             ON processed_files(session_id);
+
+        -- Enrichment tables (populated by enrich_budget_db.py)
+
+        -- Canonical record per unique PE number, aggregating across years/exhibits
+        CREATE TABLE IF NOT EXISTS pe_index (
+            pe_number         TEXT PRIMARY KEY,
+            display_title     TEXT,
+            organization_name TEXT,
+            budget_type       TEXT,
+            fiscal_years      TEXT,   -- JSON array e.g. ["2024","2025","2026"]
+            exhibit_types     TEXT,   -- JSON array e.g. ["r1","r2"]
+            updated_at        TEXT DEFAULT (datetime('now'))
+        );
+
+        -- Links PE numbers to their narrative PDF pages (via text scanning)
+        CREATE TABLE IF NOT EXISTS pe_descriptions (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            pe_number        TEXT NOT NULL,
+            fiscal_year      TEXT,
+            source_file      TEXT,
+            page_start       INTEGER,
+            page_end         INTEGER,
+            section_header   TEXT,
+            description_text TEXT,
+            FOREIGN KEY (pe_number) REFERENCES pe_index(pe_number)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pe_desc_pe ON pe_descriptions(pe_number);
+        CREATE INDEX IF NOT EXISTS idx_pe_desc_fy ON pe_descriptions(fiscal_year);
+        CREATE INDEX IF NOT EXISTS idx_pe_desc_src ON pe_descriptions(source_file);
+
+        -- Tags per PE from multiple sources (structured fields, keywords, LLM)
+        CREATE TABLE IF NOT EXISTS pe_tags (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            pe_number  TEXT NOT NULL,
+            tag        TEXT NOT NULL,
+            tag_source TEXT NOT NULL,   -- "structured" | "keyword" | "taxonomy" | "llm"
+            confidence REAL DEFAULT 1.0,
+            UNIQUE(pe_number, tag, tag_source),
+            FOREIGN KEY (pe_number) REFERENCES pe_index(pe_number)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pe_tags_pe  ON pe_tags(pe_number);
+        CREATE INDEX IF NOT EXISTS idx_pe_tags_tag ON pe_tags(tag);
+
+        -- Detected cross-PE references (project movement / lineage)
+        CREATE TABLE IF NOT EXISTS pe_lineage (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_pe       TEXT NOT NULL,
+            referenced_pe   TEXT NOT NULL,
+            fiscal_year     TEXT,
+            source_file     TEXT,
+            page_number     INTEGER,
+            context_snippet TEXT,
+            link_type       TEXT,   -- "explicit_pe_ref" | "name_match"
+            confidence      REAL DEFAULT 1.0
+        );
+        CREATE INDEX IF NOT EXISTS idx_lineage_source ON pe_lineage(source_pe);
+        CREATE INDEX IF NOT EXISTS idx_lineage_ref    ON pe_lineage(referenced_pe);
     """)
 
     conn.commit()
@@ -996,7 +1054,7 @@ def _extract_tables_with_timeout(page, timeout_seconds=10, executor=None):
 
 
 def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
-                    page_callback=None, docs_dir: Path | None = None) -> int:
+                    page_callback=None, docs_dir: Path | None = None) -> tuple[int, int]:
     """Ingest a single PDF file into the database.
 
     Args:
@@ -1004,8 +1062,12 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
         file_path: Path to the PDF file.
         page_callback: Optional callable(pages_done, total_pages) called after
             each page is processed, for real-time progress reporting.
+            Throttled internally to every 10 pages to reduce overhead.
         docs_dir: Base directory for relative path computation. Defaults to
             the global DOCS_DIR constant.
+
+    Returns:
+        Tuple of (total_pages_inserted, issue_count).
     """
     _docs_dir = (docs_dir or DOCS_DIR).resolve()
     category = _determine_category(file_path)
@@ -1016,7 +1078,7 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
         with pdfplumber.open(str(file_path)) as pdf:
             num_pages = len(pdf.pages)
             batch = []
-            page_issues_count = 0  # Track timeouts/errors for this file
+            issues_batch = []  # Accumulate issues; insert once at end
             # Reuse a single ThreadPoolExecutor across all pages to avoid
             # per-page thread pool creation overhead (thousands of pages per file)
             table_executor = ThreadPoolExecutor(max_workers=1)
@@ -1040,21 +1102,16 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                     tables, issue_type = _extract_tables_with_timeout(
                         page, timeout_seconds=10, executor=table_executor)
                     if issue_type:
-                        # Record the issue for later analysis
-                        conn.execute(
-                            "INSERT INTO extraction_issues"
-                            " (file_path, page_number, issue_type, issue_detail)"
-                            " VALUES (?,?,?,?)",
+                        issues_batch.append(
                             (relative_path, i + 1, issue_type.split(':')[0], issue_type)
                         )
-                        page_issues_count += 1
                         tables = None
 
                 table_text = _extract_table_text(tables)
 
                 # Skip truly empty pages
                 if not text.strip() and not table_text.strip():
-                    if page_callback:
+                    if page_callback and (i % 10 == 0 or i == num_pages - 1):
                         page_callback(i + 1, num_pages)
                     continue
 
@@ -1067,7 +1124,8 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                     table_text if table_text else None,
                 ))
 
-                if page_callback:
+                # Throttle callback: fire every 10 pages instead of every page
+                if page_callback and (i % 10 == 0 or i == num_pages - 1):
                     page_callback(i + 1, num_pages)
 
                 # Batch insert every 1000 pages (larger batch = fewer executemany calls)
@@ -1087,6 +1145,14 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                     VALUES (?,?,?,?,?,?)
                 """, batch)
                 total_pages += len(batch)
+
+              # Batch insert all issues at once (avoids per-issue execute overhead)
+              if issues_batch:
+                conn.executemany(
+                    "INSERT INTO extraction_issues"
+                    " (file_path, page_number, issue_type, issue_detail)"
+                    " VALUES (?,?,?,?)",
+                    issues_batch)
             finally:
                 table_executor.shutdown(wait=False)
 
@@ -1100,10 +1166,10 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
             (relative_path, "pdf", file_path.stat().st_size,
              file_path.stat().st_mtime, 0, f"error: {e}")
         )
-        return 0
+        return 0, 0
 
-    conn.commit()
-    return total_pages
+    # Caller handles commit; do not commit here to allow larger transaction batches
+    return total_pages, len(issues_batch)
 
 
 def _extract_pdf_data(args):
@@ -1189,19 +1255,29 @@ def _extract_pdf_data(args):
 # ── Main Build Pipeline ───────────────────────────────────────────────────────
 
 def _file_needs_update(conn: sqlite3.Connection, rel_path: str,
-                       file_path: Path) -> bool:
-    """Check if a file needs to be (re)ingested based on size and mtime."""
+                       file_path: Path,
+                       cache: dict | None = None) -> bool:
+    """Check if a file needs to be (re)ingested based on size and mtime.
+
+    If cache is provided (dict mapping rel_path -> (size, mtime)), uses it
+    for an O(1) in-memory lookup instead of a DB round-trip.  The cache is
+    pre-populated once before the main loops to avoid ~5000 individual
+    indexed SELECTs across the xlsx + pdf file lists.
+    """
     stat = file_path.stat()
-    row = conn.execute(
-        "SELECT file_size, file_modified FROM ingested_files WHERE file_path = ?",
-        (rel_path,)
-    ).fetchone()
+    if cache is not None:
+        row = cache.get(rel_path)
+    else:
+        row = conn.execute(
+            "SELECT file_size, file_modified FROM ingested_files"
+            " WHERE file_path = ?",
+            (rel_path,)
+        ).fetchone()
 
     if row is None:
         return True  # New file
     if row[0] != stat.st_size or abs((row[1] or 0) - stat.st_mtime) > 1:
         return True  # Modified file
-
     return False
 
 
@@ -1266,10 +1342,13 @@ def _create_session_id() -> str:
 def _save_checkpoint(conn: sqlite3.Connection, session_id: str, files_processed: int,
                      total_files: int, pages_processed: int, rows_inserted: int,
                      bytes_processed: int, last_file: str = None,
-                     last_file_status: str = None, notes: str = None) -> None:
+                     last_file_status: str = None, notes: str = None,
+                     commit: bool = True) -> None:
     """Save current build progress as a checkpoint.
 
     This allows resuming from a checkpoint without reprocessing files.
+    commit=True by default because checkpoints are explicit sync points;
+    pass commit=False when the caller will commit imminently anyway.
     """
     conn.execute("""
         INSERT INTO build_progress
@@ -1288,18 +1367,25 @@ def _save_checkpoint(conn: sqlite3.Connection, session_id: str, files_processed:
             checkpoint_time = datetime('now')
     """, (session_id, files_processed, total_files, pages_processed, rows_inserted,
           bytes_processed, last_file, last_file_status, notes))
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def _mark_file_processed(conn: sqlite3.Connection, session_id: str, file_path: str,
-                         file_type: str, rows_count: int = 0, pages_count: int = 0) -> None:
-    """Mark a file as processed in the current session."""
+                         file_type: str, rows_count: int = 0, pages_count: int = 0,
+                         commit: bool = False) -> None:
+    """Mark a file as processed in the current session.
+
+    commit=False (default) defers the commit to the caller's batch commit,
+    avoiding a WAL sync on every single file.
+    """
     conn.execute("""
         INSERT INTO processed_files
         (session_id, file_path, file_type, rows_count, pages_count, processed_at)
         VALUES (?, ?, ?, ?, ?, datetime('now'))
     """, (session_id, str(file_path), file_type, rows_count, pages_count))
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 def _get_last_checkpoint(conn: sqlite3.Connection) -> dict | None:
@@ -1431,6 +1517,16 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     pdf_files = sorted(docs_dir.rglob("*.pdf"))
     total_files = len(xlsx_files) + len(pdf_files)
 
+    # Pre-load all ingested_files metadata in one query so that
+    # _file_needs_update() can do O(1) dict lookups instead of one
+    # indexed SELECT per file (~5000 round-trips across xlsx + pdf).
+    _ingested_cache: dict[str, tuple] = {
+        row[0]: (row[1], row[2])
+        for row in conn.execute(
+            "SELECT file_path, file_size, file_modified FROM ingested_files"
+        ).fetchall()
+    }
+
     # Save initial checkpoint so the session exists in build_progress from the start
     _save_checkpoint(conn, session_id, 0, total_files, 0, 0, 0,
                      notes="Build started")
@@ -1457,6 +1553,17 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     skipped_xlsx = 0
     excel_file_times: list[float] = []  # per-file elapsed times for speed calc
     files_done_total = 0  # across both xlsx and pdf
+    initial_bl_count = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines"
+    ).fetchone()[0]
+
+    # Drop budget_lines FTS5 triggers before bulk insert, matching the PDF
+    # optimisation. Triggers fire on every row INSERT; with 100k+ rows across
+    # all Excel files the overhead is significant. We rebuild the FTS index in
+    # one pass after all files are ingested.
+    conn.execute("DROP TRIGGER IF EXISTS budget_lines_ai")
+    conn.execute("DROP TRIGGER IF EXISTS budget_lines_ad")
+    conn.commit()
 
     for xi, xlsx in enumerate(xlsx_files):
         # Check for graceful shutdown request
@@ -1483,7 +1590,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                       {"files_remaining": total_files - files_done_total})
             continue
 
-        if not rebuild and not _file_needs_update(conn, rel_path, xlsx):
+        if not rebuild and not _file_needs_update(
+                conn, rel_path, xlsx, cache=_ingested_cache):
             skipped_xlsx += 1
             files_done_total += 1
             _progress("excel", xi + 1, len(xlsx_files),
@@ -1526,7 +1634,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                   {"rows": total_budget_rows,
                    "files_remaining": total_files - files_done_total})
 
-        # Track file as processed and checkpoint periodically
+        # Track file as processed; defer commit to batch boundary below
         _mark_file_processed(conn, session_id, rel_path, "excel", rows_count=rows)
         if files_done_total % checkpoint_interval == 0:
             remaining = total_files - files_done_total
@@ -1537,8 +1645,49 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             _save_checkpoint(conn, session_id, files_done_total, total_files,
                              _metrics["pages"], total_budget_rows,
                              stat.st_size, rel_path, "ok")
+        elif xi % 5 == 4 or xi == len(xlsx_files) - 1:
+            # Commit every 5 Excel files even outside checkpoint interval
+            conn.commit()
 
     conn.commit()
+
+    # Rebuild budget_lines FTS5 index in one pass and restore triggers,
+    # mirroring what we do for pdf_pages after bulk PDF ingestion.
+    final_bl_count = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines"
+    ).fetchone()[0]
+    if final_bl_count > initial_bl_count:
+        print("  Rebuilding budget_lines FTS index...")
+        conn.execute(
+            "INSERT INTO budget_lines_fts(budget_lines_fts) VALUES('rebuild')"
+        )
+    conn.executescript("""
+        CREATE TRIGGER IF NOT EXISTS budget_lines_ai
+        AFTER INSERT ON budget_lines BEGIN
+            INSERT INTO budget_lines_fts(
+                rowid, account_title, budget_activity_title,
+                sub_activity_title, line_item_title,
+                organization_name, pe_number)
+            VALUES (
+                new.id, new.account_title, new.budget_activity_title,
+                new.sub_activity_title, new.line_item_title,
+                new.organization_name, new.pe_number);
+        END;
+        CREATE TRIGGER IF NOT EXISTS budget_lines_ad
+        AFTER DELETE ON budget_lines BEGIN
+            INSERT INTO budget_lines_fts(
+                budget_lines_fts, rowid, account_title,
+                budget_activity_title, sub_activity_title,
+                line_item_title, organization_name, pe_number)
+            VALUES (
+                'delete', old.id, old.account_title,
+                old.budget_activity_title, old.sub_activity_title,
+                old.line_item_title, old.organization_name,
+                old.pe_number);
+        END;
+    """)
+    conn.commit()
+
     if skipped_xlsx:
         print(f"\n  Skipped {skipped_xlsx} unchanged Excel file(s)")
     print(f"  Ingested budget line items: {total_budget_rows:,}")
@@ -1567,7 +1716,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             skipped_pdf += 1
             files_done_total += 1
             continue
-        if not rebuild and not _file_needs_update(conn, rel_path, pdf):
+        if not rebuild and not _file_needs_update(
+                conn, rel_path, pdf, cache=_ingested_cache):
             skipped_pdf += 1
             files_done_total += 1
             continue
@@ -1582,13 +1732,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     if skipped_pdf:
         print(f"  Skipping {skipped_pdf} unchanged/resumed PDF file(s)")
 
-    # Pre-clean: remove old data for files being re-processed
-    for pdf in pdfs_to_process:
-        rel_path = str(pdf.relative_to(docs_dir))
-        _remove_file_data(conn, rel_path, "pdf")
-    conn.commit()
-
-    # Drop FTS5 triggers for bulk insert speedup
+    # Drop FTS5 triggers before pre-clean to avoid per-row FTS5 updates on DELETE
     print("  Dropping FTS5 triggers for bulk insert optimization...")
     try:
         conn.execute("DROP TRIGGER IF EXISTS pdf_pages_ai")
@@ -1597,6 +1741,20 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     except Exception as e:
         print(f"    (Warning: {e})")
 
+    # Pre-clean: remove old data for files being re-processed (triggers already dropped)
+    # Use a single batched DELETE via a temp table to avoid 4000+ individual statements
+    if pdfs_to_process:
+        print(f"  Pre-cleaning {len(pdfs_to_process)} PDF(s) from DB...")
+        rel_paths = [str(pdf.relative_to(docs_dir)) for pdf in pdfs_to_process]
+        conn.execute("CREATE TEMP TABLE IF NOT EXISTS _pdf_preclean (path TEXT PRIMARY KEY)")
+        conn.executemany("INSERT OR IGNORE INTO _pdf_preclean VALUES (?)",
+                         [(p,) for p in rel_paths])
+        conn.execute(
+            "DELETE FROM pdf_pages WHERE source_file IN (SELECT path FROM _pdf_preclean)"
+        )
+        conn.execute("DROP TABLE _pdf_preclean")
+        conn.commit()
+
     try:
       if num_workers > 1 and len(pdfs_to_process) > 1:
         # ── Parallel PDF extraction ───────────────────────────────────
@@ -1604,18 +1762,30 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
               f"parallel workers...")
         pdf_phase_start = time.time()
 
-        with ProcessPoolExecutor(max_workers=num_workers) as pool:
-            future_to_pdf = {
-                pool.submit(
-                    _extract_pdf_data, (str(pdf), str(docs_dir))
-                ): pdf
-                for pdf in pdfs_to_process
-            }
+        # Sliding window: keep at most (num_workers * 2) futures in-flight at once.
+        # Submitting all tasks upfront would hold every completed result in memory
+        # simultaneously — potentially GBs of page text across thousands of PDFs.
+        window_size = num_workers * 2
+        pdf_iter = iter(pdfs_to_process)
+        active: dict = {}  # future -> pdf
 
-            for future in as_completed(future_to_pdf):
+        def _submit_next():
+            """Submit the next PDF from the iterator into the pool."""
+            pdf = next(pdf_iter, None)
+            if pdf is None:
+                return
+            f = pool.submit(_extract_pdf_data, (str(pdf), str(docs_dir)))
+            active[f] = pdf
+
+        with ProcessPoolExecutor(max_workers=num_workers) as pool:
+            # Seed the window
+            for _ in range(window_size):
+                _submit_next()
+
+            while active:
                 if stop_event and stop_event.is_set():
                     print("\n  Graceful stop requested — cancelling workers...")
-                    for f in future_to_pdf:
+                    for f in active:
                         f.cancel()
                     _save_checkpoint(conn, session_id, files_done_total,
                                      total_files, total_pdf_pages,
@@ -1627,15 +1797,68 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                               {"files_remaining": total_files - files_done_total})
                     break
 
-                pdf = future_to_pdf[future]
-                rel_path = str(pdf.relative_to(docs_dir))
-                processed_pdf += 1
-                files_done_total += 1
+                # Wait for the next completed future
+                done, _ = wait(active, return_when=FIRST_COMPLETED)
+                for future in done:
+                    pdf = active.pop(future)
+                    rel_path = str(pdf.relative_to(docs_dir))
+                    processed_pdf += 1
+                    files_done_total += 1
 
-                try:
-                    result = future.result(timeout=300)  # 5-min safety timeout
-                except Exception as e:
-                    print(f"  ERROR: {pdf.name}: {e}")
+                    # Immediately submit a replacement to keep window full
+                    _submit_next()
+
+                    try:
+                        result = future.result(timeout=300)  # 5-min safety timeout
+                    except Exception as e:
+                        print(f"  ERROR: {pdf.name}: {e}")
+                        stat = pdf.stat()
+                        conn.execute(
+                            "INSERT OR REPLACE INTO ingested_files "
+                            "(file_path, file_type, file_size, file_modified,"
+                            " ingested_at, row_count, status) "
+                            "VALUES (?,?,?,?,datetime('now'),?,?)",
+                            (rel_path, "pdf", stat.st_size, stat.st_mtime,
+                             0, f"error: {e}"))
+                        _mark_file_processed(conn, session_id, rel_path, "pdf",
+                                             pages_count=0)
+                        continue
+
+                    pages_data = result["pages_data"]
+                    issues = result["issues"]
+                    error = result["error"]
+
+                    if error:
+                        print(f"  ERROR: {pdf.name}: {error}")
+                        stat = pdf.stat()
+                        conn.execute(
+                            "INSERT OR REPLACE INTO ingested_files "
+                            "(file_path, file_type, file_size, file_modified,"
+                            " ingested_at, row_count, status) "
+                            "VALUES (?,?,?,?,datetime('now'),?,?)",
+                            (rel_path, "pdf", stat.st_size, stat.st_mtime,
+                             0, f"error: {error}"))
+                        _mark_file_processed(conn, session_id, rel_path, "pdf",
+                                             pages_count=0)
+                        continue
+
+                    # Batch insert all pages for this file
+                    pages = len(pages_data)
+                    if pages_data:
+                        conn.executemany("""
+                            INSERT INTO pdf_pages (source_file, source_category,
+                                page_number, page_text, has_tables, table_data)
+                            VALUES (?,?,?,?,?,?)
+                        """, pages_data)
+
+                    # Record extraction issues
+                    if issues:
+                        conn.executemany(
+                            "INSERT INTO extraction_issues"
+                            " (file_path, page_number, issue_type, issue_detail)"
+                            " VALUES (?,?,?,?)", issues)
+
+                    file_status = "ok_with_issues" if issues else "ok"
                     stat = pdf.stat()
                     conn.execute(
                         "INSERT OR REPLACE INTO ingested_files "
@@ -1643,89 +1866,43 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                         " ingested_at, row_count, status) "
                         "VALUES (?,?,?,?,datetime('now'),?,?)",
                         (rel_path, "pdf", stat.st_size, stat.st_mtime,
-                         0, f"error: {e}"))
+                         pages, file_status))
+
+                    total_pdf_pages += pages
+                    _metrics["pages"] = total_pdf_pages
+                    _metrics["files_remaining"] = total_files - files_done_total
+
+                    # Overall throughput: total pages / wall-clock elapsed
+                    elapsed = time.time() - pdf_phase_start
+                    if elapsed > 0 and total_pdf_pages > 0:
+                        _metrics["speed_pages"] = total_pdf_pages / elapsed
+
+                    # ETA: remaining files * avg time per file so far
+                    if processed_pdf > 0:
+                        avg_per_file = elapsed / processed_pdf
+                        remaining = len(pdfs_to_process) - processed_pdf
+                        _metrics["eta_sec"] = avg_per_file * remaining
+
+                    print(f"  [{processed_pdf}/{len(pdfs_to_process)}] "
+                          f"{pdf.name}: {pages} pages")
+                    _progress("pdf", processed_pdf, len(pdfs_to_process),
+                              f"[{processed_pdf}/{len(pdfs_to_process)}] "
+                              f"{pdf.name}: {pages} pages",
+                              dict(_metrics))
+
                     _mark_file_processed(conn, session_id, rel_path, "pdf",
-                                         pages_count=0)
-                    continue
+                                         pages_count=pages)
 
-                pages_data = result["pages_data"]
-                issues = result["issues"]
-                error = result["error"]
+                    if files_done_total % checkpoint_interval == 0:
+                        _save_checkpoint(conn, session_id, files_done_total,
+                                         total_files, total_pdf_pages,
+                                         total_budget_rows, stat.st_size,
+                                         rel_path, file_status,
+                                         commit=False)  # time-based commit below
 
-                if error:
-                    print(f"  ERROR: {pdf.name}: {error}")
-                    stat = pdf.stat()
-                    conn.execute(
-                        "INSERT OR REPLACE INTO ingested_files "
-                        "(file_path, file_type, file_size, file_modified,"
-                        " ingested_at, row_count, status) "
-                        "VALUES (?,?,?,?,datetime('now'),?,?)",
-                        (rel_path, "pdf", stat.st_size, stat.st_mtime,
-                         0, f"error: {error}"))
-                    _mark_file_processed(conn, session_id, rel_path, "pdf",
-                                         pages_count=0)
-                    continue
-
-                # Batch insert all pages for this file
-                pages = len(pages_data)
-                if pages_data:
-                    conn.executemany("""
-                        INSERT INTO pdf_pages (source_file, source_category,
-                            page_number, page_text, has_tables, table_data)
-                        VALUES (?,?,?,?,?,?)
-                    """, pages_data)
-
-                # Record extraction issues
-                if issues:
-                    conn.executemany(
-                        "INSERT INTO extraction_issues"
-                        " (file_path, page_number, issue_type, issue_detail)"
-                        " VALUES (?,?,?,?)", issues)
-
-                file_status = "ok_with_issues" if issues else "ok"
-                stat = pdf.stat()
-                conn.execute(
-                    "INSERT OR REPLACE INTO ingested_files "
-                    "(file_path, file_type, file_size, file_modified,"
-                    " ingested_at, row_count, status) "
-                    "VALUES (?,?,?,?,datetime('now'),?,?)",
-                    (rel_path, "pdf", stat.st_size, stat.st_mtime,
-                     pages, file_status))
-
-                total_pdf_pages += pages
-                _metrics["pages"] = total_pdf_pages
-                _metrics["files_remaining"] = total_files - files_done_total
-
-                # Overall throughput: total pages / wall-clock elapsed
-                elapsed = time.time() - pdf_phase_start
-                if elapsed > 0 and total_pdf_pages > 0:
-                    _metrics["speed_pages"] = total_pdf_pages / elapsed
-
-                # ETA: remaining files * avg time per file so far
-                if processed_pdf > 0:
-                    avg_per_file = elapsed / processed_pdf
-                    remaining = len(pdfs_to_process) - processed_pdf
-                    _metrics["eta_sec"] = avg_per_file * remaining
-
-                print(f"  [{processed_pdf}/{len(pdfs_to_process)}] "
-                      f"{pdf.name}: {pages} pages")
-                _progress("pdf", processed_pdf, len(pdfs_to_process),
-                          f"[{processed_pdf}/{len(pdfs_to_process)}] "
-                          f"{pdf.name}: {pages} pages",
-                          dict(_metrics))
-
-                _mark_file_processed(conn, session_id, rel_path, "pdf",
-                                     pages_count=pages)
-
-                if files_done_total % checkpoint_interval == 0:
-                    _save_checkpoint(conn, session_id, files_done_total,
-                                     total_files, total_pdf_pages,
-                                     total_budget_rows, stat.st_size,
-                                     rel_path, file_status)
-
-                if time.time() - last_commit_time > 2.0:
-                    conn.commit()
-                    last_commit_time = time.time()
+                    if time.time() - last_commit_time > 2.0:
+                        conn.commit()
+                        last_commit_time = time.time()
 
       else:
         # ── Sequential PDF extraction (workers=1) ─────────────────────
@@ -1770,8 +1947,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                            "current_total_pages": page_total})
 
             t0 = time.time()
-            pages = ingest_pdf_file(conn, pdf, page_callback=_page_cb,
-                                    docs_dir=docs_dir)
+            pages, issue_count = ingest_pdf_file(conn, pdf, page_callback=_page_cb,
+                                                 docs_dir=docs_dir)
             file_elapsed = time.time() - t0
             print(f"{pages} pages ({file_elapsed:.1f}s)")
 
@@ -1785,10 +1962,6 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             _metrics["eta_sec"] = avg_pdf_time * pdfs_remaining
             _metrics["pages"] = total_pdf_pages + pages
 
-            issue_count = conn.execute(
-                "SELECT COUNT(*) FROM extraction_issues WHERE file_path = ?",
-                (rel_path,)
-            ).fetchone()[0]
             file_status = "ok_with_issues" if issue_count > 0 else "ok"
 
             stat = pdf.stat()
@@ -1808,7 +1981,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             if files_done_total % checkpoint_interval == 0:
                 _save_checkpoint(conn, session_id, files_done_total, total_files,
                                  total_pdf_pages, total_budget_rows,
-                                 stat.st_size, rel_path, file_status)
+                                 stat.st_size, rel_path, file_status,
+                                 commit=False)  # time-based commit below
 
             if time.time() - last_commit_time > 2.0:
                 conn.commit()
@@ -1820,11 +1994,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             final_page_count = conn.execute("SELECT COUNT(*) FROM pdf_pages").fetchone()[0]
             if final_page_count > initial_page_count:
                 print("\n  Rebuilding full-text search indexes...")
-                conn.execute("DELETE FROM pdf_pages_fts;")
-                conn.execute("""
-                    INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data)
-                    SELECT id, page_text, source_file, table_data FROM pdf_pages;
-                """)
+                # FTS5 'rebuild' command repopulates the index from the content
+                # table in a single optimized pass — faster than DELETE+INSERT.
+                conn.execute("INSERT INTO pdf_pages_fts(pdf_pages_fts) VALUES('rebuild')")
                 conn.execute("""
                     CREATE TRIGGER IF NOT EXISTS pdf_pages_ai AFTER INSERT ON pdf_pages BEGIN
                         INSERT INTO pdf_pages_fts(rowid, page_text, source_file, table_data)
@@ -1851,6 +2023,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
     # If stopped gracefully during PDF loop, close and exit cleanly
     if _pdf_stopped:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         conn.close()
         return
 
@@ -1892,6 +2065,13 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         CREATE INDEX IF NOT EXISTS idx_bl_pe ON budget_lines(pe_number);
         CREATE INDEX IF NOT EXISTS idx_pp_source ON pdf_pages(source_file);
         CREATE INDEX IF NOT EXISTS idx_pp_category ON pdf_pages(source_category);
+        -- Composite indexes used by enrich_budget_db.py Phase 3 batch queries
+        CREATE INDEX IF NOT EXISTS idx_bl_pe_fields
+            ON budget_lines(pe_number, budget_activity_title,
+                            appropriation_title, organization_name);
+        CREATE INDEX IF NOT EXISTS idx_pe_desc_pe_text
+            ON pe_descriptions(pe_number)
+            WHERE description_text IS NOT NULL;
     """)
     conn.commit()
     _progress("index", 1, 1, "Indexes created")
@@ -1943,6 +2123,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
     _progress("done", total_files, total_files, summary,
               {"files_remaining": 0, "eta_sec": 0.0})
+    # Final WAL checkpoint: flush all accumulated WAL pages to the main DB file
+    conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     conn.close()
 
     # 1.B6-h / 2.B3-a: Post-build validation + data-quality JSON report
