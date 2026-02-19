@@ -29,8 +29,18 @@ import time
 from pathlib import Path
 
 
-PYTHON = sys.executable
 HERE = Path(__file__).resolve().parent
+
+def _find_python() -> str:
+    """Return a console-mode python.exe, never pythonw.exe."""
+    exe = Path(sys.executable)
+    if exe.name.lower() == "pythonw.exe":
+        candidate = exe.with_name("python.exe")
+        if candidate.exists():
+            return str(candidate)
+    return str(exe)
+
+PYTHON = _find_python()
 
 STEP_BUILD    = HERE / "build_budget_db.py"
 STEP_VALIDATE = HERE / "validate_budget_data.py"
