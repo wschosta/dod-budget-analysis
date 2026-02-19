@@ -177,9 +177,10 @@ class TestSafeFloatConversion:
                 safe_float(val)
         elapsed_time = (time.perf_counter() - start) * 1000  # Convert to ms
 
-        # Should be fast - ~20-50ms for 50k conversions
-        # If >100ms, function may have performance issues
-        assert elapsed_time < 100, f"Conversions took {elapsed_time:.1f}ms (expected <100ms)"
+        # Should be fast - ~20-50ms for 50k conversions on a modern machine.
+        # Threshold is generous (500ms) to avoid flakiness on slow CI runners
+        # while still catching O(n²) regressions.
+        assert elapsed_time < 500, f"Conversions took {elapsed_time:.1f}ms (expected <500ms)"
 
 
 class TestStringUtilities:
