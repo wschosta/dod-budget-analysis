@@ -51,7 +51,15 @@ def _cache_key(
     )
 
 
-@router.get("", response_model=AggregationResponse, summary="Aggregate budget data")
+@router.get(
+    "",
+    response_model=AggregationResponse,
+    summary="Aggregate budget data",
+    responses={
+        400: {"description": "Invalid group_by parameter", "content": {"application/json": {"example": {"error": "Bad request", "detail": "group_by must be one of: ['appropriation', 'budget_activity', 'exhibit_type', 'fiscal_year', 'service']", "status_code": 400}}}},
+        429: {"description": "Rate limit exceeded", "content": {"application/json": {"example": {"error": "Too many requests", "status_code": 429}}}},
+    },
+)
 def aggregate(
     group_by: str = FQuery(
         ...,

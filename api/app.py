@@ -45,7 +45,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from api.database import get_db_path
-from api.routes import aggregations, budget_lines, download, pe, reference, search
+from utils.database import get_slow_queries, get_query_stats
+from api.routes import aggregations, budget_lines, download, feedback, pe, reference, search
 from api.routes import frontend as frontend_routes
 from utils.config import AppConfig
 from utils.formatting import format_amount
@@ -269,7 +270,72 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    # TODO [Group: TIGER] TIGER-009: Add Cache-Control, ETag, and 304 response headers (~1,500 tokens)
+    # DONE [Group: TIGER] TIGER-009: Add Cache-Control, ETag, and 304 response headers
+
+    # ── TIGER-009: ETag + Cache-Control middleware ────────────────────────────
+
+    _etag_value: str | None = None
+    _etag_size: int = 0
+
+    def _compute_etag() -> str | None:
+        """Compute ETag based on database file size.
+
+        Uses file size as the basis since SQLite WAL mode may update
+        mtime on reads.  Recomputes when size changes (indicating a
+        data modification).
+        """
+        nonlocal _etag_value, _etag_size
+        db_path = get_db_path()
+        if not db_path.exists():
+            return None
+        try:
+            size = db_path.stat().st_size
+        except OSError:
+            return None
+        if _etag_value and size == _etag_size:
+            return _etag_value
+        _etag_size = size
+        _etag_value = f'W/"{size:x}"'
+        return _etag_value
+
+    @app.middleware("http")
+    async def cache_control_middleware(request: Request, call_next):
+        """Add Cache-Control headers and handle ETag/If-None-Match."""
+        path = request.url.path
+
+        # Compute ETag for GET requests to API endpoints
+        etag = None
+        if request.method == "GET" and path.startswith("/api/v1"):
+            etag = _compute_etag()
+
+            # Handle If-None-Match → 304 Not Modified
+            if etag:
+                if_none_match = request.headers.get("If-None-Match")
+                if if_none_match and if_none_match == etag:
+                    from starlette.responses import Response
+                    return Response(status_code=304, headers={"ETag": etag})
+
+        response = await call_next(request)
+
+        # Add ETag header
+        if etag and request.method == "GET":
+            response.headers["ETag"] = etag
+
+        # Add Cache-Control based on endpoint category
+        if path.startswith("/api/v1/reference"):
+            response.headers.setdefault(
+                "Cache-Control", "public, max-age=3600"
+            )
+        elif path.startswith("/api/v1/aggregations"):
+            response.headers.setdefault(
+                "Cache-Control", "public, max-age=300"
+            )
+        elif path.startswith("/api/v1/search") or path.startswith("/api/v1/download"):
+            response.headers.setdefault(
+                "Cache-Control", "private, no-cache"
+            )
+
+        return response
 
     # ── Request logging + rate limiting middleware (4.C3-a, 4.C4-a) ──────────
 
@@ -461,6 +527,9 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         rts = _metrics["response_times_ms"]
         avg_rt = round(sum(rts) / len(rts), 2) if rts else 0.0
 
+        # TIGER-011: Include query performance stats
+        qstats = get_query_stats()
+
         return {
             "status": "ok",
             "uptime_seconds": round(uptime, 2),
@@ -474,9 +543,25 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 "tracked_ips": len(_rate_counters),
                 "blocked_requests": _metrics["blocked_count"],
             },
+            "slow_query_count": qstats["slow_query_count"],
+            "avg_query_time_ms": qstats["avg_query_time_ms"],
         }
 
-    # TODO [Group: TIGER] TIGER-008: Add feedback API endpoint stub (logs to feedback.json) (~1,500 tokens)
+    # TIGER-011: Slow query monitoring endpoint
+    @app.get(
+        "/api/v1/health/queries",
+        tags=["meta"],
+        summary="Slow query log",
+        response_description="Last 50 slow queries for performance monitoring",
+    )
+    def health_queries():
+        """Return the last 50 slow queries (>100ms) for performance monitoring."""
+        return {
+            "stats": get_query_stats(),
+            "slow_queries": get_slow_queries(),
+        }
+
+    # DONE [Group: TIGER] TIGER-008: Add feedback API endpoint stub (logs to feedback.json)
 
     # ── Register routers ──────────────────────────────────────────────────────
 
@@ -487,6 +572,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     app.include_router(reference.router,    prefix=prefix)
     app.include_router(download.router,     prefix=prefix)
     app.include_router(pe.router,           prefix=prefix)
+    app.include_router(feedback.router,     prefix=prefix)
 
     # ── Static files + Jinja2 templates (3.A0-a) ──────────────────────────────
     _here = Path(__file__).parent.parent  # project root

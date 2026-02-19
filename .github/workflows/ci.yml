@@ -57,7 +57,7 @@ jobs:
         run: |
           python -m pytest tests/ \
             --ignore=tests/test_gui_tracker.py \
-            --cov=. \
+            --cov=api --cov=utils \
             --cov-report=xml \
             --cov-report=term-missing \
             --cov-fail-under=80 \

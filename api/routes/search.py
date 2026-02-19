@@ -120,7 +120,16 @@ def _pdf_select(fts_query: str, limit: int, offset: int) -> tuple[str, list[Any]
     return sql, [fts_query, limit, offset]
 
 
-@router.get("", response_model=SearchResponse, summary="Full-text search")
+@router.get(
+    "",
+    response_model=SearchResponse,
+    summary="Full-text search",
+    responses={
+        400: {"description": "Invalid search parameters", "content": {"application/json": {"example": {"error": "Bad request", "detail": "Invalid sort parameter", "status_code": 400}}}},
+        422: {"description": "Validation error", "content": {"application/json": {"example": {"error": "Validation error", "detail": "q: ensure this value has at least 1 characters", "status_code": 422}}}},
+        429: {"description": "Rate limit exceeded", "content": {"application/json": {"example": {"error": "Too many requests", "status_code": 429}}}},
+    },
+)
 def search(
     q: str = Query(..., min_length=1, description="Search query string"),
     type: str = Query(
