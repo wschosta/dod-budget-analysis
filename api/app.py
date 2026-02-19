@@ -269,6 +269,8 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    # TODO [Group: TIGER] TIGER-009: Add Cache-Control, ETag, and 304 response headers (~1,500 tokens)
+
     # ── Request logging + rate limiting middleware (4.C3-a, 4.C4-a) ──────────
 
     @app.middleware("http")
@@ -473,6 +475,8 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 "blocked_requests": _metrics["blocked_count"],
             },
         }
+
+    # TODO [Group: TIGER] TIGER-008: Add feedback API endpoint stub (logs to feedback.json) (~1,500 tokens)
 
     # ── Register routers ──────────────────────────────────────────────────────
 

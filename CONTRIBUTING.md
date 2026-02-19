@@ -256,5 +256,5 @@ Before submitting a PR, ensure:
 - Open an issue at <https://github.com/wschosta/dod-budget-analysis/issues>
 - Check `docs/wiki/` for extended documentation on the API, data model,
   and architecture decisions
-- Review `deployment_design.py` and the `TODO` comments in each source file
+- Review `docs/design/deployment_design.py` and the `TODO` comments in each source file
   for planned-but-not-yet-implemented features

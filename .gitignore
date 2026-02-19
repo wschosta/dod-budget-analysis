@@ -28,6 +28,11 @@ env/
 .DS_Store
 Thumbs.db
 
+# Generated output files
+data_quality_report.json
+refresh_progress.json
+failed_downloads.json
+
 # Claude Code
 .claude/
 

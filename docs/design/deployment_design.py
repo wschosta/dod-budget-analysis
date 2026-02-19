@@ -1,7 +1,7 @@
 """
 Deployment & Operations Design — Steps 4.A, 4.B, 4.C
 
-**Status:** Phase 4 Planning (Phases 1-3 must be complete first)
+**Status:** Phase 4 — ~50% Complete (Phases 1-3 complete; deployment infrastructure implemented)
 
 Plans and TODOs for containerization, CI/CD, deployment, and monitoring.
 
@@ -92,59 +92,26 @@ TODO 4.C6-a [Group: OH MY] [Complexity: LOW] [Tokens: ~1500] [User: YES — need
 Additional Phase 4 TODOs — Monitoring, Security, Operations
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO 4.C7-a / DEPLOY-001 [Group: BEAR] [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
-    Add application monitoring with health metrics endpoint.
-    Currently /health only checks DB existence. Expand to include operational
-    metrics useful for monitoring dashboards. Steps:
-      1. Add GET /health/detailed endpoint returning:
-         - uptime_seconds, request_count, error_count
-         - db_size_bytes, budget_lines_count, pdf_pages_count
-         - avg_response_time_ms (last 100 requests)
-         - rate_limiter_stats (tracked IPs, blocked requests)
-      2. Track metrics using a simple in-memory counter dict
-      3. Reset counters on restart (stateless — no persistence needed)
-      4. Format output compatible with Prometheus exposition format (optional)
-    Acceptance: /health/detailed returns operational metrics JSON.
+DONE 4.C7-a / DEPLOY-001  GET /health/detailed endpoint in api/app.py returns
+    uptime_seconds, request_count, error_count, db_size_bytes, budget_lines_count,
+    pdf_pages_count, avg_response_time_ms, rate_limiter_stats. In-memory counters
+    with sliding window for response times.
 
-TODO 4.C7-b / DEPLOY-002 [Group: BEAR] [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add database backup script for automated deployments.
-    SQLite files can be corrupted if copied while being written. Steps:
-      1. Create scripts/backup_db.py using sqlite3 .backup() API
-      2. Generate timestamped backup: dod_budget_YYYYMMDD_HHMMSS.sqlite
-      3. Add --keep N flag to retain only last N backups
-      4. Add to docker-compose as a periodic service or cron job
-    Acceptance: Backup produces consistent snapshot; old backups pruned.
+DONE 4.C7-b / DEPLOY-002  scripts/backup_db.py (179 lines) uses sqlite3 online
+    backup API. Timestamped filenames, --keep N pruning, --db and --dest args.
+    docker-compose.staging.yml includes backup sidecar running every 6 hours.
 
-TODO 4.C8-a / DEPLOY-003 [Group: BEAR] [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add Content Security Policy (CSP) headers.
-    Steps:
-      1. Add CSP middleware in api/app.py
-      2. Allow: self for scripts/styles, unpkg.com + cdn.jsdelivr.net for
-         HTMX and Chart.js CDN, data: for inline SVGs
-      3. Block: inline scripts/styles (unless nonce-based)
-      4. Add X-Content-Type-Options: nosniff
-      5. Add X-Frame-Options: DENY
-    Acceptance: CSP header present on all responses; no console violations.
+DONE 4.C8-a / DEPLOY-003  CSP middleware in api/app.py: default-src 'self',
+    script-src with unpkg.com + cdn.jsdelivr.net, X-Content-Type-Options: nosniff,
+    X-Frame-Options: DENY. Present on all responses.
 
-TODO 4.B4-a / DEPLOY-004 [Group: BEAR] [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    Add staging environment configuration.
-    Steps:
-      1. Create docker-compose.staging.yml with production-like settings
-      2. Add APP_ENV=staging environment variable support
-      3. In staging: disable debug mode, enable JSON logging, stricter rate limits
-      4. Add smoke test script that validates all endpoints return 200
-    Acceptance: Staging environment mirrors production config.
+DONE 4.B4-a / DEPLOY-004  docker-compose.staging.yml (102 lines) with APP_ENV=staging,
+    JSON logging, stricter rate limits (30/5/60), backup sidecar, no source volume
+    mounts, multiple workers.
 
-TODO 4.C6-b / DEPLOY-005 [Group: BEAR] [Complexity: LOW] [Tokens: ~2000] [User: NO]
-    Write CONTRIBUTING.md with development guidelines.
-    Steps:
-      1. Prerequisites: Python 3.10+, requirements-dev.txt
-      2. Development setup: clone, pip install, build test DB
-      3. Code standards: black formatting, ruff linting, type hints
-      4. Testing: how to run tests, write new tests, use fixtures
-      5. PR process: branch naming, commit message format, review checklist
-      6. Architecture overview: data flow diagram, module responsibilities
-    Acceptance: New contributors can set up and contribute within 30 minutes.
+DONE 4.C6-b / DEPLOY-005  CONTRIBUTING.md (261 lines) with prerequisites, dev setup,
+    project structure, code standards (black, ruff, mypy), testing guide, PR process,
+    architecture overview.
 """
 
 # No implementation code — this is a planning document.

@@ -11,6 +11,8 @@ Routes:
     GET /partials/detail/{id}   → partials/detail.html (HTMX swap target)
 """
 
+# TODO [Group: LION] LION-001: Add error page templates (404, 500) with branded styling (~1,500 tokens)
+
 import sqlite3
 from typing import Any
 

@@ -47,6 +47,14 @@ def _get_amount_columns(conn: sqlite3.Connection) -> list[str]:
     return [c[1] for c in cols if c[1].startswith("amount_fy")]
 
 
+# TODO [Group: TIGER] TIGER-001: Add cross-year budget consistency validation — flag >10x YoY changes (~2,500 tokens)
+# TODO [Group: TIGER] TIGER-002: Add appropriation title consistency validation (~1,500 tokens)
+# TODO [Group: TIGER] TIGER-003: Add line item rollup reconciliation (~2,500 tokens)
+# TODO [Group: TIGER] TIGER-004: Add referential integrity validation (budget_lines → lookup tables) (~1,500 tokens)
+# TODO [Group: TIGER] TIGER-005: Add FY column completeness check (~1,000 tokens)
+# TODO [Group: TIGER] TIGER-006: Integrate PDF quality metrics into validation report (~2,000 tokens)
+# TODO [Group: TIGER] TIGER-007: Add HTML validation report export and --threshold flag (~1,500 tokens)
+
 # ── Individual checks ────────────────────────────────────────────────────────
 
 def check_missing_years(conn: sqlite3.Connection) -> list[dict]:

@@ -36,11 +36,11 @@ jobs:
 
     - name: Run optimization tests
       run: |
-        python run_optimization_tests.py --verbose
+        python scripts/run_optimization_tests.py --verbose
 
     - name: Run optimization benchmarks
       run: |
-        python run_optimization_tests.py --benchmark
+        python scripts/run_optimization_tests.py --benchmark
 
     # ── Pure unit tests (stdlib + pytest only, no heavy deps) ──────────────────
     # These should always pass and catch regressions in utility modules,

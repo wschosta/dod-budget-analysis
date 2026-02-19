@@ -126,7 +126,7 @@ class TestCodeQuality:
         """No pdb/breakpoint statements should be committed."""
         # Exclude pre-commit checker infrastructure files — they reference the
         # patterns as string literals (not actual debug calls) for detection logic.
-        skip_files = {"run_precommit_checks.py", ".pre-commit-hook.py"}
+        skip_files = {"run_precommit_checks.py", "pre-commit-hook.py"}
         errors = []
         for py_file in self.get_python_files():
             if py_file.name in skip_files:
@@ -258,14 +258,12 @@ class TestLineLength:
 
         # Data-declaration and generated files where long lines are unavoidable:
         # exhibit_catalog.py  — column_spec dicts with long string literals
-        # run_optimization_tests.py — formatted benchmark output tables
-        # api_design.py / frontend_design.py / schema_design.py — design docs
+        # schema_design.py — design docs with inline status text
         # exhibit_type_inventory.py / build_budget_gui.py — UI/inventory stubs
+        # Note: api_design.py, frontend_design.py, run_optimization_tests.py
+        # moved to docs/design/ and scripts/ respectively
         skip_files = {
             "exhibit_catalog.py",
-            "run_optimization_tests.py",
-            "api_design.py",
-            "frontend_design.py",
             "schema_design.py",
             "exhibit_type_inventory.py",
             "build_budget_gui.py",
@@ -404,7 +402,7 @@ class TestConfigurationFiles:
 
     def test_hook_file_exists(self):
         """Pre-commit hook should be present."""
-        hook_file = Path(".pre-commit-hook.py")
+        hook_file = Path("scripts/hooks/pre-commit-hook.py")
         assert hook_file.exists(), "Pre-commit hook not found"
 
     def test_utils_package_complete(self):

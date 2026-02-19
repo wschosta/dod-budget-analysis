@@ -143,24 +143,24 @@ pytest tests/test_parsing.py -v
 pytest tests/ --cov=. --cov-report=term-missing
 
 # Run optimization tests
-python run_optimization_tests.py
+python scripts/run_optimization_tests.py
 
 # Run pre-commit checks
-python run_precommit_checks.py
+python scripts/run_precommit_checks.py
 ```
 
 ---
 
 ## Pre-commit Hook
 
-A pre-commit hook (`.pre-commit-hook.py`) runs a subset of checks before each commit:
+A pre-commit hook (`scripts/hooks/pre-commit-hook.py`) runs a subset of checks before each commit:
 - Import checks
 - Basic syntax validation
 - Lint-style checks
 
 To run manually:
 ```bash
-python run_precommit_checks.py
+python scripts/run_precommit_checks.py
 ```
 
 ---

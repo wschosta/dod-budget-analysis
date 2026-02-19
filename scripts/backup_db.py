@@ -14,6 +14,8 @@ Usage:
 Backup filename format: dod_budget_YYYYMMDD_HHMMSS.sqlite
 """
 
+# TODO [Group: BEAR] BEAR-005: Create scripts/smoke_test.py — deployment verification (~2,000 tokens)
+
 import argparse
 import logging
 import os

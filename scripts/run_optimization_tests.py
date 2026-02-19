@@ -6,9 +6,9 @@ Runs the optimization test suite without pytest dependency.
 Verifies that performance optimizations are working correctly.
 
 Usage:
-    python run_optimization_tests.py              # Run all tests
-    python run_optimization_tests.py --verbose    # Show detailed output
-    python run_optimization_tests.py --benchmark  # Include performance benchmarks
+    python scripts/run_optimization_tests.py              # Run all tests
+    python scripts/run_optimization_tests.py --verbose    # Show detailed output
+    python scripts/run_optimization_tests.py --benchmark  # Include performance benchmarks
 """
 
 import argparse
