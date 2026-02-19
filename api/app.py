@@ -44,7 +44,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from api.database import get_db_path
-from api.routes import aggregations, budget_lines, download, reference, search
+from api.routes import aggregations, budget_lines, download, pe, reference, search
 from api.routes import frontend as frontend_routes
 from utils.config import AppConfig
 from utils.formatting import format_amount
@@ -234,6 +234,13 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 "description": "Bulk export of filtered budget lines as CSV or NDJSON.",
             },
             {
+                "name": "pe",
+                "description": (
+                    "PE-centric views: funding by year, sub-elements, narrative descriptions, "
+                    "related PE lineage, tag browsing, and Spruill-style CSV/ZIP export."
+                ),
+            },
+            {
                 "name": "meta",
                 "description": "Health check and API metadata.",
             },
@@ -370,6 +377,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     app.include_router(aggregations.router, prefix=prefix)
     app.include_router(reference.router,    prefix=prefix)
     app.include_router(download.router,     prefix=prefix)
+    app.include_router(pe.router,           prefix=prefix)
 
     # ── Static files + Jinja2 templates (3.A0-a) ──────────────────────────────
     _here = Path(__file__).parent.parent  # project root
@@ -397,7 +405,18 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             except Exception:
                 return "—"
 
+        # FE-003: Custom filter to remove a single key=value from query params
+        def remove_filter_param(query_params, param_name: str, param_value: str) -> str:
+            from urllib.parse import urlencode
+            pairs = [
+                (k, v) for k, v in query_params.multi_items()
+                if not (k == param_name and v == str(param_value))
+                if k != "page"
+            ]
+            return urlencode(pairs)
+
         templates.env.filters["fmt_amount"] = fmt_amount
+        templates.env.filters["remove_filter_param"] = remove_filter_param
 
         # Wire templates into the frontend router
         frontend_routes.set_templates(templates)

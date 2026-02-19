@@ -9,9 +9,9 @@ Usage:
     python validate_budget_db.py --db mydb.sqlite    # Custom path
     python validate_budget_db.py --verbose            # Show all issue details
 
-──────────────────────────────────────────────────────────────────────────────
+---
 TODOs for this file
-──────────────────────────────────────────────────────────────────────────────
+---
 
 """
 

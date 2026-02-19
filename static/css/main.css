@@ -1,54 +1,4 @@
-/* DoD Budget Explorer — main.css (Step 3.A0-a, 3.A7-a)
- *
- * ──────────────────────────────────────────────────────────────────────────
- * CSS TODOs
- * ──────────────────────────────────────────────────────────────────────────
- *
- * TODO 3.A7-g / CSS-001 [Group: LION] [Complexity: LOW] [Tokens: ~1500] [User: NO]
- *     Add focus-visible styles for keyboard navigation.
- *     Currently interactive elements lack visible focus indicators beyond
- *     the browser default. Steps:
- *       1. Add :focus-visible outline styles for .btn, .page-btn, .col-toggle
- *       2. Use outline: 2px solid var(--clr-blue); outline-offset: 2px;
- *       3. Add focus ring to table rows (tr:focus-within td)
- *       4. Test with Tab key navigation through all interactive elements
- *     Acceptance: All interactive elements have visible focus indicators.
- *
- * TODO 3.A7-h / CSS-002 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
- *     Add .skip-link styles for accessibility skip navigation.
- *     Steps:
- *       1. Add .skip-link: position:absolute; left:-9999px; top:auto;
- *       2. On :focus, move to: left:1rem; top:.5rem; z-index:1000;
- *       3. Style with high contrast bg, padding, border-radius
- *     Acceptance: Skip link visible on focus, hidden otherwise.
- *
- * TODO 3.A7-i / CSS-003 [Group: LION] [Complexity: LOW] [Tokens: ~1500] [User: NO]
- *     Add .filter-chip styles for active filter chip display.
- *     Steps:
- *       1. .filter-chip: inline-flex, pill shape, small font, bg gray-100
- *       2. .filter-chip .remove: cursor:pointer, hover:red
- *       3. .active-filters: flex wrap container with gap
- *     Acceptance: Filter chips render as dismissible pills above results.
- *
- * TODO 3.A7-j / CSS-004 [Group: LION] [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
- *     Add @media print styles for report-quality printing.
- *     Steps:
- *       1. Hide .site-header, .site-footer, .filter-panel, .col-toggles,
- *          .pagination, .btn in print
- *       2. Make .results-panel and .chart-card full-width
- *       3. Remove background colors and shadows for ink savings
- *       4. Ensure table borders print correctly
- *       5. Add page-break-inside: avoid on table rows and chart cards
- *     Acceptance: Ctrl+P produces clean, printer-friendly output.
- *
- * TODO OPT-CSS-001 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
- *     Add CSS custom property spacing scale for consistency.
- *     Currently spacing values (1rem, .75rem, .5rem, etc.) are hardcoded.
- *     Create a spacing scale: --space-xs: .25rem; --space-sm: .5rem;
- *     --space-md: 1rem; --space-lg: 1.5rem; --space-xl: 2rem;
- *     Replace inline spacing values with these variables.
- *     Acceptance: Spacing is consistent; changing scale updates everywhere.
- */
+/* DoD Budget Explorer — main.css (Step 3.A0-a, 3.A7-a) */
 
 /* ── Reset & base ─────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -68,6 +18,12 @@
   --radius:      6px;
   --shadow-sm:   0 1px 2px rgba(0,0,0,.08);
   --shadow:      0 2px 8px rgba(0,0,0,.12);
+  /* OPT-CSS-001: spacing scale */
+  --space-xs: .25rem;
+  --space-sm: .5rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2rem;
   font-size: 16px;
 }
 
@@ -426,6 +382,79 @@ tr.selected td { background: #dbeafe; }
   .site-nav a:first-child { margin-left: 0; }
 }
 
+/* ── CSS-001: Focus-visible styles for keyboard navigation ───────────────── */
+.btn:focus-visible,
+.page-btn:focus-visible,
+.col-toggle:focus-visible,
+a:focus-visible,
+select:focus-visible,
+input:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--clr-blue);
+  outline-offset: 2px;
+}
+
+tr:focus-within td {
+  background: var(--clr-sky);
+}
+
+/* ── CSS-002: Skip link styles ───────────────────────────────────────────── */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  z-index: 1000;
+  background: var(--clr-navy);
+  color: #fff;
+  padding: .5rem 1rem;
+  border-radius: var(--radius);
+  font-weight: 600;
+  text-decoration: none;
+}
+.skip-link:focus {
+  position: fixed;
+  left: 1rem;
+  top: .5rem;
+  width: auto;
+  height: auto;
+  overflow: visible;
+}
+
+/* ── CSS-003: Filter chip styles ─────────────────────────────────────────── */
+.active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-sm);
+}
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  padding: .15rem .5rem;
+  border-radius: 99px;
+  background: var(--clr-gray-100);
+  border: 1px solid var(--clr-gray-200);
+  font-size: .78rem;
+  color: var(--clr-gray-700);
+  line-height: 1.4;
+}
+.filter-chip .remove {
+  cursor: pointer;
+  font-size: .85rem;
+  line-height: 1;
+  color: var(--clr-gray-700);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+.filter-chip .remove:hover {
+  color: var(--clr-red);
+}
+
 /* ── CSS tooltips (3.C5-a) ───────────────────────────────────────────────── */
 /* Pure CSS tooltips using data-tooltip attribute + ::after pseudo-element.   */
 /* Usage: <label data-tooltip="Explanation text here">Label</label>           */
@@ -480,4 +509,64 @@ tr.selected td { background: #dbeafe; }
 [data-tooltip]:hover::before,
 [data-tooltip]:focus-within::before {
   opacity: 1;
+}
+
+/* ── CSS-004: Print styles ───────────────────────────────────────────────── */
+@media print {
+  /* Hide non-essential UI */
+  .site-header,
+  .site-footer,
+  .filter-panel,
+  .col-toggles,
+  .pagination,
+  .btn,
+  .modal-backdrop,
+  #loading-indicator,
+  .active-filters,
+  .print-btn {
+    display: none !important;
+  }
+
+  /* Full-width content */
+  .search-layout {
+    display: block;
+  }
+  .results-panel,
+  .chart-card {
+    width: 100%;
+    box-shadow: none;
+    border: 1px solid #ccc;
+  }
+  .charts-grid {
+    display: block;
+  }
+  .chart-card {
+    margin-bottom: 1rem;
+    page-break-inside: avoid;
+  }
+
+  /* Remove backgrounds and shadows for ink savings */
+  body {
+    background: #fff;
+  }
+  th {
+    background: #eee !important;
+  }
+  tr:hover td,
+  tr.selected td {
+    background: transparent;
+  }
+
+  /* Ensure table borders print */
+  table {
+    border-collapse: collapse;
+  }
+  td, th {
+    border: 1px solid #ccc;
+  }
+
+  /* Avoid page breaks inside rows */
+  tr {
+    page-break-inside: avoid;
+  }
 }
