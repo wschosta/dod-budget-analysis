@@ -1198,19 +1198,29 @@ def _extract_pdf_data(args):
 # ── Main Build Pipeline ───────────────────────────────────────────────────────
 
 def _file_needs_update(conn: sqlite3.Connection, rel_path: str,
-                       file_path: Path) -> bool:
-    """Check if a file needs to be (re)ingested based on size and mtime."""
+                       file_path: Path,
+                       cache: dict | None = None) -> bool:
+    """Check if a file needs to be (re)ingested based on size and mtime.
+
+    If cache is provided (dict mapping rel_path -> (size, mtime)), uses it
+    for an O(1) in-memory lookup instead of a DB round-trip.  The cache is
+    pre-populated once before the main loops to avoid ~5000 individual
+    indexed SELECTs across the xlsx + pdf file lists.
+    """
     stat = file_path.stat()
-    row = conn.execute(
-        "SELECT file_size, file_modified FROM ingested_files WHERE file_path = ?",
-        (rel_path,)
-    ).fetchone()
+    if cache is not None:
+        row = cache.get(rel_path)
+    else:
+        row = conn.execute(
+            "SELECT file_size, file_modified FROM ingested_files"
+            " WHERE file_path = ?",
+            (rel_path,)
+        ).fetchone()
 
     if row is None:
         return True  # New file
     if row[0] != stat.st_size or abs((row[1] or 0) - stat.st_mtime) > 1:
         return True  # Modified file
-
     return False
 
 
@@ -1450,6 +1460,16 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     pdf_files = sorted(docs_dir.rglob("*.pdf"))
     total_files = len(xlsx_files) + len(pdf_files)
 
+    # Pre-load all ingested_files metadata in one query so that
+    # _file_needs_update() can do O(1) dict lookups instead of one
+    # indexed SELECT per file (~5000 round-trips across xlsx + pdf).
+    _ingested_cache: dict[str, tuple] = {
+        row[0]: (row[1], row[2])
+        for row in conn.execute(
+            "SELECT file_path, file_size, file_modified FROM ingested_files"
+        ).fetchall()
+    }
+
     # Save initial checkpoint so the session exists in build_progress from the start
     _save_checkpoint(conn, session_id, 0, total_files, 0, 0, 0,
                      notes="Build started")
@@ -1476,6 +1496,17 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     skipped_xlsx = 0
     excel_file_times: list[float] = []  # per-file elapsed times for speed calc
     files_done_total = 0  # across both xlsx and pdf
+    initial_bl_count = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines"
+    ).fetchone()[0]
+
+    # Drop budget_lines FTS5 triggers before bulk insert, matching the PDF
+    # optimisation. Triggers fire on every row INSERT; with 100k+ rows across
+    # all Excel files the overhead is significant. We rebuild the FTS index in
+    # one pass after all files are ingested.
+    conn.execute("DROP TRIGGER IF EXISTS budget_lines_ai")
+    conn.execute("DROP TRIGGER IF EXISTS budget_lines_ad")
+    conn.commit()
 
     for xi, xlsx in enumerate(xlsx_files):
         # Check for graceful shutdown request
@@ -1502,7 +1533,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                       {"files_remaining": total_files - files_done_total})
             continue
 
-        if not rebuild and not _file_needs_update(conn, rel_path, xlsx):
+        if not rebuild and not _file_needs_update(
+                conn, rel_path, xlsx, cache=_ingested_cache):
             skipped_xlsx += 1
             files_done_total += 1
             _progress("excel", xi + 1, len(xlsx_files),
@@ -1561,6 +1593,44 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             conn.commit()
 
     conn.commit()
+
+    # Rebuild budget_lines FTS5 index in one pass and restore triggers,
+    # mirroring what we do for pdf_pages after bulk PDF ingestion.
+    final_bl_count = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines"
+    ).fetchone()[0]
+    if final_bl_count > initial_bl_count:
+        print("  Rebuilding budget_lines FTS index...")
+        conn.execute(
+            "INSERT INTO budget_lines_fts(budget_lines_fts) VALUES('rebuild')"
+        )
+    conn.executescript("""
+        CREATE TRIGGER IF NOT EXISTS budget_lines_ai
+        AFTER INSERT ON budget_lines BEGIN
+            INSERT INTO budget_lines_fts(
+                rowid, account_title, budget_activity_title,
+                sub_activity_title, line_item_title,
+                organization_name, pe_number)
+            VALUES (
+                new.id, new.account_title, new.budget_activity_title,
+                new.sub_activity_title, new.line_item_title,
+                new.organization_name, new.pe_number);
+        END;
+        CREATE TRIGGER IF NOT EXISTS budget_lines_ad
+        AFTER DELETE ON budget_lines BEGIN
+            INSERT INTO budget_lines_fts(
+                budget_lines_fts, rowid, account_title,
+                budget_activity_title, sub_activity_title,
+                line_item_title, organization_name, pe_number)
+            VALUES (
+                'delete', old.id, old.account_title,
+                old.budget_activity_title, old.sub_activity_title,
+                old.line_item_title, old.organization_name,
+                old.pe_number);
+        END;
+    """)
+    conn.commit()
+
     if skipped_xlsx:
         print(f"\n  Skipped {skipped_xlsx} unchanged Excel file(s)")
     print(f"  Ingested budget line items: {total_budget_rows:,}")
@@ -1589,7 +1659,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             skipped_pdf += 1
             files_done_total += 1
             continue
-        if not rebuild and not _file_needs_update(conn, rel_path, pdf):
+        if not rebuild and not _file_needs_update(
+                conn, rel_path, pdf, cache=_ingested_cache):
             skipped_pdf += 1
             files_done_total += 1
             continue
