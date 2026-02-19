@@ -10,40 +10,6 @@ Provides reusable functions for:
 TODOs for this file
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO OPT-DBUTIL-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
-    Add dynamic schema introspection utility.
-    Multiple modules need to know which amount_fy* columns exist in
-    budget_lines (charts.html JS, aggregations.py, build_budget_db.py).
-    Steps:
-      1. Add get_amount_columns(conn) -> list[str] function that queries
-         PRAGMA table_info(budget_lines) and filters for amount_fy* columns
-      2. Add get_quantity_columns(conn) -> list[str] similarly
-      3. Cache the result per-connection (schema doesn't change mid-session)
-      4. Use this in aggregations.py to build dynamic SUM() clauses
-    Acceptance: Schema introspection returns current FY columns dynamically.
-
-TODO OPT-DBUTIL-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add batch_upsert() for incremental updates.
-    batch_insert() always INSERTs. For incremental builds where a file is
-    re-processed, we need INSERT OR REPLACE semantics. Steps:
-      1. Add batch_upsert(conn, table, columns, rows, conflict_columns)
-      2. Generate INSERT ... ON CONFLICT(conflict_cols) DO UPDATE SET ...
-      3. Use in build_budget_db.py for re-ingesting modified files
-    Acceptance: Re-ingesting a file updates existing rows instead of duplicating.
-
-TODO OPT-DBUTIL-003 [Group: TIGER] [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Add query_builder utility for safe parameterized queries.
-    Multiple files construct SQL strings with f-strings for column names
-    and WHERE clauses. While column names are validated against allow-lists,
-    a query builder would be cleaner. Steps:
-      1. Add QueryBuilder class with .select(), .where(), .order_by(),
-         .limit(), .offset() methods
-      2. Generate parameterized SQL with ? placeholders
-      3. Return (sql_string, params_list) tuple
-      4. Use in budget_lines.py, frontend.py, download.py
-    Note: This overlaps with OPT-FE-001 (shared WHERE builder). Consider
-    combining into a single utils/query.py module.
-    Acceptance: Query builder produces same SQL as current f-strings; tests pass.
 """
 
 import sqlite3
@@ -259,3 +225,200 @@ def vacuum_database(db_path: Path) -> None:
     conn = sqlite3.connect(str(db_path))
     conn.execute("VACUUM")
     conn.close()
+
+
+# ── OPT-DBUTIL-001: Dynamic schema introspection ──────────────────────────────
+
+_column_cache: Dict[str, List[str]] = {}
+
+
+def get_amount_columns(conn: sqlite3.Connection, table: str = "budget_lines") -> List[str]:
+    """Return all amount_fy* columns present in the given table's schema.
+
+    Results are cached per connection so repeated calls within a session
+    are free.
+
+    Args:
+        conn: SQLite connection.
+        table: Table name to inspect (default: "budget_lines").
+
+    Returns:
+        Sorted list of column names that start with "amount_fy".
+    """
+    cache_key = f"{id(conn)}:{table}:amount"
+    if cache_key in _column_cache:
+        return _column_cache[cache_key]
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    cols = sorted(
+        r[1] for r in rows if r[1].startswith("amount_fy")
+    )
+    _column_cache[cache_key] = cols
+    return cols
+
+
+def get_quantity_columns(conn: sqlite3.Connection, table: str = "budget_lines") -> List[str]:
+    """Return all quantity_fy* columns present in the given table's schema.
+
+    Args:
+        conn: SQLite connection.
+        table: Table name to inspect (default: "budget_lines").
+
+    Returns:
+        Sorted list of column names that start with "quantity_fy".
+    """
+    cache_key = f"{id(conn)}:{table}:quantity"
+    if cache_key in _column_cache:
+        return _column_cache[cache_key]
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    cols = sorted(
+        r[1] for r in rows if r[1].startswith("quantity_fy")
+    )
+    _column_cache[cache_key] = cols
+    return cols
+
+
+# ── OPT-DBUTIL-002: batch_upsert() for incremental updates ───────────────────
+
+def batch_upsert(
+    conn: sqlite3.Connection,
+    table: str,
+    columns: List[str],
+    rows: List[tuple],
+    conflict_columns: List[str],
+    batch_size: int = 1000,
+) -> int:
+    """Execute batch upsert (INSERT OR REPLACE) operations.
+
+    Uses INSERT ... ON CONFLICT(...) DO UPDATE SET ... semantics so that
+    re-ingesting a source file updates existing rows instead of duplicating.
+
+    Args:
+        conn: SQLite connection.
+        table: Target table name.
+        columns: List of column names to insert.
+        rows: List of value tuples matching ``columns``.
+        conflict_columns: Columns forming the unique constraint to conflict on.
+        batch_size: Number of rows per batch (default: 1000).
+
+    Returns:
+        Total number of rows upserted.
+    """
+    if not rows:
+        return 0
+
+    cols_str = ", ".join(columns)
+    placeholders = ", ".join("?" * len(columns))
+    conflict_str = ", ".join(conflict_columns)
+    update_set = ", ".join(
+        f"{c} = excluded.{c}"
+        for c in columns
+        if c not in conflict_columns
+    )
+    sql = (
+        f"INSERT INTO {table} ({cols_str}) VALUES ({placeholders}) "
+        f"ON CONFLICT({conflict_str}) DO UPDATE SET {update_set}"
+    )
+
+    total = 0
+    for i in range(0, len(rows), batch_size):
+        batch = rows[i : i + batch_size]
+        conn.executemany(sql, batch)
+        conn.commit()
+        total += len(batch)
+    return total
+
+
+# ── OPT-DBUTIL-003: QueryBuilder class ────────────────────────────────────────
+
+class QueryBuilder:
+    """Fluent SQL SELECT query builder producing safe parameterized queries.
+
+    Builds a SELECT statement step by step.  Column names used in
+    ``select()``, ``order_by()``, and ``from_table()`` are passed as-is
+    (callers are responsible for validating them against allow-lists).
+    WHERE conditions use ``?`` placeholders so values are never interpolated.
+
+    Example::
+
+        sql, params = (
+            QueryBuilder()
+            .from_table("budget_lines")
+            .select(["id", "fiscal_year", "amount_fy2026_request"])
+            .where("fiscal_year = ?", "FY2026")
+            .where("organization_name LIKE ?", "%Army%")
+            .order_by("amount_fy2026_request", "DESC")
+            .limit(25)
+            .offset(0)
+            .build()
+        )
+    """
+
+    def __init__(self) -> None:
+        self._table: str = ""
+        self._columns: List[str] = ["*"]
+        self._conditions: List[str] = []
+        self._params: List[Any] = []
+        self._order: str = ""
+        self._limit: int | None = None
+        self._offset: int | None = None
+
+    def from_table(self, table: str) -> "QueryBuilder":
+        """Set the FROM table."""
+        self._table = table
+        return self
+
+    def select(self, columns: List[str]) -> "QueryBuilder":
+        """Set the SELECT column list."""
+        self._columns = columns
+        return self
+
+    def where(self, condition: str, *values: Any) -> "QueryBuilder":
+        """Add a WHERE condition with positional ``?`` placeholders.
+
+        Args:
+            condition: SQL condition fragment, e.g. "fiscal_year = ?".
+            *values: Values for the ``?`` placeholders in ``condition``.
+        """
+        self._conditions.append(condition)
+        self._params.extend(values)
+        return self
+
+    def order_by(self, column: str, direction: str = "ASC") -> "QueryBuilder":
+        """Set ORDER BY clause."""
+        direction = "DESC" if direction.upper() == "DESC" else "ASC"
+        self._order = f"ORDER BY {column} {direction}"
+        return self
+
+    def limit(self, n: int) -> "QueryBuilder":
+        """Set LIMIT."""
+        self._limit = n
+        return self
+
+    def offset(self, n: int) -> "QueryBuilder":
+        """Set OFFSET."""
+        self._offset = n
+        return self
+
+    def build(self) -> tuple[str, List[Any]]:
+        """Build and return (sql, params) tuple.
+
+        Returns:
+            A tuple of (sql_string, params_list).
+
+        Raises:
+            ValueError: If no table has been set.
+        """
+        if not self._table:
+            raise ValueError("QueryBuilder: no table set — call .from_table() first")
+        cols = ", ".join(self._columns)
+        sql = f"SELECT {cols} FROM {self._table}"
+        params = list(self._params)
+        if self._conditions:
+            sql += " WHERE " + " AND ".join(self._conditions)
+        if self._order:
+            sql += f" {self._order}"
+        if self._limit is not None:
+            sql += f" LIMIT {self._limit}"
+        if self._offset is not None:
+            sql += f" OFFSET {self._offset}"
+        return sql, params

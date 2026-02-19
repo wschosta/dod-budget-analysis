@@ -19,12 +19,20 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from api.database import get_db
-from api.routes.budget_lines import _ALLOWED_SORT, _build_where
+from api.routes.budget_lines import _ALLOWED_SORT
+from utils.cache import TTLCache
+from utils.query import build_where_clause
+from utils import sanitize_fts5_query
 
 router = APIRouter(tags=["frontend"])
 
 # Templates instance is set by create_app() after mounting.
 _templates: Jinja2Templates | None = None
+
+# OPT-FE-002: TTL caches for reference data (5-minute TTL)
+_services_cache: TTLCache = TTLCache(maxsize=4, ttl_seconds=300)
+_exhibit_types_cache: TTLCache = TTLCache(maxsize=4, ttl_seconds=300)
+_fiscal_years_cache: TTLCache = TTLCache(maxsize=4, ttl_seconds=300)
 
 
 def set_templates(t: Jinja2Templates) -> None:
@@ -38,43 +46,61 @@ def _tmpl() -> Jinja2Templates:
     return _templates
 
 
-# ── Reference helpers ─────────────────────────────────────────────────────────
+# ── Reference helpers (OPT-FE-002: cached) ────────────────────────────────────
 
 def _get_services(conn: sqlite3.Connection) -> list[dict]:
+    cache_key = ("services", id(conn))
+    cached = _services_cache.get(cache_key)
+    if cached is not None:
+        return cached
     try:
         rows = conn.execute(
             "SELECT code, full_name FROM services_agencies ORDER BY code"
         ).fetchall()
-        return [dict(r) for r in rows]
+        result = [dict(r) for r in rows]
     except Exception:
         rows = conn.execute(
             "SELECT DISTINCT organization_name AS code FROM budget_lines "
             "WHERE organization_name IS NOT NULL ORDER BY organization_name"
         ).fetchall()
-        return [{"code": r["code"], "full_name": r["code"]} for r in rows]
+        result = [{"code": r["code"], "full_name": r["code"]} for r in rows]
+    _services_cache.set(cache_key, result)
+    return result
 
 
 def _get_exhibit_types(conn: sqlite3.Connection) -> list[dict]:
+    cache_key = ("exhibit_types", id(conn))
+    cached = _exhibit_types_cache.get(cache_key)
+    if cached is not None:
+        return cached
     try:
         rows = conn.execute(
             "SELECT code, display_name FROM exhibit_types ORDER BY code"
         ).fetchall()
-        return [dict(r) for r in rows]
+        result = [dict(r) for r in rows]
     except Exception:
         rows = conn.execute(
             "SELECT DISTINCT exhibit_type AS code FROM budget_lines "
             "WHERE exhibit_type IS NOT NULL ORDER BY exhibit_type"
         ).fetchall()
-        return [{"code": r["code"], "display_name": r["code"]} for r in rows]
+        result = [{"code": r["code"], "display_name": r["code"]} for r in rows]
+    _exhibit_types_cache.set(cache_key, result)
+    return result
 
 
 def _get_fiscal_years(conn: sqlite3.Connection) -> list[dict]:
+    cache_key = ("fiscal_years", id(conn))
+    cached = _fiscal_years_cache.get(cache_key)
+    if cached is not None:
+        return cached
     rows = conn.execute(
         "SELECT fiscal_year, COUNT(*) AS row_count FROM budget_lines "
         "WHERE fiscal_year IS NOT NULL "
         "GROUP BY fiscal_year ORDER BY fiscal_year"
     ).fetchall()
-    return [{"fiscal_year": r["fiscal_year"], "row_count": r["row_count"]} for r in rows]
+    result = [{"fiscal_year": r["fiscal_year"], "row_count": r["row_count"]} for r in rows]
+    _fiscal_years_cache.set(cache_key, result)
+    return result
 
 
 def _get_appropriations(conn: sqlite3.Connection) -> list[dict]:
@@ -122,7 +148,8 @@ def _query_results(
     page_size = page_size or filters.get("page_size", 25)
     offset    = (page - 1) * page_size
 
-    where, params = _build_where(
+    # OPT-FE-001: Use shared WHERE builder from utils/query.py
+    where, params = build_where_clause(
         fiscal_year=filters["fiscal_year"] or None,
         service=filters["service"] or None,
         exhibit_type=filters["exhibit_type"] or None,
@@ -155,7 +182,6 @@ def _query_results(
     fts_ids: list[int] | None = None
     if q:
         try:
-            from utils import sanitize_fts5_query
             safe_q = sanitize_fts5_query(q)
         except Exception:
             safe_q = q.replace('"', '""')

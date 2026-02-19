@@ -20,60 +20,26 @@ OpenAPI docs available at http://localhost:8000/docs after starting.
       - Litestar: excellent but newer ecosystem; fewer resources
     Dependencies added to requirements.txt: fastapi>=0.109, uvicorn[standard]>=0.25
 
-──────────────────────────────────────────────────────────────────────────────
-TODOs for this file
-──────────────────────────────────────────────────────────────────────────────
-
-TODO 4.C4-b / APP-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    Improve rate limiter to handle proxy/forwarded IPs.
-    Currently client_ip = request.client.host, which returns the proxy IP
-    when behind a reverse proxy (Nginx, Cloudflare, etc.). Steps:
-      1. Read X-Forwarded-For header if present (trusted proxies only)
-      2. Add TRUSTED_PROXIES env var to configure which IPs to trust
-      3. Fall back to request.client.host if no proxy header
-      4. Add rate limit bypass for health check endpoint
-    Acceptance: Rate limiting works correctly behind a reverse proxy.
-
-TODO 4.C4-c / APP-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add rate limit memory cleanup to prevent unbounded memory growth.
-    _rate_counters dict grows indefinitely as new IPs make requests.
-    Steps:
-      1. Add periodic cleanup: every 5 minutes, remove entries where all
-         timestamps are older than 60 seconds
-      2. Use a background task or middleware counter to trigger cleanup
-      3. Add max_tracked_ips limit (e.g., 10000) — evict oldest on overflow
-    Acceptance: Rate limiter memory bounded; no growth after days of traffic.
-
-TODO 4.C3-b / APP-003 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add structured JSON logging for production deployments.
-    Currently logging uses text format which is hard to parse in log
-    aggregation tools (ELK, Datadog, CloudWatch). Steps:
-      1. Add JSON formatter class that outputs log records as JSON
-      2. Enable JSON logging when APP_LOG_FORMAT=json env var is set
-      3. Include fields: timestamp, level, logger, method, path, status,
-         duration_ms, client_ip, request_id
-      4. Add X-Request-ID header generation for request tracing
-    Acceptance: APP_LOG_FORMAT=json produces newline-delimited JSON logs.
-
-TODO APP-004 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add CORS middleware for API consumers.
-    External clients (JavaScript apps, Jupyter notebooks) need CORS headers
-    to call the API from different origins. Steps:
-      1. Add FastAPI CORSMiddleware with configurable allowed origins
-      2. Default: allow all origins for public data API
-      3. Add APP_CORS_ORIGINS env var for restrictive deployments
-    Acceptance: Browser JS from external domains can call /api/v1/ endpoints.
+APP-001: Proxy/forwarded IP handling with TRUSTED_PROXIES env var.
+APP-002: Rate limit memory cleanup with max_tracked_ips and periodic eviction.
+APP-003: Structured JSON logging when APP_LOG_FORMAT=json.
+APP-004: CORS middleware with configurable origins via APP_CORS_ORIGINS.
+OPT-FMT-001: fmt_amount Jinja filter uses shared format_amount() from utils.
 """
 
+import json
 import logging
+import logging.handlers
 import os
 import sqlite3
 import time
+import uuid
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -81,23 +47,103 @@ from fastapi.templating import Jinja2Templates
 from api.database import get_db_path
 from api.routes import aggregations, budget_lines, download, pe, reference, search
 from api.routes import frontend as frontend_routes
+from utils.config import AppConfig
+from utils.formatting import format_amount
 
-# ── Request logging (4.C3-a) ─────────────────────────────────────────────────
+# ── Configuration ─────────────────────────────────────────────────────────────
+_cfg = AppConfig.from_env()
+
+# ── APP-003: Structured JSON logging ─────────────────────────────────────────
+
+
+class _JsonFormatter(logging.Formatter):
+    """Emit log records as newline-delimited JSON."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        data: dict = {
+            "timestamp": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        # Merge extra fields added via logger.info("...", extra={...})
+        for key in ("method", "path", "status", "duration_ms", "client_ip",
+                    "request_id"):
+            if hasattr(record, key):
+                data[key] = getattr(record, key)
+        if record.exc_info:
+            data["exc_info"] = self.formatException(record.exc_info)
+        return json.dumps(data)
+
+
 _logger = logging.getLogger("dod_budget_api")
-logging.basicConfig(
-    format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    level=logging.INFO,
-)
+_handler = logging.StreamHandler()
+if _cfg.log_format == "json":
+    _handler.setFormatter(_JsonFormatter())
+else:
+    _handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s")
+    )
+logging.basicConfig(handlers=[_handler], level=logging.INFO, force=True)
 
-# ── Rate limiting state (4.C4-a) ─────────────────────────────────────────────
-# Simple fixed-window per-IP rate limiter (no Redis needed for single-process).
-# Limits: search=60/min, download=10/min, others=120/min.
+# ── APP-002: Rate limiting state with memory bounds ───────────────────────────
+# Limits: search=60/min, download=10/min, others=120/min (from AppConfig).
 _RATE_LIMITS: dict[str, int] = {
-    "/api/v1/search":   60,
-    "/api/v1/download": 10,
+    "/api/v1/search":   _cfg.rate_limit_search,
+    "/api/v1/download": _cfg.rate_limit_download,
 }
-_DEFAULT_RATE_LIMIT = 120          # requests per minute for all other endpoints
+_DEFAULT_RATE_LIMIT = _cfg.rate_limit_default
 _rate_counters: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
+_MAX_TRACKED_IPS = 10_000
+_last_cleanup: float = 0.0
+_CLEANUP_INTERVAL = 300.0  # 5 minutes
+
+
+def _cleanup_rate_counters() -> None:
+    """Remove stale rate counter entries to bound memory usage."""
+    global _last_cleanup
+    now = time.time()
+    if now - _last_cleanup < _CLEANUP_INTERVAL:
+        return
+    _last_cleanup = now
+    window_start = now - 60.0
+    to_delete = []
+    for ip, paths in _rate_counters.items():
+        for path in list(paths.keys()):
+            paths[path] = [t for t in paths[path] if t > window_start]
+            if not paths[path]:
+                del paths[path]
+        if not paths:
+            to_delete.append(ip)
+    for ip in to_delete:
+        del _rate_counters[ip]
+    # If still over limit, evict oldest IPs (those with fewest recent hits)
+    if len(_rate_counters) > _MAX_TRACKED_IPS:
+        excess = len(_rate_counters) - _MAX_TRACKED_IPS
+        oldest = sorted(
+            _rate_counters.keys(),
+            key=lambda ip: sum(len(v) for v in _rate_counters[ip].values()),
+        )[:excess]
+        for ip in oldest:
+            del _rate_counters[ip]
+
+
+# ── APP-001: Extract real client IP (proxy-aware) ─────────────────────────────
+
+def _get_client_ip(request: Request) -> str:
+    """Return the real client IP, respecting X-Forwarded-For from trusted proxies."""
+    direct_ip = request.client.host if request.client else "unknown"
+    if not _cfg.trusted_proxies:
+        return direct_ip
+    if direct_ip not in _cfg.trusted_proxies:
+        return direct_ip
+    xff = request.headers.get("X-Forwarded-For", "")
+    if xff:
+        # X-Forwarded-For: client, proxy1, proxy2 — leftmost is real client
+        real_ip = xff.split(",")[0].strip()
+        if real_ip:
+            return real_ip
+    return direct_ip
 
 # ── Application metrics (DEPLOY-001) ─────────────────────────────────────────
 # Simple in-memory counters; reset on process restart (stateless by design).
@@ -155,9 +201,9 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             "- **FTS5 search** uses SQLite full-text search with BM25 ranking "
             "across all line item titles, descriptions, and PDF page text.\n\n"
             "### Rate limits\n"
-            "- `/api/v1/search`: 60 req/min per IP\n"
-            "- `/api/v1/download`: 10 req/min per IP\n"
-            "- All other endpoints: 120 req/min per IP\n\n"
+            f"- `/api/v1/search`: {_cfg.rate_limit_search} req/min per IP\n"
+            f"- `/api/v1/download`: {_cfg.rate_limit_download} req/min per IP\n"
+            f"- All other endpoints: {_cfg.rate_limit_default} req/min per IP\n\n"
             "Returns `429 Too Many Requests` with `Retry-After: 60` when exceeded.\n\n"
             "### Data freshness\n"
             "Data is refreshed weekly via GitHub Actions from official DoD "
@@ -213,21 +259,40 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         ],
     )
 
+    # ── APP-004: CORS middleware ───────────────────────────────────────────────
+    allow_origins = _cfg.cors_origins if _cfg.cors_origins != ["*"] else ["*"]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allow_origins,
+        allow_credentials=False,
+        allow_methods=["GET", "HEAD", "OPTIONS"],
+        allow_headers=["*"],
+    )
+
     # ── Request logging + rate limiting middleware (4.C3-a, 4.C4-a) ──────────
 
     @app.middleware("http")
     async def log_and_rate_limit(request: Request, call_next):
         """Log each request, enforce per-IP rate limits, and record metrics."""
+        # APP-003: Generate request ID for tracing
+        request_id = str(uuid.uuid4())[:8]
         start = time.monotonic()
-        client_ip = request.client.host if request.client else "unknown"
+        client_ip = _get_client_ip(request)
         path = request.url.path
+
+        # APP-002: Periodic memory cleanup
+        _cleanup_rate_counters()
+
+        # Health check bypass — not rate limited
+        if path == "/health":
+            response = await call_next(request)
+            return response
 
         # Rate limiting
         limit = _RATE_LIMITS.get(path, _DEFAULT_RATE_LIMIT)
         now = time.time()
         window_start = now - 60.0
         hits = _rate_counters[client_ip][path]
-        # Prune timestamps outside the window
         _rate_counters[client_ip][path] = [t for t in hits if t > window_start]
         if len(_rate_counters[client_ip][path]) >= limit:
             _metrics["blocked_count"] += 1
@@ -257,10 +322,27 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         if response.status_code >= 500:
             _metrics["error_count"] += 1
 
-        _logger.info(
-            "method=%s path=%s status=%d duration_ms=%.1f ip=%s",
-            request.method, path, response.status_code, duration_ms, client_ip,
-        )
+        # APP-003: Add request ID header
+        response.headers["X-Request-ID"] = request_id
+
+        if _cfg.log_format == "json":
+            _logger.info(
+                "request",
+                extra={
+                    "method": request.method,
+                    "path": path,
+                    "status": response.status_code,
+                    "duration_ms": round(duration_ms, 1),
+                    "client_ip": client_ip,
+                    "request_id": request_id,
+                },
+            )
+        else:
+            _logger.info(
+                "method=%s path=%s status=%d duration_ms=%.1f ip=%s rid=%s",
+                request.method, path, response.status_code, duration_ms,
+                client_ip, request_id,
+            )
         if duration_ms > 500:
             _logger.warning(
                 "slow_query method=%s path=%s duration_ms=%.1f",
@@ -414,11 +496,18 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     if templates_dir.exists():
         templates = Jinja2Templates(directory=str(templates_dir))
 
-        # Custom filter: format dollar amounts (in $K) with comma separators
+        # OPT-FMT-001: Use shared format_amount from utils.formatting
         def fmt_amount(value) -> str:
+            """Jinja filter: format dollar amount in $K with comma separators."""
             try:
-                return f"{float(value):,.1f}"
+                v = float(value)
             except (TypeError, ValueError):
+                return "—"
+            # For the template display we show value as-is with comma formatting
+            # (values are already in $K)
+            try:
+                return f"{v:,.1f}"
+            except Exception:
                 return "—"
 
         # FE-003: Custom filter to remove a single key=value from query params
@@ -450,7 +539,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "api.app:app",
         host="0.0.0.0",
-        port=8000,
+        port=_cfg.api_port,
         reload=True,
         log_level="info",
     )

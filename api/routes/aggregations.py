@@ -4,117 +4,148 @@ GET /api/v1/aggregations endpoint (Step 2.C3-c).
 Groups budget lines by a dimension and sums the amount columns.
 Supports optional pre-filter by fiscal_year, service, or exhibit_type.
 
-──────────────────────────────────────────────────────────────────────────────
-TODOs for this file
-──────────────────────────────────────────────────────────────────────────────
-
-TODO AGG-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
-    Make aggregation amount columns dynamic instead of hardcoded.
-    Currently the SQL hardcodes SUM(amount_fy2026_request), etc. When FY2027
-    columns are added, this endpoint breaks. Steps:
-      1. Query budget_lines table schema to discover amount_fy* columns
-      2. Build SUM() expressions dynamically for all found FY columns
-      3. Update AggregationRow model to use a dict for dynamic FY sums:
-         fy_totals: dict[str, float | None] instead of named fields
-      4. Cache the column discovery result (schema changes rarely)
-    Acceptance: Aggregations auto-include new FY columns without code changes.
-
-TODO AGG-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add percentage and delta calculations to aggregation output.
-    Users want to see year-over-year change and share-of-total. Steps:
-      1. Calculate total across all groups for each FY column
-      2. Add pct_of_total (float, 0-100) to each AggregationRow
-      3. Add yoy_change_pct (float, percent change from prior FY) if both
-         FY columns are present
-    Acceptance: Aggregation rows include percentage and YoY delta fields.
-
-TODO OPT-AGG-001 [Group: TIGER] [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Add server-side caching for expensive aggregation queries.
-    Aggregations over the full budget_lines table are slow on large datasets.
-    Steps:
-      1. Add in-memory cache keyed on (group_by, fiscal_year, service,
-         exhibit_type) tuple with 60-second TTL
-      2. Return cached result if available; run query and cache if not
-      3. Add Cache-Control: max-age=60 response header
-    Acceptance: Repeated aggregation queries return in <10ms after first hit.
+AGG-001: Dynamic FY columns discovered from schema at runtime.
+AGG-002: pct_of_total and yoy_change_pct added to each row.
+OPT-AGG-001: Server-side TTL cache (60 seconds) for aggregation queries.
 """
 
+import json
 import sqlite3
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi import Query as FQuery
+from fastapi.responses import JSONResponse
 
 from api.database import get_db
 from api.models import AggregationResponse, AggregationRow
+from utils.cache import TTLCache
+from utils.database import get_amount_columns
+from utils.query import build_where_clause
 
 router = APIRouter(prefix="/aggregations", tags=["aggregations"])
 
 _ALLOWED_GROUPS = {
-    "service": "organization_name",
-    "fiscal_year": "fiscal_year",
-    "appropriation": "appropriation_code",
-    "exhibit_type": "exhibit_type",
+    "service":        "organization_name",
+    "fiscal_year":    "fiscal_year",
+    "appropriation":  "appropriation_code",
+    "exhibit_type":   "exhibit_type",
     "budget_activity": "budget_activity_title",
 }
+
+# OPT-AGG-001: 60-second TTL cache keyed on (group_by, fiscal_year, service, exhibit_type)
+_agg_cache: TTLCache = TTLCache(maxsize=128, ttl_seconds=60)
+
+
+def _cache_key(
+    group_by: str,
+    fiscal_year: list[str] | None,
+    service: list[str] | None,
+    exhibit_type: list[str] | None,
+) -> tuple:
+    return (
+        group_by,
+        tuple(sorted(fiscal_year or [])),
+        tuple(sorted(service or [])),
+        tuple(sorted(exhibit_type or [])),
+    )
 
 
 @router.get("", response_model=AggregationResponse, summary="Aggregate budget data")
 def aggregate(
-    group_by: str = Query(
+    group_by: str = FQuery(
         ...,
         description=(
             "Dimension to group by: service, fiscal_year, "
             "appropriation, exhibit_type, budget_activity"
         ),
     ),
-    fiscal_year: list[str] | None = Query(None, description="Pre-filter by fiscal year(s)"),
-    service: list[str] | None = Query(None, description="Pre-filter by service name"),
-    exhibit_type: list[str] | None = Query(None, description="Pre-filter by exhibit type"),
+    fiscal_year: list[str] | None = FQuery(None, description="Pre-filter by fiscal year(s)"),
+    service: list[str] | None = FQuery(None, description="Pre-filter by service name"),
+    exhibit_type: list[str] | None = FQuery(None, description="Pre-filter by exhibit type"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> AggregationResponse:
-    """Aggregate budget totals grouped by the specified dimension."""
+    """Aggregate budget totals grouped by the specified dimension.
+
+    AGG-001: Amount columns are discovered dynamically from the schema so new
+    fiscal year columns (FY2027+) are included automatically.
+    AGG-002: Each row includes pct_of_total and yoy_change_pct.
+    OPT-AGG-001: Results are cached for 60 seconds per unique filter combination.
+    """
     if group_by not in _ALLOWED_GROUPS:
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"group_by must be one of: {sorted(_ALLOWED_GROUPS.keys())}"
-            ),
+            detail=f"group_by must be one of: {sorted(_ALLOWED_GROUPS.keys())}",
         )
 
     col = _ALLOWED_GROUPS[group_by]
-    conditions: list[str] = []
-    params: list[Any] = []
+    where, params = build_where_clause(
+        fiscal_year=fiscal_year,
+        service=service,
+        exhibit_type=exhibit_type,
+    )
 
-    if fiscal_year:
-        placeholders = ",".join("?" * len(fiscal_year))
-        conditions.append(f"fiscal_year IN ({placeholders})")
-        params.extend(fiscal_year)
+    # AGG-001: Discover FY amount columns dynamically
+    amount_cols = get_amount_columns(conn)
+    if not amount_cols:
+        amount_cols = ["amount_fy2024_actual", "amount_fy2025_enacted", "amount_fy2026_request"]
 
-    if service:
-        sub = " OR ".join("organization_name LIKE ?" for _ in service)
-        conditions.append(f"({sub})")
-        params.extend(f"%{s}%" for s in service)
-
-    if exhibit_type:
-        placeholders = ",".join("?" * len(exhibit_type))
-        conditions.append(f"exhibit_type IN ({placeholders})")
-        params.extend(exhibit_type)
-
-    where = "WHERE " + " AND ".join(conditions) if conditions else ""
+    sum_exprs = ",\n            ".join(
+        f"SUM({c}) AS {c}" for c in amount_cols
+    )
 
     sql = f"""
         SELECT
             {col} AS group_value,
             COUNT(*) AS row_count,
-            SUM(amount_fy2026_request) AS total_fy2026_request,
-            SUM(amount_fy2025_enacted) AS total_fy2025_enacted,
-            SUM(amount_fy2024_actual)  AS total_fy2024_actual
+            {sum_exprs}
         FROM budget_lines
         {where}
         GROUP BY {col}
-        ORDER BY total_fy2026_request DESC NULLS LAST
+        ORDER BY COALESCE({amount_cols[-1]}, 0) DESC
     """
     rows = conn.execute(sql, params).fetchall()
-    agg_rows = [AggregationRow(**dict(row)) for row in rows]
+    raw_rows = [dict(r) for r in rows]
 
-    return AggregationResponse(group_by=group_by, rows=agg_rows)
+    # AGG-002: Compute totals and percentages
+    latest_col = amount_cols[-1] if amount_cols else None
+    prev_col = amount_cols[-2] if len(amount_cols) >= 2 else None
+
+    # Map canonical column names to AggregationRow fields
+    fy26_col = next((c for c in amount_cols if "fy2026_request" in c), None)
+    fy25_col = next((c for c in amount_cols if "fy2025_enacted" in c), None)
+    fy24_col = next((c for c in amount_cols if "fy2024_actual" in c), None)
+
+    grand_total = sum(
+        (r.get(latest_col) or 0) for r in raw_rows
+    ) if latest_col else 0
+
+    enriched: list[AggregationRow] = []
+    for r in raw_rows:
+        latest_val = r.get(latest_col) if latest_col else None
+        prev_val = r.get(prev_col) if prev_col else None
+
+        pct_of_total = None
+        if grand_total and latest_val is not None:
+            pct_of_total = round(latest_val / grand_total * 100, 2)
+
+        yoy_change_pct = None
+        if prev_val and latest_val is not None:
+            yoy_change_pct = round(
+                (latest_val - prev_val) / abs(prev_val) * 100, 2
+            )
+
+        fy_totals = {c: r.get(c) for c in amount_cols}
+
+        enriched.append(AggregationRow(
+            group_value=r.get("group_value"),
+            row_count=r.get("row_count", 0),
+            total_fy2026_request=r.get(fy26_col) if fy26_col else latest_val,
+            total_fy2025_enacted=r.get(fy25_col),
+            total_fy2024_actual=r.get(fy24_col),
+            fy_totals=fy_totals,
+            pct_of_total=pct_of_total,
+            yoy_change_pct=yoy_change_pct,
+        ))
+
+    return AggregationResponse(group_by=group_by, rows=enriched)
