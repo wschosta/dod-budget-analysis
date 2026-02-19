@@ -307,7 +307,18 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             except (TypeError, ValueError):
                 return "—"
 
+        # FE-003: Custom filter to remove a single key=value from query params
+        def remove_filter_param(query_params, param_name: str, param_value: str) -> str:
+            from urllib.parse import urlencode
+            pairs = [
+                (k, v) for k, v in query_params.multi_items()
+                if not (k == param_name and v == str(param_value))
+                if k != "page"
+            ]
+            return urlencode(pairs)
+
         templates.env.filters["fmt_amount"] = fmt_amount
+        templates.env.filters["remove_filter_param"] = remove_filter_param
 
         # Wire templates into the frontend router
         frontend_routes.set_templates(templates)

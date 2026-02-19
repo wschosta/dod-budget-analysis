@@ -37,10 +37,10 @@ without user intervention (except `OH MY` group items).
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| FE-001 | 3.A3-c | `templates/index.html`, `api/routes/frontend.py` | LOW | ~1500 | Add amount range (min/max) filters to filter sidebar |
-| FE-002 | 3.A3-d | `templates/index.html`, `api/routes/frontend.py` | LOW | ~1500 | Add appropriation filter dropdown |
-| FE-003 | 3.A3-e | `templates/partials/results.html`, `static/css/main.css` | LOW | ~1000 | Add active filter chips above results |
-| FE-010 | 3.A4-c | `templates/partials/results.html`, `api/routes/frontend.py` | LOW | ~1500 | Add page-size selector to pagination |
+| FE-001 | 3.A3-c | `templates/index.html`, `api/routes/frontend.py` | LOW | ~1500 | ~~Add amount range (min/max) filters to filter sidebar~~ ✅ DONE |
+| FE-002 | 3.A3-d | `templates/index.html`, `api/routes/frontend.py` | LOW | ~1500 | ~~Add appropriation filter dropdown~~ ✅ DONE |
+| FE-003 | 3.A3-e | `templates/partials/results.html`, `static/css/main.css` | LOW | ~1000 | ~~Add active filter chips above results~~ ✅ DONE |
+| FE-010 | 3.A4-c | `templates/partials/results.html`, `api/routes/frontend.py` | LOW | ~1500 | ~~Add page-size selector to pagination~~ ✅ DONE |
 | FE-011 | 3.A4-d | `templates/partials/results.html`, `api/routes/download.py` | LOW | ~1000 | Export visible columns only option |
 | FE-012 | 3.C5-a | `templates/index.html`, `templates/partials/results.html` | LOW | ~1500 | Add contextual help tooltips to all labels |
 
@@ -56,7 +56,7 @@ without user intervention (except `OH MY` group items).
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
 | FE-004 | 3.A7-c | `templates/base.html`, `static/css/main.css` | LOW | ~1000 | ~~Add skip-to-content link~~ ✅ DONE |
-| FE-005 | 3.A7-d | `templates/base.html`, `templates/index.html` | MEDIUM | ~2000 | Add ARIA live regions for HTMX updates |
+| FE-005 | 3.A7-d | `templates/base.html`, `templates/index.html` | MEDIUM | ~2000 | ~~Add ARIA live regions for HTMX updates~~ ✅ DONE |
 | FE-008 | 3.A7-e | `templates/base.html` | LOW | ~1000 | ~~Add SRI integrity hashes to CDN scripts~~ ✅ DONE |
 | FE-009 | 3.A7-f | `templates/base.html` | LOW | ~800 | ~~Add meta description and Open Graph tags~~ ✅ DONE |
 
