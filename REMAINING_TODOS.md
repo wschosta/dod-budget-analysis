@@ -64,11 +64,11 @@ without user intervention (except `OH MY` group items).
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| CSS-001 | 3.A7-g | `static/css/main.css` | LOW | ~1500 | Add :focus-visible styles for keyboard nav |
-| CSS-002 | 3.A7-h | `static/css/main.css` | LOW | ~1000 | Add .skip-link styles |
-| CSS-003 | 3.A7-i | `static/css/main.css` | LOW | ~1500 | Add .filter-chip styles |
-| CSS-004 | 3.A7-j | `static/css/main.css` | MEDIUM | ~2000 | Add @media print styles |
-| OPT-CSS-001 | — | `static/css/main.css` | LOW | ~1000 | Add CSS custom property spacing scale |
+| CSS-001 | 3.A7-g | `static/css/main.css` | LOW | ~1500 | ~~Add :focus-visible styles for keyboard nav~~ ✅ DONE |
+| CSS-002 | 3.A7-h | `static/css/main.css` | LOW | ~1000 | ~~Add .skip-link styles~~ ✅ DONE |
+| CSS-003 | 3.A7-i | `static/css/main.css` | LOW | ~1500 | ~~Add .filter-chip styles~~ ✅ DONE |
+| CSS-004 | 3.A7-j | `static/css/main.css` | MEDIUM | ~2000 | ~~Add @media print styles~~ ✅ DONE |
+| OPT-CSS-001 | — | `static/css/main.css` | LOW | ~1000 | ~~Add CSS custom property spacing scale~~ ✅ DONE |
 
 ### JavaScript (static/js/app.js)
 
