@@ -1,3 +1,43 @@
+{#
+──────────────────────────────────────────────────────────────────────────────
+Frontend TODOs for this template (Step 3.A — UI Design & Core Features)
+──────────────────────────────────────────────────────────────────────────────
+
+TODO 3.A3-c / FE-001 [Group: LION] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add amount range filters (min/max) to the filter sidebar.
+    The wireframe (docs/UI_WIREFRAMES.md) shows Min/Max amount inputs but they
+    are not yet implemented. Steps:
+      1. Add two <input type="number"> fields for min_amount and max_amount
+         below the exhibit type filter
+      2. Include them in the hx-get/hx-include form submission
+      3. Update _parse_filters() in api/routes/frontend.py to read them
+      4. Update _query_results() to add WHERE clauses for amount range
+      5. Add data-tooltip explaining "Amount in thousands of dollars ($K)"
+    Acceptance: Users can filter budget lines by dollar amount range.
+
+TODO 3.A3-d / FE-002 [Group: LION] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add appropriation filter dropdown to the filter sidebar.
+    The API supports appropriation_code filtering but the UI doesn't expose it.
+    Steps:
+      1. Add a <select multiple> for appropriation codes
+      2. Populate from a new _get_appropriations(conn) helper in frontend.py
+      3. Include in form submission and _parse_filters()
+      4. Add data-tooltip: "Appropriation 'color of money' — e.g., RDT&E,
+         Procurement, O&M"
+    Acceptance: Appropriation filter appears and narrows results.
+
+TODO 3.A3-e / FE-003 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add "active filter chips" above the results table.
+    Show which filters are currently applied as dismissible chips/tags so users
+    can see at a glance what's filtering their results and remove individual
+    filters by clicking the X on each chip.
+    Steps:
+      1. Add a <div class="active-filters"> between the form and results
+      2. In results.html partial, render a chip for each non-empty filter
+      3. Each chip links to the same page with that filter removed
+      4. Style chips in main.css (.filter-chip class)
+    Acceptance: Active filters are visible and individually removable.
+#}
 {% extends "base.html" %}
 
 {% block title %}Search — DoD Budget Explorer{% endblock %}

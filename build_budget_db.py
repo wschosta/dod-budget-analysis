@@ -47,6 +47,63 @@ DONE 1.B5-c  utils/pdf_sections.py: parse_narrative_sections() detects R-2/R-3
     10 unit tests in tests/test_utils.py; all pass.
 
 DONE 1.B6-h: validate_budget_data.validate_all() called at end of build_database().
+
+──────────────────────────────────────────────────────────────────────────────
+Remaining TODOs for this file
+──────────────────────────────────────────────────────────────────────────────
+
+TODO 1.A6-a / BUILD-001 [Group: BEAR] [Complexity: MEDIUM] [Tokens: ~3000] [User: NO]
+    Implement structured failure log for failed downloads.
+    Write a `failed_downloads.json` after each build with entries for files that
+    failed to parse. Include: file_path, error_type, error_detail, timestamp.
+    Add a `--retry-failures` CLI flag that reads the log and re-attempts only
+    those files. This enables incremental recovery from transient parse errors.
+    Steps:
+      1. Create FailedFileEntry dataclass (file_path, error_type, detail, ts)
+      2. In ingest_excel_file() and ingest_pdf_file(), catch exceptions and
+         append to a failures list instead of silently continuing
+      3. After build_database() completes, write failures to JSON
+      4. Add --retry-failures argparse flag that loads JSON and filters file list
+      5. Add tests for failure logging and retry logic
+    Acceptance: `--retry-failures` re-processes only previously-failed files.
+
+TODO 1.B3-d / BUILD-002 [Group: BEAR] [Complexity: MEDIUM] [Tokens: ~4000] [User: NO]
+    Make fiscal year columns dynamic instead of hardcoded FY2024-2026.
+    Currently the schema hardcodes amount_fy2024_actual, amount_fy2025_enacted,
+    amount_fy2026_request etc. When FY2027 data arrives, this requires manual
+    schema changes in 4+ locations. Refactor to:
+      1. Detect FY columns from Excel headers dynamically
+      2. Generate ALTER TABLE statements for new FY columns on first encounter
+      3. Update _map_columns() to handle arbitrary FY ranges
+      4. Update INSERT statements to use dynamic column lists
+      5. Add migration in schema_design.py to handle schema evolution
+    NOTE: Keep backward compatibility with existing FY2024-2026 columns.
+    See DESIGN NOTE in create_database() for trade-off discussion.
+    Acceptance: New FY columns auto-created when parsing FY2027+ exhibits.
+
+TODO 1.B5-d / BUILD-003 [Group: BEAR] [Complexity: LOW] [Tokens: ~2000] [User: NO]
+    Add configurable PDF extraction timeout per page.
+    _extract_tables_with_timeout() uses a fixed timeout. Large or complex PDFs
+    may need longer timeouts. Add:
+      1. --pdf-timeout CLI argument (default 30s)
+      2. Pass timeout to _extract_tables_with_timeout()
+      3. Log pages that consistently time out for manual review
+      4. Add to extraction_issues table with issue_type='timeout'
+    Acceptance: Users can tune PDF timeout; timeouts logged for triage.
+
+TODO OPT-BUILD-001 [Group: BEAR] [Complexity: MEDIUM] [Tokens: ~3500] [User: NO]
+    Parallelize Excel file ingestion using ProcessPoolExecutor.
+    Currently ingest_excel_file() processes files serially. For large document
+    corpora (500+ files), this is the bottleneck. Refactor to:
+      1. Create a standalone ingest_single_file() function that opens its own
+         DB connection and processes one file
+      2. Use ProcessPoolExecutor with max_workers=cpu_count()
+      3. Merge results back into main DB using batch_insert from utils/database
+      4. Ensure ingested_files tracking is process-safe (use SAVEPOINT)
+      5. Add --workers CLI argument (default: cpu_count())
+    Caveat: SQLite WAL mode supports concurrent readers but only one writer.
+    Consider writing to temp DBs and merging, or using a queue.
+    Acceptance: Build time reduced >2x on multi-core machines.
 """
 
 import argparse

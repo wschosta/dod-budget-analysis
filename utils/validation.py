@@ -5,6 +5,40 @@ Provides reusable functions for:
 - Running validation check registries
 - Formatting validation issues
 - Type checking and coercion
+
+──────────────────────────────────────────────────────────────────────────────
+TODOs for this file
+──────────────────────────────────────────────────────────────────────────────
+
+TODO VAL-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
+    Add cross-exhibit consistency validation.
+    Verify that summary exhibits (P-1, R-1) totals match the sum of their
+    detail exhibits (P-5, R-2). Steps:
+      1. Add check_summary_detail_consistency() validator
+      2. For each service+FY, sum P-5 amounts and compare to P-1 total
+      3. For each service+FY, sum R-2 amounts and compare to R-1 total
+      4. Report discrepancies as warnings (not errors — source data may differ)
+      5. Register in ValidationRegistry
+    Acceptance: Validation report shows summary-vs-detail discrepancies.
+
+TODO VAL-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add year-over-year outlier detection.
+    Flag budget lines where the FY2026 request differs from FY2025 enacted
+    by more than 50% (potential parsing error or real policy change). Steps:
+      1. Add check_yoy_outliers(conn, threshold=0.5) validator
+      2. Query budget_lines WHERE abs(fy2026 - fy2025) / fy2025 > threshold
+      3. Return as warnings with the actual delta percentage
+      4. Exclude rows where either amount is NULL or zero
+    Acceptance: Outlier report identifies unusual year-over-year changes.
+
+TODO VAL-003 [Group: TIGER] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add validation result export to JSON for CI integration.
+    Currently validation results are printed to stdout. Steps:
+      1. Add ValidationResult.to_json() method
+      2. Output as structured JSON: {checks: [...], issues: [...], summary: {}}
+      3. Add --json-output flag to validate_budget_db.py
+      4. CI workflow can parse JSON and fail on error-severity issues
+    Acceptance: --json-output produces parseable validation report.
 """
 
 from typing import List, Dict, Any, Callable, Optional

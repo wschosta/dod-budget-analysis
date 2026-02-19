@@ -9,6 +9,58 @@ Routes:
     GET /charts                 → charts.html (Chart.js visualisations)
     GET /partials/results       → partials/results.html (HTMX swap target)
     GET /partials/detail/{id}   → partials/detail.html (HTMX swap target)
+
+──────────────────────────────────────────────────────────────────────────────
+TODOs for this file
+──────────────────────────────────────────────────────────────────────────────
+
+TODO 3.A3-c / FE-001 [Group: LION] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add amount range (min/max) filter support.
+    Steps:
+      1. In _parse_filters(), read min_amount and max_amount from query params
+      2. In _query_results(), add WHERE clauses:
+         amount_fy2026_request >= ? AND amount_fy2026_request <= ?
+      3. Pass min_amount/max_amount to template context for form pre-fill
+    Acceptance: Amount range filter narrows results correctly.
+
+TODO 3.A3-d / FE-002 [Group: LION] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add appropriation filter support.
+    Steps:
+      1. Add _get_appropriations(conn) helper returning DISTINCT
+         appropriation_code, appropriation_title from budget_lines
+      2. In _parse_filters(), read appropriation_code from query params
+      3. In _query_results(), add WHERE appropriation_code IN (?) clause
+      4. Pass appropriation list to index template context
+    Acceptance: Appropriation dropdown filters results correctly.
+
+TODO 3.A6-b / FE-006 [Group: LION] [Complexity: MEDIUM] [Tokens: ~3000] [User: NO]
+    Add related items query to detail_partial().
+    Steps:
+      1. After fetching the main item, query for related rows:
+         SELECT id, fiscal_year, amount_fy2026_request FROM budget_lines
+         WHERE pe_number = ? AND id != ? ORDER BY fiscal_year
+      2. Fall back to matching on organization_name + line_item_title
+      3. Pass related_items list to detail.html template
+    Acceptance: Detail panel shows same program across fiscal years.
+
+TODO OPT-FE-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
+    Extract _build_where() into a shared utility module (DRY).
+    The WHERE clause builder is duplicated between api/routes/budget_lines.py
+    and this file (imported from budget_lines). The download.py route also
+    has its own inline WHERE builder. Consolidate into utils/query.py:
+      1. Create utils/query.py with build_where_clause() function
+      2. Import in budget_lines.py, frontend.py, and download.py
+      3. Add tests in tests/test_query_utils.py
+    Acceptance: Single WHERE builder used by all routes; all tests pass.
+
+TODO OPT-FE-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Cache reference data queries to avoid repeated DB hits.
+    _get_services(), _get_exhibit_types(), _get_fiscal_years() query the DB
+    on every page load. These change rarely. Steps:
+      1. Add simple in-memory cache with TTL (e.g., 5 minutes)
+      2. Use functools.lru_cache or a timestamp-based dict cache
+      3. Optionally add a POST /admin/refresh-cache endpoint
+    Acceptance: Reference queries hit DB once per 5 minutes, not per request.
 """
 
 import sqlite3

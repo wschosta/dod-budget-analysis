@@ -3,6 +3,50 @@ GET /api/v1/download endpoint (Step 2.C4-a).
 
 Streams large result sets as CSV or JSON without loading everything into memory.
 Accepts the same filter parameters as /budget-lines.
+
+──────────────────────────────────────────────────────────────────────────────
+TODOs for this file
+──────────────────────────────────────────────────────────────────────────────
+
+TODO 3.A5-b / DL-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
+    Add Excel (.xlsx) export format.
+    The wireframe (docs/UI_WIREFRAMES.md section 4) shows Excel as a download
+    option. Steps:
+      1. Add fmt=xlsx to the Query() pattern: "^(csv|json|xlsx)$"
+      2. Use openpyxl (already a dependency) to create an in-memory workbook
+      3. Write headers and stream rows in batches using openpyxl's
+         write_only mode for memory efficiency
+      4. Return as StreamingResponse with Content-Type
+         application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      5. Add Content-Disposition with .xlsx filename
+    Acceptance: /api/v1/download?fmt=xlsx returns valid Excel workbook.
+
+TODO OPT-DL-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
+    DRY: Replace inline WHERE clause builder with shared utility.
+    This file builds its own WHERE clause (lines 61-81) identical to the one
+    in budget_lines.py. Steps:
+      1. Import build_where_clause from utils/query.py (see OPT-FE-001)
+      2. Replace inline conditions/params construction with the shared function
+      3. Add keyword search (q) filter support to downloads
+    Acceptance: Download uses same WHERE builder as budget-lines; tests pass.
+
+TODO DL-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add keyword search filter to downloads.
+    Currently downloads only support structured filters (FY, service, etc.)
+    but not free-text search. The wireframe shows downloads apply ALL current
+    filters including search text. Steps:
+      1. Add q: str = Query(None) parameter to the download endpoint
+      2. If q is provided, join with budget_lines_fts via MATCH
+      3. Test with combined filters + search term
+    Acceptance: /api/v1/download?q=missile&fmt=csv returns FTS-filtered results.
+
+TODO DL-003 [Group: TIGER] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add export row count header for client progress tracking.
+    Steps:
+      1. Before streaming, COUNT(*) the filtered result set
+      2. Add X-Total-Count header to the StreamingResponse
+      3. Frontend can use this to show download progress percentage
+    Acceptance: Response includes X-Total-Count header with row count.
 """
 
 import csv

@@ -41,7 +41,7 @@ DONE 3.A6-a  Detail panel: clicking a row fires hx-get="/partials/detail/{id}" i
 DONE 3.A7-a  Responsive CSS in static/css/main.css: media queries at 768px + 480px,
     horizontal table scroll, touch-friendly targets >= 44px.
 
-TODO 3.A7-b [Complexity: LOW] [Tokens: ~1000] [User: YES — needs running UI]
+TODO 3.A7-b [Group: OH MY] [Complexity: LOW] [Tokens: ~1000] [User: YES — needs running UI]
     Accessibility audit.
     Steps:
       1. Run Lighthouse or axe-core on the running UI

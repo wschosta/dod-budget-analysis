@@ -5,6 +5,34 @@ Provides reusable functions for:
 - Managing environment-specific settings
 - Organizing constants and known values
 - Configuration validation
+
+──────────────────────────────────────────────────────────────────────────────
+TODOs for this file
+──────────────────────────────────────────────────────────────────────────────
+
+TODO OPT-CFG-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
+    Consolidate all environment variable configuration into Config class.
+    Currently env vars are read in multiple places:
+    - api/database.py reads APP_DB_PATH
+    - api/app.py reads nothing (hardcoded rate limits)
+    - build_budget_db.py has its own DEFAULT_DB_PATH constant
+    Steps:
+      1. Add env var fields to Config: db_path, api_port, log_format,
+         cors_origins, rate_limit_search, rate_limit_download, pool_size
+      2. Load from environment with sensible defaults
+      3. Add Config.from_env() class method
+      4. Have api/app.py, api/database.py, build_budget_db.py all use Config
+      5. Document all env vars in docs/deployment.md
+    Acceptance: All configuration comes from Config; env vars documented.
+
+TODO OPT-CFG-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+    Add KnownValues.fiscal_years as configurable instead of hardcoded.
+    Currently FY2024-2026 are hardcoded in multiple places. Steps:
+      1. Add fiscal_years: list[str] to KnownValues (default: [2024,2025,2026])
+      2. Add SUPPORTED_FISCAL_YEARS env var to override
+      3. Update build_budget_db.py to reference KnownValues.fiscal_years
+      4. Update API models and schemas to use this list
+    Acceptance: New FY support requires only env var change, not code changes.
 """
 
 from pathlib import Path

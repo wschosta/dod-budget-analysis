@@ -1,175 +1,355 @@
 # Remaining TODOs
 
-Updated: 2026-02-18 (continued session)
+Updated: 2026-02-19
 
-This document catalogs all remaining TODO items found across the codebase, organized
-by category and priority.
-
----
-
-## Summary
-
-| Category | Count |
-|---|---|
-| Data Source Auditing & Coverage (1.A) | 6 |
-| Exhibit Parsing & Cataloging (1.B) | 1 |
-| Frontend (3.A) | 1 |
-| Deployment & Launch (4.x) | 4 |
-| Documentation Verification | 8 |
-| **Total** | **20** |
+This document catalogs all TODO items across the codebase, organized by agent
+group assignment and priority. Each TODO is sized for an agent to work through
+without user intervention (except `OH MY` group items).
 
 ---
 
-## Recently Completed (this session)
+## Agent Group Assignments
 
-| ID | Description | Implementation |
-|---|---|---|
-| 1.C2-g | Clean up legacy TODO comments in test files | Replaced TODO markers with DONE in test_parsing.py, test_exhibit_catalog.py, conftest.py |
-| 1.B5-a | PDF extraction quality audit script | `scripts/pdf_quality_audit.py` + tests in `tests/test_pdf_quality_audit.py` |
-| 2.B2-a | Cross-service reconciliation check | `scripts/reconcile_budget_data.py::reconcile_cross_service()` + tests |
-| 2.B2-b | Cross-exhibit reconciliation (P-1 vs P-5, R-1 vs R-2) | `scripts/reconcile_budget_data.py::reconcile_cross_exhibit()` + tests |
-| 1.B2-c | Handle multi-row headers in Excel exhibit sheets | Already implemented via `_merge_header_rows()` + `ingest_excel_file()` integration; TODO comment updated to DONE |
-| TEST-001 | P-5 and R-2 test fixtures | Already implemented in conftest.py; TODO comment updated to DONE |
-| 1.C1-a | Excel fixtures for summary exhibits | Already implemented in conftest.py; TODO comment updated to DONE |
-| 1.C1-b | PDF fixtures | Already implemented in conftest.py; TODO comment updated to DONE |
-| 1.C2-a | Tests for `_detect_exhibit_type` | Already implemented; TODO comment updated to DONE |
-| 1.C2-b | `_map_columns` basic + extended coverage | Already implemented; TODO comment updated to DONE |
-| 1.C2-c | Tests for `_safe_float` | Already implemented; TODO comment updated to DONE |
-| 1.C2-d | Tests for `_determine_category` | Already implemented; TODO comment updated to DONE |
-| 1.C2-e | Tests for `_extract_table_text` | Already implemented; TODO comment updated to DONE |
-| 1.B2-b | Catalog-driven column detection for detail exhibits | Already implemented with tests; TODO comment updated to DONE |
-| 1.B1-f | All catalog entries return valid mappings | Already implemented with tests; TODO comment updated to DONE |
-| 1.C1 | Populate test fixtures directory | `scripts/generate_expected_output.py` creates synthetic .xlsx fixtures + expected JSON; 14 integration tests in `tests/test_fixture_integration.py` |
-
-### Test Coverage Improvements (continued session)
-
-| Test File | Tests | Modules Covered |
-|---|---|---|
-| `tests/test_backfill.py` | 11 | `backfill_reference_tables.py` — backfill(), service classification, deduplication, dry-run, CLI |
-| `tests/test_refresh_workflow.py` | 22 | `refresh_data.py` — RefreshWorkflow init, logging, run_command, dry-run stages, webhook notification |
-| `tests/test_database_utils.py` | 19 | `utils/database.py` — init_pragmas, batch_insert, table introspection, FTS5 index/triggers, vacuum |
-| `tests/test_pdf_sections.py` | 24 | `utils/pdf_sections.py` — R-2/R-3 section pattern matching, narrative parsing, is_narrative_exhibit |
-| `tests/test_common_utils.py` | 12 | `utils/common.py` — format_bytes, elapsed, sanitize_filename, get_connection |
-| `tests/test_exhibit_inventory.py` | 19 | `exhibit_type_inventory.py` — ExhibitInventory scan, report, JSON/CSV export |
-| `tests/test_search_extended.py` | 9 | `search_budget.py` — display_budget_results, display_pdf_results, export_results |
-| `tests/test_build_where.py` | 11 | `api/routes/budget_lines.py` — _build_where() SQL WHERE clause builder |
-| `tests/test_gui_eta.py` | 10 | `build_budget_gui.py` — _fmt_eta() ETA formatting |
-| `tests/test_api_database.py` | 5 | `api/database.py` — get_db() FastAPI dependency, connection lifecycle |
-| `tests/test_api_search_snippet.py` | 9 | `api/routes/search.py` — _snippet() text extraction and edge cases |
-| `tests/test_api_models.py` | 20 | `api/models.py` — all 11 Pydantic models validation and serialization |
-| `tests/test_frontend_helpers.py` | 17 | `api/routes/frontend.py` — _get_services, _get_exhibit_types, _parse_filters, _query_results |
-| `tests/test_download_route.py` | 7 | `api/routes/download.py` — _iter_rows streaming, column list, allowed sorts |
-| `tests/test_app_factory.py` | 5 | `api/app.py` — create_app() factory, health endpoint (200 + 503) |
-| `tests/test_patterns.py` | 48 | `utils/patterns.py` — all 7 pre-compiled regex patterns (PE_NUMBER, FISCAL_YEAR, etc.) |
-| `tests/test_config_classes.py` | 34 | `utils/config.py` — Config, DatabaseConfig, DownloadConfig, KnownValues, ColumnMapping, FilePatterns |
-| `tests/test_reference_aggregation.py` | 18 | `api/routes/reference.py` + `aggregations.py` — reference endpoints, fallback paths, aggregation filters |
-| `tests/test_scheduled_download.py` | 18 | `scripts/scheduled_download.py` + `run_precommit_checks.py` — download orchestration, PreCommitChecker |
-| `tests/test_validation_classes.py` | 45 | `utils/validation.py` — ValidationIssue, ValidationResult, ValidationRegistry, standalone validators |
-| `tests/test_strings_edge_cases.py` | 25 | `utils/strings.py` — safe_float NaN/Inf/currency, normalize_whitespace unicode, sanitize_fts5_query |
-| `tests/test_schema_design.py` | 13 | `schema_design.py` — _current_version, migrate (idempotent, seeds, indexes), create_normalized_db |
-| `tests/test_precommit_hook.py` | 16 | `.pre-commit-hook.py` — check_syntax, check_code_quality, check_security, check_database_schema |
-| `tests/test_http_utils.py` (additions) | 6 | `utils/http.py` — download_file() success, error handling, cleanup, streaming |
-| `tests/test_budget_lines_endpoint.py` | 15 | `api/routes/budget_lines.py` — list_budget_lines filters, pagination, sorting, get_budget_line |
-| `tests/test_search_endpoint.py` | 8 | `api/routes/search.py` — FTS5 search across budget lines + PDF pages, type filtering |
-| optimization_validation fixes | 0 | Fixed PytestReturnNotNoneWarning + _safe_float expectations in existing tests |
-| **Total** | **446** | Test count: 561 → 1175 (+614 new tests across all sessions) |
+| Group | Focus Area | File Ownership | Agent Can Run Autonomously |
+|-------|-----------|----------------|---------------------------|
+| **LION** | Frontend & User Experience | `templates/`, `static/`, charts | Yes |
+| **TIGER** | API, Backend & Data Layer | `api/`, `utils/`, `schema_design.py` | Yes |
+| **BEAR** | Infrastructure, Testing & Pipeline | `tests/`, `.github/`, `Dockerfile`, `build_budget_db.py`, `refresh_data.py`, `deployment_design.py`, docs | Yes |
+| **OH MY** | Requires User / External Resources | Various (network, cloud, corpus) | **No — needs human** |
 
 ---
 
-## 1. Data Source Auditing & Coverage
+## Summary by Group
 
-### `dod_budget_downloader.py`
-
-| ID | Line | Complexity | Description |
-|---|---|---|---|
-| 1.A1-a | 33 | LOW | Audit source coverage by running `--list --years all --sources all`. Produce a coverage matrix (source x FY) and document gaps in `DATA_SOURCES.md`. Requires network + live env. |
-| 1.A1-b | 42 | MEDIUM | Identify missing DoD component sources (DLA, MDA, SOCOM, DHA, DISA, National Guard Bureau). Search each agency domain for standalone budget justification documents and add to `SERVICE_PAGE_TEMPLATES` if found. Requires web browsing. |
-| 1.A1-c | 57 | LOW | Verify defense-wide discovery captures all J-Books. Run `--list --years 2026 --sources defense-wide` and compare against known defense agency J-Books. Requires network. |
-| 1.A2-a | 65 | LOW | Test historical fiscal year reach back to FY2017. Run `--list` for years 2017-2019 and check for non-empty results. Try Wayback Machine if gaps found. Requires network. |
-| 1.A2-b | 73 | MEDIUM | Handle alternate URL patterns for older fiscal years. Depends on 1.A2-a identifying which years fail first. Requires network. |
-| 1.A2-c | 82 | MEDIUM | Handle service-specific historical URL changes for FY2017-2020. Run `--list` for each service for years 2017-2018 and fix failures. Requires network. |
-
-### Inline implementation markers
-
-| ID | Line | Note |
-|---|---|---|
-| 1.A3-b | 1583 | Hash verification stub — comment marks where previously-recorded hash verification should be extended. |
-| 1.A3-c | 1630 | WAF/bot detection helper — marked as implemented. |
+| Group | Count | Est. Total Tokens | Autonomous |
+|-------|-------|-------------------|------------|
+| LION | 22 | ~32,300 | Yes |
+| TIGER | 35 | ~56,300 | Yes |
+| BEAR | 25 | ~39,500 | Yes |
+| OH MY | 12 | ~18,500 | No |
+| **Total** | **94** | **~146,600** | |
 
 ---
 
-## 2. Exhibit Parsing & Cataloging
+## LION — Frontend & User Experience
 
-### `exhibit_catalog.py`
+### Filters & Interaction (templates/index.html, api/routes/frontend.py)
 
-| ID | Line | Complexity | Description |
-|---|---|---|---|
-| 1.B1-a | 19, 425 | LOW | Inventory all exhibit types found in downloaded files. Run `scripts/exhibit_audit.py` against `DoD_Budget_Documents/` and compare against catalog entries. Requires downloaded corpus. |
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| FE-001 | 3.A3-c | `templates/index.html`, `api/routes/frontend.py` | LOW | ~1500 | Add amount range (min/max) filters to filter sidebar |
+| FE-002 | 3.A3-d | `templates/index.html`, `api/routes/frontend.py` | LOW | ~1500 | Add appropriation filter dropdown |
+| FE-003 | 3.A3-e | `templates/partials/results.html`, `static/css/main.css` | LOW | ~1000 | Add active filter chips above results |
+| FE-010 | 3.A4-c | `templates/partials/results.html`, `api/routes/frontend.py` | LOW | ~1500 | Add page-size selector to pagination |
+| FE-011 | 3.A4-d | `templates/partials/results.html`, `api/routes/download.py` | LOW | ~1000 | Export visible columns only option |
+| FE-012 | 3.C5-a | `templates/index.html`, `templates/partials/results.html` | LOW | ~1500 | Add contextual help tooltips to all labels |
+
+### Detail Panel (templates/partials/detail.html, api/routes/frontend.py)
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| FE-006 | 3.A6-b | `templates/partials/detail.html`, `api/routes/frontend.py` | MEDIUM | ~3000 | Add "Related Items" section across fiscal years |
+| FE-007 | 3.A6-c | `templates/partials/detail.html` | LOW | ~1000 | Add "Download This Item" and "Source Document" buttons |
+
+### Accessibility (templates/base.html, static/css/main.css)
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| FE-004 | 3.A7-c | `templates/base.html`, `static/css/main.css` | LOW | ~1000 | Add skip-to-content link |
+| FE-005 | 3.A7-d | `templates/base.html`, `templates/index.html` | MEDIUM | ~2000 | Add ARIA live regions for HTMX updates |
+| FE-008 | 3.A7-e | `templates/base.html` | LOW | ~1000 | Add SRI integrity hashes to CDN scripts |
+| FE-009 | 3.A7-f | `templates/base.html` | LOW | ~800 | Add meta description and Open Graph tags |
+
+### CSS (static/css/main.css)
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| CSS-001 | 3.A7-g | `static/css/main.css` | LOW | ~1500 | Add :focus-visible styles for keyboard nav |
+| CSS-002 | 3.A7-h | `static/css/main.css` | LOW | ~1000 | Add .skip-link styles |
+| CSS-003 | 3.A7-i | `static/css/main.css` | LOW | ~1500 | Add .filter-chip styles |
+| CSS-004 | 3.A7-j | `static/css/main.css` | MEDIUM | ~2000 | Add @media print styles |
+| OPT-CSS-001 | — | `static/css/main.css` | LOW | ~1000 | Add CSS custom property spacing scale |
+
+### JavaScript (static/js/app.js)
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| JS-001 | 3.A5-b | `static/js/app.js`, `api/routes/download.py` | MEDIUM | ~2000 | Add Excel (.xlsx) export support |
+| JS-002 | 3.A5-c | `static/js/app.js` | LOW | ~1500 | Show estimated result count in download modal |
+| JS-003 | 3.A3-f | `static/js/app.js` | LOW | ~1000 | Add keyboard shortcut for search (/ or Ctrl+K) |
+| JS-004 | 3.A6-d | `static/js/app.js` | LOW | ~1000 | Add keyboard navigation for detail panel |
+| OPT-JS-001 | — | `static/js/app.js` | LOW | ~1000 | Debounce filter form changes |
+
+### Charts & Visualization (templates/charts.html)
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| VIZ-001 | 3.B1-b | `templates/charts.html`, `api/routes/aggregations.py` | MEDIUM | ~2500 | Make chart FY columns dynamic |
+| VIZ-002 | 3.B1-c | `templates/charts.html` | LOW | ~1500 | Add error handling and loading indicators |
+| VIZ-003 | 3.B2-b | `templates/charts.html` | LOW | ~1500 | Add service filter to charts page |
+| VIZ-004 | 3.B3-b | `templates/charts.html`, `static/css/main.css` | MEDIUM | ~2000 | Add print-friendly chart styles |
+| VIZ-005 | 3.B4-a | `templates/charts.html` | MEDIUM | ~3000 | Add budget comparison interactive chart |
 
 ---
 
-## 3. Frontend
+## TIGER — API, Backend & Data Layer
 
-### `frontend_design.py`
+### Search API (api/routes/search.py)
 
-| ID | Line | Complexity | Description |
-|---|---|---|---|
-| 3.A7-b | 44 | LOW | Accessibility audit. Run Lighthouse or axe-core, fix issues (labels, contrast, ARIA, keyboard nav). Depends on 3.A2-3.A6 being implemented. Target: Lighthouse score >= 90. |
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| SEARCH-001 | — | `api/routes/search.py` | MEDIUM | ~2500 | Add BM25 relevance scoring |
+| SEARCH-002 | — | `api/routes/search.py` | LOW | ~1500 | Add structured filter support (FY, service, exhibit) |
+| SEARCH-003 | — | `api/routes/search.py`, `utils/formatting.py` | LOW | ~1500 | Improve snippet generation with HTML highlighting |
+| SEARCH-004 | — | `api/routes/search.py` | MEDIUM | ~2000 | Add search suggestions/autocomplete endpoint |
+
+### Aggregations API (api/routes/aggregations.py)
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| AGG-001 | — | `api/routes/aggregations.py`, `api/models.py` | MEDIUM | ~2500 | Make aggregation FY columns dynamic |
+| AGG-002 | — | `api/routes/aggregations.py`, `api/models.py` | LOW | ~1500 | Add percentage and YoY delta calculations |
+| OPT-AGG-001 | — | `api/routes/aggregations.py` | LOW | ~1000 | Add server-side aggregation caching |
+
+### Download API (api/routes/download.py)
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| DL-001 | 3.A5-b | `api/routes/download.py` | MEDIUM | ~2500 | Add Excel (.xlsx) export format |
+| DL-002 | — | `api/routes/download.py` | LOW | ~1500 | Add keyword search filter to downloads |
+| DL-003 | — | `api/routes/download.py` | LOW | ~1000 | Add X-Total-Count header for progress tracking |
+| OPT-DL-001 | — | `api/routes/download.py` | MEDIUM | ~2000 | DRY: Use shared WHERE builder |
+
+### App & Middleware (api/app.py)
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| APP-001 | 4.C4-b | `api/app.py` | MEDIUM | ~2000 | Handle proxy/forwarded IPs in rate limiter |
+| APP-002 | 4.C4-c | `api/app.py` | LOW | ~1500 | Rate limit memory cleanup (prevent unbounded growth) |
+| APP-003 | 4.C3-b | `api/app.py` | LOW | ~1500 | Add structured JSON logging for production |
+| APP-004 | — | `api/app.py` | LOW | ~1500 | Add CORS middleware for external API consumers |
+
+### Database (api/database.py)
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| OPT-DB-001 | — | `api/database.py` | MEDIUM | ~2500 | Implement connection pooling |
+| OPT-DB-002 | — | `api/database.py` | LOW | ~1000 | Add read-only connection mode |
+| OPT-DB-003 | — | `api/database.py` | LOW | ~800 | Add friendly error on missing database |
+
+### Shared Utilities (utils/)
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| UTIL-001 | OPT-FE-001 | `utils/__init__.py`, new `utils/query.py` | MEDIUM | ~2500 | Create shared SQL query builder (DRY across 3 routes) |
+| UTIL-002 | — | `utils/__init__.py`, new `utils/cache.py` | LOW | ~1500 | Create lightweight in-memory TTL cache |
+| OPT-FE-001 | — | `api/routes/frontend.py` | MEDIUM | ~2000 | Extract _build_where() into shared utility |
+| OPT-FE-002 | — | `api/routes/frontend.py` | LOW | ~1500 | Cache reference data queries (TTL) |
+| OPT-FMT-001 | — | `utils/formatting.py`, `api/app.py` | LOW | ~1000 | Consolidate fmt_amount() (remove API inline duplicate) |
+| OPT-FMT-002 | — | `utils/formatting.py`, `api/routes/search.py` | LOW | ~1000 | Consolidate _snippet() into shared module |
+| OPT-UTIL-001 | — | `utils/common.py`, `api/database.py` | LOW | ~1500 | Consolidate get_connection() across modules |
+| OPT-UTIL-002 | — | `utils/common.py` | LOW | ~1000 | Add elapsed_ms() and elapsed_sec() variants |
+| OPT-DBUTIL-001 | — | `utils/database.py` | MEDIUM | ~2500 | Add dynamic schema introspection utility |
+| OPT-DBUTIL-002 | — | `utils/database.py` | LOW | ~1500 | Add batch_upsert() for incremental updates |
+| OPT-DBUTIL-003 | — | `utils/database.py` | LOW | ~1000 | Add QueryBuilder class for safe parameterized queries |
+
+### Schema & Data Model (schema_design.py)
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| SCHEMA-001 | 2.A5-c | `schema_design.py` | MEDIUM | ~3000 | Add FY2027+ schema migration support |
+| SCHEMA-002a | 2.B1-a-1 | `schema_design.py` | MEDIUM | ~3000 | Create compatibility view for normalized tables |
+| SCHEMA-002b | 2.B1-a-2 | `build_budget_db.py`, `schema_design.py` | MEDIUM | ~3000 | Update build pipeline to write normalized tables |
+| SCHEMA-002c | 2.B1-a-3 | `api/routes/*.py` | MEDIUM | ~2000 | Migrate API routes to normalized tables |
+| SCHEMA-003 | — | `validate_budget_db.py` | LOW | ~1500 | Add database integrity check (PRAGMA + FTS sync) |
+
+### Validation (utils/validation.py)
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| VAL-001 | — | `utils/validation.py` | MEDIUM | ~2500 | Add cross-exhibit consistency validation (P-1 vs P-5) |
+| VAL-002 | — | `utils/validation.py` | LOW | ~1500 | Add year-over-year outlier detection |
+| VAL-003 | — | `utils/validation.py`, `validate_budget_db.py` | LOW | ~1000 | Add validation result export to JSON |
+
+### Configuration (utils/config.py)
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| OPT-CFG-001 | — | `utils/config.py`, `api/app.py`, `api/database.py` | MEDIUM | ~2000 | Consolidate all env var config into Config class |
+| OPT-CFG-002 | — | `utils/config.py` | LOW | ~1000 | Make KnownValues.fiscal_years configurable |
 
 ---
 
-## 4. Deployment & Launch
+## BEAR — Infrastructure, Testing & Pipeline
 
-### `deployment_design.py`
+### Build Pipeline (build_budget_db.py)
 
-| ID | Line | Complexity | Description |
-|---|---|---|---|
-| 4.A3-a | 25 | MEDIUM | Choose hosting platform. Evaluate Railway, Fly.io, Render, AWS ECS, DigitalOcean. Criteria: cost, SQLite support, auto-deploy, custom domain, HTTPS. Requires cloud account. |
-| 4.B2-a | 46 | MEDIUM | Create GitHub Actions deploy workflow (`.github/workflows/deploy.yml`). Trigger on push to main, build Docker image, deploy, run smoke test. Depends on 4.A3-a. Requires secrets. |
-| 4.C1-a | 61 | LOW | Configure custom domain + HTTPS. Register domain, configure DNS, enable TLS. Requires domain registration. |
-| 4.C6-a | 80 | LOW | Prepare for public launch. Community review needed. |
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| BUILD-001 | 1.A6-a | `build_budget_db.py` | MEDIUM | ~3000 | Implement structured failure log + `--retry-failures` |
+| BUILD-002 | 1.B3-d | `build_budget_db.py` | MEDIUM | ~4000 | Make fiscal year columns dynamic (auto ALTER TABLE) |
+| BUILD-003 | 1.B5-d | `build_budget_db.py` | LOW | ~2000 | Add configurable PDF extraction timeout per page |
+| OPT-BUILD-001 | — | `build_budget_db.py` | MEDIUM | ~3500 | Parallelize Excel ingestion with ProcessPoolExecutor |
+
+### Refresh Pipeline (refresh_data.py)
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| REFRESH-003 | — | `refresh_data.py` | MEDIUM | ~2500 | Add automatic rollback on failed refresh |
+| REFRESH-004 | — | `refresh_data.py` | LOW | ~1500 | Add refresh progress file for external monitoring |
+| REFRESH-005 | — | `refresh_data.py` | LOW | ~1000 | Add `--schedule` flag for periodic refresh |
+
+### Testing (tests/conftest.py, new test files)
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| TEST-001 | — | new `tests/test_frontend_routes.py` | MEDIUM | ~3000 | End-to-end frontend route tests with TestClient |
+| TEST-002 | — | new `tests/test_charts_data.py` | MEDIUM | ~2500 | Chart data contract tests + edge cases |
+| TEST-003 | — | new `tests/test_download_streaming.py` | LOW | ~1500 | Download endpoint streaming tests |
+| TEST-004 | — | new `tests/test_rate_limiter.py` | LOW | ~1500 | Rate limiter behavior tests |
+| TEST-005 | — | new `tests/test_performance.py` | MEDIUM | ~2000 | Performance regression smoke tests |
+| TEST-006 | — | new `tests/test_accessibility.py` | LOW | ~1500 | Static accessibility checks on HTML output |
+
+### Deployment & Docker
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| DEPLOY-001 | 4.C7-a | `deployment_design.py` | MEDIUM | ~2500 | Add /health/detailed metrics endpoint |
+| DEPLOY-002 | 4.C7-b | new `scripts/backup_db.py` | LOW | ~1500 | Add database backup script |
+| DEPLOY-003 | 4.C8-a | `api/app.py` | LOW | ~1500 | Add Content Security Policy headers |
+| DEPLOY-004 | 4.B4-a | `docker-compose.staging.yml` | MEDIUM | ~2000 | Add staging environment configuration |
+| DEPLOY-005 | 4.C6-b | new `CONTRIBUTING.md` | LOW | ~2000 | Write CONTRIBUTING.md with dev guidelines |
+| DOCKER-001 | — | `Dockerfile` | LOW | ~1000 | Add templates/ and static/ to COPY |
+| DOCKER-002 | — | `Dockerfile` | LOW | ~1000 | Add production security hardening |
+| DOCKER-003 | — | `docker-compose.yml` | LOW | ~1000 | Add templates/static volume mounts for hot-reload |
+| DOCKER-004 | — | `docker-compose.yml` | LOW | ~1000 | Remove deprecated version key |
+
+### CI/CD (.github/workflows/)
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| CI-001 | — | `.github/workflows/ci.yml` | LOW | ~1500 | Add test coverage reporting |
+| CI-002 | — | `.github/workflows/ci.yml` | LOW | ~1000 | Add mypy type checking step |
+| CI-003 | — | `.github/workflows/ci.yml` | LOW | ~1000 | Add Docker build validation step |
+
+### Documentation
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| DOC-001 | 3.C4-a | `docs/wiki/API-Reference.md` | MEDIUM | ~4000 | Populate API Reference with endpoint docs + examples |
 
 ---
 
-## 5. Documentation Verification
+## OH MY — Requires User Intervention / External Resources
 
-These are inline verification markers in documentation files that need to be resolved
-after running the source coverage audit (TODO 1.A1-a).
+These TODOs **cannot be completed by an autonomous agent**. They require network
+access to DoD websites, cloud accounts, domain registration, a downloaded document
+corpus, or community review.
 
-| File | Line | Description |
-|---|---|---|
-| `DATA_SOURCES.md` | 44 | Verify actual earliest year after running 1.A1 audit. |
-| `DATA_SOURCES.md` | 62 | Verify FY range for source after audit. |
-| `DATA_SOURCES.md` | 81 | Verify FY range for source after audit. |
-| `DATA_SOURCES.md` | 100 | Verify FY range for source after audit. |
-| `DATA_SOURCES.md` | 120 | Verify FY range for source after audit. |
-| `DATA_SOURCES.md` | 140 | Verify FY range; Space Force separated FY 2021+. |
-| `DATA_SOURCES.md` | 200 | Fill in after running audit (Step 1.A1). |
-| `docs/wiki/Data-Sources.md` | 79 | Fill in after running downloader audit (Step 1.A1). |
+### Data Source Auditing (dod_budget_downloader.py) — Requires Network
 
----
+| ID | Roadmap | File(s) | Complexity | Tokens | Blocker |
+|----|---------|---------|------------|--------|---------|
+| — | 1.A1-a | `dod_budget_downloader.py` | LOW | ~1500 | Needs network + live DoD sites |
+| — | 1.A1-b | `dod_budget_downloader.py` | MEDIUM | ~2500 | Needs web browsing of agency sites |
+| — | 1.A1-c | `dod_budget_downloader.py` | LOW | ~1000 | Needs network access |
+| — | 1.A2-a | `dod_budget_downloader.py` | LOW | ~1000 | Needs network access |
+| — | 1.A2-b | `dod_budget_downloader.py` | MEDIUM | ~2000 | Depends on 1.A2-a; needs network |
+| — | 1.A2-c | `dod_budget_downloader.py` | MEDIUM | ~2500 | Needs network access |
 
-## 6. API Documentation
+### Exhibit Inventory (exhibit_catalog.py) — Requires Downloaded Corpus
 
-| File | Line | Description |
-|---|---|---|
-| `docs/wiki/API-Reference.md` | 3 | Populate after API endpoints are designed and implemented (Steps 2.C2-2.C6). |
+| ID | Roadmap | File(s) | Complexity | Tokens | Blocker |
+|----|---------|---------|------------|--------|---------|
+| — | 1.B1-a | `exhibit_catalog.py` | LOW | ~1500 | Needs downloaded document corpus |
+
+### Accessibility Audit (frontend_design.py) — Requires Running UI
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Blocker |
+|----|---------|---------|------------|--------|---------|
+| — | 3.A7-b | `frontend_design.py` | LOW | ~1000 | Needs Lighthouse/axe-core + running UI |
+
+### Deployment & Launch — Requires Cloud/Domain/Community
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Blocker |
+|----|---------|---------|------------|--------|---------|
+| — | 4.A3-a | `deployment_design.py` | MEDIUM | ~2000 | Needs cloud account |
+| — | 4.B2-a | `deployment_design.py` | MEDIUM | ~2000 | Needs secrets; depends on 4.A3-a |
+| — | 4.C1-a | `deployment_design.py` | LOW | ~1000 | Needs domain registration |
+| — | 4.C6-a | `deployment_design.py` | LOW | ~1500 | Needs community review |
+
+### Documentation Verification — Depends on 1.A1 Audit
+
+| File | Description |
+|------|-------------|
+| `DATA_SOURCES.md` lines 44, 62, 81, 100, 120, 140, 200 | Verify FY ranges after running 1.A1 source audit |
+| `docs/wiki/Data-Sources.md` line 79 | Fill in after running downloader audit |
 
 ---
 
 ## Dependency Graph
 
 ```
-1.A1-a ──► 1.A2-a ──► 1.A2-b
-  │                     │
-  ▼                     ▼
-Documentation      1.A2-c
-verification
-(DATA_SOURCES.md)
+OH MY Dependencies (sequential):
+  1.A1-a ──► 1.A2-a ──► 1.A2-b
+    │                      │
+    ▼                      ▼
+  DATA_SOURCES.md      1.A2-c
+  verification
 
-1.B1-a (needs downloaded corpus)
+  4.A3-a ──► 4.B2-a ──► 4.C1-a ──► 4.C6-a
 
-3.A2–3.A6 ──► 3.A7-b (accessibility audit)
+LION Suggested Order:
+  CSS-001,002,003 ──► FE-004 (skip link needs CSS-002)
+  FE-001,002 ──► FE-003 (chips need filters to exist)
+  FE-008,009 (independent, do early)
+  VIZ-002 ──► VIZ-001 ──► VIZ-003 (error handling before dynamic FY)
 
-4.A3-a ──► 4.B2-a ──► 4.C1-a ──► 4.C6-a
+TIGER Suggested Order:
+  UTIL-001,002 ──► OPT-FE-001,002 (shared utils before route refactors)
+  OPT-DBUTIL-001 ──► AGG-001 (schema introspection before dynamic agg)
+  SEARCH-001 ──► SEARCH-002 ──► SEARCH-003 (scoring before filters before snippets)
+  OPT-CFG-001 ──► APP-001,003 (config consolidation before middleware changes)
+  SCHEMA-001 ──► SCHEMA-002a ──► SCHEMA-002b ──► SCHEMA-002c
+
+BEAR Suggested Order:
+  DOCKER-001,004 ──► DOCKER-002,003 (basic fixes before hardening)
+  BUILD-003 ──► BUILD-001 ──► BUILD-002 (small fixes before big refactors)
+  TEST-001,003 ──► TEST-002 ──► TEST-004,005,006 (basic tests before advanced)
+  CI-001 ──► CI-002 ──► CI-003 (coverage before type checks before Docker)
+  DOC-001 (independent, can be done anytime)
+```
+
+---
+
+## Cross-File Coordination Notes
+
+Some TODOs span files owned by different groups. Coordinate as follows:
+
+| TODO | Primary Group | Touches Other Group's Files | Resolution |
+|------|--------------|----------------------------|------------|
+| FE-001 | LION | `api/routes/frontend.py` (TIGER) | LION implements frontend.py filter changes since they own the feature |
+| FE-006 | LION | `api/routes/frontend.py` (TIGER) | LION adds related items query to frontend.py |
+| JS-001/DL-001 | LION/TIGER | Both need xlsx export | TIGER implements DL-001 endpoint; LION wires JS-001 button |
+| VIZ-001 | LION | `api/routes/aggregations.py` (TIGER) | TIGER does AGG-001 first; LION adapts charts |
+| OPT-FE-001 | TIGER | Shared utility used by LION's frontend.py | TIGER creates utils/query.py; LION adopts it |
+
+---
+
+## How to Find TODOs in Code
+
+```bash
+# All TODOs with group assignments
+grep -rn 'TODO.*\[Group:' --include='*.py' --include='*.html' --include='*.css' --include='*.js' --include='*.yml' --include='*.md' .
+
+# TODOs for a specific group
+grep -rn '\[Group: LION\]' --include='*.py' --include='*.html' --include='*.css' --include='*.js' .
+grep -rn '\[Group: TIGER\]' --include='*.py' --include='*.html' --include='*.css' --include='*.js' .
+grep -rn '\[Group: BEAR\]' --include='*.py' --include='*.html' --include='*.css' --include='*.js' --include='*.yml' .
+grep -rn '\[Group: OH MY\]' --include='*.py' .
+
+# All TODOs by complexity
+grep -rn '\[Complexity: HIGH\]' .
+grep -rn '\[Complexity: MEDIUM\]' .
+grep -rn '\[Complexity: LOW\]' .
 ```

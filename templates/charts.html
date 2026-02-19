@@ -1,3 +1,56 @@
+{#
+──────────────────────────────────────────────────────────────────────────────
+Charts page TODOs (Step 3.B — Data Visualization)
+──────────────────────────────────────────────────────────────────────────────
+
+TODO 3.B1-b / VIZ-001 [Group: LION] [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
+    Make chart FY columns dynamic instead of hardcoded FY2024/2025/2026.
+    Currently the JS references hardcoded column names like total_fy2026_request.
+    When FY2027 data arrives, all charts break. Steps:
+      1. Add a /api/v1/reference/amount-columns endpoint that returns the list
+         of amount column names present in budget_lines schema
+      2. In loadCharts(), fetch this list first and use it to build chart labels
+      3. Update aggregation endpoint to return dynamic column sums
+      4. Update chart dataset construction to iterate over dynamic FY list
+    Acceptance: Charts auto-adapt when new FY columns are added to the schema.
+
+TODO 3.B1-c / VIZ-002 [Group: LION] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add error handling and loading indicators to chart API calls.
+    Currently if an API call fails, the chart silently shows nothing. Steps:
+      1. Wrap each fetch() in try/catch
+      2. Show a user-friendly error message in the chart card on failure
+      3. Add a loading spinner to each chart-card while data loads
+      4. Disable FY selector during loading to prevent double-fetches
+    Acceptance: Network errors show message instead of blank charts.
+
+TODO 3.B2-b / VIZ-003 [Group: LION] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add service filter to charts page.
+    Currently charts show all services. Add filter controls to scope charts
+    to specific services. Steps:
+      1. Add service multi-select dropdown next to the FY selector
+      2. Pass selected services as query parameter to aggregation API
+      3. Update loadCharts() to include service filter in fetch URLs
+    Acceptance: Users can filter charts by service/agency.
+
+TODO 3.B3-b / VIZ-004 [Group: LION] [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
+    Add print-friendly styles for the charts page.
+    Charts should be printable for reports and briefings. Steps:
+      1. Add @media print {} rules in main.css
+      2. Hide navigation, filters, and interactive controls in print
+      3. Ensure charts render at full width in print layout
+      4. Add a "Print Charts" button that triggers window.print()
+    Acceptance: Ctrl+P produces a clean, readable chart printout.
+
+TODO 3.B4-a / VIZ-005 [Group: LION] [Complexity: MEDIUM] [Tokens: ~3000] [User: NO]
+    Add a "Budget Comparison" interactive chart.
+    Allow users to select two programs or services and overlay their budget
+    trends on a single chart for visual comparison. Steps:
+      1. Add a comparison mode with two entity selectors
+      2. Fetch aggregation data for both entities
+      3. Render overlapping bar or line chart using Chart.js
+      4. Include percent-change annotations between years
+    Acceptance: Users can visually compare two budget items side-by-side.
+#}
 {% extends "base.html" %}
 
 {% block title %}Charts — DoD Budget Explorer{% endblock %}

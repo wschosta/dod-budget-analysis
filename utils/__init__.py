@@ -1,4 +1,42 @@
-"""Shared utilities for DoD Budget tools."""
+"""Shared utilities for DoD Budget tools.
+
+──────────────────────────────────────────────────────────────────────────────
+Cross-cutting Utility TODOs
+──────────────────────────────────────────────────────────────────────────────
+
+TODO OPT-FE-001 / UTIL-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
+    Create utils/query.py — shared SQL query builder module.
+    The WHERE clause construction logic is duplicated in three places:
+    - api/routes/budget_lines.py (_build_where)
+    - api/routes/frontend.py (imports from budget_lines)
+    - api/routes/download.py (inline implementation)
+    Steps:
+      1. Create utils/query.py with:
+         - build_where_clause(fiscal_year, service, exhibit_type, pe_number,
+           appropriation_code, min_amount, max_amount) -> (str, list)
+         - build_order_clause(sort_by, sort_dir, allowed_sorts) -> str
+      2. Move _build_where from budget_lines.py to utils/query.py
+      3. Update budget_lines.py, frontend.py, download.py to import from utils
+      4. Add utils/query.py to this __init__.py imports and __all__
+      5. Add comprehensive tests in tests/test_query_utils.py
+    Acceptance: Single query builder; all 3 routes use it; all tests pass.
+
+TODO UTIL-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Create utils/cache.py — lightweight in-memory TTL cache.
+    Multiple components need TTL caching (reference data, aggregations,
+    connection pool stats). Steps:
+      1. Create utils/cache.py with TTLCache class:
+         - __init__(maxsize=128, ttl_seconds=300)
+         - get(key) -> value | None
+         - set(key, value) -> None
+         - clear() -> None
+         - stats() -> dict (hits, misses, size)
+      2. Use in frontend.py for _get_services(), _get_exhibit_types()
+      3. Use in aggregations.py for expensive GROUP BY queries
+      4. Add to this __init__.py imports
+      5. Add tests in tests/test_cache_utils.py
+    Acceptance: TTL cache reduces repeated DB queries; tests pass.
+"""
 
 # Common utilities
 from utils.common import format_bytes, elapsed, sanitize_filename, get_connection

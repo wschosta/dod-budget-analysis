@@ -19,6 +19,50 @@ OpenAPI docs available at http://localhost:8000/docs after starting.
       - Flask: no auto-OpenAPI; must add flask-restx or apispec manually
       - Litestar: excellent but newer ecosystem; fewer resources
     Dependencies added to requirements.txt: fastapi>=0.109, uvicorn[standard]>=0.25
+
+──────────────────────────────────────────────────────────────────────────────
+TODOs for this file
+──────────────────────────────────────────────────────────────────────────────
+
+TODO 4.C4-b / APP-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
+    Improve rate limiter to handle proxy/forwarded IPs.
+    Currently client_ip = request.client.host, which returns the proxy IP
+    when behind a reverse proxy (Nginx, Cloudflare, etc.). Steps:
+      1. Read X-Forwarded-For header if present (trusted proxies only)
+      2. Add TRUSTED_PROXIES env var to configure which IPs to trust
+      3. Fall back to request.client.host if no proxy header
+      4. Add rate limit bypass for health check endpoint
+    Acceptance: Rate limiting works correctly behind a reverse proxy.
+
+TODO 4.C4-c / APP-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add rate limit memory cleanup to prevent unbounded memory growth.
+    _rate_counters dict grows indefinitely as new IPs make requests.
+    Steps:
+      1. Add periodic cleanup: every 5 minutes, remove entries where all
+         timestamps are older than 60 seconds
+      2. Use a background task or middleware counter to trigger cleanup
+      3. Add max_tracked_ips limit (e.g., 10000) — evict oldest on overflow
+    Acceptance: Rate limiter memory bounded; no growth after days of traffic.
+
+TODO 4.C3-b / APP-003 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add structured JSON logging for production deployments.
+    Currently logging uses text format which is hard to parse in log
+    aggregation tools (ELK, Datadog, CloudWatch). Steps:
+      1. Add JSON formatter class that outputs log records as JSON
+      2. Enable JSON logging when APP_LOG_FORMAT=json env var is set
+      3. Include fields: timestamp, level, logger, method, path, status,
+         duration_ms, client_ip, request_id
+      4. Add X-Request-ID header generation for request tracing
+    Acceptance: APP_LOG_FORMAT=json produces newline-delimited JSON logs.
+
+TODO APP-004 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+    Add CORS middleware for API consumers.
+    External clients (JavaScript apps, Jupyter notebooks) need CORS headers
+    to call the API from different origins. Steps:
+      1. Add FastAPI CORSMiddleware with configurable allowed origins
+      2. Default: allow all origins for public data API
+      3. Add APP_CORS_ORIGINS env var for restrictive deployments
+    Acceptance: Browser JS from external domains can call /api/v1/ endpoints.
 """
 
 import logging

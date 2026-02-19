@@ -16,7 +16,7 @@ Current state:
 TODOs — each is an independent task unless noted otherwise
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO 1.B1-a [Complexity: LOW] [Tokens: ~1500] [User: YES — needs downloaded corpus]
+TODO 1.B1-a [Group: OH MY] [Complexity: LOW] [Tokens: ~1500] [User: YES — needs downloaded corpus]
     Inventory all exhibit types found in downloaded files.
     Steps:
       1. Write a 40-line script: walk DoD_Budget_Documents/, open every .xlsx
@@ -422,7 +422,7 @@ def describe_catalog():
     return "\n".join(lines)
 
 
-# TODO 1.B1-a [Complexity: LOW] [Tokens: ~1500] [User: YES — needs downloaded corpus]
+# TODO 1.B1-a [Group: OH MY] [Complexity: LOW] [Tokens: ~1500] [User: YES — needs downloaded corpus]
 #   Run scripts/exhibit_audit.py against DoD_Budget_Documents/ to inventory
 #   actual header rows from every .xlsx file. Compare against catalog entries.
 #   Save output to exhibit_audit_report.txt and review for catalog gaps.

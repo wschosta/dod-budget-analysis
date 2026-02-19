@@ -4,6 +4,37 @@
 # Matrix: Python 3.11 and 3.12.
 # Steps: lint/precommit checks, then pytest.
 # Fails the PR if any tests fail or precommit violations are found.
+#
+# ──────────────────────────────────────────────────────────────────────────────
+# CI Workflow TODOs
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# TODO CI-001 [Group: BEAR] [Complexity: LOW] [Tokens: ~1500] [User: NO]
+#     Add test coverage reporting to CI.
+#     Steps:
+#       1. Add --cov=. --cov-report=xml to pytest command
+#       2. Upload coverage.xml as artifact
+#       3. Add coverage badge to README.md using codecov or similar
+#       4. Optionally: fail CI if coverage drops below threshold (e.g., 80%)
+#     Acceptance: CI generates coverage report; badge shows in README.
+#
+# TODO CI-002 [Group: BEAR] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+#     Add type checking step with mypy or pyright.
+#     The codebase uses type hints extensively but they're not validated.
+#     Steps:
+#       1. Add mypy to requirements-dev.txt
+#       2. Add mypy step: mypy api/ utils/ --ignore-missing-imports
+#       3. Fix any type errors that are found
+#       4. Consider adding py.typed marker for downstream consumers
+#     Acceptance: mypy runs in CI; no type errors.
+#
+# TODO CI-003 [Group: BEAR] [Complexity: LOW] [Tokens: ~1000] [User: NO]
+#     Add Docker build validation step.
+#     Steps:
+#       1. Add a job that runs docker build -t test .
+#       2. Run docker run --rm test python -c "from api.app import create_app"
+#       3. Verifies the Docker image builds and imports work
+#     Acceptance: CI validates Docker image on every push.
 
 name: CI
 
