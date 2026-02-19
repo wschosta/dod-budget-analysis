@@ -79,7 +79,7 @@ from datetime import datetime
 from pathlib import Path
 from concurrent.futures import (
     ThreadPoolExecutor, ProcessPoolExecutor, TimeoutError as FuturesTimeoutError,
-    wait, FIRST_COMPLETED,
+    as_completed, wait, FIRST_COMPLETED,
 )
 import os
 
