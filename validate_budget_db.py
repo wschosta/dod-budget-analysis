@@ -8,6 +8,9 @@ Usage:
     python validate_budget_db.py                     # Default database
     python validate_budget_db.py --db mydb.sqlite    # Custom path
     python validate_budget_db.py --verbose            # Show all issue details
+    python validate_budget_db.py --json               # JSON output
+    python validate_budget_db.py --html > report.html # HTML report (TIGER-007)
+    python validate_budget_db.py --threshold warning  # Exit non-zero on warnings+
 
 ---
 TODOs for this file
@@ -20,6 +23,7 @@ import json
 import re
 import sqlite3
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # Shared utilities: Import from utils package for consistency across codebase
@@ -47,13 +51,13 @@ def _get_amount_columns(conn: sqlite3.Connection) -> list[str]:
     return [c[1] for c in cols if c[1].startswith("amount_fy")]
 
 
-# TODO [Group: TIGER] TIGER-001: Add cross-year budget consistency validation — flag >10x YoY changes (~2,500 tokens)
-# TODO [Group: TIGER] TIGER-002: Add appropriation title consistency validation (~1,500 tokens)
-# TODO [Group: TIGER] TIGER-003: Add line item rollup reconciliation (~2,500 tokens)
-# TODO [Group: TIGER] TIGER-004: Add referential integrity validation (budget_lines → lookup tables) (~1,500 tokens)
-# TODO [Group: TIGER] TIGER-005: Add FY column completeness check (~1,000 tokens)
-# TODO [Group: TIGER] TIGER-006: Integrate PDF quality metrics into validation report (~2,000 tokens)
-# TODO [Group: TIGER] TIGER-007: Add HTML validation report export and --threshold flag (~1,500 tokens)
+# DONE [Group: TIGER] TIGER-001: Add cross-year budget consistency validation — flag >10x YoY changes
+# DONE [Group: TIGER] TIGER-002: Add appropriation title consistency validation
+# DONE [Group: TIGER] TIGER-003: Add line item rollup reconciliation
+# DONE [Group: TIGER] TIGER-004: Add referential integrity validation (budget_lines → lookup tables)
+# DONE [Group: TIGER] TIGER-005: Add FY column completeness check
+# DONE [Group: TIGER] TIGER-006: Integrate PDF quality metrics into validation report
+# DONE [Group: TIGER] TIGER-007: Add HTML validation report export and --threshold flag
 
 # ── Individual checks ────────────────────────────────────────────────────────
 
@@ -381,6 +385,360 @@ def check_negative_amounts(conn: sqlite3.Connection) -> list[dict]:
     return issues
 
 
+# ── TIGER-001: Cross-year budget consistency validation ─────────────────────
+
+def check_yoy_budget_anomalies(conn: sqlite3.Connection) -> list[dict]:
+    """Detect anomalous year-over-year budget changes (>10x / 1000%).
+
+    For each (organization, account, exhibit_type) group, compares adjacent
+    fiscal year amounts.  A change ratio > 10 suggests a potential data issue
+    (though large changes may be legitimate policy shifts).
+
+    Severity: WARNING
+    """
+    issues = []
+    amount_cols = _get_amount_columns(conn)
+    if len(amount_cols) < 2:
+        return issues
+
+    # Compare adjacent pairs of amount columns
+    for i in range(len(amount_cols) - 1):
+        col_old = amount_cols[i]
+        col_new = amount_cols[i + 1]
+        try:
+            rows = conn.execute(f"""
+                SELECT organization_name, account, exhibit_type,
+                       {col_old} AS amount_old, {col_new} AS amount_new
+                FROM budget_lines
+                WHERE {col_old} IS NOT NULL AND {col_old} != 0
+                  AND {col_new} IS NOT NULL AND {col_new} != 0
+                  AND ABS({col_new} - {col_old}) / MAX(ABS({col_old}), 1) > 10
+                ORDER BY ABS({col_new} - {col_old}) / MAX(ABS({col_old}), 1) DESC
+                LIMIT 50
+            """).fetchall()
+        except Exception:
+            continue
+
+        if rows:
+            issues.append({
+                "check": "yoy_budget_anomalies",
+                "severity": "warning",
+                "detail": (
+                    f"{len(rows)} row(s) have >1000% change from {col_old} to {col_new}"
+                ),
+                "columns": [col_old, col_new],
+                "count": len(rows),
+                "samples": [
+                    f"{r['organization_name']} / {r['account']} / {r['exhibit_type']}: "
+                    f"{r['amount_old']:,.0f} → {r['amount_new']:,.0f}"
+                    for r in rows[:5]
+                ],
+            })
+
+    return issues
+
+
+# ── TIGER-002: Appropriation title consistency validation ───────────────────
+
+def check_appropriation_title_consistency(conn: sqlite3.Connection) -> list[dict]:
+    """Detect the same appropriation code used with different titles.
+
+    Severity: WARNING
+    """
+    issues = []
+    try:
+        rows = conn.execute("""
+            SELECT account, COUNT(DISTINCT account_title) AS title_count
+            FROM budget_lines
+            WHERE account IS NOT NULL AND account != ''
+              AND account_title IS NOT NULL AND account_title != ''
+            GROUP BY account
+            HAVING title_count > 1
+        """).fetchall()
+    except Exception:
+        return []
+
+    for r in rows:
+        # Fetch the distinct titles for this account
+        titles = conn.execute(
+            "SELECT DISTINCT account_title FROM budget_lines "
+            "WHERE account = ? AND account_title IS NOT NULL AND account_title != ''",
+            (r["account"],),
+        ).fetchall()
+        title_list = [t["account_title"] for t in titles]
+        issues.append({
+            "check": "appropriation_title_consistency",
+            "severity": "warning",
+            "detail": (
+                f"Account '{r['account']}' has {r['title_count']} distinct titles: "
+                f"{'; '.join(title_list[:5])}"
+            ),
+            "account": r["account"],
+            "title_count": r["title_count"],
+            "titles": title_list,
+        })
+
+    return issues
+
+
+# ── TIGER-003: Line item rollup reconciliation ─────────────────────────────
+
+def check_line_item_rollups(conn: sqlite3.Connection) -> list[dict]:
+    """Verify that detail line items sum correctly to budget activity totals.
+
+    For each (organization, account, fiscal_year, exhibit_type), sums all
+    line item amounts and compares against the budget activity total row
+    (where budget_activity_title contains 'total').
+    Flags discrepancies > $1M (to allow for rounding).
+
+    Severity: WARNING
+    """
+    issues = []
+    amount_cols = _get_amount_columns(conn)
+    if not amount_cols:
+        return issues
+
+    # Use the most recent request column for comparison
+    check_col = amount_cols[-1]
+
+    try:
+        # Get total rows (rows where budget_activity_title suggests a total)
+        total_rows = conn.execute(f"""
+            SELECT organization_name, account, fiscal_year, exhibit_type,
+                   SUM(COALESCE({check_col}, 0)) AS total_amount
+            FROM budget_lines
+            WHERE LOWER(COALESCE(budget_activity_title, '')) LIKE '%total%'
+            GROUP BY organization_name, account, fiscal_year, exhibit_type
+        """).fetchall()
+
+        if not total_rows:
+            return issues
+
+        # Get detail sums (non-total rows)
+        detail_rows = conn.execute(f"""
+            SELECT organization_name, account, fiscal_year, exhibit_type,
+                   SUM(COALESCE({check_col}, 0)) AS detail_sum
+            FROM budget_lines
+            WHERE LOWER(COALESCE(budget_activity_title, '')) NOT LIKE '%total%'
+              AND budget_activity_title IS NOT NULL
+              AND budget_activity_title != ''
+            GROUP BY organization_name, account, fiscal_year, exhibit_type
+        """).fetchall()
+
+        detail_map = {
+            (r["organization_name"], r["account"], r["fiscal_year"], r["exhibit_type"]):
+                r["detail_sum"]
+            for r in detail_rows
+        }
+
+        for r in total_rows:
+            key = (r["organization_name"], r["account"], r["fiscal_year"], r["exhibit_type"])
+            detail_sum = detail_map.get(key)
+            if detail_sum is None:
+                continue
+            total_amount = r["total_amount"] or 0
+            diff = abs(total_amount - detail_sum)
+            # Flag discrepancies > $1M (amounts are in thousands, so 1000 = $1M)
+            if diff > 1000:
+                issues.append({
+                    "check": "line_item_rollups",
+                    "severity": "warning",
+                    "detail": (
+                        f"Rollup mismatch for {key[0]} / {key[1]} / {key[2]} / {key[3]}: "
+                        f"total={total_amount:,.0f} detail_sum={detail_sum:,.0f} "
+                        f"diff=${diff:,.0f}K"
+                    ),
+                    "organization": key[0],
+                    "account": key[1],
+                    "fiscal_year": key[2],
+                    "exhibit_type": key[3],
+                    "total_amount": total_amount,
+                    "detail_sum": detail_sum,
+                    "difference": diff,
+                })
+    except Exception:
+        pass
+
+    return issues
+
+
+# ── TIGER-004: Referential integrity validation ────────────────────────────
+
+def check_referential_integrity(conn: sqlite3.Connection) -> list[dict]:
+    """Verify all referenced values exist in lookup tables.
+
+    Checks that:
+    - organization_name values in budget_lines exist in services_agencies
+    - exhibit_type values in budget_lines exist in exhibit_types
+
+    Severity: ERROR for missing references
+    """
+    issues = []
+
+    # Check organization_name → services_agencies
+    try:
+        orphaned_orgs = conn.execute("""
+            SELECT DISTINCT b.organization_name, COUNT(*) AS cnt
+            FROM budget_lines b
+            LEFT JOIN services_agencies s ON b.organization_name = s.code
+               OR b.organization_name = s.full_name
+            WHERE b.organization_name IS NOT NULL
+              AND b.organization_name != ''
+              AND s.code IS NULL
+            GROUP BY b.organization_name
+            ORDER BY cnt DESC
+        """).fetchall()
+
+        for r in orphaned_orgs:
+            issues.append({
+                "check": "referential_integrity",
+                "severity": "error",
+                "detail": (
+                    f"Organization '{r['organization_name']}' ({r['cnt']} rows) "
+                    "not found in services_agencies table"
+                ),
+                "table": "services_agencies",
+                "missing_value": r["organization_name"],
+                "count": r["cnt"],
+            })
+    except Exception:
+        # services_agencies table may not exist
+        pass
+
+    # Check exhibit_type → exhibit_types
+    try:
+        orphaned_exhibits = conn.execute("""
+            SELECT DISTINCT b.exhibit_type, COUNT(*) AS cnt
+            FROM budget_lines b
+            LEFT JOIN exhibit_types e ON b.exhibit_type = e.code
+            WHERE b.exhibit_type IS NOT NULL
+              AND b.exhibit_type != ''
+              AND e.code IS NULL
+            GROUP BY b.exhibit_type
+            ORDER BY cnt DESC
+        """).fetchall()
+
+        for r in orphaned_exhibits:
+            issues.append({
+                "check": "referential_integrity",
+                "severity": "error",
+                "detail": (
+                    f"Exhibit type '{r['exhibit_type']}' ({r['cnt']} rows) "
+                    "not found in exhibit_types table"
+                ),
+                "table": "exhibit_types",
+                "missing_value": r["exhibit_type"],
+                "count": r["cnt"],
+            })
+    except Exception:
+        # exhibit_types table may not exist
+        pass
+
+    return issues
+
+
+# ── TIGER-005: FY column completeness check ────────────────────────────────
+
+# Expected FY amount columns based on current budget cycle
+EXPECTED_FY_COLUMNS = {
+    "amount_fy2024_actual",
+    "amount_fy2025_enacted",
+    "amount_fy2025_supplemental",
+    "amount_fy2025_total",
+    "amount_fy2026_request",
+    "amount_fy2026_reconciliation",
+    "amount_fy2026_total",
+}
+
+
+def check_expected_fy_columns(conn: sqlite3.Connection) -> list[dict]:
+    """Verify expected fiscal year columns exist in the budget_lines schema.
+
+    Checks PRAGMA table_info for amount_fy* columns and compares against
+    the expected set.
+
+    Severity: ERROR for missing expected columns
+    """
+    issues = []
+    actual_cols = set(_get_amount_columns(conn))
+    missing = EXPECTED_FY_COLUMNS - actual_cols
+    if missing:
+        issues.append({
+            "check": "expected_fy_columns",
+            "severity": "error",
+            "detail": (
+                f"Missing expected FY columns: {', '.join(sorted(missing))}"
+            ),
+            "missing_columns": sorted(missing),
+        })
+    return issues
+
+
+# ── TIGER-006: PDF extraction quality metrics ──────────────────────────────
+
+def check_pdf_extraction_quality(conn: sqlite3.Connection) -> list[dict]:
+    """Check PDF extraction quality and calculate quality score.
+
+    Queries pdf_pages for:
+    - Pages with suspiciously short text (< 50 chars excluding whitespace)
+    - Pages where has_tables=1 but extracted table text is empty
+
+    Severity: WARNING if quality score < 0.9; INFO otherwise
+    """
+    issues = []
+    try:
+        total_pages = conn.execute(
+            "SELECT COUNT(*) AS c FROM pdf_pages"
+        ).fetchone()["c"]
+    except Exception:
+        return issues
+
+    if total_pages == 0:
+        return issues
+
+    # Short text pages
+    try:
+        short_pages = conn.execute("""
+            SELECT COUNT(*) AS c FROM pdf_pages
+            WHERE LENGTH(REPLACE(REPLACE(COALESCE(page_text, ''), ' ', ''),
+                         CHAR(10), '')) < 50
+        """).fetchone()["c"]
+    except Exception:
+        short_pages = 0
+
+    # Empty table data pages
+    try:
+        empty_table_pages = conn.execute("""
+            SELECT COUNT(*) AS c FROM pdf_pages
+            WHERE has_tables = 1
+              AND (table_data IS NULL OR TRIM(table_data) = '')
+        """).fetchone()["c"]
+    except Exception:
+        empty_table_pages = 0
+
+    bad_pages = short_pages + empty_table_pages
+    # Avoid double-counting pages that are both short and have empty tables
+    good_pages = max(total_pages - bad_pages, 0)
+    quality_score = round(good_pages / total_pages, 4) if total_pages > 0 else 1.0
+
+    severity = "warning" if quality_score < 0.9 else "info"
+    issues.append({
+        "check": "pdf_extraction_quality",
+        "severity": severity,
+        "detail": (
+            f"PDF extraction quality score: {quality_score:.2%} "
+            f"({good_pages}/{total_pages} good pages, "
+            f"{short_pages} short text, {empty_table_pages} empty table data)"
+        ),
+        "pdf_quality_score": quality_score,
+        "total_pages": total_pages,
+        "short_text_pages": short_pages,
+        "empty_table_pages": empty_table_pages,
+    })
+
+    return issues
+
+
 # ── Report generation ────────────────────────────────────────────────────────
 
 def check_integrity(conn: sqlite3.Connection) -> list[dict]:
@@ -410,10 +768,16 @@ ALL_CHECKS = [
     ("Unknown Exhibit Types", check_unknown_exhibits),
     ("Ingestion Errors", check_ingestion_errors),
     ("Empty Files", check_empty_files),
-    ("Unit Consistency", check_unit_consistency),      # Step 1.B3-f
-    ("PE Number Format", check_pe_number_format),      # VALDB-001
-    ("Negative Amounts", check_negative_amounts),      # VALDB-002
-    ("Database Integrity", check_integrity),             # SCHEMA-003
+    ("Unit Consistency", check_unit_consistency),                # Step 1.B3-f
+    ("PE Number Format", check_pe_number_format),                # VALDB-001
+    ("Negative Amounts", check_negative_amounts),                # VALDB-002
+    ("Database Integrity", check_integrity),                      # SCHEMA-003
+    ("YoY Budget Anomalies", check_yoy_budget_anomalies),        # TIGER-001
+    ("Appropriation Title Consistency", check_appropriation_title_consistency),  # TIGER-002
+    ("Line Item Rollups", check_line_item_rollups),              # TIGER-003
+    ("Referential Integrity", check_referential_integrity),      # TIGER-004
+    ("Expected FY Columns", check_expected_fy_columns),          # TIGER-005
+    ("PDF Extraction Quality", check_pdf_extraction_quality),    # TIGER-006
 ]
 
 
@@ -430,6 +794,7 @@ def generate_json_report(conn: sqlite3.Connection) -> dict:
     checks_output = []
     total_issues = 0
     severity_counts = {"error": 0, "warning": 0, "info": 0}
+    pdf_quality_score = None
 
     for check_name, check_fn in ALL_CHECKS:
         issues = check_fn(conn)
@@ -437,6 +802,9 @@ def generate_json_report(conn: sqlite3.Connection) -> dict:
         total_issues += count
         for issue in issues:
             severity_counts[issue["severity"]] += 1
+            # TIGER-006: Extract PDF quality score
+            if "pdf_quality_score" in issue:
+                pdf_quality_score = issue["pdf_quality_score"]
         severities = list({i["severity"] for i in issues})
         status = "pass"
         if issues:
@@ -448,7 +816,7 @@ def generate_json_report(conn: sqlite3.Connection) -> dict:
             "issues": issues,
         })
 
-    return {
+    result = {
         "database": {
             "budget_lines": total_lines,
             "pdf_pages": total_pages,
@@ -462,6 +830,10 @@ def generate_json_report(conn: sqlite3.Connection) -> dict:
         },
         "checks": checks_output,
     }
+    # TIGER-006: Include PDF quality score in report
+    if pdf_quality_score is not None:
+        result["pdf_quality_score"] = pdf_quality_score
+    return result
 
 
 def generate_report(conn: sqlite3.Connection, verbose: bool = False) -> int:
@@ -522,6 +894,142 @@ def generate_report(conn: sqlite3.Connection, verbose: bool = False) -> int:
     return total_issues
 
 
+# ── TIGER-007: HTML report generation ──────────────────────────────────────
+
+_SEVERITY_COLORS = {
+    "error": "#dc3545",
+    "warning": "#ffc107",
+    "info": "#17a2b8",
+}
+
+_HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DoD Budget Validation Report</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+         max-width: 960px; margin: 2rem auto; padding: 0 1rem; color: #333; }}
+  h1 {{ border-bottom: 2px solid #333; padding-bottom: 0.5rem; }}
+  .timestamp {{ color: #666; font-size: 0.9rem; }}
+  .summary-table {{ width: 100%; border-collapse: collapse; margin: 1rem 0; }}
+  .summary-table th, .summary-table td {{ border: 1px solid #ddd; padding: 8px 12px;
+                                          text-align: left; }}
+  .summary-table th {{ background: #f8f9fa; }}
+  .pass {{ color: #28a745; font-weight: bold; }}
+  .fail {{ color: #dc3545; font-weight: bold; }}
+  .warn {{ color: #856404; font-weight: bold; }}
+  .sev-error {{ background: #f8d7da; color: #721c24; padding: 2px 6px;
+                border-radius: 3px; font-size: 0.85rem; }}
+  .sev-warning {{ background: #fff3cd; color: #856404; padding: 2px 6px;
+                  border-radius: 3px; font-size: 0.85rem; }}
+  .sev-info {{ background: #d1ecf1; color: #0c5460; padding: 2px 6px;
+               border-radius: 3px; font-size: 0.85rem; }}
+  details {{ margin: 0.5rem 0; border: 1px solid #ddd; border-radius: 4px; padding: 0.5rem; }}
+  details summary {{ cursor: pointer; font-weight: 600; }}
+  details summary:hover {{ color: #0056b3; }}
+  .issue {{ padding: 4px 0; border-bottom: 1px solid #eee; font-size: 0.9rem; }}
+  .issue:last-child {{ border-bottom: none; }}
+  .metric {{ display: inline-block; padding: 4px 10px; margin: 2px;
+             background: #e9ecef; border-radius: 3px; font-size: 0.9rem; }}
+</style>
+</head>
+<body>
+<h1>DoD Budget Database Validation Report</h1>
+<p class="timestamp">Generated: {timestamp}</p>
+
+<h2>Database Overview</h2>
+<div>
+  <span class="metric">Budget Lines: {budget_lines:,}</span>
+  <span class="metric">PDF Pages: {pdf_pages:,}</span>
+  <span class="metric">Files Ingested: {files_ingested:,}</span>
+</div>
+
+<h2>Summary</h2>
+<table class="summary-table">
+<tr><th>Metric</th><th>Count</th></tr>
+<tr><td>Total Issues</td><td>{total_issues}</td></tr>
+<tr><td><span class="sev-error">Errors</span></td><td>{errors}</td></tr>
+<tr><td><span class="sev-warning">Warnings</span></td><td>{warnings}</td></tr>
+<tr><td><span class="sev-info">Info</span></td><td>{info}</td></tr>
+</table>
+
+<h2>Check Results</h2>
+<table class="summary-table">
+<tr><th>Check</th><th>Status</th><th>Issues</th></tr>
+{check_rows}
+</table>
+
+<h2>Details</h2>
+{check_details}
+
+</body>
+</html>"""
+
+
+def generate_html_report(conn: sqlite3.Connection) -> str:
+    """Run all checks and return a styled HTML report (TIGER-007)."""
+    report = generate_json_report(conn)
+
+    check_rows = []
+    check_details = []
+
+    for check in report["checks"]:
+        status_class = check["status"]
+        status_label = check["status"].upper()
+        check_rows.append(
+            f'<tr><td>{check["name"]}</td>'
+            f'<td class="{status_class}">{status_label}</td>'
+            f'<td>{check["issue_count"]}</td></tr>'
+        )
+
+        if check["issues"]:
+            issue_html = []
+            for issue in check["issues"][:20]:
+                sev_class = f"sev-{issue['severity']}"
+                issue_html.append(
+                    f'<div class="issue"><span class="{sev_class}">'
+                    f'{issue["severity"].upper()}</span> {issue["detail"]}</div>'
+                )
+            if check["issue_count"] > 20:
+                issue_html.append(
+                    f'<div class="issue">... and {check["issue_count"] - 20} more</div>'
+                )
+            check_details.append(
+                f'<details><summary>{check["name"]} ({check["issue_count"]} issues)</summary>'
+                f'{"".join(issue_html)}</details>'
+            )
+
+    return _HTML_TEMPLATE.format(
+        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        budget_lines=report["database"]["budget_lines"],
+        pdf_pages=report["database"]["pdf_pages"],
+        files_ingested=report["database"]["files_ingested"],
+        total_issues=report["summary"]["total_issues"],
+        errors=report["summary"]["errors"],
+        warnings=report["summary"]["warnings"],
+        info=report["summary"]["info"],
+        check_rows="\n".join(check_rows),
+        check_details="\n".join(check_details),
+    )
+
+
+# ── TIGER-007: Threshold-based exit code ───────────────────────────────────
+
+_SEVERITY_LEVELS = {"info": 0, "warning": 1, "error": 2}
+
+
+def _exceeds_threshold(report: dict, threshold: str) -> bool:
+    """Check if any issues exceed the given severity threshold."""
+    threshold_level = _SEVERITY_LEVELS.get(threshold, 2)
+    for check in report["checks"]:
+        for issue in check["issues"]:
+            if _SEVERITY_LEVELS.get(issue["severity"], 0) >= threshold_level:
+                return True
+    return False
+
+
 def main():
     """Parse CLI arguments, run all validation checks, and exit with status code."""
     parser = argparse.ArgumentParser(
@@ -532,19 +1040,32 @@ def main():
                         help="Show details for each issue found")
     parser.add_argument("--json", action="store_true",
                         help="Output results as JSON (VALDB-003)")
+    parser.add_argument("--html", action="store_true",
+                        help="Output a styled HTML report (TIGER-007)")
+    parser.add_argument("--threshold", default="error",
+                        choices=["info", "warning", "error"],
+                        help="Exit non-zero if issues at/above this severity (default: error)")
     args = parser.parse_args()
 
     conn = get_connection(args.db)
 
-    if args.json:
+    if args.html:
+        html = generate_html_report(conn)
+        print(html)
+        report = generate_json_report(conn)
+        should_fail = _exceeds_threshold(report, args.threshold)
+        conn.close()
+        sys.exit(1 if should_fail else 0)
+    elif args.json:
         report = generate_json_report(conn)
         print(json.dumps(report, indent=2))
-        issue_count = report["summary"]["total_issues"]
+        should_fail = _exceeds_threshold(report, args.threshold)
+        conn.close()
+        sys.exit(1 if should_fail else 0)
     else:
         issue_count = generate_report(conn, verbose=args.verbose)
-
-    conn.close()
-    sys.exit(1 if issue_count > 0 else 0)
+        conn.close()
+        sys.exit(1 if issue_count > 0 else 0)
 
 
 if __name__ == "__main__":

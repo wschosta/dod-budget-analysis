@@ -10,12 +10,87 @@ Provides reusable functions for:
 TODOs for this file
 ──────────────────────────────────────────────────────────────────────────────
 
-# TODO [Group: TIGER] TIGER-011: Add query performance logging — slow query tracking (~2,000 tokens)
+# DONE [Group: TIGER] TIGER-011: Add query performance logging — slow query tracking
 """
 
+import logging
 import sqlite3
+import time
+import threading
+from collections import deque
 from pathlib import Path
 from typing import List, Dict, Any
+
+_logger = logging.getLogger("dod_budget_api.queries")
+
+# ── TIGER-011: Slow query log ────────────────────────────────────────────────
+
+_SLOW_QUERY_THRESHOLD_MS = 100  # Log queries taking longer than this
+_MAX_SLOW_QUERIES = 50  # Keep last N slow queries in memory
+_slow_queries: deque = deque(maxlen=_MAX_SLOW_QUERIES)
+_query_stats_lock = threading.Lock()
+_query_stats: Dict[str, Any] = {
+    "total_queries": 0,
+    "slow_query_count": 0,
+    "total_time_ms": 0.0,
+}
+
+
+def get_slow_queries() -> list[dict]:
+    """Return the last N slow queries for monitoring."""
+    with _query_stats_lock:
+        return list(_slow_queries)
+
+
+def get_query_stats() -> dict:
+    """Return aggregate query performance statistics."""
+    with _query_stats_lock:
+        total = _query_stats["total_queries"]
+        avg = _query_stats["total_time_ms"] / total if total > 0 else 0.0
+        return {
+            "total_queries": total,
+            "slow_query_count": _query_stats["slow_query_count"],
+            "avg_query_time_ms": round(avg, 2),
+        }
+
+
+def timed_execute(conn: sqlite3.Connection, query: str,
+                  params: tuple | list = ()) -> sqlite3.Cursor:
+    """Execute a query with timing, logging slow queries.
+
+    Args:
+        conn: SQLite connection
+        query: SQL query string
+        params: Query parameters
+
+    Returns:
+        sqlite3.Cursor with results
+    """
+    start = time.monotonic()
+    cursor = conn.execute(query, params)
+    elapsed_ms = (time.monotonic() - start) * 1000
+
+    with _query_stats_lock:
+        _query_stats["total_queries"] += 1
+        _query_stats["total_time_ms"] += elapsed_ms
+
+        if elapsed_ms > _SLOW_QUERY_THRESHOLD_MS:
+            _query_stats["slow_query_count"] += 1
+            entry = {
+                "query": query[:200],
+                "params_count": len(params) if params else 0,
+                "time_ms": round(elapsed_ms, 2),
+                "row_count": cursor.rowcount if cursor.rowcount >= 0 else None,
+                "timestamp": time.time(),
+            }
+            _slow_queries.append(entry)
+            _logger.warning(
+                "slow_query time_ms=%.1f query=%s",
+                elapsed_ms,
+                query[:200],
+            )
+
+    return cursor
 
 
 def init_pragmas(conn: sqlite3.Connection) -> None:

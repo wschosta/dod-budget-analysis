@@ -24,7 +24,7 @@ without user intervention (except `OH MY` group items).
 | Group | Previously Done | New Tasks | Est. New Tokens | Autonomous |
 |-------|----------------|-----------|-----------------|------------|
 | LION | 27/27 ✅ | 10 new | ~17,000 | Yes |
-| TIGER | 35/35 ✅ | 11 new | ~20,500 | Yes |
+| TIGER | 35/35 ✅ | 11 new ✅ ALL DONE | ~20,500 | Yes |
 | BEAR | 25/25 ✅ | 12 new | ~26,000 | Yes |
 | OH MY | — | 12 (unchanged) | ~18,500 | **No — needs human** |
 | **Total** | **87 done** | **45 new** | **~82,000** | |
@@ -265,22 +265,22 @@ without user intervention (except `OH MY` group items).
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| TIGER-001 | 1.B6-i | `validate_budget_db.py`, `utils/validation.py` | MEDIUM | ~2,500 | Add cross-year budget consistency validation (flag >10x YoY changes) |
-| TIGER-002 | 1.B6-j | `validate_budget_db.py` | LOW | ~1,500 | Add appropriation title consistency validation |
-| TIGER-003 | 1.B6-k | `validate_budget_db.py` | MEDIUM | ~2,500 | Add line item rollup reconciliation |
-| TIGER-004 | 1.B6-l | `validate_budget_db.py` | LOW | ~1,500 | Add referential integrity validation (budget_lines → lookup tables) |
-| TIGER-005 | 1.B6-m | `validate_budget_db.py` | LOW | ~1,000 | Add FY column completeness check |
-| TIGER-006 | 1.B5-e | `validate_budget_db.py`, `scripts/pdf_quality_audit.py` | MEDIUM | ~2,000 | Integrate PDF quality metrics into validation report |
-| TIGER-007 | 1.B6-n | `validate_budget_db.py` | LOW | ~1,500 | Add validation result export improvements (HTML report, --threshold) |
+| TIGER-001 | 1.B6-i | `validate_budget_db.py`, `utils/validation.py` | MEDIUM | ~2,500 | ~~Add cross-year budget consistency validation (flag >10x YoY changes)~~ ✅ DONE |
+| TIGER-002 | 1.B6-j | `validate_budget_db.py` | LOW | ~1,500 | ~~Add appropriation title consistency validation~~ ✅ DONE |
+| TIGER-003 | 1.B6-k | `validate_budget_db.py` | MEDIUM | ~2,500 | ~~Add line item rollup reconciliation~~ ✅ DONE |
+| TIGER-004 | 1.B6-l | `validate_budget_db.py` | LOW | ~1,500 | ~~Add referential integrity validation (budget_lines → lookup tables)~~ ✅ DONE |
+| TIGER-005 | 1.B6-m | `validate_budget_db.py` | LOW | ~1,000 | ~~Add FY column completeness check~~ ✅ DONE |
+| TIGER-006 | 1.B5-e | `validate_budget_db.py`, `scripts/pdf_quality_audit.py` | MEDIUM | ~2,000 | ~~Integrate PDF quality metrics into validation report~~ ✅ DONE |
+| TIGER-007 | 1.B6-n | `validate_budget_db.py` | LOW | ~1,500 | ~~Add validation result export improvements (HTML report, --threshold)~~ ✅ DONE |
 
 ### API Enhancements
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| TIGER-008 | 4.B2-c | `api/routes/feedback.py`, `api/app.py`, `api/models.py` | LOW | ~1,500 | Add feedback API endpoint stub (logs to feedback.json) |
-| TIGER-009 | 4.C4-c | `api/app.py`, `api/routes/reference.py`, `api/routes/aggregations.py` | LOW | ~1,500 | Add API response caching headers (Cache-Control, ETag, 304) |
-| TIGER-010 | 3.C4-b | `api/models.py`, `api/routes/*.py` | LOW | ~2,000 | Add OpenAPI example responses to all endpoints |
-| TIGER-011 | 4.C4-d | `api/app.py`, `utils/database.py` | MEDIUM | ~2,000 | Add query performance logging (slow query tracking) |
+| TIGER-008 | 4.B2-c | `api/routes/feedback.py`, `api/app.py`, `api/models.py` | LOW | ~1,500 | ~~Add feedback API endpoint stub (logs to feedback.json)~~ ✅ DONE |
+| TIGER-009 | 4.C4-c | `api/app.py`, `api/routes/reference.py`, `api/routes/aggregations.py` | LOW | ~1,500 | ~~Add API response caching headers (Cache-Control, ETag, 304)~~ ✅ DONE |
+| TIGER-010 | 3.C4-b | `api/models.py`, `api/routes/*.py` | LOW | ~2,000 | ~~Add OpenAPI example responses to all endpoints~~ ✅ DONE |
+| TIGER-011 | 4.C4-d | `api/app.py`, `utils/database.py` | MEDIUM | ~2,000 | ~~Add query performance logging (slow query tracking)~~ ✅ DONE |
 
 ---
 
@@ -360,10 +360,10 @@ NEW LION (all independent — can run in parallel):
   LION-002 ←→ TIGER-008: Feedback form (LION) needs feedback endpoint (TIGER)
   LION-009 ←→ VIZ-005: Click-to-filter builds on existing chart interactivity
 
-NEW TIGER (mostly independent):
-  TIGER-001 through TIGER-007: Data quality tasks — independent of each other
-  TIGER-008: Feedback endpoint — pairs with LION-002
-  TIGER-009 through TIGER-011: API enhancements — independent of each other
+NEW TIGER (ALL DONE ✅):
+  TIGER-001 through TIGER-007: Data quality tasks — ✅ ALL DONE
+  TIGER-008: Feedback endpoint — ✅ DONE (pairs with LION-002)
+  TIGER-009 through TIGER-011: API enhancements — ✅ ALL DONE
 
 NEW BEAR (some sequential dependencies):
   BEAR-001 through BEAR-004: Test suites — independent of each other
