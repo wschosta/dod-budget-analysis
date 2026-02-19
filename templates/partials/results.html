@@ -76,7 +76,7 @@
           <th class="col-exhibit" data-tooltip="Budget exhibit type (R-2, P-5, O-1, etc.)">Exhibit</th>
           <th class="col-account" data-tooltip="Appropriation account code">Account</th>
           <th class="col-pe" data-tooltip="Program Element number — unique identifier for each R&amp;D program">PE #</th>
-          <th class="col-fy24 td-amount">
+          <th class="col-fy24 td-amount" data-tooltip="FY2024 actual expenditure in thousands of dollars ($K). Actual = amounts obligated by end of fiscal year.">
             <a hx-get="/partials/results" hx-target="#results-container"
                hx-push-url="true"
                hx-vals='{"sort_by":"amount_fy2024_actual","sort_dir":"{% if sort_by == "amount_fy2024_actual" and sort_dir == "desc" %}asc{% else %}desc{% endif %}","page":"1"}'
@@ -86,7 +86,7 @@
             </a>
           </th>
           <th class="col-fy25 td-amount" data-tooltip="FY2025 enacted amount in thousands of dollars ($K). Enacted = signed into law by Congress.">FY25 Enacted ($K)</th>
-          <th class="col-fy26 td-amount">
+          <th class="col-fy26 td-amount" data-tooltip="FY2026 budget request in thousands of dollars ($K). Request = President's budget submission to Congress.">
             <a hx-get="/partials/results" hx-target="#results-container"
                hx-push-url="true"
                hx-vals='{"sort_by":"amount_fy2026_request","sort_dir":"{% if sort_by == "amount_fy2026_request" and sort_dir == "desc" %}asc{% else %}desc{% endif %}","page":"1"}'

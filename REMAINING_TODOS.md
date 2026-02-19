@@ -42,14 +42,14 @@ without user intervention (except `OH MY` group items).
 | FE-003 | 3.A3-e | `templates/partials/results.html`, `static/css/main.css` | LOW | ~1000 | ~~Add active filter chips above results~~ ✅ DONE |
 | FE-010 | 3.A4-c | `templates/partials/results.html`, `api/routes/frontend.py` | LOW | ~1500 | ~~Add page-size selector to pagination~~ ✅ DONE |
 | FE-011 | 3.A4-d | `templates/partials/results.html`, `api/routes/download.py` | LOW | ~1000 | Export visible columns only option |
-| FE-012 | 3.C5-a | `templates/index.html`, `templates/partials/results.html` | LOW | ~1500 | Add contextual help tooltips to all labels |
+| FE-012 | 3.C5-a | `templates/index.html`, `templates/partials/results.html` | LOW | ~1500 | ~~Add contextual help tooltips to all labels~~ ✅ DONE |
 
 ### Detail Panel (templates/partials/detail.html, api/routes/frontend.py)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| FE-006 | 3.A6-b | `templates/partials/detail.html`, `api/routes/frontend.py` | MEDIUM | ~3000 | Add "Related Items" section across fiscal years |
-| FE-007 | 3.A6-c | `templates/partials/detail.html` | LOW | ~1000 | Add "Download This Item" and "Source Document" buttons |
+| FE-006 | 3.A6-b | `templates/partials/detail.html`, `api/routes/frontend.py` | MEDIUM | ~3000 | ~~Add "Related Items" section across fiscal years~~ ✅ DONE |
+| FE-007 | 3.A6-c | `templates/partials/detail.html` | LOW | ~1000 | ~~Add "Download This Item" and "Source Document" buttons~~ ✅ DONE |
 
 ### Accessibility (templates/base.html, static/css/main.css)
 

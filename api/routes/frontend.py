@@ -272,7 +272,35 @@ def detail_partial(
     if row is None:
         raise HTTPException(status_code=404, detail=f"Budget line {item_id} not found")
 
+    item = dict(row)
+
+    # FE-006: Related items — same program across fiscal years
+    related_items: list[dict] = []
+    pe_number = item.get("pe_number")
+    if pe_number:
+        related_rows = conn.execute(
+            "SELECT id, fiscal_year, line_item_title, organization_name, "
+            "amount_fy2026_request FROM budget_lines "
+            "WHERE pe_number = ? AND id != ? ORDER BY fiscal_year",
+            (pe_number, item_id),
+        ).fetchall()
+        related_items = [dict(r) for r in related_rows]
+
+    # Fall back: match on organization_name + line_item_title if no PE results
+    if not related_items:
+        org   = item.get("organization_name")
+        title = item.get("line_item_title")
+        if org and title:
+            related_rows = conn.execute(
+                "SELECT id, fiscal_year, line_item_title, organization_name, "
+                "amount_fy2026_request FROM budget_lines "
+                "WHERE organization_name = ? AND line_item_title = ? AND id != ? "
+                "ORDER BY fiscal_year",
+                (org, title, item_id),
+            ).fetchall()
+            related_items = [dict(r) for r in related_rows]
+
     return _tmpl().TemplateResponse(
         "partials/detail.html",
-        {"request": request, "item": dict(row)},
+        {"request": request, "item": item, "related_items": related_items},
     )
