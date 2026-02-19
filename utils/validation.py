@@ -10,35 +10,6 @@ Provides reusable functions for:
 TODOs for this file
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO VAL-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
-    Add cross-exhibit consistency validation.
-    Verify that summary exhibits (P-1, R-1) totals match the sum of their
-    detail exhibits (P-5, R-2). Steps:
-      1. Add check_summary_detail_consistency() validator
-      2. For each service+FY, sum P-5 amounts and compare to P-1 total
-      3. For each service+FY, sum R-2 amounts and compare to R-1 total
-      4. Report discrepancies as warnings (not errors — source data may differ)
-      5. Register in ValidationRegistry
-    Acceptance: Validation report shows summary-vs-detail discrepancies.
-
-TODO VAL-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add year-over-year outlier detection.
-    Flag budget lines where the FY2026 request differs from FY2025 enacted
-    by more than 50% (potential parsing error or real policy change). Steps:
-      1. Add check_yoy_outliers(conn, threshold=0.5) validator
-      2. Query budget_lines WHERE abs(fy2026 - fy2025) / fy2025 > threshold
-      3. Return as warnings with the actual delta percentage
-      4. Exclude rows where either amount is NULL or zero
-    Acceptance: Outlier report identifies unusual year-over-year changes.
-
-TODO VAL-003 [Group: TIGER] [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Add validation result export to JSON for CI integration.
-    Currently validation results are printed to stdout. Steps:
-      1. Add ValidationResult.to_json() method
-      2. Output as structured JSON: {checks: [...], issues: [...], summary: {}}
-      3. Add --json-output flag to validate_budget_db.py
-      4. CI workflow can parse JSON and fail on error-severity issues
-    Acceptance: --json-output produces parseable validation report.
 """
 
 from typing import List, Dict, Any, Callable, Optional
@@ -287,3 +258,169 @@ def is_valid_exhibit_type(exhibit: str, known_exhibits: Optional[set] = None) ->
         return exhibit in known_exhibits
     # Generic validation: 1-3 alphanumeric chars
     return 1 <= len(exhibit) <= 3 and exhibit.isalnum()
+
+
+# ── VAL-001: Cross-exhibit consistency validation ─────────────────────────────
+
+def check_summary_detail_consistency(
+    conn: sqlite3.Connection,
+    tolerance: float = 0.05,
+) -> list["ValidationIssue"]:
+    """Validate that summary exhibit totals match sum of detail exhibit lines.
+
+    For each service+fiscal_year, compares:
+    - P-1 total vs sum of P-5 amounts
+    - R-1 total vs sum of R-2 amounts
+
+    Args:
+        conn: SQLite connection.
+        tolerance: Acceptable relative difference (default 5%).
+
+    Returns:
+        List of ValidationIssue warnings for significant discrepancies.
+    """
+    issues: list[ValidationIssue] = []
+
+    exhibit_pairs = [
+        ("p1", "p5", "Procurement P-1 vs P-5"),
+        ("r1", "r2", "RDT&E R-1 vs R-2"),
+    ]
+
+    for summary_type, detail_type, label in exhibit_pairs:
+        try:
+            # Get summary exhibit totals by service + fiscal_year
+            summary_rows = conn.execute("""
+                SELECT organization_name, fiscal_year,
+                       SUM(COALESCE(amount_fy2026_request,
+                                    amount_fy2025_enacted,
+                                    amount_fy2024_actual, 0)) AS total
+                FROM budget_lines
+                WHERE LOWER(exhibit_type) = ?
+                GROUP BY organization_name, fiscal_year
+            """, (summary_type,)).fetchall()
+
+            # Get detail exhibit totals by service + fiscal_year
+            detail_rows = conn.execute("""
+                SELECT organization_name, fiscal_year,
+                       SUM(COALESCE(amount_fy2026_request,
+                                    amount_fy2025_enacted,
+                                    amount_fy2024_actual, 0)) AS total
+                FROM budget_lines
+                WHERE LOWER(exhibit_type) = ?
+                GROUP BY organization_name, fiscal_year
+            """, (detail_type,)).fetchall()
+
+            detail_map = {
+                (r["organization_name"], r["fiscal_year"]): r["total"]
+                for r in detail_rows
+            }
+
+            for row in summary_rows:
+                key = (row["organization_name"], row["fiscal_year"])
+                detail_total = detail_map.get(key)
+                if detail_total is None:
+                    continue
+                summary_total = row["total"] or 0
+                if summary_total == 0:
+                    continue
+                diff = abs(summary_total - detail_total) / abs(summary_total)
+                if diff > tolerance:
+                    issues.append(ValidationIssue(
+                        check_name="summary_detail_consistency",
+                        severity="warning",
+                        detail=(
+                            f"{label}: {key[0]} FY={key[1]} "
+                            f"summary={summary_total:,.0f} "
+                            f"detail={detail_total:,.0f} "
+                            f"diff={diff:.1%}"
+                        ),
+                        sample=key,
+                        count=1,
+                    ))
+        except Exception as e:
+            issues.append(ValidationIssue(
+                check_name="summary_detail_consistency",
+                severity="warning",
+                detail=f"Could not run {label} check: {e}",
+            ))
+
+    return issues
+
+
+# ── VAL-002: Year-over-year outlier detection ─────────────────────────────────
+
+def check_yoy_outliers(
+    conn: sqlite3.Connection,
+    threshold: float = 0.5,
+) -> list["ValidationIssue"]:
+    """Flag budget lines with unusual year-over-year changes.
+
+    Checks where |FY2026_request - FY2025_enacted| / FY2025_enacted > threshold.
+
+    Args:
+        conn: SQLite connection.
+        threshold: Relative change threshold (default 50%).
+
+    Returns:
+        List of ValidationIssue warnings for outlier rows.
+    """
+    issues: list[ValidationIssue] = []
+    try:
+        rows = conn.execute("""
+            SELECT id, source_file, exhibit_type, organization_name,
+                   line_item_title, pe_number,
+                   amount_fy2025_enacted, amount_fy2026_request,
+                   ABS(amount_fy2026_request - amount_fy2025_enacted)
+                       / ABS(amount_fy2025_enacted) AS delta_pct
+            FROM budget_lines
+            WHERE amount_fy2025_enacted IS NOT NULL
+              AND amount_fy2025_enacted != 0
+              AND amount_fy2026_request IS NOT NULL
+              AND ABS(amount_fy2026_request - amount_fy2025_enacted)
+                  / ABS(amount_fy2025_enacted) > ?
+            ORDER BY delta_pct DESC
+            LIMIT 500
+        """, (threshold,)).fetchall()
+
+        if rows:
+            issues.append(ValidationIssue(
+                check_name="yoy_outliers",
+                severity="warning",
+                detail=(
+                    f"{len(rows)} budget line(s) changed by >{threshold:.0%} "
+                    "from FY2025 enacted to FY2026 request"
+                ),
+                sample=dict(rows[0]) if rows else None,
+                count=len(rows),
+            ))
+    except Exception as e:
+        issues.append(ValidationIssue(
+            check_name="yoy_outliers",
+            severity="warning",
+            detail=f"Could not run YoY outlier check: {e}",
+        ))
+    return issues
+
+
+# ── VAL-003: JSON export for ValidationResult ─────────────────────────────────
+
+import json as _json
+
+
+def _add_to_json(cls):
+    """Add to_json() method to ValidationResult."""
+    def to_json(self, indent: int = 2) -> str:
+        """Serialize validation results to JSON string.
+
+        Returns:
+            JSON string with checks, issues, and summary sections.
+        """
+        return _json.dumps(self.to_dict(), indent=indent, default=str)
+    cls.to_json = to_json
+    return cls
+
+
+# Monkey-patch ValidationResult with to_json()
+ValidationResult.to_json = lambda self, indent=2: _json.dumps(  # type: ignore[method-assign]
+    self.to_dict(), indent=indent, default=str
+)

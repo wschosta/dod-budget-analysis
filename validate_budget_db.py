@@ -9,9 +9,9 @@ Usage:
     python validate_budget_db.py --db mydb.sqlite    # Custom path
     python validate_budget_db.py --verbose            # Show all issue details
 
-──────────────────────────────────────────────────────────────────────────────
+---
 TODOs for this file
-──────────────────────────────────────────────────────────────────────────────
+---
 
 """
 
@@ -24,6 +24,7 @@ from pathlib import Path
 
 # Shared utilities: Import from utils package for consistency across codebase
 from utils import get_connection
+from schema_design import check_database_integrity
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 
@@ -374,6 +375,25 @@ def check_negative_amounts(conn: sqlite3.Connection) -> list[dict]:
 
 # ── Report generation ────────────────────────────────────────────────────────
 
+def check_integrity(conn: sqlite3.Connection) -> list[dict]:
+    """Run PRAGMA integrity_check and FTS sync verification (SCHEMA-003)."""
+    result = check_database_integrity(conn)
+    issues = []
+    if not result["integrity_ok"]:
+        issues.append({
+            "check": "integrity_check",
+            "severity": "error",
+            "detail": "; ".join(result["details"]),
+        })
+    if not result["fts_sync_ok"]:
+        issues.append({
+            "check": "fts_sync",
+            "severity": "error",
+            "detail": "; ".join(d for d in result["details"] if "fts_sync" in d),
+        })
+    return issues
+
+
 ALL_CHECKS = [
     ("Missing Fiscal Years", check_missing_years),
     ("Duplicate Rows", check_duplicates),
@@ -385,6 +405,7 @@ ALL_CHECKS = [
     ("Unit Consistency", check_unit_consistency),      # Step 1.B3-f
     ("PE Number Format", check_pe_number_format),      # VALDB-001
     ("Negative Amounts", check_negative_amounts),      # VALDB-002
+    ("Database Integrity", check_integrity),             # SCHEMA-003
 ]
 
 

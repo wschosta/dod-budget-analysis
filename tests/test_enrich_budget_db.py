@@ -1,0 +1,400 @@
+"""
+Tests for enrich_budget_db.py — all four enrichment phases.
+
+Uses in-memory SQLite databases to avoid touching the real DB.
+"""
+from __future__ import annotations
+
+import json
+import sqlite3
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from enrich_budget_db import (
+    run_phase1,
+    run_phase2,
+    run_phase3,
+    run_phase4,
+    _extract_fy_from_path,
+    _context_window,
+    _tags_from_keywords,
+)
+
+
+# ── Fixtures ──────────────────────────────────────────────────────────────────
+
+def _make_db() -> sqlite3.Connection:
+    """Create an in-memory DB with all required tables."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE budget_lines (
+            id INTEGER PRIMARY KEY,
+            source_file TEXT,
+            exhibit_type TEXT,
+            fiscal_year TEXT,
+            account TEXT,
+            account_title TEXT,
+            organization TEXT,
+            organization_name TEXT,
+            budget_activity TEXT,
+            budget_activity_title TEXT,
+            sub_activity TEXT,
+            sub_activity_title TEXT,
+            line_item TEXT,
+            line_item_title TEXT,
+            pe_number TEXT,
+            budget_type TEXT,
+            appropriation_title TEXT,
+            amount_fy2024_actual REAL,
+            amount_fy2025_enacted REAL,
+            amount_fy2025_total REAL,
+            amount_fy2026_request REAL,
+            amount_fy2026_total REAL,
+            quantity_fy2024 REAL,
+            quantity_fy2025 REAL,
+            quantity_fy2026_request REAL
+        );
+
+        CREATE TABLE pdf_pages (
+            id INTEGER PRIMARY KEY,
+            source_file TEXT,
+            source_category TEXT,
+            page_number INTEGER,
+            page_text TEXT,
+            has_tables INTEGER DEFAULT 0,
+            table_data TEXT
+        );
+
+        CREATE TABLE pe_index (
+            pe_number TEXT PRIMARY KEY,
+            display_title TEXT,
+            organization_name TEXT,
+            budget_type TEXT,
+            fiscal_years TEXT,
+            exhibit_types TEXT,
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE TABLE pe_descriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pe_number TEXT NOT NULL,
+            fiscal_year TEXT,
+            source_file TEXT,
+            page_start INTEGER,
+            page_end INTEGER,
+            section_header TEXT,
+            description_text TEXT
+        );
+
+        CREATE TABLE pe_tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pe_number TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            tag_source TEXT NOT NULL,
+            confidence REAL DEFAULT 1.0,
+            UNIQUE(pe_number, tag, tag_source)
+        );
+
+        CREATE TABLE pe_lineage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_pe TEXT NOT NULL,
+            referenced_pe TEXT NOT NULL,
+            fiscal_year TEXT,
+            source_file TEXT,
+            page_number INTEGER,
+            context_snippet TEXT,
+            link_type TEXT,
+            confidence REAL DEFAULT 1.0
+        );
+    """)
+    return conn
+
+
+@pytest.fixture()
+def conn():
+    db = _make_db()
+    yield db
+    db.close()
+
+
+def _insert_budget_line(conn, pe_number="0602120A", fiscal_year="2026",
+                         exhibit_type="r1", org="Army",
+                         title="Radar Technology", ba_title="6.2 Applied Research",
+                         approp_title="Research, Development, Test and Evaluation, Army"):
+    conn.execute("""
+        INSERT INTO budget_lines
+            (source_file, exhibit_type, fiscal_year, organization_name,
+             budget_activity_title, line_item_title, pe_number,
+             budget_type, appropriation_title)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, ("army/r1.xlsx", exhibit_type, fiscal_year, org,
+          ba_title, title, pe_number, "rdte", approp_title))
+    conn.commit()
+
+
+def _insert_pdf_page(conn, source_file="army/FY2026/r2_army.pdf",
+                     page_number=1, page_text=""):
+    conn.execute("""
+        INSERT INTO pdf_pages (source_file, source_category, page_number, page_text)
+        VALUES (?, 'Army', ?, ?)
+    """, (source_file, page_number, page_text))
+    conn.commit()
+
+
+# ── Phase 1 tests ─────────────────────────────────────────────────────────────
+
+class TestPhase1:
+    def test_empty_budget_lines(self, conn):
+        count = run_phase1(conn)
+        assert count == 0
+        assert conn.execute("SELECT COUNT(*) FROM pe_index").fetchone()[0] == 0
+
+    def test_single_pe(self, conn):
+        _insert_budget_line(conn, pe_number="0602120A", fiscal_year="2026")
+        count = run_phase1(conn)
+        assert count == 1
+        row = conn.execute("SELECT * FROM pe_index WHERE pe_number = '0602120A'").fetchone()
+        assert row is not None
+        assert row["display_title"] == "Radar Technology"
+        assert row["organization_name"] == "Army"
+        assert "2026" in json.loads(row["fiscal_years"])
+        assert "r1" in json.loads(row["exhibit_types"])
+
+    def test_multiple_fiscal_years(self, conn):
+        _insert_budget_line(conn, fiscal_year="2025")
+        _insert_budget_line(conn, fiscal_year="2026")
+        run_phase1(conn)
+        row = conn.execute("SELECT * FROM pe_index WHERE pe_number = '0602120A'").fetchone()
+        fy_list = json.loads(row["fiscal_years"])
+        assert "2025" in fy_list
+        assert "2026" in fy_list
+
+    def test_multiple_pes(self, conn):
+        _insert_budget_line(conn, pe_number="0602120A")
+        _insert_budget_line(conn, pe_number="0603000A", title="Fighter Aircraft")
+        count = run_phase1(conn)
+        assert count == 2
+        assert conn.execute("SELECT COUNT(*) FROM pe_index").fetchone()[0] == 2
+
+    def test_upsert_on_rerun(self, conn):
+        _insert_budget_line(conn)
+        run_phase1(conn)
+        run_phase1(conn)  # second run should not raise or duplicate
+        assert conn.execute("SELECT COUNT(*) FROM pe_index").fetchone()[0] == 1
+
+    def test_null_pe_excluded(self, conn):
+        conn.execute("""
+            INSERT INTO budget_lines (source_file, exhibit_type, fiscal_year,
+                organization_name, line_item_title, pe_number, budget_type)
+            VALUES ('x.xlsx', 'r1', '2026', 'Army', 'Unknown', NULL, 'rdte')
+        """)
+        conn.commit()
+        count = run_phase1(conn)
+        assert count == 0
+
+
+# ── Phase 2 tests ─────────────────────────────────────────────────────────────
+
+class TestPhase2:
+    def test_no_pdf_pages(self, conn):
+        _insert_budget_line(conn)
+        run_phase1(conn)
+        count = run_phase2(conn)
+        assert count == 0
+
+    def test_pe_found_in_page_text(self, conn):
+        _insert_budget_line(conn, pe_number="0602120A")
+        run_phase1(conn)
+        text = (
+            "Program Element: 0602120A\n"
+            "Accomplishments/Planned Program\n"
+            "In FY2026, the program completed radar prototype testing and "
+            "demonstrated 95% detection rate against low-observable targets."
+        )
+        _insert_pdf_page(conn, page_text=text)
+        count = run_phase2(conn)
+        assert count > 0
+        row = conn.execute("SELECT * FROM pe_descriptions WHERE pe_number = '0602120A'").fetchone()
+        assert row is not None
+        assert "radar" in row["description_text"].lower()
+
+    def test_unknown_pe_skipped(self, conn):
+        # PE in PDF but not in pe_index → should be skipped
+        run_phase1(conn)  # pe_index empty
+        _insert_pdf_page(conn, page_text="PE 0602120A mentioned here")
+        count = run_phase2(conn)
+        assert count == 0
+
+    def test_fiscal_year_extracted_from_path(self, conn):
+        _insert_budget_line(conn, pe_number="0602120A")
+        run_phase1(conn)
+        _insert_pdf_page(conn, source_file="army/FY2026/r2.pdf",
+                         page_text="0602120A radar technology development")
+        run_phase2(conn)
+        row = conn.execute("SELECT fiscal_year FROM pe_descriptions LIMIT 1").fetchone()
+        assert row["fiscal_year"] == "2026"
+
+    def test_incremental_skips_done_files(self, conn):
+        _insert_budget_line(conn, pe_number="0602120A")
+        run_phase1(conn)
+        _insert_pdf_page(conn, source_file="army/FY2026/r2.pdf",
+                         page_text="0602120A program description text")
+        run_phase2(conn)
+        count_after_first = conn.execute("SELECT COUNT(*) FROM pe_descriptions").fetchone()[0]
+        run_phase2(conn)  # second run — same file already done
+        count_after_second = conn.execute("SELECT COUNT(*) FROM pe_descriptions").fetchone()[0]
+        assert count_after_first == count_after_second
+
+
+# ── Phase 3 tests ─────────────────────────────────────────────────────────────
+
+class TestPhase3:
+    def _setup(self, conn, text="hypersonic glide vehicle technology development"):
+        _insert_budget_line(conn, pe_number="0602120A",
+                            ba_title="6.2 Applied Research",
+                            approp_title="Research, Development, Test and Evaluation, Army",
+                            org="Army")
+        run_phase1(conn)
+        conn.execute("""
+            INSERT INTO pe_descriptions (pe_number, fiscal_year, source_file,
+                page_start, page_end, description_text)
+            VALUES ('0602120A', '2026', 'army/r2.pdf', 1, 1, ?)
+        """, (text,))
+        conn.commit()
+
+    def test_structured_tags_service(self, conn):
+        self._setup(conn)
+        run_phase3(conn, with_llm=False)
+        tags = [r["tag"] for r in conn.execute(
+            "SELECT tag FROM pe_tags WHERE pe_number = '0602120A' AND tag_source = 'structured'"
+        ).fetchall()]
+        assert "army" in tags
+
+    def test_structured_tags_approp(self, conn):
+        self._setup(conn)
+        run_phase3(conn, with_llm=False)
+        tags = [r["tag"] for r in conn.execute(
+            "SELECT tag FROM pe_tags WHERE pe_number = '0602120A' AND tag_source = 'structured'"
+        ).fetchall()]
+        assert "rdte" in tags
+
+    def test_structured_tags_ba(self, conn):
+        self._setup(conn)
+        run_phase3(conn, with_llm=False)
+        tags = [r["tag"] for r in conn.execute(
+            "SELECT tag FROM pe_tags WHERE pe_number = '0602120A' AND tag_source = 'structured'"
+        ).fetchall()]
+        assert "applied-research" in tags
+
+    def test_keyword_tag_hypersonic(self, conn):
+        self._setup(conn, text="hypersonic glide vehicle")
+        run_phase3(conn, with_llm=False)
+        tags = [r["tag"] for r in conn.execute(
+            "SELECT tag FROM pe_tags WHERE pe_number = '0602120A' AND tag_source = 'keyword'"
+        ).fetchall()]
+        assert "hypersonic" in tags
+
+    def test_keyword_tag_cyber(self, conn):
+        self._setup(conn, text="cybersecurity resilience program")
+        run_phase3(conn, with_llm=False)
+        tag_names = [r["tag"] for r in conn.execute(
+            "SELECT tag FROM pe_tags WHERE pe_number = '0602120A'"
+        ).fetchall()]
+        assert "cyber" in tag_names
+
+    def test_incremental_skips_tagged_pes(self, conn):
+        self._setup(conn)
+        run_phase3(conn, with_llm=False)
+        count1 = conn.execute("SELECT COUNT(*) FROM pe_tags").fetchone()[0]
+        run_phase3(conn, with_llm=False)
+        count2 = conn.execute("SELECT COUNT(*) FROM pe_tags").fetchone()[0]
+        assert count1 == count2  # no duplicates added
+
+
+# ── Phase 4 tests ─────────────────────────────────────────────────────────────
+
+class TestPhase4:
+    def _setup(self, conn):
+        for pe, title in [("0602120A", "Radar Technology"),
+                           ("0603000A", "Fighter Systems")]:
+            _insert_budget_line(conn, pe_number=pe, title=title)
+        run_phase1(conn)
+
+    def test_explicit_pe_ref(self, conn):
+        self._setup(conn)
+        # Description for 0602120A mentions 0603000A explicitly
+        conn.execute("""
+            INSERT INTO pe_descriptions
+                (pe_number, fiscal_year, source_file, page_start, page_end, description_text)
+            VALUES ('0602120A', '2026', 'r2.pdf', 1, 1,
+                'This program supports 0603000A through shared radar components.')
+        """)
+        conn.commit()
+        count = run_phase4(conn)
+        assert count > 0
+        row = conn.execute("""
+            SELECT * FROM pe_lineage
+            WHERE source_pe = '0602120A' AND referenced_pe = '0603000A'
+        """).fetchone()
+        assert row is not None
+        assert row["link_type"] == "explicit_pe_ref"
+        assert row["confidence"] >= 0.9
+
+    def test_no_self_reference(self, conn):
+        self._setup(conn)
+        conn.execute("""
+            INSERT INTO pe_descriptions
+                (pe_number, fiscal_year, source_file, page_start, page_end, description_text)
+            VALUES ('0602120A', '2026', 'r2.pdf', 1, 1,
+                'PE 0602120A continues radar development in FY2026.')
+        """)
+        conn.commit()
+        run_phase4(conn)
+        self_refs = conn.execute("""
+            SELECT * FROM pe_lineage WHERE source_pe = referenced_pe
+        """).fetchall()
+        assert len(self_refs) == 0
+
+    def test_no_lineage_when_empty(self, conn):
+        self._setup(conn)
+        count = run_phase4(conn)
+        assert count == 0
+
+
+# ── Utility function tests ────────────────────────────────────────────────────
+
+class TestHelpers:
+    def test_extract_fy_from_path(self):
+        assert _extract_fy_from_path("army/FY2026/r2.pdf") == "2026"
+        assert _extract_fy_from_path("navy/FY 2025/p5.pdf") == "2025"
+        assert _extract_fy_from_path("no_year_here.pdf") is None
+
+    def test_context_window_center(self):
+        text = "a" * 100 + "MATCH" + "b" * 100
+        snippet = _context_window(text, 102, window=20)
+        assert "MATCH" in snippet
+
+    def test_context_window_short_text(self):
+        text = "short text"
+        snippet = _context_window(text, 5, window=200)
+        assert snippet == "short text"
+
+    def test_tags_from_keywords_hypersonic(self):
+        tags = _tags_from_keywords("0602120A", "hypersonic glide vehicle research")
+        tag_names = [t[1] for t in tags]
+        assert "hypersonic" in tag_names
+
+    def test_tags_from_keywords_no_match(self):
+        tags = _tags_from_keywords("0602120A", "general administrative support activities")
+        assert len(tags) == 0
+
+    def test_tags_from_keywords_multiple(self):
+        tags = _tags_from_keywords("0602120A", "cyber and space satellite program")
+        tag_names = [t[1] for t in tags]
+        assert "cyber" in tag_names
+        assert "space" in tag_names

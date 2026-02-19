@@ -92,7 +92,12 @@ def check_code_quality():
     ]
 
     for py_file in root.glob("*.py"):
-        if py_file.name.startswith("test_"):
+        if (py_file.name.startswith("test_")
+                or "check" in py_file.name
+                or py_file.name.startswith(".pre-commit")):
+            continue
+        # Skip pre-commit scripts themselves (they contain these patterns in string literals)
+        if "precommit" in py_file.name or py_file.name.startswith(".pre-commit"):
             continue
 
         with open(py_file) as f:

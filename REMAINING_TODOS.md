@@ -23,7 +23,7 @@ without user intervention (except `OH MY` group items).
 
 | Group | Count | Est. Total Tokens | Autonomous |
 |-------|-------|-------------------|------------|
-| LION | 22 | ~32,300 | Yes |
+| LION | 0 remaining (27/27 ✅ DONE) | ~32,300 | Yes |
 | TIGER | 35 | ~56,300 | Yes |
 | BEAR | 25 | ~39,500 | Yes |
 | OH MY | 12 | ~18,500 | No |
@@ -37,58 +37,58 @@ without user intervention (except `OH MY` group items).
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| FE-001 | 3.A3-c | `templates/index.html`, `api/routes/frontend.py` | LOW | ~1500 | Add amount range (min/max) filters to filter sidebar |
-| FE-002 | 3.A3-d | `templates/index.html`, `api/routes/frontend.py` | LOW | ~1500 | Add appropriation filter dropdown |
-| FE-003 | 3.A3-e | `templates/partials/results.html`, `static/css/main.css` | LOW | ~1000 | Add active filter chips above results |
-| FE-010 | 3.A4-c | `templates/partials/results.html`, `api/routes/frontend.py` | LOW | ~1500 | Add page-size selector to pagination |
-| FE-011 | 3.A4-d | `templates/partials/results.html`, `api/routes/download.py` | LOW | ~1000 | Export visible columns only option |
-| FE-012 | 3.C5-a | `templates/index.html`, `templates/partials/results.html` | LOW | ~1500 | Add contextual help tooltips to all labels |
+| FE-001 | 3.A3-c | `templates/index.html`, `api/routes/frontend.py` | LOW | ~1500 | ~~Add amount range (min/max) filters to filter sidebar~~ ✅ DONE |
+| FE-002 | 3.A3-d | `templates/index.html`, `api/routes/frontend.py` | LOW | ~1500 | ~~Add appropriation filter dropdown~~ ✅ DONE |
+| FE-003 | 3.A3-e | `templates/partials/results.html`, `static/css/main.css` | LOW | ~1000 | ~~Add active filter chips above results~~ ✅ DONE |
+| FE-010 | 3.A4-c | `templates/partials/results.html`, `api/routes/frontend.py` | LOW | ~1500 | ~~Add page-size selector to pagination~~ ✅ DONE |
+| FE-011 | 3.A4-d | `templates/partials/results.html`, `api/routes/download.py` | LOW | ~1000 | ~~Export visible columns only option~~ ✅ DONE |
+| FE-012 | 3.C5-a | `templates/index.html`, `templates/partials/results.html` | LOW | ~1500 | ~~Add contextual help tooltips to all labels~~ ✅ DONE |
 
 ### Detail Panel (templates/partials/detail.html, api/routes/frontend.py)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| FE-006 | 3.A6-b | `templates/partials/detail.html`, `api/routes/frontend.py` | MEDIUM | ~3000 | Add "Related Items" section across fiscal years |
-| FE-007 | 3.A6-c | `templates/partials/detail.html` | LOW | ~1000 | Add "Download This Item" and "Source Document" buttons |
+| FE-006 | 3.A6-b | `templates/partials/detail.html`, `api/routes/frontend.py` | MEDIUM | ~3000 | ~~Add "Related Items" section across fiscal years~~ ✅ DONE |
+| FE-007 | 3.A6-c | `templates/partials/detail.html` | LOW | ~1000 | ~~Add "Download This Item" and "Source Document" buttons~~ ✅ DONE |
 
 ### Accessibility (templates/base.html, static/css/main.css)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| FE-004 | 3.A7-c | `templates/base.html`, `static/css/main.css` | LOW | ~1000 | Add skip-to-content link |
-| FE-005 | 3.A7-d | `templates/base.html`, `templates/index.html` | MEDIUM | ~2000 | Add ARIA live regions for HTMX updates |
-| FE-008 | 3.A7-e | `templates/base.html` | LOW | ~1000 | Add SRI integrity hashes to CDN scripts |
-| FE-009 | 3.A7-f | `templates/base.html` | LOW | ~800 | Add meta description and Open Graph tags |
+| FE-004 | 3.A7-c | `templates/base.html`, `static/css/main.css` | LOW | ~1000 | ~~Add skip-to-content link~~ ✅ DONE |
+| FE-005 | 3.A7-d | `templates/base.html`, `templates/index.html` | MEDIUM | ~2000 | ~~Add ARIA live regions for HTMX updates~~ ✅ DONE |
+| FE-008 | 3.A7-e | `templates/base.html` | LOW | ~1000 | ~~Add SRI integrity hashes to CDN scripts~~ ✅ DONE |
+| FE-009 | 3.A7-f | `templates/base.html` | LOW | ~800 | ~~Add meta description and Open Graph tags~~ ✅ DONE |
 
 ### CSS (static/css/main.css)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| CSS-001 | 3.A7-g | `static/css/main.css` | LOW | ~1500 | Add :focus-visible styles for keyboard nav |
-| CSS-002 | 3.A7-h | `static/css/main.css` | LOW | ~1000 | Add .skip-link styles |
-| CSS-003 | 3.A7-i | `static/css/main.css` | LOW | ~1500 | Add .filter-chip styles |
-| CSS-004 | 3.A7-j | `static/css/main.css` | MEDIUM | ~2000 | Add @media print styles |
-| OPT-CSS-001 | — | `static/css/main.css` | LOW | ~1000 | Add CSS custom property spacing scale |
+| CSS-001 | 3.A7-g | `static/css/main.css` | LOW | ~1500 | ~~Add :focus-visible styles for keyboard nav~~ ✅ DONE |
+| CSS-002 | 3.A7-h | `static/css/main.css` | LOW | ~1000 | ~~Add .skip-link styles~~ ✅ DONE |
+| CSS-003 | 3.A7-i | `static/css/main.css` | LOW | ~1500 | ~~Add .filter-chip styles~~ ✅ DONE |
+| CSS-004 | 3.A7-j | `static/css/main.css` | MEDIUM | ~2000 | ~~Add @media print styles~~ ✅ DONE |
+| OPT-CSS-001 | — | `static/css/main.css` | LOW | ~1000 | ~~Add CSS custom property spacing scale~~ ✅ DONE |
 
 ### JavaScript (static/js/app.js)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| JS-001 | 3.A5-b | `static/js/app.js`, `api/routes/download.py` | MEDIUM | ~2000 | Add Excel (.xlsx) export support |
-| JS-002 | 3.A5-c | `static/js/app.js` | LOW | ~1500 | Show estimated result count in download modal |
-| JS-003 | 3.A3-f | `static/js/app.js` | LOW | ~1000 | Add keyboard shortcut for search (/ or Ctrl+K) |
-| JS-004 | 3.A6-d | `static/js/app.js` | LOW | ~1000 | Add keyboard navigation for detail panel |
-| OPT-JS-001 | — | `static/js/app.js` | LOW | ~1000 | Debounce filter form changes |
+| JS-001 | 3.A5-b | `static/js/app.js`, `api/routes/download.py` | MEDIUM | ~2000 | ~~Add Excel (.xlsx) export support~~ ✅ DONE |
+| JS-002 | 3.A5-c | `static/js/app.js` | LOW | ~1500 | ~~Show estimated result count in download modal~~ ✅ DONE |
+| JS-003 | 3.A3-f | `static/js/app.js` | LOW | ~1000 | ~~Add keyboard shortcut for search (/ or Ctrl+K)~~ ✅ DONE |
+| JS-004 | 3.A6-d | `static/js/app.js` | LOW | ~1000 | ~~Add keyboard navigation for detail panel~~ ✅ DONE |
+| OPT-JS-001 | — | `static/js/app.js` | LOW | ~1000 | ~~Debounce filter form changes~~ ✅ DONE |
 
 ### Charts & Visualization (templates/charts.html)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| VIZ-001 | 3.B1-b | `templates/charts.html`, `api/routes/aggregations.py` | MEDIUM | ~2500 | Make chart FY columns dynamic |
-| VIZ-002 | 3.B1-c | `templates/charts.html` | LOW | ~1500 | Add error handling and loading indicators |
-| VIZ-003 | 3.B2-b | `templates/charts.html` | LOW | ~1500 | Add service filter to charts page |
-| VIZ-004 | 3.B3-b | `templates/charts.html`, `static/css/main.css` | MEDIUM | ~2000 | Add print-friendly chart styles |
-| VIZ-005 | 3.B4-a | `templates/charts.html` | MEDIUM | ~3000 | Add budget comparison interactive chart |
+| VIZ-001 | 3.B1-b | `templates/charts.html`, `api/routes/aggregations.py` | MEDIUM | ~2500 | ~~Make chart FY columns dynamic~~ ✅ DONE |
+| VIZ-002 | 3.B1-c | `templates/charts.html` | LOW | ~1500 | ~~Add error handling and loading indicators~~ ✅ DONE |
+| VIZ-003 | 3.B2-b | `templates/charts.html` | LOW | ~1500 | ~~Add service filter to charts page~~ ✅ DONE |
+| VIZ-004 | 3.B3-b | `templates/charts.html`, `static/css/main.css` | MEDIUM | ~2000 | ~~Add print-friendly chart styles~~ ✅ DONE |
+| VIZ-005 | 3.B4-a | `templates/charts.html` | MEDIUM | ~3000 | ~~Add budget comparison interactive chart~~ ✅ DONE |
 
 ---
 
@@ -98,85 +98,85 @@ without user intervention (except `OH MY` group items).
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| SEARCH-001 | — | `api/routes/search.py` | MEDIUM | ~2500 | Add BM25 relevance scoring |
-| SEARCH-002 | — | `api/routes/search.py` | LOW | ~1500 | Add structured filter support (FY, service, exhibit) |
-| SEARCH-003 | — | `api/routes/search.py`, `utils/formatting.py` | LOW | ~1500 | Improve snippet generation with HTML highlighting |
-| SEARCH-004 | — | `api/routes/search.py` | MEDIUM | ~2000 | Add search suggestions/autocomplete endpoint |
+| SEARCH-001 | — | `api/routes/search.py` | MEDIUM | ~2500 | ~~Add BM25 relevance scoring~~ ✅ DONE |
+| SEARCH-002 | — | `api/routes/search.py` | LOW | ~1500 | ~~Add structured filter support (FY, service, exhibit)~~ ✅ DONE |
+| SEARCH-003 | — | `api/routes/search.py`, `utils/formatting.py` | LOW | ~1500 | ~~Improve snippet generation with HTML highlighting~~ ✅ DONE |
+| SEARCH-004 | — | `api/routes/search.py` | MEDIUM | ~2000 | ~~Add search suggestions/autocomplete endpoint~~ ✅ DONE |
 
 ### Aggregations API (api/routes/aggregations.py)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| AGG-001 | — | `api/routes/aggregations.py`, `api/models.py` | MEDIUM | ~2500 | Make aggregation FY columns dynamic |
-| AGG-002 | — | `api/routes/aggregations.py`, `api/models.py` | LOW | ~1500 | Add percentage and YoY delta calculations |
-| OPT-AGG-001 | — | `api/routes/aggregations.py` | LOW | ~1000 | Add server-side aggregation caching |
+| AGG-001 | — | `api/routes/aggregations.py`, `api/models.py` | MEDIUM | ~2500 | ~~Make aggregation FY columns dynamic~~ ✅ DONE |
+| AGG-002 | — | `api/routes/aggregations.py`, `api/models.py` | LOW | ~1500 | ~~Add percentage and YoY delta calculations~~ ✅ DONE |
+| OPT-AGG-001 | — | `api/routes/aggregations.py` | LOW | ~1000 | ~~Add server-side aggregation caching~~ ✅ DONE |
 
 ### Download API (api/routes/download.py)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| DL-001 | 3.A5-b | `api/routes/download.py` | MEDIUM | ~2500 | Add Excel (.xlsx) export format |
-| DL-002 | — | `api/routes/download.py` | LOW | ~1500 | Add keyword search filter to downloads |
-| DL-003 | — | `api/routes/download.py` | LOW | ~1000 | Add X-Total-Count header for progress tracking |
-| OPT-DL-001 | — | `api/routes/download.py` | MEDIUM | ~2000 | DRY: Use shared WHERE builder |
+| DL-001 | 3.A5-b | `api/routes/download.py` | MEDIUM | ~2500 | ~~Add Excel (.xlsx) export format~~ ✅ DONE |
+| DL-002 | — | `api/routes/download.py` | LOW | ~1500 | ~~Add keyword search filter to downloads~~ ✅ DONE |
+| DL-003 | — | `api/routes/download.py` | LOW | ~1000 | ~~Add X-Total-Count header for progress tracking~~ ✅ DONE |
+| OPT-DL-001 | — | `api/routes/download.py` | MEDIUM | ~2000 | ~~DRY: Use shared WHERE builder~~ ✅ DONE |
 
 ### App & Middleware (api/app.py)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| APP-001 | 4.C4-b | `api/app.py` | MEDIUM | ~2000 | Handle proxy/forwarded IPs in rate limiter |
-| APP-002 | 4.C4-c | `api/app.py` | LOW | ~1500 | Rate limit memory cleanup (prevent unbounded growth) |
-| APP-003 | 4.C3-b | `api/app.py` | LOW | ~1500 | Add structured JSON logging for production |
-| APP-004 | — | `api/app.py` | LOW | ~1500 | Add CORS middleware for external API consumers |
+| APP-001 | 4.C4-b | `api/app.py` | MEDIUM | ~2000 | ~~Handle proxy/forwarded IPs in rate limiter~~ ✅ DONE |
+| APP-002 | 4.C4-c | `api/app.py` | LOW | ~1500 | ~~Rate limit memory cleanup (prevent unbounded growth)~~ ✅ DONE |
+| APP-003 | 4.C3-b | `api/app.py` | LOW | ~1500 | ~~Add structured JSON logging for production~~ ✅ DONE |
+| APP-004 | — | `api/app.py` | LOW | ~1500 | ~~Add CORS middleware for external API consumers~~ ✅ DONE |
 
 ### Database (api/database.py)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| OPT-DB-001 | — | `api/database.py` | MEDIUM | ~2500 | Implement connection pooling |
-| OPT-DB-002 | — | `api/database.py` | LOW | ~1000 | Add read-only connection mode |
-| OPT-DB-003 | — | `api/database.py` | LOW | ~800 | Add friendly error on missing database |
+| OPT-DB-001 | — | `api/database.py` | MEDIUM | ~2500 | ~~Implement connection pooling~~ ✅ DONE |
+| OPT-DB-002 | — | `api/database.py` | LOW | ~1000 | ~~Add read-only connection mode~~ ✅ DONE |
+| OPT-DB-003 | — | `api/database.py` | LOW | ~800 | ~~Add friendly error on missing database~~ ✅ DONE |
 
 ### Shared Utilities (utils/)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| UTIL-001 | OPT-FE-001 | `utils/__init__.py`, new `utils/query.py` | MEDIUM | ~2500 | Create shared SQL query builder (DRY across 3 routes) |
-| UTIL-002 | — | `utils/__init__.py`, new `utils/cache.py` | LOW | ~1500 | Create lightweight in-memory TTL cache |
-| OPT-FE-001 | — | `api/routes/frontend.py` | MEDIUM | ~2000 | Extract _build_where() into shared utility |
-| OPT-FE-002 | — | `api/routes/frontend.py` | LOW | ~1500 | Cache reference data queries (TTL) |
-| OPT-FMT-001 | — | `utils/formatting.py`, `api/app.py` | LOW | ~1000 | Consolidate fmt_amount() (remove API inline duplicate) |
-| OPT-FMT-002 | — | `utils/formatting.py`, `api/routes/search.py` | LOW | ~1000 | Consolidate _snippet() into shared module |
-| OPT-UTIL-001 | — | `utils/common.py`, `api/database.py` | LOW | ~1500 | Consolidate get_connection() across modules |
-| OPT-UTIL-002 | — | `utils/common.py` | LOW | ~1000 | Add elapsed_ms() and elapsed_sec() variants |
-| OPT-DBUTIL-001 | — | `utils/database.py` | MEDIUM | ~2500 | Add dynamic schema introspection utility |
-| OPT-DBUTIL-002 | — | `utils/database.py` | LOW | ~1500 | Add batch_upsert() for incremental updates |
-| OPT-DBUTIL-003 | — | `utils/database.py` | LOW | ~1000 | Add QueryBuilder class for safe parameterized queries |
+| UTIL-001 | OPT-FE-001 | `utils/__init__.py`, new `utils/query.py` | MEDIUM | ~2500 | ~~Create shared SQL query builder (DRY across 3 routes)~~ ✅ DONE |
+| UTIL-002 | — | `utils/__init__.py`, new `utils/cache.py` | LOW | ~1500 | ~~Create lightweight in-memory TTL cache~~ ✅ DONE |
+| OPT-FE-001 | — | `api/routes/frontend.py` | MEDIUM | ~2000 | ~~Extract _build_where() into shared utility~~ ✅ DONE |
+| OPT-FE-002 | — | `api/routes/frontend.py` | LOW | ~1500 | ~~Cache reference data queries (TTL)~~ ✅ DONE |
+| OPT-FMT-001 | — | `utils/formatting.py`, `api/app.py` | LOW | ~1000 | ~~Consolidate fmt_amount() (remove API inline duplicate)~~ ✅ DONE |
+| OPT-FMT-002 | — | `utils/formatting.py`, `api/routes/search.py` | LOW | ~1000 | ~~Consolidate _snippet() into shared module~~ ✅ DONE |
+| OPT-UTIL-001 | — | `utils/common.py`, `api/database.py` | LOW | ~1500 | ~~Consolidate get_connection() across modules~~ ✅ DONE |
+| OPT-UTIL-002 | — | `utils/common.py` | LOW | ~1000 | ~~Add elapsed_ms() and elapsed_sec() variants~~ ✅ DONE |
+| OPT-DBUTIL-001 | — | `utils/database.py` | MEDIUM | ~2500 | ~~Add dynamic schema introspection utility~~ ✅ DONE |
+| OPT-DBUTIL-002 | — | `utils/database.py` | LOW | ~1500 | ~~Add batch_upsert() for incremental updates~~ ✅ DONE |
+| OPT-DBUTIL-003 | — | `utils/database.py` | LOW | ~1000 | ~~Add QueryBuilder class for safe parameterized queries~~ ✅ DONE |
 
 ### Schema & Data Model (schema_design.py)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| SCHEMA-001 | 2.A5-c | `schema_design.py` | MEDIUM | ~3000 | Add FY2027+ schema migration support |
-| SCHEMA-002a | 2.B1-a-1 | `schema_design.py` | MEDIUM | ~3000 | Create compatibility view for normalized tables |
-| SCHEMA-002b | 2.B1-a-2 | `build_budget_db.py`, `schema_design.py` | MEDIUM | ~3000 | Update build pipeline to write normalized tables |
-| SCHEMA-002c | 2.B1-a-3 | `api/routes/*.py` | MEDIUM | ~2000 | Migrate API routes to normalized tables |
-| SCHEMA-003 | — | `validate_budget_db.py` | LOW | ~1500 | Add database integrity check (PRAGMA + FTS sync) |
+| SCHEMA-001 | 2.A5-c | `schema_design.py` | MEDIUM | ~3000 | ~~Add FY2027+ schema migration support~~ ✅ DONE |
+| SCHEMA-002a | 2.B1-a-1 | `schema_design.py` | MEDIUM | ~3000 | ~~Create compatibility view for normalized tables~~ ✅ DONE |
+| SCHEMA-002b | 2.B1-a-2 | `build_budget_db.py`, `schema_design.py` | MEDIUM | ~3000 | ~~Update build pipeline to write normalized tables~~ ✅ DONE |
+| SCHEMA-002c | 2.B1-a-3 | `api/routes/*.py` | MEDIUM | ~2000 | ~~Migrate API routes to normalized tables~~ ✅ DONE |
+| SCHEMA-003 | — | `validate_budget_db.py` | LOW | ~1500 | ~~Add database integrity check (PRAGMA + FTS sync)~~ ✅ DONE |
 
 ### Validation (utils/validation.py)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| VAL-001 | — | `utils/validation.py` | MEDIUM | ~2500 | Add cross-exhibit consistency validation (P-1 vs P-5) |
-| VAL-002 | — | `utils/validation.py` | LOW | ~1500 | Add year-over-year outlier detection |
-| VAL-003 | — | `utils/validation.py`, `validate_budget_db.py` | LOW | ~1000 | Add validation result export to JSON |
+| VAL-001 | — | `utils/validation.py` | MEDIUM | ~2500 | ~~Add cross-exhibit consistency validation (P-1 vs P-5)~~ ✅ DONE |
+| VAL-002 | — | `utils/validation.py` | LOW | ~1500 | ~~Add year-over-year outlier detection~~ ✅ DONE |
+| VAL-003 | — | `utils/validation.py`, `validate_budget_db.py` | LOW | ~1000 | ~~Add validation result export to JSON~~ ✅ DONE |
 
 ### Configuration (utils/config.py)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| OPT-CFG-001 | — | `utils/config.py`, `api/app.py`, `api/database.py` | MEDIUM | ~2000 | Consolidate all env var config into Config class |
-| OPT-CFG-002 | — | `utils/config.py` | LOW | ~1000 | Make KnownValues.fiscal_years configurable |
+| OPT-CFG-001 | — | `utils/config.py`, `api/app.py`, `api/database.py` | MEDIUM | ~2000 | ~~Consolidate all env var config into Config class~~ ✅ DONE |
+| OPT-CFG-002 | — | `utils/config.py` | LOW | ~1000 | ~~Make KnownValues.fiscal_years configurable~~ ✅ DONE |
 
 ---
 

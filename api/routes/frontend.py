@@ -9,58 +9,6 @@ Routes:
     GET /charts                 → charts.html (Chart.js visualisations)
     GET /partials/results       → partials/results.html (HTMX swap target)
     GET /partials/detail/{id}   → partials/detail.html (HTMX swap target)
-
-──────────────────────────────────────────────────────────────────────────────
-TODOs for this file
-──────────────────────────────────────────────────────────────────────────────
-
-TODO 3.A3-c / FE-001 [Group: LION] [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add amount range (min/max) filter support.
-    Steps:
-      1. In _parse_filters(), read min_amount and max_amount from query params
-      2. In _query_results(), add WHERE clauses:
-         amount_fy2026_request >= ? AND amount_fy2026_request <= ?
-      3. Pass min_amount/max_amount to template context for form pre-fill
-    Acceptance: Amount range filter narrows results correctly.
-
-TODO 3.A3-d / FE-002 [Group: LION] [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add appropriation filter support.
-    Steps:
-      1. Add _get_appropriations(conn) helper returning DISTINCT
-         appropriation_code, appropriation_title from budget_lines
-      2. In _parse_filters(), read appropriation_code from query params
-      3. In _query_results(), add WHERE appropriation_code IN (?) clause
-      4. Pass appropriation list to index template context
-    Acceptance: Appropriation dropdown filters results correctly.
-
-TODO 3.A6-b / FE-006 [Group: LION] [Complexity: MEDIUM] [Tokens: ~3000] [User: NO]
-    Add related items query to detail_partial().
-    Steps:
-      1. After fetching the main item, query for related rows:
-         SELECT id, fiscal_year, amount_fy2026_request FROM budget_lines
-         WHERE pe_number = ? AND id != ? ORDER BY fiscal_year
-      2. Fall back to matching on organization_name + line_item_title
-      3. Pass related_items list to detail.html template
-    Acceptance: Detail panel shows same program across fiscal years.
-
-TODO OPT-FE-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    Extract _build_where() into a shared utility module (DRY).
-    The WHERE clause builder is duplicated between api/routes/budget_lines.py
-    and this file (imported from budget_lines). The download.py route also
-    has its own inline WHERE builder. Consolidate into utils/query.py:
-      1. Create utils/query.py with build_where_clause() function
-      2. Import in budget_lines.py, frontend.py, and download.py
-      3. Add tests in tests/test_query_utils.py
-    Acceptance: Single WHERE builder used by all routes; all tests pass.
-
-TODO OPT-FE-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Cache reference data queries to avoid repeated DB hits.
-    _get_services(), _get_exhibit_types(), _get_fiscal_years() query the DB
-    on every page load. These change rarely. Steps:
-      1. Add simple in-memory cache with TTL (e.g., 5 minutes)
-      2. Use functools.lru_cache or a timestamp-based dict cache
-      3. Optionally add a POST /admin/refresh-cache endpoint
-    Acceptance: Reference queries hit DB once per 5 minutes, not per request.
 """
 
 import sqlite3
@@ -71,12 +19,20 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from api.database import get_db
-from api.routes.budget_lines import _ALLOWED_SORT, _build_where
+from api.routes.budget_lines import _ALLOWED_SORT
+from utils.cache import TTLCache
+from utils.query import build_where_clause
+from utils import sanitize_fts5_query
 
 router = APIRouter(tags=["frontend"])
 
 # Templates instance is set by create_app() after mounting.
 _templates: Jinja2Templates | None = None
+
+# OPT-FE-002: TTL caches for reference data (5-minute TTL)
+_services_cache: TTLCache = TTLCache(maxsize=4, ttl_seconds=300)
+_exhibit_types_cache: TTLCache = TTLCache(maxsize=4, ttl_seconds=300)
+_fiscal_years_cache: TTLCache = TTLCache(maxsize=4, ttl_seconds=300)
 
 
 def set_templates(t: Jinja2Templates) -> None:
@@ -90,85 +46,142 @@ def _tmpl() -> Jinja2Templates:
     return _templates
 
 
-# ── Reference helpers ─────────────────────────────────────────────────────────
+# ── Reference helpers (OPT-FE-002: cached) ────────────────────────────────────
 
 def _get_services(conn: sqlite3.Connection) -> list[dict]:
+    cache_key = ("services", id(conn))
+    cached = _services_cache.get(cache_key)
+    if cached is not None:
+        return cached
     try:
         rows = conn.execute(
             "SELECT code, full_name FROM services_agencies ORDER BY code"
         ).fetchall()
-        return [dict(r) for r in rows]
+        result = [dict(r) for r in rows]
+        _services_cache.set(cache_key, result)  # only cache stable reference table
     except Exception:
         rows = conn.execute(
             "SELECT DISTINCT organization_name AS code FROM budget_lines "
             "WHERE organization_name IS NOT NULL ORDER BY organization_name"
         ).fetchall()
-        return [{"code": r["code"], "full_name": r["code"]} for r in rows]
+        result = [{"code": r["code"], "full_name": r["code"]} for r in rows]
+    return result
 
 
 def _get_exhibit_types(conn: sqlite3.Connection) -> list[dict]:
+    cache_key = ("exhibit_types", id(conn))
+    cached = _exhibit_types_cache.get(cache_key)
+    if cached is not None:
+        return cached
     try:
         rows = conn.execute(
             "SELECT code, display_name FROM exhibit_types ORDER BY code"
         ).fetchall()
-        return [dict(r) for r in rows]
+        result = [dict(r) for r in rows]
+        _exhibit_types_cache.set(cache_key, result)  # only cache stable reference table
     except Exception:
         rows = conn.execute(
             "SELECT DISTINCT exhibit_type AS code FROM budget_lines "
             "WHERE exhibit_type IS NOT NULL ORDER BY exhibit_type"
         ).fetchall()
-        return [{"code": r["code"], "display_name": r["code"]} for r in rows]
+        result = [{"code": r["code"], "display_name": r["code"]} for r in rows]
+    return result
 
 
 def _get_fiscal_years(conn: sqlite3.Connection) -> list[dict]:
+    cache_key = ("fiscal_years", id(conn))
+    cached = _fiscal_years_cache.get(cache_key)
+    if cached is not None:
+        return cached
     rows = conn.execute(
         "SELECT fiscal_year, COUNT(*) AS row_count FROM budget_lines "
         "WHERE fiscal_year IS NOT NULL "
         "GROUP BY fiscal_year ORDER BY fiscal_year"
     ).fetchall()
-    return [{"fiscal_year": r["fiscal_year"], "row_count": r["row_count"]} for r in rows]
+    result = [{"fiscal_year": r["fiscal_year"], "row_count": r["row_count"]} for r in rows]
+    _fiscal_years_cache.set(cache_key, result)
+    return result
+
+
+def _get_appropriations(conn: sqlite3.Connection) -> list[dict]:
+    """FE-002: Return distinct appropriation codes and titles."""
+    rows = conn.execute(
+        "SELECT DISTINCT appropriation_code AS code, appropriation_title AS title "
+        "FROM budget_lines "
+        "WHERE appropriation_code IS NOT NULL "
+        "ORDER BY appropriation_code"
+    ).fetchall()
+    return [{"code": r["code"], "title": r["title"]} for r in rows]
 
 
 def _parse_filters(request: Request) -> dict[str, Any]:
     """Extract filter params from query string into a dict."""
     params = request.query_params
+    # FE-001: parse min/max amount
+    min_amt = params.get("min_amount", "")
+    max_amt = params.get("max_amount", "")
     return {
-        "q":           params.get("q", ""),
-        "fiscal_year": params.getlist("fiscal_year"),
-        "service":     params.getlist("service"),
-        "exhibit_type": params.getlist("exhibit_type"),
-        "pe_number":   params.getlist("pe_number"),
-        "sort_by":     params.get("sort_by", "id"),
-        "sort_dir":    params.get("sort_dir", "asc"),
-        "page":        max(1, int(params.get("page", 1))),
+        "q":                 params.get("q", ""),
+        "fiscal_year":       params.getlist("fiscal_year"),
+        "service":           params.getlist("service"),
+        "exhibit_type":      params.getlist("exhibit_type"),
+        "pe_number":         params.getlist("pe_number"),
+        "appropriation_code": params.getlist("appropriation_code"),
+        "min_amount":        min_amt,
+        "max_amount":        max_amt,
+        "sort_by":           params.get("sort_by", "id"),
+        "sort_dir":          params.get("sort_dir", "asc"),
+        "page":              max(1, int(params.get("page", 1))),
+        "page_size":         min(100, max(10, int(params.get("page_size", 25)))),
     }
 
 
 def _query_results(
     filters: dict[str, Any],
     conn: sqlite3.Connection,
-    page_size: int = 25,
+    page_size: int | None = None,
 ) -> dict[str, Any]:
     """Run the filtered budget_lines query and return template context vars."""
-    sort_by  = filters["sort_by"] if filters["sort_by"] in _ALLOWED_SORT else "id"
-    sort_dir = "DESC" if filters["sort_dir"] == "desc" else "ASC"
-    page     = filters["page"]
-    offset   = (page - 1) * page_size
+    sort_by   = filters["sort_by"] if filters["sort_by"] in _ALLOWED_SORT else "id"
+    sort_dir  = "DESC" if filters["sort_dir"] == "desc" else "ASC"
+    page      = filters["page"]
+    page_size = page_size or filters.get("page_size", 25)
+    offset    = (page - 1) * page_size
 
-    where, params = _build_where(
+    # OPT-FE-001: Use shared WHERE builder from utils/query.py
+    where, params = build_where_clause(
         fiscal_year=filters["fiscal_year"] or None,
         service=filters["service"] or None,
         exhibit_type=filters["exhibit_type"] or None,
         pe_number=filters["pe_number"] or None,
-        appropriation_code=None,
+        appropriation_code=filters.get("appropriation_code") or None,
     )
+
+    # FE-001: amount range filter
+    min_amt = filters.get("min_amount", "")
+    max_amt = filters.get("max_amount", "")
+    if min_amt:
+        try:
+            val = float(min_amt)
+            connector = "AND" if where else "WHERE"
+            where = f"{where} {connector} amount_fy2026_request >= ?"
+            params = list(params) + [val]
+        except ValueError:
+            pass
+    if max_amt:
+        try:
+            val = float(max_amt)
+            connector = "AND" if where else "WHERE"
+            where = f"{where} {connector} amount_fy2026_request <= ?"
+            params = list(params) + [val]
+        except ValueError:
+            pass
 
     # Apply keyword filter against FTS if provided
     q = filters["q"].strip()
     fts_ids: list[int] | None = None
     if q:
         try:
-            from utils import sanitize_fts5_query
             safe_q = sanitize_fts5_query(q)
         except Exception:
             safe_q = q.replace('"', '""')
@@ -217,6 +230,7 @@ def _query_results(
         "total_pages": total_pages,
         "sort_by":     sort_by,
         "sort_dir":    filters["sort_dir"],
+        "page_size":   page_size,
     }
 
 
@@ -225,29 +239,35 @@ def _query_results(
 @router.get("/", response_class=HTMLResponse, include_in_schema=False)
 def index(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
     """Main search page."""
-    filters       = _parse_filters(request)
-    results       = _query_results(filters, conn)
-    fiscal_years  = _get_fiscal_years(conn)
-    services      = _get_services(conn)
-    exhibit_types = _get_exhibit_types(conn)
+    filters        = _parse_filters(request)
+    results        = _query_results(filters, conn)
+    fiscal_years   = _get_fiscal_years(conn)
+    services       = _get_services(conn)
+    exhibit_types  = _get_exhibit_types(conn)
+    appropriations = _get_appropriations(conn)
 
     return _tmpl().TemplateResponse(
         "index.html",
         {
-            "request":       request,
-            "filters":       filters,
-            "fiscal_years":  fiscal_years,
-            "services":      services,
-            "exhibit_types": exhibit_types,
+            "request":        request,
+            "filters":        filters,
+            "fiscal_years":   fiscal_years,
+            "services":       services,
+            "exhibit_types":  exhibit_types,
+            "appropriations": appropriations,
             **results,
         },
     )
 
 
 @router.get("/charts", response_class=HTMLResponse, include_in_schema=False)
-def charts(request: Request) -> HTMLResponse:
+def charts(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
     """Chart.js visualisations page."""
-    return _tmpl().TemplateResponse("charts.html", {"request": request})
+    fiscal_years = _get_fiscal_years(conn)
+    return _tmpl().TemplateResponse(
+        "charts.html",
+        {"request": request, "fiscal_years": fiscal_years},
+    )
 
 
 @router.get("/partials/results", response_class=HTMLResponse, include_in_schema=False)
@@ -261,7 +281,7 @@ def results_partial(
 
     return _tmpl().TemplateResponse(
         "partials/results.html",
-        {"request": request, **results},
+        {"request": request, "filters": filters, **results},
     )
 
 
@@ -278,7 +298,35 @@ def detail_partial(
     if row is None:
         raise HTTPException(status_code=404, detail=f"Budget line {item_id} not found")
 
+    item = dict(row)
+
+    # FE-006: Related items — same program across fiscal years
+    related_items: list[dict] = []
+    pe_number = item.get("pe_number")
+    if pe_number:
+        related_rows = conn.execute(
+            "SELECT id, fiscal_year, line_item_title, organization_name, "
+            "amount_fy2026_request FROM budget_lines "
+            "WHERE pe_number = ? AND id != ? ORDER BY fiscal_year",
+            (pe_number, item_id),
+        ).fetchall()
+        related_items = [dict(r) for r in related_rows]
+
+    # Fall back: match on organization_name + line_item_title if no PE results
+    if not related_items:
+        org   = item.get("organization_name")
+        title = item.get("line_item_title")
+        if org and title:
+            related_rows = conn.execute(
+                "SELECT id, fiscal_year, line_item_title, organization_name, "
+                "amount_fy2026_request FROM budget_lines "
+                "WHERE organization_name = ? AND line_item_title = ? AND id != ? "
+                "ORDER BY fiscal_year",
+                (org, title, item_id),
+            ).fetchall()
+            related_items = [dict(r) for r in related_rows]
+
     return _tmpl().TemplateResponse(
         "partials/detail.html",
-        {"request": request, "item": dict(row)},
+        {"request": request, "item": item, "related_items": related_items},
     )
