@@ -1,5 +1,16 @@
-<!-- TODO [Group: LION] LION-003: Add loading skeleton animation for HTMX requests (~1,000 tokens) -->
-<!-- TODO [Group: LION] LION-004: Add "No results" empty state with clear-filters action (~800 tokens) -->
+<!-- DONE [Group: LION] LION-003: Loading skeleton animation for HTMX requests -->
+<!-- DONE [Group: LION] LION-004: "No results" empty state with clear-filters action -->
+
+{# LION-003: Skeleton rows shown during HTMX loading (hidden by default, shown via .htmx-request) #}
+<div class="skeleton-loading" role="status" aria-live="polite" aria-label="Loading results">
+  <div class="skeleton-row"></div>
+  <div class="skeleton-row"></div>
+  <div class="skeleton-row"></div>
+  <div class="skeleton-row"></div>
+  <div class="skeleton-row"></div>
+  <span class="sr-only">Loading results...</span>
+</div>
+
 {% if items %}
 
 {# FE-003: Active filter chips #}
@@ -173,10 +184,19 @@
 </div>
 
 {% else %}
+{# LION-004: Enhanced empty state with clear-filters action #}
 <div class="results-panel">
   <div class="empty-state">
-    <p>No results found.</p>
-    <p style="font-size:.85rem">Try broadening your filters or using different keywords.</p>
+    <div class="empty-state-icon" aria-hidden="true">&#128269;</div>
+    <p><strong>No budget items match your filters.</strong></p>
+    <p style="font-size:.85rem">Try broadening your search or clearing some filters.</p>
+    <div style="margin-top:1rem">
+      <a href="/"
+         hx-get="/partials/results"
+         hx-target="#results-container"
+         hx-push-url="/"
+         class="btn btn-primary btn-sm">Clear all filters</a>
+    </div>
   </div>
 </div>
 {% endif %}

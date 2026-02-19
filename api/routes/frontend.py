@@ -11,7 +11,7 @@ Routes:
     GET /partials/detail/{id}   → partials/detail.html (HTMX swap target)
 """
 
-# TODO [Group: LION] LION-001: Add error page templates (404, 500) with branded styling (~1,500 tokens)
+# DONE [Group: LION] LION-001: Add error page templates (404, 500) with branded styling (~1,500 tokens)
 
 import sqlite3
 from typing import Any
@@ -27,6 +27,26 @@ from utils.query import build_where_clause
 from utils import sanitize_fts5_query
 
 router = APIRouter(tags=["frontend"])
+
+
+# LION-001: Custom HTML error handlers for 404/500 pages
+def register_error_handlers(app) -> None:
+    """Register custom exception handlers that render branded error pages."""
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    @app.exception_handler(404)
+    async def not_found_handler(request: Request, exc):
+        tmpl = _tmpl()
+        return tmpl.TemplateResponse(
+            "errors/404.html", {"request": request}, status_code=404
+        )
+
+    @app.exception_handler(500)
+    async def server_error_handler(request: Request, exc):
+        tmpl = _tmpl()
+        return tmpl.TemplateResponse(
+            "errors/500.html", {"request": request}, status_code=500
+        )
 
 # Templates instance is set by create_app() after mounting.
 _templates: Jinja2Templates | None = None

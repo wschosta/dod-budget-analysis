@@ -99,6 +99,9 @@
       <div class="filter-actions">
         <button type="submit" class="btn btn-primary btn-sm">Apply</button>
         <a href="/" class="btn btn-secondary btn-sm">Reset</a>
+        {# LION-007: Share button — copies filtered URL to clipboard #}
+        <button type="button" id="share-btn" class="btn btn-secondary btn-sm share-btn"
+                onclick="copyShareURL()" aria-label="Copy shareable URL">&#128279; Share</button>
       </div>
     </form>
 
@@ -112,6 +115,23 @@
 
   {# ── Results area ─────────────────────────────────────────────────────── #}
   <section>
+    {# LION-008: Print header (visible only when printing) #}
+    <div class="print-header">
+      <h2>DoD Budget Explorer</h2>
+      <div class="print-meta">
+        {% if filters.q %}Keyword: "{{ filters.q }}" | {% endif %}
+        {% if filters.fiscal_year %}FY: {{ filters.fiscal_year | join(', ') }} | {% endif %}
+        {% if filters.service %}Service: {{ filters.service | join(', ') }} | {% endif %}
+        {% if filters.exhibit_type %}Exhibit: {{ filters.exhibit_type | join(', ') }} | {% endif %}
+        Printed <script>document.write(new Date().toLocaleDateString())</script>
+      </div>
+    </div>
+
+    {# LION-008: Print button #}
+    <div style="display:flex;justify-content:flex-end;margin-bottom:.5rem">
+      <button class="btn btn-secondary btn-sm print-btn" onclick="window.print()">Print Results</button>
+    </div>
+
     {# FE-005: ARIA live region for loading status #}
     <div id="loading-indicator" class="htmx-indicator" style="margin-bottom:.5rem"
          role="status" aria-live="polite" aria-label="Loading results">

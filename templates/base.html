@@ -5,7 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}DoD Budget Explorer{% endblock %}</title>
 
-  <!-- TODO [Group: LION] LION-010: Add dark mode toggle with CSS custom properties (~2,500 tokens) -->
+  <!-- DONE [Group: LION] LION-010: Dark mode toggle with CSS custom properties -->
+  <script>
+    // LION-010: Apply saved theme before first paint to avoid flash
+    (function() {
+      var saved = localStorage.getItem('dod_theme');
+      if (saved) {
+        document.documentElement.setAttribute('data-theme', saved);
+      }
+    })();
+  </script>
 
   <!-- FE-009: Meta description and Open Graph tags -->
   <meta name="description" content="Search and explore U.S. Department of Defense budget justification data across fiscal years, services, and appropriation accounts.">
@@ -40,6 +49,11 @@
       <a href="/"         {% if request.url.path == "/" %}class="active"{% endif %}>Search</a>
       <a href="/charts"   {% if request.url.path == "/charts" %}class="active"{% endif %}>Charts</a>
       <a href="/docs"     target="_blank" rel="noopener">API Docs</a>
+      <!-- LION-010: Dark mode toggle -->
+      <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode">
+        <span class="icon-moon">&#9790;</span>
+        <span class="icon-sun">&#9788;</span>
+      </button>
     </nav>
   </div>
 </header>
@@ -54,10 +68,13 @@
       rel="noopener">DoD Comptroller</a>.
     This is an independent research tool; not affiliated with the U.S. Department of Defense.
     <a href="/docs" target="_blank" rel="noopener">API</a>
+    <!-- DONE [Group: LION] LION-002: Feedback button -->
+    <button class="btn btn-secondary btn-sm feedback-btn" onclick="openFeedbackModal()" aria-label="Send feedback">Feedback</button>
   </div>
 </footer>
 
-<!-- TODO [Group: LION] LION-002: Add feedback form modal in footer (~2,500 tokens) -->
+<!-- DONE [Group: LION] LION-002: Feedback form modal -->
+{% include "partials/feedback.html" %}
 
 {% block extra_scripts %}{% endblock %}
 </body>
