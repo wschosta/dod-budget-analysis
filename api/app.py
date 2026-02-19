@@ -66,6 +66,7 @@ TODO APP-004 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
 """
 
 import logging
+import os
 import sqlite3
 import time
 from collections import defaultdict
@@ -97,6 +98,17 @@ _RATE_LIMITS: dict[str, int] = {
 }
 _DEFAULT_RATE_LIMIT = 120          # requests per minute for all other endpoints
 _rate_counters: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
+
+# ── Application metrics (DEPLOY-001) ─────────────────────────────────────────
+# Simple in-memory counters; reset on process restart (stateless by design).
+_app_start_time: float = time.time()
+_metrics: dict = {
+    "request_count": 0,
+    "error_count": 0,
+    "blocked_count": 0,
+    "response_times_ms": [],  # capped at last 100 entries
+}
+_RESPONSE_TIME_WINDOW = 100  # number of recent response times to average
 
 
 @asynccontextmanager
@@ -198,7 +210,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def log_and_rate_limit(request: Request, call_next):
-        """Log each request and enforce per-IP rate limits."""
+        """Log each request, enforce per-IP rate limits, and record metrics."""
         start = time.monotonic()
         client_ip = request.client.host if request.client else "unknown"
         path = request.url.path
@@ -211,6 +223,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         # Prune timestamps outside the window
         _rate_counters[client_ip][path] = [t for t in hits if t > window_start]
         if len(_rate_counters[client_ip][path]) >= limit:
+            _metrics["blocked_count"] += 1
             _logger.warning(
                 "rate_limited ip=%s path=%s limit=%d", client_ip, path, limit
             )
@@ -222,8 +235,21 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         _rate_counters[client_ip][path].append(now)
 
         # Dispatch and log
+        _metrics["request_count"] += 1
         response = await call_next(request)
         duration_ms = (time.monotonic() - start) * 1000
+
+        # Track response time (cap at last _RESPONSE_TIME_WINDOW entries)
+        _metrics["response_times_ms"].append(duration_ms)
+        if len(_metrics["response_times_ms"]) > _RESPONSE_TIME_WINDOW:
+            _metrics["response_times_ms"] = (
+                _metrics["response_times_ms"][-_RESPONSE_TIME_WINDOW:]
+            )
+
+        # Track server errors
+        if response.status_code >= 500:
+            _metrics["error_count"] += 1
+
         _logger.info(
             "method=%s path=%s status=%d duration_ms=%.1f ip=%s",
             request.method, path, response.status_code, duration_ms, client_ip,
@@ -233,6 +259,26 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 "slow_query method=%s path=%s duration_ms=%.1f",
                 request.method, path, duration_ms,
             )
+        return response
+
+    # ── Content Security Policy + security headers (DEPLOY-003) ──────────────
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        """Add Content-Security-Policy, X-Content-Type-Options, and X-Frame-Options."""
+        response = await call_next(request)
+        # CSP: allow self + CDN origins used by HTMX and Chart.js.
+        # 'unsafe-inline' is required for the inline <script> blocks in templates.
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' unpkg.com cdn.jsdelivr.net 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; "
+            "font-src 'self'; "
+            "connect-src 'self';"
+        )
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
         return response
 
     # ── Error handling middleware (2.C5-b) ────────────────────────────────────
@@ -278,6 +324,66 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             status_code=503,
             content={"status": "no_database", "database": str(db_path)},
         )
+
+    # ── Detailed health / metrics endpoint (DEPLOY-001) ──────────────────────
+
+    @app.get(
+        "/health/detailed",
+        tags=["meta"],
+        summary="Detailed health metrics",
+        response_description="Operational metrics for monitoring dashboards",
+    )
+    def health_detailed():
+        """Return detailed operational metrics for monitoring dashboards.
+
+        Includes uptime, request/error counters, database statistics,
+        average response time, and rate-limiter stats.  Counters reset
+        on process restart (stateless — no persistence).
+        """
+        db_path = get_db_path()
+        now = time.time()
+        uptime = now - _app_start_time
+
+        if not db_path.exists():
+            return JSONResponse(
+                status_code=503,
+                content={"status": "no_database", "database": str(db_path)},
+            )
+
+        try:
+            conn = sqlite3.connect(str(db_path))
+            budget_count = conn.execute(
+                "SELECT COUNT(*) FROM budget_lines"
+            ).fetchone()[0]
+            pdf_count = conn.execute(
+                "SELECT COUNT(*) FROM pdf_pages"
+            ).fetchone()[0]
+            conn.close()
+        except Exception as exc:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "degraded", "error": str(exc)},
+            )
+
+        db_size = os.path.getsize(str(db_path))
+
+        rts = _metrics["response_times_ms"]
+        avg_rt = round(sum(rts) / len(rts), 2) if rts else 0.0
+
+        return {
+            "status": "ok",
+            "uptime_seconds": round(uptime, 2),
+            "request_count": _metrics["request_count"],
+            "error_count": _metrics["error_count"],
+            "db_size_bytes": db_size,
+            "budget_lines_count": budget_count,
+            "pdf_pages_count": pdf_count,
+            "avg_response_time_ms": avg_rt,
+            "rate_limiter_stats": {
+                "tracked_ips": len(_rate_counters),
+                "blocked_requests": _metrics["blocked_count"],
+            },
+        }
 
     # ── Register routers ──────────────────────────────────────────────────────
 
