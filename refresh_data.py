@@ -13,82 +13,63 @@ Usage:
     python refresh_data.py --years 2026 --sources army navy # FY2026 Army+Navy only
     python refresh_data.py --years 2025 2026 --sources all  # Multiple years
     python refresh_data.py --dry-run --years 2026           # Preview without downloading
+    python refresh_data.py --schedule daily --at-hour 02:00 # Schedule daily at 2am
     python refresh_data.py --help                           # Show full options
-
----
-TODOs for this file
----
 
 DONE REFRESH-001: Stages 2 (build) and 3 (validate) now call Python functions
   directly instead of subprocess. Stage 1 (download) still uses subprocess
   since the downloader has heavy optional deps (Playwright, GUI).
 DONE REFRESH-002: --notify flag added; POSTs summary JSON to webhook URL on
   completion or failure.
-
-TODO REFRESH-003 [Group: BEAR] [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
-    Add automatic rollback on failed refresh.
-    If Stage 2 (build) or Stage 3 (validate) fails, the database may be in an
-    inconsistent state. Steps:
-      1. Before Stage 2, copy current DB to dod_budget.sqlite.bak
-      2. If Stage 2 or 3 fails, restore from backup
-      3. Log rollback event and include in notification webhook
-      4. Add --no-rollback flag to disable this for debugging
-    Acceptance: Failed refresh restores previous good database.
-
-TODO REFRESH-004 [Group: BEAR] [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add refresh progress file for monitoring.
-    During long-running refreshes (can be 30+ minutes for full download),
-    there's no way to monitor progress externally. Steps:
-      1. Write refresh_progress.json at each stage transition
-      2. Include: current_stage, stage_status, elapsed_seconds, stage_detail
-      3. External monitors can poll this file (e.g., GitHub Actions, web UI)
-      4. Delete file on successful completion
-    Acceptance: Progress file updated during refresh; monitorable externally.
-
-TODO REFRESH-005 [Group: BEAR] [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Add --schedule flag for periodic refresh support.
-    Steps:
-      1. Add --schedule=daily|weekly|monthly argparse argument
-      2. Use Python's sched module or a simple sleep loop
-      3. Log next scheduled run time
-      4. Add --at-hour HH:MM to control time of day
-    NOTE: For production use, prefer cron/Task Scheduler/GH Actions over
-    this built-in scheduler. This is for simple local deployments.
-    Acceptance: --schedule=daily runs refresh once per day.
+DONE REFRESH-003: Automatic rollback on failed refresh. DB is backed up before
+  Stage 2; restored on failure unless --no-rollback is specified.
+DONE REFRESH-004: Progress file (refresh_progress.json) written at each stage
+  transition. Deleted on successful completion.
+DONE REFRESH-005: --schedule flag for periodic refresh (daily/weekly/monthly).
+  Uses a sleep loop with configurable --at-hour.
 """
 
 import argparse
 import json
+import shutil
+import sched
 import subprocess
 import sys
 import time
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+
+# REFRESH-004: Path for the progress file polled by external monitors
+_PROGRESS_FILE = Path("refresh_progress.json")
 
 
 class RefreshWorkflow:
     """Orchestrates the complete data refresh pipeline."""
 
     def __init__(self, verbose=False, dry_run=False, workers=4, notify_url=None,
-                 db_path=None):
+                 db_path=None, no_rollback=False):
         """Initialize workflow state.
 
         Args:
-            verbose:    If True, emit detailed stage output.
-            dry_run:    If True, log commands without executing them.
-            workers:    Number of concurrent HTTP download threads.
-            notify_url: Optional webhook URL; if set, a JSON summary is POSTed
-                        there after the workflow completes (REFRESH-002).
-            db_path:    Path to the SQLite database (default: dod_budget.sqlite).
+            verbose:     If True, emit detailed stage output.
+            dry_run:     If True, log commands without executing them.
+            workers:     Number of concurrent HTTP download threads.
+            notify_url:  Optional webhook URL; if set, a JSON summary is POSTed
+                         there after the workflow completes (REFRESH-002).
+            db_path:     Path to the SQLite database (default: dod_budget.sqlite).
+            no_rollback: If True, skip the automatic rollback on failure (REFRESH-003).
         """
         self.verbose = verbose
         self.dry_run = dry_run
         self.workers = workers
         self.notify_url = notify_url
         self.db_path = Path(db_path) if db_path else Path("dod_budget.sqlite")
+        self.no_rollback = no_rollback
         self.start_time = None
         self.results = {}
+        # REFRESH-003: path for the pre-build backup
+        self._backup_path: Path | None = None
 
     def log(self, msg: str, level="info"):
         """Print a timestamped log message."""
@@ -96,13 +77,80 @@ class RefreshWorkflow:
         if level == "info":
             print(f"[{timestamp}] {msg}")
         elif level == "warn":
-            print(f"[{timestamp}] ⚠ WARNING: {msg}")
+            print(f"[{timestamp}] WARNING: {msg}")
         elif level == "error":
-            print(f"[{timestamp}] ✗ ERROR: {msg}")
+            print(f"[{timestamp}] ERROR: {msg}")
         elif level == "ok":
-            print(f"[{timestamp}] ✓ {msg}")
+            print(f"[{timestamp}] OK: {msg}")
         elif level == "detail" and self.verbose:
-            print(f"  → {msg}")
+            print(f"  -> {msg}")
+
+    # ── REFRESH-004: Progress file ──────────────────────────────────────────
+
+    def _write_progress(self, stage: str, status: str, detail: str = "") -> None:
+        """Write refresh_progress.json for external monitoring (REFRESH-004)."""
+        elapsed = round(time.time() - (self.start_time or time.time()), 1)
+        progress = {
+            "current_stage": stage,
+            "stage_status": status,
+            "elapsed_seconds": elapsed,
+            "stage_detail": detail,
+            "timestamp": datetime.now().isoformat(),
+            "stages_completed": dict(self.results),
+        }
+        try:
+            with open(_PROGRESS_FILE, "w") as f:
+                json.dump(progress, f, indent=2)
+        except OSError as e:
+            self.log(f"Could not write progress file: {e}", "warn")
+
+    def _clear_progress(self) -> None:
+        """Remove the progress file on successful completion (REFRESH-004)."""
+        try:
+            _PROGRESS_FILE.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    # ── REFRESH-003: Rollback helpers ───────────────────────────────────────
+
+    def _backup_db(self) -> bool:
+        """Copy the current database to a .bak file before Stage 2 (REFRESH-003)."""
+        if self.dry_run or not self.db_path.exists():
+            return True
+        self._backup_path = self.db_path.with_suffix(".sqlite.bak")
+        try:
+            shutil.copy2(self.db_path, self._backup_path)
+            self.log(f"REFRESH-003: Database backed up to {self._backup_path}", "detail")
+            return True
+        except OSError as e:
+            self.log(f"REFRESH-003: Backup failed: {e}", "warn")
+            return False
+
+    def _rollback_db(self) -> bool:
+        """Restore the database from backup after a failed refresh (REFRESH-003)."""
+        if self.no_rollback:
+            self.log("REFRESH-003: Rollback skipped (--no-rollback)", "warn")
+            return False
+        if not self._backup_path or not self._backup_path.exists():
+            self.log("REFRESH-003: No backup available to roll back to", "warn")
+            return False
+        try:
+            shutil.copy2(self._backup_path, self.db_path)
+            self.log(f"REFRESH-003: Database restored from {self._backup_path}", "ok")
+            return True
+        except OSError as e:
+            self.log(f"REFRESH-003: Rollback failed: {e}", "error")
+            return False
+
+    def _cleanup_backup(self) -> None:
+        """Remove the backup file after a successful refresh (REFRESH-003)."""
+        if self._backup_path and self._backup_path.exists():
+            try:
+                self._backup_path.unlink()
+            except OSError:
+                pass
+
+    # ── Stages ─────────────────────────────────────────────────────────────
 
     def run_command(self, cmd: list, description: str) -> bool:
         """Run a shell command and return success status."""
@@ -136,6 +184,7 @@ class RefreshWorkflow:
         self.log("=" * 60)
         self.log("STAGE 1: DOWNLOAD BUDGET DOCUMENTS")
         self.log("=" * 60)
+        self._write_progress("stage_1_download", "running", "Downloading budget documents")
 
         cmd = ["python", "dod_budget_downloader.py", "--no-gui",
                "--workers", str(self.workers)]
@@ -148,6 +197,8 @@ class RefreshWorkflow:
 
         success = self.run_command(cmd, "Budget document download")
         self.results["download"] = "completed" if success else "failed"
+        self._write_progress("stage_1_download", "completed" if success else "failed",
+                             f"Download {'succeeded' if success else 'failed'}")
         return success
 
     def stage_2_build(self) -> bool:
@@ -155,11 +206,16 @@ class RefreshWorkflow:
         self.log("=" * 60)
         self.log("STAGE 2: BUILD DATABASE")
         self.log("=" * 60)
+        self._write_progress("stage_2_build", "running", "Building database")
 
         if self.dry_run:
             self.log("[DRY RUN] Would call build_database()", "detail")
             self.results["build"] = "completed"
+            self._write_progress("stage_2_build", "completed")
             return True
+
+        # REFRESH-003: Back up before building
+        self._backup_db()
 
         try:
             from build_budget_db import build_database  # noqa: PLC0415
@@ -167,10 +223,15 @@ class RefreshWorkflow:
             build_database(docs_dir, self.db_path)
             self.log("Completed: Database build/update", "ok")
             self.results["build"] = "completed"
+            self._write_progress("stage_2_build", "completed", "Database built successfully")
             return True
         except Exception as e:
             self.log(f"Exception during Database build/update: {e}", "error")
             self.results["build"] = "failed"
+            self._write_progress("stage_2_build", "failed", str(e))
+            # REFRESH-003: Rollback on failure
+            rolled_back = self._rollback_db()
+            self.results["rollback"] = "completed" if rolled_back else "skipped"
             return False
 
     def stage_3_validate(self) -> bool:
@@ -178,10 +239,12 @@ class RefreshWorkflow:
         self.log("=" * 60)
         self.log("STAGE 3: VALIDATE DATABASE")
         self.log("=" * 60)
+        self._write_progress("stage_3_validate", "running", "Running validation checks")
 
         if self.dry_run:
             self.log("[DRY RUN] Would call validate_all()", "detail")
             self.results["validate"] = "completed"
+            self._write_progress("stage_3_validate", "completed")
             return True
 
         try:
@@ -191,10 +254,22 @@ class RefreshWorkflow:
             success = summary["total_failures"] == 0
             self.log("Completed: Data validation", "ok" if success else "warn")
             self.results["validate"] = "completed" if success else "failed"
+            self._write_progress(
+                "stage_3_validate",
+                "completed" if success else "failed",
+                f"{summary.get('total_failures', 0)} failures"
+            )
+            if not success:
+                # REFRESH-003: Rollback on validation failure
+                rolled_back = self._rollback_db()
+                self.results["rollback"] = "completed" if rolled_back else "skipped"
             return success
         except Exception as e:
             self.log(f"Exception during Data validation: {e}", "error")
             self.results["validate"] = "failed"
+            self._write_progress("stage_3_validate", "failed", str(e))
+            rolled_back = self._rollback_db()
+            self.results["rollback"] = "completed" if rolled_back else "skipped"
             return False
 
     def stage_4_report(self) -> bool:
@@ -202,15 +277,18 @@ class RefreshWorkflow:
         self.log("=" * 60)
         self.log("STAGE 4: GENERATE QUALITY REPORT")
         self.log("=" * 60)
+        self._write_progress("stage_4_report", "running", "Generating quality report")
 
         if self.dry_run:
             self.log("[DRY RUN] Would call generate_quality_report()", "detail")
             self.results["report"] = "completed"
+            self._write_progress("stage_4_report", "completed")
             return True
 
         if not self.db_path.exists():
             self.log("Database not found; skipping report generation", "warn")
             self.results["report"] = "skipped"
+            self._write_progress("stage_4_report", "skipped", "DB not found")
             return False
 
         try:
@@ -244,11 +322,14 @@ class RefreshWorkflow:
             )
             self.log(f"Reports saved: data_quality_report.json, {report_path}", "ok")
             self.results["report"] = "completed"
+            self._write_progress("stage_4_report", "completed",
+                                 f"{quality_report['total_budget_lines']:,} budget lines")
             return True
 
         except Exception as e:
             self.log(f"Error generating report: {e}", "error")
             self.results["report"] = "failed"
+            self._write_progress("stage_4_report", "failed", str(e))
             return False
 
     def run(self, years: list, sources: list) -> int:
@@ -261,7 +342,11 @@ class RefreshWorkflow:
         self.log(f"Fiscal Years: {years if years else 'all'}")
         self.log(f"Sources: {sources if sources else 'all'}")
         self.log(f"Dry Run: {self.dry_run}")
+        self.log(f"Rollback on failure: {not self.no_rollback}")
         self.log("")
+
+        # REFRESH-004: Initial progress entry
+        self._write_progress("starting", "running", "Refresh workflow starting")
 
         # Execute stages
         success = True
@@ -282,8 +367,8 @@ class RefreshWorkflow:
         self.log("REFRESH WORKFLOW SUMMARY")
         self.log("=" * 60)
         for stage, result in self.results.items():
-            icon = "✓" if result == "completed" else "⚠" if result == "skipped" else "✗"
-            print(f"  {icon} {stage:15s}: {result}")
+            icon = "OK" if result == "completed" else "skip" if result == "skipped" else "FAIL"
+            print(f"  [{icon}] {stage:15s}: {result}")
         self.log(f"Total time: {elapsed:.1f}s")
         self.log("")
 
@@ -291,15 +376,19 @@ class RefreshWorkflow:
         if self.notify_url:
             self._send_notification(success, elapsed)
 
+        if success:
+            # REFRESH-003: Clean up backup on success
+            self._cleanup_backup()
+            # REFRESH-004: Clear progress file on successful completion
+            self._clear_progress()
+        else:
+            self._write_progress("done", "failed",
+                                 f"Workflow failed after {elapsed:.1f}s")
+
         return 0 if success else 1
 
     def _send_notification(self, success: bool, elapsed: float) -> None:
-        """POST a JSON summary to the configured webhook URL (REFRESH-002).
-
-        Silently ignores failures so a broken webhook never stops the workflow.
-        The payload shape is compatible with Slack incoming-webhook format as
-        well as generic HTTP webhook receivers.
-        """
+        """POST a JSON summary to the configured webhook URL (REFRESH-002)."""
         payload = {
             "text": (
                 f"DoD Budget Refresh {'succeeded' if success else 'failed'} "
@@ -324,6 +413,62 @@ class RefreshWorkflow:
             self.log(f"Notification failed (non-fatal): {e}", "warn")
 
 
+# ── REFRESH-005: Periodic scheduler ──────────────────────────────────────────
+
+_SCHEDULE_INTERVALS = {
+    "daily": 86400,
+    "weekly": 604800,
+    "monthly": 2592000,  # 30 days
+}
+
+
+def _next_run_time(at_hour: str | None) -> float:
+    """Compute the next run time as a Unix timestamp (REFRESH-005).
+
+    If at_hour is "HH:MM", schedules for that time today (or tomorrow if past).
+    Otherwise returns now + a short delay.
+    """
+    if not at_hour:
+        return time.time()
+    try:
+        hh, mm = at_hour.split(":")
+        now = datetime.now()
+        run_today = now.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+        if run_today <= now:
+            run_today += timedelta(days=1)
+        return run_today.timestamp()
+    except ValueError:
+        print(f"WARNING: Invalid --at-hour value '{at_hour}'; running immediately.")
+        return time.time()
+
+
+def run_scheduled(args, workflow_kwargs: dict) -> None:
+    """Run the refresh workflow on a schedule (REFRESH-005).
+
+    Uses a simple sleep loop rather than sched to avoid drift on long intervals.
+    """
+    interval = _SCHEDULE_INTERVALS[args.schedule]
+    next_run = _next_run_time(args.at_hour)
+
+    print(f"REFRESH-005: Scheduled refresh every {args.schedule}")
+    print(f"  Interval: {interval}s")
+    print(f"  Next run: {datetime.fromtimestamp(next_run).isoformat()}")
+    print("  Press Ctrl+C to stop.")
+
+    while True:
+        wait = max(0, next_run - time.time())
+        if wait > 0:
+            print(f"  Sleeping {wait:.0f}s until {datetime.fromtimestamp(next_run).isoformat()}...")
+            time.sleep(wait)
+
+        print(f"\n[{datetime.now().isoformat()}] REFRESH-005: Starting scheduled run")
+        workflow = RefreshWorkflow(**workflow_kwargs)
+        workflow.run(args.years or [2026], args.sources or ["all"])
+
+        next_run = time.time() + interval
+        print(f"  Next run scheduled for {datetime.fromtimestamp(next_run).isoformat()}")
+
+
 def main():
     """Parse CLI arguments and run the four-stage data refresh workflow."""
     parser = argparse.ArgumentParser(
@@ -334,6 +479,7 @@ Examples:
   python refresh_data.py --years 2026
   python refresh_data.py --years 2025 2026 --sources army navy
   python refresh_data.py --dry-run --years 2026
+  python refresh_data.py --schedule daily --at-hour 02:00
         """,
     )
     parser.add_argument(
@@ -379,18 +525,44 @@ Examples:
         default=None,
         help="Webhook URL to POST a JSON summary on completion/failure (REFRESH-002)",
     )
+    # REFRESH-003: Rollback control
+    parser.add_argument(
+        "--no-rollback",
+        action="store_true",
+        help="Disable automatic rollback on failed refresh (REFRESH-003)",
+    )
+    # REFRESH-005: Scheduling
+    parser.add_argument(
+        "--schedule",
+        choices=["daily", "weekly", "monthly"],
+        default=None,
+        help="Run refresh on a repeating schedule (REFRESH-005)",
+    )
+    parser.add_argument(
+        "--at-hour",
+        metavar="HH:MM",
+        default=None,
+        help="Time of day for scheduled refresh, e.g. 02:00 (REFRESH-005)",
+    )
 
     args = parser.parse_args()
 
-    workflow = RefreshWorkflow(
-        verbose=args.verbose,
-        dry_run=args.dry_run,
-        workers=args.workers,
-        notify_url=args.notify,
-        db_path=args.db,
-    )
-    exit_code = workflow.run(args.years or [2026], args.sources or ["all"])
-    sys.exit(exit_code)
+    workflow_kwargs = {
+        "verbose": args.verbose,
+        "dry_run": args.dry_run,
+        "workers": args.workers,
+        "notify_url": args.notify,
+        "db_path": args.db,
+        "no_rollback": args.no_rollback,
+    }
+
+    if args.schedule:
+        # REFRESH-005: Enter the scheduling loop
+        run_scheduled(args, workflow_kwargs)
+    else:
+        workflow = RefreshWorkflow(**workflow_kwargs)
+        exit_code = workflow.run(args.years or [2026], args.sources or ["all"])
+        sys.exit(exit_code)
 
 
 if __name__ == "__main__":

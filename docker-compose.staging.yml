@@ -1,0 +1,101 @@
+# DoD Budget — docker-compose.staging.yml (DEPLOY-004)
+#
+# Staging environment configuration that mirrors production settings.
+# Differences from development (docker-compose.yml):
+#   - No source-code volume mounts (code is baked into the image)
+#   - No --reload flag (uvicorn runs with multiple workers)
+#   - APP_ENV=staging enables JSON logging and stricter rate limits
+#   - Database volume is read-only from a named volume (not host path)
+#   - Backup sidecar runs scripts/backup_db.py every 6 hours
+#
+# Usage:
+#   docker-compose -f docker-compose.staging.yml up -d
+#   docker-compose -f docker-compose.staging.yml down
+#   docker-compose -f docker-compose.staging.yml pull && \
+#     docker-compose -f docker-compose.staging.yml up -d
+#
+# Smoke test after deploy:
+#   curl -sf http://localhost:8000/health && echo "OK"
+#   curl -sf http://localhost:8000/health/detailed | python3 -m json.tool
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dod-budget-api:staging
+    ports:
+      - "8000:8000"
+    volumes:
+      # Staging database on a named volume (populated by build_budget_db.py)
+      - db_data:/app/data:ro
+    environment:
+      APP_DB_PATH: /app/data/dod_budget.sqlite
+      APP_ENV: staging
+      # Enable JSON-formatted log output for log aggregation tools
+      APP_LOG_FORMAT: json
+      # Stricter rate limits in staging (half of production defaults)
+      RATE_LIMIT_SEARCH: "30"
+      RATE_LIMIT_DOWNLOAD: "5"
+      RATE_LIMIT_DEFAULT: "60"
+      # Backup directory inside the container (backup sidecar writes here)
+      BACKUP_DIR: /app/backups
+    command: >
+      uvicorn api.app:app
+        --host 0.0.0.0
+        --port 8000
+        --workers 2
+        --no-access-log
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - |
+          import urllib.request
+          urllib.request.urlopen('http://localhost:8000/health', timeout=3)
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    restart: unless-stopped
+
+  backup:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dod-budget-api:staging
+    volumes:
+      - db_data:/app/data:ro
+      - backup_data:/app/backups
+    environment:
+      APP_DB_PATH: /app/data/dod_budget.sqlite
+      BACKUP_DIR: /app/backups
+    # Run backup every 6 hours; keep the last 28 backups (7 days × 4/day)
+    command: >
+      sh -c "while true; do
+        python scripts/backup_db.py
+          --db /app/data/dod_budget.sqlite
+          --dest /app/backups
+          --keep 28
+          && echo 'Backup done';
+        sleep 21600;
+      done"
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  db_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: "${DB_HOST_PATH:-./data}"
+  backup_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: "${BACKUP_HOST_PATH:-./backups}"

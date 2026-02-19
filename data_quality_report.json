@@ -1,6 +1,6 @@
 {
-  "timestamp": "2026-02-19T11:05:26.342906",
-  "database": "/tmp/pytest-of-root/pytest-1/test_stop_event_not_set_comple0/test.sqlite",
+  "timestamp": "2026-02-19T11:21:56.620640",
+  "database": "/tmp/pytest-of-root/pytest-0/test_stop_event_not_set_comple0/test.sqlite",
   "total_budget_lines": 4,
   "row_counts_by_service_fy_exhibit": [
     {
@@ -24,16 +24,16 @@
       "zero_pct": 0.0
     },
     "amount_fy2025_supplemental": {
-      "null_count": 0,
-      "null_pct": 0.0,
-      "zero_count": 4,
-      "zero_pct": 100.0
+      "null_count": 4,
+      "null_pct": 100.0,
+      "zero_count": 0,
+      "zero_pct": 0.0
     },
     "amount_fy2025_total": {
-      "null_count": 0,
-      "null_pct": 0.0,
-      "zero_count": 4,
-      "zero_pct": 100.0
+      "null_count": 4,
+      "null_pct": 100.0,
+      "zero_count": 0,
+      "zero_pct": 0.0
     },
     "amount_fy2026_request": {
       "null_count": 0,
@@ -42,16 +42,16 @@
       "zero_pct": 0.0
     },
     "amount_fy2026_reconciliation": {
-      "null_count": 0,
-      "null_pct": 0.0,
-      "zero_count": 4,
-      "zero_pct": 100.0
+      "null_count": 4,
+      "null_pct": 100.0,
+      "zero_count": 0,
+      "zero_pct": 0.0
     },
     "amount_fy2026_total": {
-      "null_count": 0,
-      "null_pct": 0.0,
-      "zero_count": 4,
-      "zero_pct": 100.0
+      "null_count": 4,
+      "null_pct": 100.0,
+      "zero_count": 0,
+      "zero_pct": 0.0
     }
   },
   "validation_summary": {

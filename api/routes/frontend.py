@@ -58,13 +58,13 @@ def _get_services(conn: sqlite3.Connection) -> list[dict]:
             "SELECT code, full_name FROM services_agencies ORDER BY code"
         ).fetchall()
         result = [dict(r) for r in rows]
+        _services_cache.set(cache_key, result)  # only cache stable reference table
     except Exception:
         rows = conn.execute(
             "SELECT DISTINCT organization_name AS code FROM budget_lines "
             "WHERE organization_name IS NOT NULL ORDER BY organization_name"
         ).fetchall()
         result = [{"code": r["code"], "full_name": r["code"]} for r in rows]
-    _services_cache.set(cache_key, result)
     return result
 
 
@@ -78,13 +78,13 @@ def _get_exhibit_types(conn: sqlite3.Connection) -> list[dict]:
             "SELECT code, display_name FROM exhibit_types ORDER BY code"
         ).fetchall()
         result = [dict(r) for r in rows]
+        _exhibit_types_cache.set(cache_key, result)  # only cache stable reference table
     except Exception:
         rows = conn.execute(
             "SELECT DISTINCT exhibit_type AS code FROM budget_lines "
             "WHERE exhibit_type IS NOT NULL ORDER BY exhibit_type"
         ).fetchall()
         result = [{"code": r["code"], "display_name": r["code"]} for r in rows]
-    _exhibit_types_cache.set(cache_key, result)
     return result
 
 

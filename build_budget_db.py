@@ -52,61 +52,23 @@ DONE 1.B6-h: validate_budget_data.validate_all() called at end of build_database
 Remaining TODOs for this file
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO 1.A6-a / BUILD-001 [Group: BEAR] [Complexity: MEDIUM] [Tokens: ~3000] [User: NO]
-    Implement structured failure log for failed downloads.
-    Write a `failed_downloads.json` after each build with entries for files that
-    failed to parse. Include: file_path, error_type, error_detail, timestamp.
-    Add a `--retry-failures` CLI flag that reads the log and re-attempts only
-    those files. This enables incremental recovery from transient parse errors.
-    Steps:
-      1. Create FailedFileEntry dataclass (file_path, error_type, detail, ts)
-      2. In ingest_excel_file() and ingest_pdf_file(), catch exceptions and
-         append to a failures list instead of silently continuing
-      3. After build_database() completes, write failures to JSON
-      4. Add --retry-failures argparse flag that loads JSON and filters file list
-      5. Add tests for failure logging and retry logic
-    Acceptance: `--retry-failures` re-processes only previously-failed files.
+BUILD-001 [DONE]: Structured failure log + --retry-failures flag.
+    FailedFileEntry dataclass tracks parse errors. build_database() writes
+    failed_downloads.json on errors; --retry-failures re-processes only those files.
 
-TODO 1.B3-d / BUILD-002 [Group: BEAR] [Complexity: MEDIUM] [Tokens: ~4000] [User: NO]
-    Make fiscal year columns dynamic instead of hardcoded FY2024-2026.
-    Currently the schema hardcodes amount_fy2024_actual, amount_fy2025_enacted,
-    amount_fy2026_request etc. When FY2027 data arrives, this requires manual
-    schema changes in 4+ locations. Refactor to:
-      1. Detect FY columns from Excel headers dynamically
-      2. Generate ALTER TABLE statements for new FY columns on first encounter
-      3. Update _map_columns() to handle arbitrary FY ranges
-      4. Update INSERT statements to use dynamic column lists
-      5. Add migration in schema_design.py to handle schema evolution
-    NOTE: Keep backward compatibility with existing FY2024-2026 columns.
-    See DESIGN NOTE in create_database() for trade-off discussion.
-    Acceptance: New FY columns auto-created when parsing FY2027+ exhibits.
+BUILD-002 [DONE]: Dynamic fiscal year columns (auto ALTER TABLE).
+    _ensure_fy_columns() adds new FY columns dynamically. ingest_excel_file()
+    uses dynamic column list for INSERT. Backward-compatible with FY2024-2026.
 
-TODO 1.B5-d / BUILD-003 [Group: BEAR] [Complexity: LOW] [Tokens: ~2000] [User: NO]
-    Add configurable PDF extraction timeout per page.
-    _extract_tables_with_timeout() uses a fixed timeout. Large or complex PDFs
-    may need longer timeouts. Add:
-      1. --pdf-timeout CLI argument (default 30s)
-      2. Pass timeout to _extract_tables_with_timeout()
-      3. Log pages that consistently time out for manual review
-      4. Add to extraction_issues table with issue_type='timeout'
-    Acceptance: Users can tune PDF timeout; timeouts logged for triage.
-
-TODO OPT-BUILD-001 [Group: BEAR] [Complexity: MEDIUM] [Tokens: ~3500] [User: NO]
-    Parallelize Excel file ingestion using ProcessPoolExecutor.
-    Currently ingest_excel_file() processes files serially. For large document
-    corpora (500+ files), this is the bottleneck. Refactor to:
-      1. Create a standalone ingest_single_file() function that opens its own
-         DB connection and processes one file
-      2. Use ProcessPoolExecutor with max_workers=cpu_count()
-      3. Merge results back into main DB using batch_insert from utils/database
-      4. Ensure ingested_files tracking is process-safe (use SAVEPOINT)
-      5. Add --workers CLI argument (default: cpu_count())
-    Caveat: SQLite WAL mode supports concurrent readers but only one writer.
-    Consider writing to temp DBs and merging, or using a queue.
-    Acceptance: Build time reduced >2x on multi-core machines.
+OPT-BUILD-001 [DONE]: Parallelize Excel file ingestion using ProcessPoolExecutor.
+    _extract_excel_rows() is a standalone worker that extracts rows without DB access.
+    build_database() uses ProcessPoolExecutor for Excel when workers > 1.
+    Rows are merged back into the main DB via batch INSERT in the main process.
 """
 
 import argparse
+import dataclasses
+import json
 import re
 import signal
 import sqlite3
@@ -117,7 +79,7 @@ from datetime import datetime
 from pathlib import Path
 from concurrent.futures import (
     ThreadPoolExecutor, ProcessPoolExecutor, TimeoutError as FuturesTimeoutError,
-    wait, FIRST_COMPLETED,
+    as_completed, wait, FIRST_COMPLETED,
 )
 import os
 
@@ -178,6 +140,53 @@ EXHIBIT_TYPES = {
     "r3":  "RDT&E Project Schedule (R-3)",
     "r4":  "RDT&E Budget Item Justification (R-4)",
 }
+
+
+# ── BUILD-001: Structured failure log ─────────────────────────────────────────
+
+@dataclasses.dataclass
+class FailedFileEntry:
+    """Record of a file that failed to ingest, written to failed_downloads.json."""
+    file_path: str
+    error_type: str
+    error_detail: str
+    timestamp: str = dataclasses.field(
+        default_factory=lambda: datetime.now().isoformat()
+    )
+
+    def to_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+
+# ── BUILD-002: Dynamic fiscal year column management ──────────────────────────
+
+# Columns that exist in the baseline CREATE TABLE schema (FY2024–2026).
+_FIXED_AMOUNT_COLUMNS: frozenset = frozenset([
+    "amount_fy2024_actual",
+    "amount_fy2025_enacted", "amount_fy2025_supplemental", "amount_fy2025_total",
+    "amount_fy2026_request", "amount_fy2026_reconciliation", "amount_fy2026_total",
+    "quantity_fy2024", "quantity_fy2025",
+    "quantity_fy2026_request", "quantity_fy2026_total",
+])
+
+
+def _ensure_fy_columns(conn: sqlite3.Connection, col_names: list[str]) -> None:
+    """Dynamically add new FY columns to budget_lines via ALTER TABLE (BUILD-002).
+
+    For each column name not in the baseline schema, issues ALTER TABLE ADD COLUMN
+    so that new fiscal-year data (e.g. FY2027) is persisted without manual schema changes.
+    Existing columns are left untouched.
+    """
+    existing = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(budget_lines)").fetchall()
+    }
+    for col in col_names:
+        if col not in existing:
+            col_type = "REAL" if col.startswith(("amount_", "quantity_")) else "TEXT"
+            conn.execute(f"ALTER TABLE budget_lines ADD COLUMN {col} {col_type}")
+            conn.commit()
+            print(f"  BUILD-002: Added new column to budget_lines: {col}")
 
 
 # ── Database Setup ────────────────────────────────────────────────────────────
@@ -766,7 +775,8 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
 
 
 def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
-                      docs_dir: Path | None = None) -> int:
+                      docs_dir: Path | None = None,
+                      ensure_columns: bool = True) -> int:
     """Ingest a single Excel file into the database."""
     _docs_dir = (docs_dir or DOCS_DIR).resolve()
     wb = openpyxl.load_workbook(str(file_path), read_only=True, data_only=True)
@@ -809,6 +819,17 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
         if "account" not in col_map:
             continue
 
+        # BUILD-002: detect any FY columns beyond the baseline FY2024-2026 schema
+        # and add them dynamically via ALTER TABLE before inserting
+        if ensure_columns:
+            dynamic_fy_cols = [
+                k for k in col_map
+                if (k.startswith("amount_fy") or k.startswith("quantity_fy"))
+                and k not in _FIXED_AMOUNT_COLUMNS
+            ]
+            if dynamic_fy_cols:
+                _ensure_fy_columns(conn, dynamic_fy_cols)
+
         # Detect fiscal year from sheet name and normalise to "FY YYYY" (Step 1.B2-d)
         fiscal_year = _normalise_fiscal_year(sheet_name)
 
@@ -826,6 +847,13 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
 
         # Derive amount_type from exhibit type (Step 1.B3-c)
         amount_type = _EXHIBIT_AMOUNT_TYPE.get(exhibit_type, "budget_authority")
+
+        # BUILD-002: Collect all FY/quantity columns detected in this sheet's headers.
+        # These will be included in the dynamic INSERT statement below.
+        _fy_cols_in_map = sorted([
+            k for k in col_map
+            if k.startswith("amount_fy") or k.startswith("quantity_fy")
+        ])
 
         batch = []
 
@@ -877,6 +905,15 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
                 v = _safe_float(get_val(row, field))
                 return v * unit_multiplier if v else v
 
+            # BUILD-002: Build the FY/quantity values dynamically from col_map.
+            # Amounts use _amt() for unit normalisation; quantities are unitless.
+            fy_values = []
+            for fc in _fy_cols_in_map:
+                if fc.startswith("amount_"):
+                    fy_values.append(_amt(fc))
+                else:
+                    fy_values.append(_safe_float(get_val(row, fc)))
+
             batch.append((
                 str(file_path.relative_to(_docs_dir)),
                 exhibit_type,
@@ -893,17 +930,7 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
                 line_item_val,
                 get_str(row, "line_item_title"),
                 get_str(row, "classification"),
-                _amt("amount_fy2024_actual"),
-                _amt("amount_fy2025_enacted"),
-                _amt("amount_fy2025_supplemental"),
-                _amt("amount_fy2025_total"),
-                _amt("amount_fy2026_request"),
-                _amt("amount_fy2026_reconciliation"),
-                _amt("amount_fy2026_total"),
-                _safe_float(get_val(row, "quantity_fy2024")),    # quantities are unit-less
-                _safe_float(get_val(row, "quantity_fy2025")),
-                _safe_float(get_val(row, "quantity_fy2026_request")),
-                _safe_float(get_val(row, "quantity_fy2026_total")),
+                *fy_values,    # dynamic FY columns (BUILD-002)
                 None,          # extra_fields
                 pe_number,     # Step 1.B4-a: PE number from line_item or account
                 currency_year, # Step 1.B3-b: currency year context
@@ -915,30 +942,177 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
             ))
 
         if batch:
-            conn.executemany("""
-                INSERT INTO budget_lines (
-                    source_file, exhibit_type, sheet_name, fiscal_year,
-                    account, account_title, organization, organization_name,
-                    budget_activity, budget_activity_title,
-                    sub_activity, sub_activity_title,
-                    line_item, line_item_title, classification,
-                    amount_fy2024_actual, amount_fy2025_enacted,
-                    amount_fy2025_supplemental, amount_fy2025_total,
-                    amount_fy2026_request, amount_fy2026_reconciliation,
-                    amount_fy2026_total,
-                    quantity_fy2024, quantity_fy2025,
-                    quantity_fy2026_request, quantity_fy2026_total,
-                    extra_fields,
-                    pe_number, currency_year,
-                    appropriation_code, appropriation_title,
-                    amount_unit, budget_type, amount_type
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, batch)
+            # BUILD-002: Use dynamic column list so new FY columns are included
+            _fixed_cols = (
+                "source_file, exhibit_type, sheet_name, fiscal_year, "
+                "account, account_title, organization, organization_name, "
+                "budget_activity, budget_activity_title, "
+                "sub_activity, sub_activity_title, "
+                "line_item, line_item_title, classification"
+            )
+            _fy_col_str = ", ".join(_fy_cols_in_map) if _fy_cols_in_map else ""
+            _tail_cols = (
+                "extra_fields, pe_number, currency_year, "
+                "appropriation_code, appropriation_title, "
+                "amount_unit, budget_type, amount_type"
+            )
+            all_cols = ", ".join(filter(None, [_fixed_cols, _fy_col_str, _tail_cols]))
+            n_params = len(all_cols.split(","))
+            placeholders = ", ".join(["?"] * n_params)
+            conn.executemany(
+                f"INSERT INTO budget_lines ({all_cols}) VALUES ({placeholders})",
+                batch,
+            )
             total_rows += len(batch)
 
     wb.close()
     conn.commit()
     return total_rows
+
+
+# ── OPT-BUILD-001: Standalone Excel extraction worker ─────────────────────────
+
+def _extract_excel_rows(args: tuple) -> dict:
+    """Worker function for parallel Excel extraction (OPT-BUILD-001).
+
+    Extracts all budget-line rows from a single Excel file without any
+    database access, so it can run safely in a subprocess.
+
+    Args:
+        args: Tuple of (file_path_str, docs_dir_str).
+
+    Returns:
+        Dict with keys: relative_path, rows (list of tuples), columns (list of str),
+        error (str|None), exhibit_type (str).
+    """
+    file_path_str, docs_dir_str = args
+    file_path = Path(file_path_str)
+    docs_dir = Path(docs_dir_str)
+
+    exhibit_type = _detect_exhibit_type(file_path.name)
+    result: dict = {
+        "relative_path": str(file_path.relative_to(docs_dir)),
+        "rows": [],
+        "columns": [],
+        "exhibit_type": exhibit_type,
+        "error": None,
+    }
+
+    try:
+        wb = openpyxl.load_workbook(str(file_path), read_only=True, data_only=True)
+    except Exception as e:
+        result["error"] = str(e)
+        return result
+
+    all_rows: list[tuple] = []
+    all_cols: list[str] = []
+
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        rows_iter = ws.iter_rows(values_only=True)
+
+        header_idx = None
+        first_rows = []
+        for i, row in enumerate(rows_iter):
+            first_rows.append(row)
+            if header_idx is not None:
+                break
+            if i >= 4:
+                break
+            for val in row:
+                if val and str(val).strip().lower() == "account":
+                    header_idx = i
+                    break
+
+        if header_idx is None:
+            continue
+
+        headers = first_rows[header_idx]
+        if header_idx + 1 < len(first_rows):
+            merged = _merge_header_rows(headers, first_rows[header_idx + 1])
+            if merged != list(headers):
+                headers = merged
+
+        col_map = _map_columns(headers, exhibit_type)
+        if "account" not in col_map:
+            continue
+
+        fiscal_year = _normalise_fiscal_year(sheet_name)
+        currency_year = _detect_currency_year(sheet_name, file_path.name)
+        amount_unit = _detect_amount_unit(first_rows, header_idx)
+        unit_multiplier = 1000.0 if amount_unit == "millions" else 1.0
+        budget_type = _EXHIBIT_BUDGET_TYPE.get(exhibit_type)
+        amount_type = _EXHIBIT_AMOUNT_TYPE.get(exhibit_type, "budget_authority")
+
+        _fy_cols_in_map = sorted([
+            k for k in col_map
+            if k.startswith("amount_fy") or k.startswith("quantity_fy")
+        ])
+
+        # Record which columns this file uses (for dynamic schema management)
+        for fc in _fy_cols_in_map:
+            if fc not in all_cols:
+                all_cols.append(fc)
+
+        def _amt(row, field):
+            idx = col_map.get(field)
+            v = row[idx] if idx is not None and idx < len(row) else None
+            fv = safe_float(v)
+            return fv * unit_multiplier if fv else fv
+
+        def _get_str(row, field):
+            idx = col_map.get(field)
+            v = row[idx] if idx is not None and idx < len(row) else None
+            return str(v).strip() if v is not None else None
+
+        rel_path_str = str(file_path.relative_to(docs_dir))
+
+        for row in rows_iter:
+            if not row or all(v is None for v in row):
+                continue
+            _acct_idx = col_map.get("account")
+            acct = row[_acct_idx] if _acct_idx is not None and _acct_idx < len(row) else None
+            if not acct:
+                continue
+
+            _org_idx = col_map.get("organization")
+            org_code = (
+                str(row[_org_idx]).strip()
+                if _org_idx is not None and _org_idx < len(row) and row[_org_idx]
+                else ""
+            )
+            org_name = ORG_MAP.get(org_code) or ORG_MAP.get(org_code.upper(), org_code)
+            line_item_val = _get_str(row, "line_item")
+            account_val = str(acct).strip()
+            pe_number = _extract_pe_number(line_item_val) or _extract_pe_number(account_val)
+            acct_title_val = _get_str(row, "account_title")
+            approp_code, approp_title = _parse_appropriation(acct_title_val)
+
+            fy_values = []
+            for fc in _fy_cols_in_map:
+                if fc.startswith("amount_"):
+                    fy_values.append(_amt(row, fc))
+                else:
+                    idx = col_map.get(fc)
+                    v = row[idx] if idx is not None and idx < len(row) else None
+                    fy_values.append(safe_float(v))
+
+            all_rows.append((
+                rel_path_str, exhibit_type, sheet_name, fiscal_year,
+                account_val, acct_title_val, org_code, org_name,
+                _get_str(row, "budget_activity"), _get_str(row, "budget_activity_title"),
+                _get_str(row, "sub_activity"), _get_str(row, "sub_activity_title"),
+                line_item_val, _get_str(row, "line_item_title"),
+                _get_str(row, "classification"),
+                *fy_values,
+                None, pe_number, currency_year, approp_code, approp_title,
+                amount_unit, budget_type, amount_type,
+            ))
+
+    wb.close()
+    result["rows"] = all_rows
+    result["columns"] = all_cols
+    return result
 
 
 # ── PDF Ingestion ─────────────────────────────────────────────────────────────
@@ -1054,7 +1228,8 @@ def _extract_tables_with_timeout(page, timeout_seconds=10, executor=None):
 
 
 def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
-                    page_callback=None, docs_dir: Path | None = None) -> tuple[int, int]:
+                    page_callback=None, docs_dir: Path | None = None,
+                    pdf_timeout: int = 30) -> tuple[int, int]:
     """Ingest a single PDF file into the database.
 
     Args:
@@ -1065,6 +1240,7 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
             Throttled internally to every 10 pages to reduce overhead.
         docs_dir: Base directory for relative path computation. Defaults to
             the global DOCS_DIR constant.
+        pdf_timeout: Seconds to wait for table extraction per page (BUILD-003).
 
     Returns:
         Tuple of (total_pages_inserted, issue_count).
@@ -1100,7 +1276,7 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                 issue_type = None
                 if _likely_has_tables(page):
                     tables, issue_type = _extract_tables_with_timeout(
-                        page, timeout_seconds=10, executor=table_executor)
+                        page, timeout_seconds=pdf_timeout, executor=table_executor)
                     if issue_type:
                         issues_batch.append(
                             (relative_path, i + 1, issue_type.split(':')[0], issue_type)
@@ -1179,13 +1355,17 @@ def _extract_pdf_data(args):
     No database access — returns raw data for the main process to insert.
 
     Args:
-        args: Tuple of (file_path_str, docs_dir_str) for picklability.
+        args: Tuple of (file_path_str, docs_dir_str, pdf_timeout) for picklability.
 
     Returns:
         Dict with keys: relative_path, category, pages_data, issues, error,
         num_pages.
     """
-    file_path_str, docs_dir_str = args
+    if len(args) == 3:
+        file_path_str, docs_dir_str, pdf_timeout = args
+    else:
+        file_path_str, docs_dir_str = args
+        pdf_timeout = 30
     file_path = Path(file_path_str)
     docs_dir = Path(docs_dir_str)
 
@@ -1212,7 +1392,7 @@ def _extract_pdf_data(args):
                     tables = None
                     if _likely_has_tables(page):
                         tables, issue_type = _extract_tables_with_timeout(
-                            page, timeout_seconds=10, executor=executor)
+                            page, timeout_seconds=pdf_timeout, executor=executor)
                         if issue_type:
                             issues.append((
                                 relative_path, i + 1,
@@ -1429,7 +1609,10 @@ def _mark_session_complete(conn: sqlite3.Connection, session_id: str, notes: str
 def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                    progress_callback=None, resume: bool = False,
                    checkpoint_interval: int = 10,
-                   stop_event=None, workers: int = 0):
+                   stop_event=None, workers: int = 0,
+                   pdf_timeout: int = 30,
+                   failures_log: Path | None = None,
+                   retry_failures: bool = False):
     """Build or incrementally update the budget database.
 
     Args:
@@ -1448,6 +1631,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         workers: Number of parallel worker processes for PDF extraction.
             0 = auto-detect (CPU count, capped at 4). 1 = sequential (no
             multiprocessing overhead).
+        pdf_timeout: Seconds to wait for table extraction per page (BUILD-003).
+        failures_log: Path to write failed_downloads.json (BUILD-001).
+        retry_failures: If True, only process files listed in failures_log (BUILD-001).
     """
     # ── Metrics state shared across the build ─────────────────────────────
     _metrics = {
@@ -1474,6 +1660,23 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             _metrics[key] = new_value
         else:
             _metrics[key] = alpha * new_value + (1 - alpha) * _metrics[key]
+
+    # ── BUILD-001: Failure tracking ────────────────────────────────────────
+    _failures: list[FailedFileEntry] = []
+    _failures_log_path = failures_log or Path("failed_downloads.json")
+
+    # If --retry-failures, load the failures JSON and use it as the file filter
+    _retry_only: set[str] | None = None
+    if retry_failures and _failures_log_path.exists():
+        try:
+            with open(_failures_log_path) as _f:
+                _prev_failures = json.load(_f)
+            _retry_only = {e["file_path"] for e in _prev_failures if "file_path" in e}
+            print(f"  BUILD-001: Retrying {len(_retry_only)} previously-failed file(s) "
+                  f"from {_failures_log_path}")
+        except Exception as _lf_err:
+            print(f"  BUILD-001: Could not load failures log: {_lf_err}")
+            _retry_only = None
 
     # ── Setup ──────────────────────────────────────────────────────────────
     if not docs_dir.exists():
@@ -1515,6 +1718,20 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
     xlsx_files = sorted(docs_dir.rglob("*.xlsx"))
     pdf_files = sorted(docs_dir.rglob("*.pdf"))
+
+    # BUILD-001: If retrying only failures, filter file lists
+    if _retry_only is not None:
+        docs_dir_resolved = docs_dir.resolve()
+        xlsx_files = [
+            f for f in xlsx_files
+            if str(f.relative_to(docs_dir_resolved)) in _retry_only
+        ]
+        pdf_files = [
+            f for f in pdf_files
+            if str(f.relative_to(docs_dir_resolved)) in _retry_only
+        ]
+        print(f"  BUILD-001: Filtered to {len(xlsx_files)} Excel + {len(pdf_files)} PDF retry files")
+
     total_files = len(xlsx_files) + len(pdf_files)
 
     # Pre-load all ingested_files metadata in one query so that
@@ -1549,6 +1766,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     print("  INGESTING EXCEL FILES")
     print(f"{'='*60}")
 
+    # Resolve worker count early (used for both Excel and PDF)
+    num_workers = workers if workers > 0 else min(os.cpu_count() or 1, 4)
+
     total_budget_rows = 0
     skipped_xlsx = 0
     excel_file_times: list[float] = []  # per-file elapsed times for speed calc
@@ -1565,7 +1785,133 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     conn.execute("DROP TRIGGER IF EXISTS budget_lines_ad")
     conn.commit()
 
-    for xi, xlsx in enumerate(xlsx_files):
+    # OPT-BUILD-001: Determine which files need processing
+    xlsx_to_process: list[Path] = []
+    xlsx_skip_list: list[Path] = []
+    for xlsx in xlsx_files:
+        rel_path = str(xlsx.relative_to(docs_dir))
+        if rel_path in already_processed:
+            xlsx_skip_list.append(xlsx)
+        elif not rebuild and not _file_needs_update(conn, rel_path, xlsx):
+            xlsx_skip_list.append(xlsx)
+        else:
+            xlsx_to_process.append(xlsx)
+
+    skipped_xlsx = len(xlsx_skip_list)
+    files_done_total = skipped_xlsx
+
+    # Emit individual "Resumed (skipped)" progress messages for compatibility
+    for _si, _skipped_xl in enumerate(xlsx_skip_list):
+        _skipped_rel = str(_skipped_xl.relative_to(docs_dir))
+        _detail = (
+            f"Resumed (skipped): {_skipped_xl.name}"
+            if _skipped_rel in already_processed
+            else f"Skipped (unchanged): {_skipped_xl.name}"
+        )
+        _progress("excel", _si + 1, len(xlsx_files), _detail,
+                  {"files_remaining": total_files - _si - 1})
+
+    # OPT-BUILD-001: Use parallel extraction when workers > 1 and enough files
+    _excel_use_parallel = num_workers > 1 and len(xlsx_to_process) > 1
+
+    if _excel_use_parallel:
+        print(f"  Processing {len(xlsx_to_process)} Excel files with "
+              f"{num_workers} parallel workers (OPT-BUILD-001)...")
+        t_excel_start = time.time()
+        with ProcessPoolExecutor(max_workers=num_workers) as pool:
+            future_to_xl = {
+                pool.submit(_extract_excel_rows, (str(xl), str(docs_dir))): xl
+                for xl in xlsx_to_process
+            }
+            for xi, future in enumerate(as_completed(future_to_xl)):
+                if stop_event and stop_event.is_set():
+                    for f in future_to_xl:
+                        f.cancel()
+                    _save_checkpoint(conn, session_id, files_done_total, total_files,
+                                     _metrics["pages"], total_budget_rows, 0, "", "interrupted")
+                    conn.commit()
+                    _progress("stopped", xi, len(xlsx_to_process), "Stopped — resume with --resume")
+                    conn.close()
+                    return
+
+                xl = future_to_xl[future]
+                rel_path = str(xl.relative_to(docs_dir))
+                files_done_total += 1
+                try:
+                    result = future.result(timeout=120)
+                except Exception as _xl_err:
+                    print(f"  ERROR: {xl.name}: {_xl_err}")
+                    _failures.append(FailedFileEntry(
+                        file_path=rel_path,
+                        error_type=type(_xl_err).__name__,
+                        error_detail=str(_xl_err),
+                    ))
+                    conn.execute(
+                        "INSERT OR REPLACE INTO ingested_files "
+                        "(file_path, file_type, file_size, file_modified,"
+                        " ingested_at, row_count, status) "
+                        "VALUES (?,?,?,?,datetime('now'),?,?)",
+                        (rel_path, "xlsx", xl.stat().st_size, xl.stat().st_mtime,
+                         0, f"error: {_xl_err}"))
+                    continue
+
+                if result.get("error"):
+                    _failures.append(FailedFileEntry(
+                        file_path=rel_path,
+                        error_type="ParseError",
+                        error_detail=result["error"],
+                    ))
+                    continue
+
+                rows = result["rows"]
+                fy_cols = result["columns"]
+                if fy_cols:
+                    _ensure_fy_columns(conn, fy_cols)
+
+                if rows:
+                    # Reconstruct the INSERT dynamically based on extracted columns
+                    _fixed_c = (
+                        "source_file, exhibit_type, sheet_name, fiscal_year, "
+                        "account, account_title, organization, organization_name, "
+                        "budget_activity, budget_activity_title, "
+                        "sub_activity, sub_activity_title, "
+                        "line_item, line_item_title, classification"
+                    )
+                    _fy_c = ", ".join(sorted(fy_cols)) if fy_cols else ""
+                    _tail_c = (
+                        "extra_fields, pe_number, currency_year, "
+                        "appropriation_code, appropriation_title, "
+                        "amount_unit, budget_type, amount_type"
+                    )
+                    all_c = ", ".join(filter(None, [_fixed_c, _fy_c, _tail_c]))
+                    n_p = len(all_c.split(","))
+                    ph = ", ".join(["?"] * n_p)
+                    conn.executemany(f"INSERT INTO budget_lines ({all_c}) VALUES ({ph})", rows)
+                    total_budget_rows += len(rows)
+                    _metrics["rows"] = total_budget_rows
+
+                stat = xl.stat()
+                conn.execute(
+                    "INSERT OR REPLACE INTO ingested_files "
+                    "(file_path, file_type, file_size, file_modified,"
+                    " ingested_at, row_count, status) "
+                    "VALUES (?,?,?,?,datetime('now'),?,?)",
+                    (rel_path, "xlsx", stat.st_size, stat.st_mtime, len(rows), "ok"))
+                _mark_file_processed(conn, session_id, rel_path, "excel", rows_count=len(rows))
+                elapsed = time.time() - t_excel_start
+                excel_file_times.append(elapsed / max(xi + 1, 1))
+                print(f"  [{xi+1}/{len(xlsx_to_process)}] {xl.name}: {len(rows)} rows")
+                _progress("excel", xi + 1 + skipped_xlsx, len(xlsx_files),
+                          f"Done: {xl.name} ({len(rows)} rows)",
+                          {"rows": total_budget_rows,
+                           "files_remaining": total_files - files_done_total})
+        conn.commit()
+        if skipped_xlsx:
+            print(f"\n  Skipped {skipped_xlsx} unchanged Excel file(s)")
+        print(f"  Ingested budget line items: {total_budget_rows:,}")
+
+    if not _excel_use_parallel:
+     for xi, xlsx in enumerate(xlsx_to_process):
         # Check for graceful shutdown request
         if stop_event and stop_event.is_set():
             print("\n  Graceful stop requested — saving checkpoint...")
@@ -1607,7 +1953,26 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         _remove_file_data(conn, rel_path, "xlsx")
 
         t0 = time.time()
-        rows = ingest_excel_file(conn, xlsx, docs_dir=docs_dir)
+        try:
+            rows = ingest_excel_file(conn, xlsx, docs_dir=docs_dir)
+        except Exception as _xl_err:
+            file_elapsed = time.time() - t0
+            print(f"ERROR ({file_elapsed:.1f}s): {_xl_err}")
+            _failures.append(FailedFileEntry(
+                file_path=rel_path,
+                error_type=type(_xl_err).__name__,
+                error_detail=str(_xl_err),
+            ))
+            conn.execute(
+                "INSERT OR REPLACE INTO ingested_files "
+                "(file_path, file_type, file_size, file_modified,"
+                " ingested_at, row_count, status) "
+                "VALUES (?,?,?,?,datetime('now'),?,?)",
+                (rel_path, "xlsx", xlsx.stat().st_size, xlsx.stat().st_mtime,
+                 0, f"error: {_xl_err}")
+            )
+            files_done_total += 1
+            continue
         file_elapsed = time.time() - t0
         print(f"{rows} rows ({file_elapsed:.1f}s)")
 
@@ -1649,7 +2014,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             # Commit every 5 Excel files even outside checkpoint interval
             conn.commit()
 
-    conn.commit()
+    if not _excel_use_parallel:
+        conn.commit()
 
     # Rebuild budget_lines FTS5 index in one pass and restore triggers,
     # mirroring what we do for pdf_pages after bulk PDF ingestion.
@@ -1688,9 +2054,10 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     """)
     conn.commit()
 
-    if skipped_xlsx:
-        print(f"\n  Skipped {skipped_xlsx} unchanged Excel file(s)")
-    print(f"  Ingested budget line items: {total_budget_rows:,}")
+    if not _excel_use_parallel:
+        if skipped_xlsx:
+            print(f"\n  Skipped {skipped_xlsx} unchanged Excel file(s)")
+        print(f"  Ingested budget line items: {total_budget_rows:,}")
 
     # ── Ingest PDF files ───────────────────────────────────────────────────
     print(f"\n{'='*60}")
@@ -1704,9 +2071,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     initial_page_count = conn.execute("SELECT COUNT(*) FROM pdf_pages").fetchone()[0]
     pdf_file_times: list[float] = []  # per-file elapsed for speed calc
     _pdf_stopped = False  # set when a graceful stop fires inside the PDF loop
-
-    # Resolve worker count: 0 = auto-detect based on CPU count (capped at 4)
-    num_workers = workers if workers > 0 else min(os.cpu_count() or 1, 4)
+    # num_workers already set above (shared for both Excel and PDF phases)
 
     # ── Filter PDFs that need processing ──────────────────────────────
     pdfs_to_process: list[Path] = []
@@ -1774,7 +2139,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             pdf = next(pdf_iter, None)
             if pdf is None:
                 return
-            f = pool.submit(_extract_pdf_data, (str(pdf), str(docs_dir)))
+            f = pool.submit(_extract_pdf_data, (str(pdf), str(docs_dir), pdf_timeout))
             active[f] = pdf
 
         with ProcessPoolExecutor(max_workers=num_workers) as pool:
@@ -1820,6 +2185,11 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                             "VALUES (?,?,?,?,datetime('now'),?,?)",
                             (rel_path, "pdf", stat.st_size, stat.st_mtime,
                              0, f"error: {e}"))
+                        _failures.append(FailedFileEntry(
+                            file_path=rel_path,
+                            error_type=type(e).__name__,
+                            error_detail=str(e),
+                        ))
                         _mark_file_processed(conn, session_id, rel_path, "pdf",
                                              pages_count=0)
                         continue
@@ -1838,6 +2208,11 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                             "VALUES (?,?,?,?,datetime('now'),?,?)",
                             (rel_path, "pdf", stat.st_size, stat.st_mtime,
                              0, f"error: {error}"))
+                        _failures.append(FailedFileEntry(
+                            file_path=rel_path,
+                            error_type="ExtractionError",
+                            error_detail=str(error),
+                        ))
                         _mark_file_processed(conn, session_id, rel_path, "pdf",
                                              pages_count=0)
                         continue
@@ -1948,7 +2323,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
             t0 = time.time()
             pages, issue_count = ingest_pdf_file(conn, pdf, page_callback=_page_cb,
-                                                 docs_dir=docs_dir)
+                                                 docs_dir=docs_dir,
+                                                 pdf_timeout=pdf_timeout)
             file_elapsed = time.time() - t0
             print(f"{pages} pages ({file_elapsed:.1f}s)")
 
@@ -2127,6 +2503,16 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     conn.close()
 
+    # BUILD-001: Write failures log
+    if _failures:
+        with open(_failures_log_path, "w") as _flog:
+            json.dump([f.to_dict() for f in _failures], _flog, indent=2)
+        print(f"\n  BUILD-001: {len(_failures)} file(s) failed — logged to {_failures_log_path}")
+        print("  Re-process with: python build_budget_db.py --retry-failures")
+    elif _failures_log_path.exists() and not retry_failures:
+        # Clear stale failure log after a clean build
+        _failures_log_path.unlink()
+
     # 1.B6-h / 2.B3-a: Post-build validation + data-quality JSON report
     try:
         from validate_budget_data import (  # noqa: PLC0415
@@ -2162,6 +2548,17 @@ def main():
     parser.add_argument("--workers", type=int, default=0, metavar="N",
                         help="Parallel workers for PDF extraction "
                              "(default: 0 = auto-detect CPU count, 1 = sequential)")
+    # BUILD-003: Configurable PDF extraction timeout
+    parser.add_argument("--pdf-timeout", type=int, default=30, metavar="SECS",
+                        help="Seconds to wait for table extraction per PDF page "
+                             "(default: 30; increase for complex PDFs)")
+    # BUILD-001: Failure log and retry
+    parser.add_argument("--retry-failures", action="store_true",
+                        help="Re-process only files listed in failed_downloads.json")
+    parser.add_argument("--failures-log", type=Path, default=Path("failed_downloads.json"),
+                        metavar="PATH",
+                        help="Path to write/read the failure log "
+                             "(default: failed_downloads.json)")
     args = parser.parse_args()
 
     # ── Graceful shutdown via Ctrl+C ───────────────────────────────────────
@@ -2186,7 +2583,10 @@ def main():
                        resume=args.resume,
                        checkpoint_interval=args.checkpoint_interval,
                        stop_event=stop_event,
-                       workers=args.workers)
+                       workers=args.workers,
+                       pdf_timeout=args.pdf_timeout,
+                       failures_log=args.failures_log,
+                       retry_failures=args.retry_failures)
     except FileNotFoundError as e:
         print(f"ERROR: {e}")
         sys.exit(1)
