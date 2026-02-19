@@ -24,7 +24,7 @@ without user intervention (except `OH MY` group items).
 | Group | Count | Est. Total Tokens | Autonomous |
 |-------|-------|-------------------|------------|
 | LION | 0 remaining (27/27 ✅ DONE) | ~32,300 | Yes |
-| TIGER | 35 | ~56,300 | Yes |
+| TIGER | 0 remaining (35/35 ✅ DONE) | ~56,300 | Yes |
 | BEAR | 25 | ~39,500 | Yes |
 | OH MY | 12 | ~18,500 | No |
 | **Total** | **94** | **~146,600** | |
