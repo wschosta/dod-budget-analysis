@@ -6,29 +6,6 @@
 #   docker-compose up              # Start API server
 #   docker-compose up --build      # Rebuild image first
 #   docker-compose down            # Stop and remove containers
-#
-# ──────────────────────────────────────────────────────────────────────────────
-# Docker Compose TODOs
-# ──────────────────────────────────────────────────────────────────────────────
-#
-# TODO DOCKER-003 [Group: BEAR] [Complexity: LOW] [Tokens: ~1000] [User: NO]
-#     Add templates/ and static/ volume mounts for frontend hot-reload.
-#     Currently only api/ and utils/ are mounted for hot-reload. Frontend
-#     template and CSS/JS changes require a container rebuild. Steps:
-#       1. Add: - ./templates:/app/templates:ro
-#       2. Add: - ./static:/app/static:ro
-#       3. Add --reload-dir /app/templates --reload-dir /app/static to command
-#     Acceptance: Template/CSS/JS changes reload without docker rebuild.
-#
-# TODO DOCKER-004 [Group: BEAR] [Complexity: LOW] [Tokens: ~1000] [User: NO]
-#     Remove deprecated "version" key.
-#     Docker Compose v2+ no longer requires the version field and it generates
-#     deprecation warnings. Steps:
-#       1. Remove the `version: "3.9"` line
-#       2. Test: docker-compose up --build
-#     Acceptance: No deprecation warnings on docker-compose up.
-
-version: "3.9"
 
 services:
   web:
@@ -43,6 +20,9 @@ services:
       # Hot-reload for API source in development
       - ./api:/app/api:ro
       - ./utils:/app/utils:ro
+      # Hot-reload for frontend templates and static assets (DOCKER-003)
+      - ./templates:/app/templates:ro
+      - ./static:/app/static:ro
     environment:
       APP_DB_PATH: /app/dod_budget.sqlite
     command: >
@@ -52,6 +32,8 @@ services:
         --reload
         --reload-dir /app/api
         --reload-dir /app/utils
+        --reload-dir /app/templates
+        --reload-dir /app/static
     healthcheck:
       test:
         - "CMD"
