@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}Page Not Found — DoD Budget Explorer{% endblock %}
+
+{% block content %}
+<div class="error-page">
+  <div class="error-code">404</div>
+  <h1>Page not found</h1>
+  <p>The page you requested could not be found. It may have been moved or removed.</p>
+  <div class="error-actions">
+    <a href="/" class="btn btn-primary">Search Budget Data</a>
+    <a href="/charts" class="btn btn-secondary">View Charts</a>
+  </div>
+</div>
+{% endblock %}

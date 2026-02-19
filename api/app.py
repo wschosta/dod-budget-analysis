@@ -531,6 +531,9 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         frontend_routes.set_templates(templates)
         app.include_router(frontend_routes.router)
 
+        # LION-001: Register custom HTML error pages for 404/500
+        frontend_routes.register_error_handlers(app)
+
     return app
 
 

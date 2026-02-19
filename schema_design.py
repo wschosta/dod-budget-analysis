@@ -89,7 +89,7 @@ Remaining TODOs for this file
 
 """
 
-# TODO [Group: LION] LION-005: Add script to auto-generate data dictionary from schema (~3,000 tokens)
+# DONE [Group: LION] LION-005: Add script to auto-generate data dictionary from schema (~3,000 tokens)
 
 import sqlite3
 from pathlib import Path
