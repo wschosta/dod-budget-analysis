@@ -23,7 +23,7 @@ without user intervention (except `OH MY` group items).
 
 | Group | Previously Done | New Tasks | Est. New Tokens | Autonomous |
 |-------|----------------|-----------|-----------------|------------|
-| LION | 27/27 ✅ | 10 new | ~17,000 | Yes |
+| LION | 37/37 ✅ | 0 remaining | ~17,000 | Yes — ALL DONE |
 | TIGER | 35/35 ✅ | 11 new | ~20,500 | Yes |
 | BEAR | 25/25 ✅ | 12 new | ~26,000 | Yes |
 | OH MY | — | 12 (unchanged) | ~18,500 | **No — needs human** |
@@ -242,20 +242,20 @@ without user intervention (except `OH MY` group items).
 
 ---
 
-## NEW LION Tasks — Frontend Polish, Documentation & UX
+## NEW LION Tasks — Frontend Polish, Documentation & UX (ALL DONE ✅)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| LION-001 | 3.A3-g | `templates/errors/`, `api/routes/frontend.py` | LOW | ~1,500 | Add error page templates (404, 500) |
-| LION-002 | 4.B2-b | `templates/partials/feedback.html`, `templates/base.html`, `static/js/app.js` | MEDIUM | ~2,500 | Add feedback form UI stub (modal in footer) |
-| LION-003 | 3.A3-h | `templates/partials/results.html`, `static/css/main.css` | LOW | ~1,000 | Add loading skeleton for HTMX requests |
-| LION-004 | 3.A3-i | `templates/partials/results.html`, `static/css/main.css` | LOW | ~800 | Add "No results" empty state with clear-filters |
-| LION-005 | 3.C2-b | `scripts/generate_data_dictionary.py`, `docs/data_dictionary.md` | MEDIUM | ~3,000 | Auto-generate data dictionary from schema |
-| LION-006 | 3.B1-d | `templates/charts.html`, `static/js/app.js` | LOW | ~1,500 | Add chart export (PNG download) |
-| LION-007 | 3.A3-j | `templates/index.html`, `static/js/app.js` | LOW | ~1,200 | Add URL sharing for filtered views |
-| LION-008 | 3.A4-e | `templates/partials/results.html`, `static/css/main.css` | LOW | ~1,000 | Add print-friendly results view |
-| LION-009 | 3.B4-b | `templates/charts.html`, `static/js/app.js` | MEDIUM | ~2,000 | Enhance chart interactivity — click-to-filter |
-| LION-010 | 3.A7-k | `templates/base.html`, `static/css/main.css`, `static/js/app.js` | MEDIUM | ~2,500 | Add dark mode toggle |
+| LION-001 | 3.A3-g | `templates/errors/`, `api/routes/frontend.py` | LOW | ~1,500 | ~~Add error page templates (404, 500)~~ ✅ DONE |
+| LION-002 | 4.B2-b | `templates/partials/feedback.html`, `templates/base.html`, `static/js/app.js` | MEDIUM | ~2,500 | ~~Add feedback form UI stub (modal in footer)~~ ✅ DONE |
+| LION-003 | 3.A3-h | `templates/partials/results.html`, `static/css/main.css` | LOW | ~1,000 | ~~Add loading skeleton for HTMX requests~~ ✅ DONE |
+| LION-004 | 3.A3-i | `templates/partials/results.html`, `static/css/main.css` | LOW | ~800 | ~~Add "No results" empty state with clear-filters~~ ✅ DONE |
+| LION-005 | 3.C2-b | `scripts/generate_data_dictionary.py`, `docs/data_dictionary.md` | MEDIUM | ~3,000 | ~~Auto-generate data dictionary from schema~~ ✅ DONE |
+| LION-006 | 3.B1-d | `templates/charts.html`, `static/js/app.js` | LOW | ~1,500 | ~~Add chart export (PNG download)~~ ✅ DONE |
+| LION-007 | 3.A3-j | `templates/index.html`, `static/js/app.js` | LOW | ~1,200 | ~~Add URL sharing for filtered views~~ ✅ DONE |
+| LION-008 | 3.A4-e | `templates/partials/results.html`, `static/css/main.css` | LOW | ~1,000 | ~~Add print-friendly results view~~ ✅ DONE |
+| LION-009 | 3.B4-b | `templates/charts.html`, `static/js/app.js` | MEDIUM | ~2,000 | ~~Enhance chart interactivity — click-to-filter~~ ✅ DONE |
+| LION-010 | 3.A7-k | `templates/base.html`, `static/css/main.css`, `static/js/app.js` | MEDIUM | ~2,500 | ~~Add dark mode toggle~~ ✅ DONE |
 
 ---
 

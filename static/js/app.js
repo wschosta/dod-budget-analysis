@@ -7,9 +7,43 @@
  *          download modal result count (JS-002), Excel export (JS-001).
  */
 
-// TODO [Group: LION] LION-007: Add URL sharing — sync filter state to URL query params (~1,200 tokens)
+// DONE [Group: LION] LION-007: Add URL sharing — sync filter state to URL query params (~1,200 tokens)
 
 "use strict";
+
+// ── LION-010: Dark mode toggle ──────────────────────────────────────────────
+
+var THEME_KEY = "dod_theme";
+
+function toggleTheme() {
+  var html = document.documentElement;
+  var current = html.getAttribute("data-theme");
+  var next;
+  if (current === "dark") {
+    next = "light";
+  } else if (current === "light") {
+    next = "dark";
+  } else {
+    // No explicit theme set — check system preference
+    next = window.matchMedia("(prefers-color-scheme: dark)").matches ? "light" : "dark";
+  }
+  html.setAttribute("data-theme", next);
+  localStorage.setItem(THEME_KEY, next);
+  updateChartTheme();
+}
+
+function updateChartTheme() {
+  // Update Chart.js defaults color for theme
+  if (typeof Chart !== "undefined") {
+    var isDark = document.documentElement.getAttribute("data-theme") === "dark" ||
+      (!document.documentElement.getAttribute("data-theme") &&
+       window.matchMedia("(prefers-color-scheme: dark)").matches);
+    var textColor = isDark ? "#c4c4d4" : "#374151";
+    var gridColor = isDark ? "rgba(255,255,255,.1)" : "rgba(0,0,0,.1)";
+    Chart.defaults.color = textColor;
+    Chart.defaults.borderColor = gridColor;
+  }
+}
 
 // ── Column toggle (3.A4-b) ────────────────────────────────────────────────────
 // Persist to localStorage so preference survives page reloads.
@@ -185,6 +219,92 @@ function openDownloadModal() {
   }
 }
 
+// ── LION-002: Feedback modal ─────────────────────────────────────────────────
+
+function openFeedbackModal() {
+  var modal = document.getElementById("feedback-modal");
+  if (modal) {
+    modal.classList.add("open");
+    // Auto-fill page URL
+    var urlInput = document.getElementById("feedback-page-url");
+    if (urlInput) urlInput.value = window.location.href;
+    // Focus the type select
+    var typeSelect = document.getElementById("feedback-type");
+    if (typeSelect) typeSelect.focus();
+  }
+}
+
+function closeFeedbackModal() {
+  var modal = document.getElementById("feedback-modal");
+  if (modal) modal.classList.remove("open");
+}
+
+// Handle feedback form submission (POST to /api/v1/feedback — returns 501 until backend implements)
+(function() {
+  document.addEventListener("submit", function(e) {
+    if (e.target && e.target.id === "feedback-form") {
+      e.preventDefault();
+      var form = e.target;
+      var data = new FormData(form);
+      var payload = {};
+      data.forEach(function(v, k) { payload[k] = v; });
+      fetch("/api/v1/feedback", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      }).then(function(resp) {
+        if (resp.ok) {
+          closeFeedbackModal();
+          form.reset();
+        }
+      }).catch(function() {
+        // Silently handle — endpoint may not exist yet
+      });
+      closeFeedbackModal();
+      form.reset();
+    }
+  });
+})();
+
+// ── LION-006: Chart export (PNG download) ───────────────────────────────────
+
+function downloadChartAsPNG(canvasId, filename) {
+  var canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  var url = canvas.toDataURL("image/png");
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = filename || (canvasId + ".png");
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
+// ── LION-007: Copy shareable URL with current filters ───────────────────────
+
+function copyShareURL() {
+  var url = window.location.href;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url);
+  } else {
+    // Fallback for older browsers
+    var ta = document.createElement("textarea");
+    ta.value = url;
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+  }
+  // Show "Copied!" tooltip
+  var btn = document.getElementById("share-btn");
+  if (btn) {
+    btn.classList.add("copied");
+    setTimeout(function() { btn.classList.remove("copied"); }, 1500);
+  }
+}
+
 // ── FE-010: Page-size selector ────────────────────────────────────────────────
 
 function setPageSize(size) {
@@ -250,6 +370,12 @@ document.addEventListener("keydown", function (e) {
     if (modal && modal.classList.contains("open")) {
       modal.classList.remove("open");
     }
+
+    // LION-002: Close feedback modal with Escape
+    const fbModal = document.getElementById("feedback-modal");
+    if (fbModal && fbModal.classList.contains("open")) {
+      fbModal.classList.remove("open");
+    }
   }
 });
 
@@ -288,6 +414,9 @@ document.addEventListener("htmx:afterSwap", function (evt) {
 // ── Initialise ─────────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", function () {
+  // LION-010: Apply chart theme on init
+  updateChartTheme();
+
   restoreFiltersFromURL();
   applyHiddenCols(getHiddenCols());
   updateDownloadLinks();

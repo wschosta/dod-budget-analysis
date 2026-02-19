@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block title %}Something Went Wrong — DoD Budget Explorer{% endblock %}
+
+{% block content %}
+<div class="error-page">
+  <div class="error-code">500</div>
+  <h1>Something went wrong</h1>
+  <p>An unexpected error occurred while processing your request. Please try again in a moment.</p>
+  <div class="error-actions">
+    <a href="/" class="btn btn-primary">Return to Search</a>
+    <button class="btn btn-secondary" onclick="location.reload()">Retry</button>
+  </div>
+</div>
+{% endblock %}

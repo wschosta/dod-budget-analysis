@@ -23,7 +23,7 @@
     </select>
   </label>
 
-  <!-- TODO [Group: LION] LION-006: Add chart export button for PNG download (~1,500 tokens) -->
+  <!-- DONE [Group: LION] LION-006: Chart export buttons added per card below -->
 
   {# VIZ-004: Print button #}
   <button class="btn btn-secondary btn-sm print-btn" onclick="window.print()" style="margin-left:auto">
@@ -44,6 +44,7 @@
     <h3>FY Request by Service ($M)</h3>
     <div id="err-service" style="display:none" class="empty-state" role="alert"></div>
     <canvas id="chart-service" height="200"></canvas>
+    <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-service','service-chart.png')">Download as PNG</button>
   </div>
 
   {# 3.B1-a: Year-over-year trend #}
@@ -51,6 +52,7 @@
     <h3>Year-over-Year Totals by Exhibit Type</h3>
     <div id="err-yoy" style="display:none" class="empty-state" role="alert"></div>
     <canvas id="chart-yoy" height="200"></canvas>
+    <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-yoy','yoy-chart.png')">Download as PNG</button>
   </div>
 
   {# 3.B3-a: Top-N budget items #}
@@ -58,6 +60,7 @@
     <h3>Top 10 Budget Line Items — FY Request ($M)</h3>
     <div id="err-topn" style="display:none" class="empty-state" role="alert"></div>
     <canvas id="chart-topn" height="120"></canvas>
+    <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-topn','top10-chart.png')">Download as PNG</button>
   </div>
 
   {# VIZ-005: Budget comparison chart #}
@@ -79,6 +82,7 @@
     </div>
     <div id="err-compare" style="display:none" class="empty-state" role="alert"></div>
     <canvas id="chart-compare" height="120"></canvas>
+    <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-compare','comparison-chart.png')">Download as PNG</button>
   </div>
 
 </div>
@@ -86,7 +90,8 @@
 {% endblock %}
 
 {% block extra_scripts %}
-<!-- TODO [Group: LION] LION-009: Add chart click-to-filter interactivity (~2,000 tokens) -->
+<!-- DONE [Group: LION] LION-009: Chart click-to-filter interactivity -->
+<script src="/static/js/app.js"></script>
 <script>
 const API = '/api/v1';
 
@@ -216,6 +221,17 @@ async function loadServiceChart(fy) {
         scales: {
           x: { ticks: { callback: v => '$' + v.toLocaleString() + 'M' } },
         },
+        // LION-009: Click bar to filter by service
+        onHover: function(e, elements) {
+          e.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+        },
+        onClick: function(e, elements) {
+          if (elements.length) {
+            var idx = elements[0].index;
+            var service = svcLabels[idx];
+            window.location.href = '/?service=' + encodeURIComponent(service);
+          }
+        },
       },
     });
   } catch (err) {
@@ -255,6 +271,17 @@ async function loadYoYChart() {
       options: {
         plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
         scales: { x: { stacked: false }, y: { ticks: { callback: v => '$' + v.toLocaleString() + 'M' } } },
+        // LION-009: Click bar to filter by fiscal year
+        onHover: function(e, elements) {
+          e.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+        },
+        onClick: function(e, elements) {
+          if (elements.length) {
+            var idx = elements[0].index;
+            var fy = yoyLabels[idx];
+            window.location.href = '/?fiscal_year=' + encodeURIComponent(fy);
+          }
+        },
       },
     });
   } catch (err) {
@@ -291,6 +318,9 @@ async function loadTopNChart(fy) {
     });
     const topAmts = data.items.map(r => (r[amtCol] || 0) / 1000);
 
+    // LION-009: Store items for click handler
+    const topItems = data.items;
+
     if (chartTopN) chartTopN.destroy();
     chartTopN = new Chart(document.getElementById('chart-topn'), {
       type: 'bar',
@@ -308,6 +338,22 @@ async function loadTopNChart(fy) {
         plugins: { legend: { display: false } },
         scales: {
           x: { ticks: { callback: v => '$' + v.toLocaleString() + 'M' } },
+        },
+        // LION-009: Click bar to search for that program
+        onHover: function(e, elements) {
+          e.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+        },
+        onClick: function(e, elements) {
+          if (elements.length) {
+            var idx = elements[0].index;
+            var item = topItems[idx];
+            if (item.pe_number) {
+              window.location.href = '/?q=' + encodeURIComponent(item.pe_number);
+            } else {
+              var q = item.line_item_title || item.account_title || '';
+              window.location.href = '/?q=' + encodeURIComponent(q);
+            }
+          }
         },
       },
     });
