@@ -17,16 +17,11 @@ from api.routes.aggregations import aggregate, _ALLOWED_GROUPS
 
 @pytest.fixture(autouse=True)
 def _clear_column_cache():
-    """Clear the utils.database column cache between tests.
+    """No-op: column cache was removed in favor of direct PRAGMA table_info.
 
-    The cache keys on id(conn), which Python may recycle after close().
-    Without clearing, a later test can inherit stale column lists from
-    an earlier connection that had a different schema.
+    Kept as autouse fixture placeholder so test ordering stays consistent.
     """
-    from utils.database import _column_cache
-    _column_cache.clear()
     yield
-    _column_cache.clear()
 
 
 @pytest.fixture()
