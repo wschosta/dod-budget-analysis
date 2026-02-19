@@ -21,7 +21,26 @@ from api.routes.frontend import (
     _query_results,
     set_templates,
     _tmpl,
+    _services_cache,
+    _exhibit_types_cache,
+    _fiscal_years_cache,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_frontend_caches():
+    """Clear module-level TTL caches between tests.
+
+    The caches key on id(conn), which Python may reuse after close(),
+    causing a later test to hit stale cached results from a different schema.
+    """
+    _services_cache.clear()
+    _exhibit_types_cache.clear()
+    _fiscal_years_cache.clear()
+    yield
+    _services_cache.clear()
+    _exhibit_types_cache.clear()
+    _fiscal_years_cache.clear()
 
 
 @pytest.fixture()
