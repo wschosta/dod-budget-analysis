@@ -13,6 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+# TODO [Group: TIGER] TIGER-010: Add OpenAPI example responses to all endpoint models (~2,000 tokens)
 
 # ── Reference data models ─────────────────────────────────────────────────────
 

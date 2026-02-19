@@ -231,20 +231,29 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | **Containerization** | `Dockerfile*`, `docker-compose*.yml` | — | ✅ Complete — production, multistage, dev, staging configurations |
 | **Backup & monitoring** | `scripts/backup_db.py`, `api/app.py` | — | ✅ Complete — automated backups, /health/detailed, structured logging |
 
-### Remaining TODOs (12 items)
+### Remaining TODOs (45 new + 12 OH MY)
 
-All remaining items require external resources (network access, downloaded corpus, or cloud accounts):
+**New autonomous agent tasks (45 items):**
+
+| Group | Focus | Count | Est. Tokens | Instruction File |
+|-------|-------|-------|-------------|------------------|
+| **LION** | Frontend polish, UX, documentation | 10 | ~17,000 | `LION_INSTRUCTIONS.md` |
+| **TIGER** | Data quality validation, API enhancements | 11 | ~20,500 | `TIGER_INSTRUCTIONS.md` |
+| **BEAR** | Test suites, CI/CD, infrastructure | 12 | ~26,000 | `BEAR_INSTRUCTIONS.md` |
+
+**Items requiring external resources (12 items):**
 
 | Category | Count | Blocker |
 |----------|-------|---------|
-| Data Source Auditing (1.A) | 6 | Network access to DoD websites |
+| Data Source Auditing (1.A) | 5 | Network access to DoD websites |
 | Exhibit Inventory (1.B) | 1 | Downloaded document corpus |
+| Hosting & Deployment (4.A) | 3 | Cloud account + domain + secrets |
 | Accessibility Audit (3.A) | 1 | Running UI + Lighthouse/axe-core |
-| Hosting & Domain (4.A) | 2 | Cloud account + domain registration |
-| Launch & Feedback (4.B) | 2 | Deployed application + secrets |
-| **Total** | **12** | |
+| Launch & Feedback (4.B) | 2 | Deployed application + community |
+| **Total** | **12** | See `OH_MY_INSTRUCTIONS.md` |
 
-See [REMAINING_TODOS.md](REMAINING_TODOS.md) for detailed descriptions of each item.
+See [REMAINING_TODOS.md](REMAINING_TODOS.md) for detailed descriptions.
+Each LION/TIGER/BEAR instruction file is prompt-ready: open a new branch and run `execute the LION instructions`.
 
 ---
 

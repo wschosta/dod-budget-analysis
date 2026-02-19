@@ -21,13 +21,15 @@ without user intervention (except `OH MY` group items).
 
 ## Summary by Group
 
-| Group | Count | Est. Total Tokens | Autonomous |
-|-------|-------|-------------------|------------|
-| LION | 0 remaining (27/27 ✅ DONE) | ~32,300 | Yes |
-| TIGER | 0 remaining (35/35 ✅ DONE) | ~56,300 | Yes |
-| BEAR | 0 remaining (25/25 ✅ DONE) | ~39,500 | Yes |
-| OH MY | 12 | ~18,500 | No |
-| **Total** | **94 tracked (82 ✅ DONE, 12 remaining)** | **~146,600** | |
+| Group | Previously Done | New Tasks | Est. New Tokens | Autonomous |
+|-------|----------------|-----------|-----------------|------------|
+| LION | 27/27 ✅ | 10 new | ~17,000 | Yes |
+| TIGER | 35/35 ✅ | 11 new | ~20,500 | Yes |
+| BEAR | 25/25 ✅ | 12 new | ~26,000 | Yes |
+| OH MY | — | 12 (unchanged) | ~18,500 | **No — needs human** |
+| **Total** | **87 done** | **45 new** | **~82,000** | |
+
+**Instruction files:** See `LION_INSTRUCTIONS.md`, `TIGER_INSTRUCTIONS.md`, `BEAR_INSTRUCTIONS.md`, `OH_MY_INSTRUCTIONS.md` for prompt-ready agent instructions.
 
 ---
 
@@ -240,43 +242,106 @@ without user intervention (except `OH MY` group items).
 
 ---
 
+## NEW LION Tasks — Frontend Polish, Documentation & UX
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| LION-001 | 3.A3-g | `templates/errors/`, `api/routes/frontend.py` | LOW | ~1,500 | Add error page templates (404, 500) |
+| LION-002 | 4.B2-b | `templates/partials/feedback.html`, `templates/base.html`, `static/js/app.js` | MEDIUM | ~2,500 | Add feedback form UI stub (modal in footer) |
+| LION-003 | 3.A3-h | `templates/partials/results.html`, `static/css/main.css` | LOW | ~1,000 | Add loading skeleton for HTMX requests |
+| LION-004 | 3.A3-i | `templates/partials/results.html`, `static/css/main.css` | LOW | ~800 | Add "No results" empty state with clear-filters |
+| LION-005 | 3.C2-b | `scripts/generate_data_dictionary.py`, `docs/data_dictionary.md` | MEDIUM | ~3,000 | Auto-generate data dictionary from schema |
+| LION-006 | 3.B1-d | `templates/charts.html`, `static/js/app.js` | LOW | ~1,500 | Add chart export (PNG download) |
+| LION-007 | 3.A3-j | `templates/index.html`, `static/js/app.js` | LOW | ~1,200 | Add URL sharing for filtered views |
+| LION-008 | 3.A4-e | `templates/partials/results.html`, `static/css/main.css` | LOW | ~1,000 | Add print-friendly results view |
+| LION-009 | 3.B4-b | `templates/charts.html`, `static/js/app.js` | MEDIUM | ~2,000 | Enhance chart interactivity — click-to-filter |
+| LION-010 | 3.A7-k | `templates/base.html`, `static/css/main.css`, `static/js/app.js` | MEDIUM | ~2,500 | Add dark mode toggle |
+
+---
+
+## NEW TIGER Tasks — Data Quality, API & Backend
+
+### Data Quality Validation
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| TIGER-001 | 1.B6-i | `validate_budget_db.py`, `utils/validation.py` | MEDIUM | ~2,500 | Add cross-year budget consistency validation (flag >10x YoY changes) |
+| TIGER-002 | 1.B6-j | `validate_budget_db.py` | LOW | ~1,500 | Add appropriation title consistency validation |
+| TIGER-003 | 1.B6-k | `validate_budget_db.py` | MEDIUM | ~2,500 | Add line item rollup reconciliation |
+| TIGER-004 | 1.B6-l | `validate_budget_db.py` | LOW | ~1,500 | Add referential integrity validation (budget_lines → lookup tables) |
+| TIGER-005 | 1.B6-m | `validate_budget_db.py` | LOW | ~1,000 | Add FY column completeness check |
+| TIGER-006 | 1.B5-e | `validate_budget_db.py`, `scripts/pdf_quality_audit.py` | MEDIUM | ~2,000 | Integrate PDF quality metrics into validation report |
+| TIGER-007 | 1.B6-n | `validate_budget_db.py` | LOW | ~1,500 | Add validation result export improvements (HTML report, --threshold) |
+
+### API Enhancements
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| TIGER-008 | 4.B2-c | `api/routes/feedback.py`, `api/app.py`, `api/models.py` | LOW | ~1,500 | Add feedback API endpoint stub (logs to feedback.json) |
+| TIGER-009 | 4.C4-c | `api/app.py`, `api/routes/reference.py`, `api/routes/aggregations.py` | LOW | ~1,500 | Add API response caching headers (Cache-Control, ETag, 304) |
+| TIGER-010 | 3.C4-b | `api/models.py`, `api/routes/*.py` | LOW | ~2,000 | Add OpenAPI example responses to all endpoints |
+| TIGER-011 | 4.C4-d | `api/app.py`, `utils/database.py` | MEDIUM | ~2,000 | Add query performance logging (slow query tracking) |
+
+---
+
+## NEW BEAR Tasks — Testing, CI/CD & Infrastructure
+
+### New Test Suites
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| BEAR-001 | 1.C2-h | `tests/test_bear_dynamic_schema.py` | MEDIUM | ~2,500 | Add dynamic FY schema tests (ALTER TABLE, idempotency, FTS triggers) |
+| BEAR-002 | 1.C2-i | `tests/test_bear_historical_compat.py` | MEDIUM | ~2,500 | Add historical data compatibility tests (FY2017-2023) |
+| BEAR-003 | 1.C3-i | `tests/test_bear_validation_integration.py` | MEDIUM | ~3,000 | Add validation integration tests with 7+ intentional data errors |
+| BEAR-004 | 4.C4-e | `tests/test_bear_load.py` | MEDIUM | ~2,500 | Add load testing for 100K-row datasets |
+| BEAR-008 | 2.A5-d | `tests/test_bear_migration.py` | MEDIUM | ~2,500 | Add database migration framework tests |
+| BEAR-009 | 4.A2-b | `tests/test_bear_docker.py` | LOW | ~1,500 | Add Dockerfile/docker-compose lint-level validation tests |
+| BEAR-010 | 2.B4-b | `tests/test_bear_refresh_e2e.py` | MEDIUM | ~2,500 | Add data refresh end-to-end test (dry-run, rollback, webhook) |
+
+### CI/CD & Deployment Prep
+
+| ID | Roadmap | File(s) | Complexity | Tokens | Description |
+|----|---------|---------|------------|--------|-------------|
+| BEAR-005 | 4.B4-b | `scripts/smoke_test.py` | LOW | ~2,000 | Add smoke test script for deployment verification |
+| BEAR-006 | 4.A3-b | `.github/workflows/ci.yml`, `pyproject.toml` | LOW | ~1,000 | Add CI coverage threshold enforcement (80%) |
+| BEAR-007 | 4.A3-c | `.github/workflows/deploy.yml` | MEDIUM | ~2,000 | Add CD deploy workflow template (GHCR + platform placeholder) |
+| BEAR-011 | 4.C4-f | `.github/workflows/ci.yml`, `scripts/profile_queries.py` | MEDIUM | ~2,500 | Add performance profiling to CI |
+| BEAR-012 | — | `scripts/hooks/pre-commit-hook.py`, `CONTRIBUTING.md` | LOW | ~1,000 | Update pre-commit hook for new file location |
+
+---
+
 ## OH MY — Requires User Intervention / External Resources
 
 These TODOs **cannot be completed by an autonomous agent**. They require network
 access to DoD websites, cloud accounts, domain registration, a downloaded document
 corpus, or community review.
 
-### Data Source Auditing (dod_budget_downloader.py) — Requires Network
+### Data Source Auditing — Requires Network
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Blocker |
 |----|---------|---------|------------|--------|---------|
-| — | 1.A1-a | `dod_budget_downloader.py` | LOW | ~1500 | Needs network + live DoD sites |
-| — | 1.A1-b | `dod_budget_downloader.py` | MEDIUM | ~2500 | Needs web browsing of agency sites |
-| — | 1.A1-c | `dod_budget_downloader.py` | LOW | ~1000 | Needs network access |
-| — | 1.A2-a | `dod_budget_downloader.py` | LOW | ~1000 | Needs network access |
-| — | 1.A2-b | `dod_budget_downloader.py` | MEDIUM | ~2000 | Depends on 1.A2-a; needs network |
-| — | 1.A2-c | `dod_budget_downloader.py` | MEDIUM | ~2500 | Needs network access |
+| OH-MY-001 | 1.A1-a | `dod_budget_downloader.py` | LOW | ~1,500 | Needs network + live DoD sites |
+| OH-MY-002 | 1.A1-b | `dod_budget_downloader.py` | MEDIUM | ~2,500 | Needs web browsing of agency sites |
+| OH-MY-003 | 1.A1-c | `dod_budget_downloader.py` | LOW | ~1,000 | Needs network access |
+| OH-MY-004 | 1.A2-a | `dod_budget_downloader.py` | LOW | ~1,000 | Needs network access |
+| OH-MY-005 | 1.A2-b | `dod_budget_downloader.py` | MEDIUM | ~2,000 | Depends on OH-MY-004; needs network |
 
-### Exhibit Inventory (exhibit_catalog.py) — Requires Downloaded Corpus
-
-| ID | Roadmap | File(s) | Complexity | Tokens | Blocker |
-|----|---------|---------|------------|--------|---------|
-| — | 1.B1-a | `exhibit_catalog.py` | LOW | ~1500 | Needs downloaded document corpus |
-
-### Accessibility Audit (frontend_design.py) — Requires Running UI
+### Exhibit Inventory — Requires Downloaded Corpus
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Blocker |
 |----|---------|---------|------------|--------|---------|
-| — | 3.A7-b | `docs/design/frontend_design.py` | LOW | ~1000 | Needs Lighthouse/axe-core + running UI |
+| OH-MY-006 | 1.B1-a | `exhibit_catalog.py` | LOW | ~1,500 | Needs downloaded document corpus |
 
 ### Deployment & Launch — Requires Cloud/Domain/Community
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Blocker |
 |----|---------|---------|------------|--------|---------|
-| — | 4.A3-a | `docs/design/deployment_design.py` | MEDIUM | ~2000 | Needs cloud account |
-| — | 4.B2-a | `docs/design/deployment_design.py` | MEDIUM | ~2000 | Needs secrets; depends on 4.A3-a |
-| — | 4.C1-a | `docs/design/deployment_design.py` | LOW | ~1000 | Needs domain registration |
-| — | 4.C6-a | `docs/design/deployment_design.py` | LOW | ~1500 | Needs community review |
+| OH-MY-007 | 4.A1 | `docs/design/deployment_design.py` | MEDIUM | ~2,000 | **CRITICAL** — unblocks all deployment |
+| OH-MY-008 | 4.A3-a | `.github/workflows/deploy.yml` | MEDIUM | ~2,000 | Depends on OH-MY-007; needs secrets |
+| OH-MY-009 | 4.A4/4.C1-a | — | LOW | ~1,000 | Needs domain registration |
+| OH-MY-010 | 3.A7-b | `docs/design/frontend_design.py` | LOW | ~1,000 | Needs running UI + Lighthouse |
+| OH-MY-011 | 4.B1/4.B2-a | — | LOW | ~1,500 | Needs deployed app + secrets |
+| OH-MY-012 | 4.B3/4.B4/4.C6-a | — | LOW | ~1,500 | Needs community channels |
 
 ### Documentation Verification — Depends on 1.A1 Audit
 
@@ -290,18 +355,52 @@ corpus, or community review.
 ## Dependency Graph
 
 ```
+NEW LION (all independent — can run in parallel):
+  LION-001 through LION-010: No inter-dependencies
+  LION-002 ←→ TIGER-008: Feedback form (LION) needs feedback endpoint (TIGER)
+  LION-009 ←→ VIZ-005: Click-to-filter builds on existing chart interactivity
+
+NEW TIGER (mostly independent):
+  TIGER-001 through TIGER-007: Data quality tasks — independent of each other
+  TIGER-008: Feedback endpoint — pairs with LION-002
+  TIGER-009 through TIGER-011: API enhancements — independent of each other
+
+NEW BEAR (some sequential dependencies):
+  BEAR-001 through BEAR-004: Test suites — independent of each other
+  BEAR-005: Smoke test — independent
+  BEAR-006: Coverage threshold — independent
+  BEAR-007: Deploy workflow template — independent
+  BEAR-008: Migration tests — depends on schema_design.py (already complete)
+  BEAR-009: Docker lint tests — independent
+  BEAR-010: Refresh e2e test — depends on refresh_data.py (already complete)
+  BEAR-011: Performance profiling — independent
+  BEAR-012: Pre-commit hook update — independent
+
+Cross-group coordination:
+  LION-002 + TIGER-008: Feedback form (UI) + feedback endpoint (API)
+  BEAR-005 + BEAR-007: Smoke test used by deploy workflow
+
 OH MY Dependencies (sequential) — remaining items:
-  1.A1-a ──► 1.A2-a ──► 1.A2-b
-    │                      │
-    ▼                      ▼
-  DATA_SOURCES.md      1.A2-c
-  verification
+  OH-MY-001 ──► OH-MY-002
+       │              │
+       ▼              ▼
+  OH-MY-003      OH-MY-005
+       │
+       ▼
+  OH-MY-004 ──► OH-MY-005
+       │
+       ▼
+  OH-MY-006 (needs downloaded corpus from OH-MY-001)
 
-  4.A3-a ──► 4.B2-a ──► 4.C1-a ──► 4.C6-a
+  OH-MY-007 ──► OH-MY-008 ──► OH-MY-009
+                    │
+                    ▼
+               OH-MY-010 ──► OH-MY-011 ──► OH-MY-012
 
-LION: ✅ ALL 27/27 DONE
-TIGER: ✅ ALL 35/35 DONE
-BEAR: ✅ ALL 25/25 DONE
+Previously completed:
+  LION: ✅ ALL 27/27 DONE
+  TIGER: ✅ ALL 35/35 DONE
+  BEAR: ✅ ALL 25/25 DONE
 ```
 
 ---

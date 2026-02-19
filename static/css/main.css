@@ -511,6 +511,8 @@ tr:focus-within td {
   opacity: 1;
 }
 
+/* TODO [Group: LION] LION-008: Add print-friendly results view styling (~1,000 tokens) */
+
 /* ── CSS-004: Print styles ───────────────────────────────────────────────── */
 @media print {
   /* Hide non-essential UI */

@@ -48,6 +48,9 @@ jobs:
           mypy api/ utils/ --ignore-missing-imports --no-error-summary
         continue-on-error: true   # Warn but don't fail until all stubs added
 
+      # TODO [Group: BEAR] BEAR-006: Add coverage threshold enforcement (80%) via pyproject.toml (~1,000 tokens)
+      # TODO [Group: BEAR] BEAR-011: Add performance profiling to CI via scripts/profile_queries.py (~2,500 tokens)
+
       # CI-001: Run tests with coverage reporting
       - name: Run tests with coverage
         run: |
@@ -91,3 +94,5 @@ jobs:
       - name: Validate Docker image imports
         run: |
           docker run --rm dod-budget-test python -c "from api.app import create_app; print('Import OK')"
+
+  # TODO [Group: BEAR] BEAR-007: Create .github/workflows/deploy.yml — CD template with GHCR + platform placeholder (~2,000 tokens)

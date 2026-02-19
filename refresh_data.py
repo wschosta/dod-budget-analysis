@@ -29,6 +29,8 @@ DONE REFRESH-005: --schedule flag for periodic refresh (daily/weekly/monthly).
   Uses a sleep loop with configurable --at-hour.
 """
 
+# TODO [Group: BEAR] BEAR-010: Add data refresh end-to-end test (dry-run, rollback, webhook) (~2,500 tokens)
+
 import argparse
 import json
 import shutil

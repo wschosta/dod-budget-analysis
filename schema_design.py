@@ -89,6 +89,8 @@ Remaining TODOs for this file
 
 """
 
+# TODO [Group: LION] LION-005: Add script to auto-generate data dictionary from schema (~3,000 tokens)
+
 import sqlite3
 from pathlib import Path
 
@@ -437,6 +439,8 @@ def _current_version(conn: sqlite3.Connection) -> int:
         # schema_version table doesn't exist yet
         return 0
 
+
+# TODO [Group: BEAR] BEAR-008: Add database migration framework tests (~2,500 tokens)
 
 def migrate(conn: sqlite3.Connection) -> int:
     """Apply all pending migrations in order.

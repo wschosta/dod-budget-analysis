@@ -10,6 +10,7 @@ Provides reusable functions for:
 TODOs for this file
 ──────────────────────────────────────────────────────────────────────────────
 
+# TODO [Group: TIGER] TIGER-011: Add query performance logging — slow query tracking (~2,000 tokens)
 """
 
 import sqlite3

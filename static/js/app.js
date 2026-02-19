@@ -7,6 +7,8 @@
  *          download modal result count (JS-002), Excel export (JS-001).
  */
 
+// TODO [Group: LION] LION-007: Add URL sharing — sync filter state to URL query params (~1,200 tokens)
+
 "use strict";
 
 // ── Column toggle (3.A4-b) ────────────────────────────────────────────────────

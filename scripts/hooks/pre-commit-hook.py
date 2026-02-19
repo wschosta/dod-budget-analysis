@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# TODO [Group: BEAR] BEAR-012: Update pre-commit hook for new file location + CONTRIBUTING.md reference (~1,000 tokens)
 """
 Pre-commit hook for optimization tests
 
