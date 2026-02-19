@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Import the hook module using importlib since it starts with a dot
 import importlib.util
-_hook_path = Path(__file__).resolve().parent.parent / ".pre-commit-hook.py"
+_hook_path = Path(__file__).resolve().parent.parent / "scripts" / "hooks" / "pre-commit-hook.py"
 _spec = importlib.util.spec_from_file_location("precommit_hook", str(_hook_path))
 hook = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(hook)

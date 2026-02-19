@@ -10,7 +10,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+_project_root = str(Path(__file__).resolve().parent.parent)
+sys.path.insert(0, _project_root)
+sys.path.insert(0, str(Path(_project_root) / "scripts"))
 
 
 def _make_downloader_mock(

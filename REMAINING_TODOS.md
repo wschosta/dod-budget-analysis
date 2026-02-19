@@ -14,7 +14,7 @@ without user intervention (except `OH MY` group items).
 |-------|-----------|----------------|---------------------------|
 | **LION** | Frontend & User Experience | `templates/`, `static/`, charts | Yes |
 | **TIGER** | API, Backend & Data Layer | `api/`, `utils/`, `schema_design.py` | Yes |
-| **BEAR** | Infrastructure, Testing & Pipeline | `tests/`, `.github/`, `Dockerfile`, `build_budget_db.py`, `refresh_data.py`, `deployment_design.py`, docs | Yes |
+| **BEAR** | Infrastructure, Testing & Pipeline | `tests/`, `.github/`, `Dockerfile`, `build_budget_db.py`, `refresh_data.py`, `docs/design/deployment_design.py`, docs | Yes |
 | **OH MY** | Requires User / External Resources | Various (network, cloud, corpus) | **No — needs human** |
 
 ---
@@ -267,16 +267,16 @@ corpus, or community review.
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Blocker |
 |----|---------|---------|------------|--------|---------|
-| — | 3.A7-b | `frontend_design.py` | LOW | ~1000 | Needs Lighthouse/axe-core + running UI |
+| — | 3.A7-b | `docs/design/frontend_design.py` | LOW | ~1000 | Needs Lighthouse/axe-core + running UI |
 
 ### Deployment & Launch — Requires Cloud/Domain/Community
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Blocker |
 |----|---------|---------|------------|--------|---------|
-| — | 4.A3-a | `deployment_design.py` | MEDIUM | ~2000 | Needs cloud account |
-| — | 4.B2-a | `deployment_design.py` | MEDIUM | ~2000 | Needs secrets; depends on 4.A3-a |
-| — | 4.C1-a | `deployment_design.py` | LOW | ~1000 | Needs domain registration |
-| — | 4.C6-a | `deployment_design.py` | LOW | ~1500 | Needs community review |
+| — | 4.A3-a | `docs/design/deployment_design.py` | MEDIUM | ~2000 | Needs cloud account |
+| — | 4.B2-a | `docs/design/deployment_design.py` | MEDIUM | ~2000 | Needs secrets; depends on 4.A3-a |
+| — | 4.C1-a | `docs/design/deployment_design.py` | LOW | ~1000 | Needs domain registration |
+| — | 4.C6-a | `docs/design/deployment_design.py` | LOW | ~1500 | Needs community review |
 
 ### Documentation Verification — Depends on 1.A1 Audit
 
