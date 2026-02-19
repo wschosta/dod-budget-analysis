@@ -5,9 +5,9 @@ Deployment & Operations Design — Steps 4.A, 4.B, 4.C
 
 Plans and TODOs for containerization, CI/CD, deployment, and monitoring.
 
-──────────────────────────────────────────────────────────────────────────────
+---
 TODOs — Step 4.A (Containerization & Infrastructure)
-──────────────────────────────────────────────────────────────────────────────
+---
 
 DONE 4.A1-a  Dockerfile: python:3.12-slim, non-root appuser, HEALTHCHECK,
     COPY requirements.txt + pip install, COPY api/ utils/ templates/ static/ *.py,
@@ -34,9 +34,9 @@ TODO 4.A3-a [Group: OH MY] [Complexity: MEDIUM] [Tokens: ~2000] [User: YES — n
     Success: Platform chosen; account created; test deploy done.
 
 
-──────────────────────────────────────────────────────────────────────────────
+---
 TODOs — Step 4.B (CI/CD Pipeline)
-──────────────────────────────────────────────────────────────────────────────
+---
 
 DONE 4.B1-a  .github/workflows/ci.yml: matrix Python 3.11/3.12, checkout + pip install
     + ruff lint + pytest (ignoring test_gui_tracker.py) + upload artifact.
@@ -54,9 +54,9 @@ TODO 4.B2-a [Group: OH MY] [Complexity: MEDIUM] [Tokens: ~2000] [User: YES — n
     Success: Merging to main auto-deploys within minutes.
 
 
-──────────────────────────────────────────────────────────────────────────────
+---
 TODOs — Step 4.C (Monitoring, Domain & Launch)
-──────────────────────────────────────────────────────────────────────────────
+---
 
 TODO 4.C1-a [Group: OH MY] [Complexity: LOW] [Tokens: ~1000] [User: YES — needs domain]
     Configure custom domain + HTTPS.
