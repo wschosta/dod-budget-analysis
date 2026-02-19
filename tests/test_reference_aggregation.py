@@ -15,6 +15,20 @@ from api.routes.reference import list_services, list_exhibit_types, list_fiscal_
 from api.routes.aggregations import aggregate, _ALLOWED_GROUPS
 
 
+@pytest.fixture(autouse=True)
+def _clear_column_cache():
+    """Clear the utils.database column cache between tests.
+
+    The cache keys on id(conn), which Python may recycle after close().
+    Without clearing, a later test can inherit stale column lists from
+    an earlier connection that had a different schema.
+    """
+    from utils.database import _column_cache
+    _column_cache.clear()
+    yield
+    _column_cache.clear()
+
+
 @pytest.fixture()
 def db_with_ref_tables():
     """Database with reference tables populated."""
@@ -44,16 +58,16 @@ def db_with_ref_tables():
             fiscal_year TEXT,
             organization_name TEXT,
             exhibit_type TEXT,
-            amount_fy2026_request REAL,
-            amount_fy2025_enacted REAL,
             amount_fy2024_actual REAL,
+            amount_fy2025_enacted REAL,
+            amount_fy2026_request REAL,
             appropriation_code TEXT,
             budget_activity_title TEXT
         );
-        INSERT INTO budget_lines VALUES (1, 'FY 2026', 'Army', 'p1', 1000, 900, 800, '3010', 'Aircraft');
-        INSERT INTO budget_lines VALUES (2, 'FY 2026', 'Army', 'r1', 2000, 1800, 1600, '3600', 'Missiles');
-        INSERT INTO budget_lines VALUES (3, 'FY 2026', 'Navy', 'p1', 500, 400, 300, '3010', 'Ships');
-        INSERT INTO budget_lines VALUES (4, 'FY 2025', 'Army', 'p1', 1500, 1400, 1300, '3010', 'Aircraft');
+        INSERT INTO budget_lines VALUES (1, 'FY 2026', 'Army', 'p1', 800, 900, 1000, '3010', 'Aircraft');
+        INSERT INTO budget_lines VALUES (2, 'FY 2026', 'Army', 'r1', 1600, 1800, 2000, '3600', 'Missiles');
+        INSERT INTO budget_lines VALUES (3, 'FY 2026', 'Navy', 'p1', 300, 400, 500, '3010', 'Ships');
+        INSERT INTO budget_lines VALUES (4, 'FY 2025', 'Army', 'p1', 1300, 1400, 1500, '3010', 'Aircraft');
     """)
     yield conn
     conn.close()
