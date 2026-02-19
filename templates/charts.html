@@ -1,56 +1,3 @@
-{#
-──────────────────────────────────────────────────────────────────────────────
-Charts page TODOs (Step 3.B — Data Visualization)
-──────────────────────────────────────────────────────────────────────────────
-
-TODO 3.B1-b / VIZ-001 [Group: LION] [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
-    Make chart FY columns dynamic instead of hardcoded FY2024/2025/2026.
-    Currently the JS references hardcoded column names like total_fy2026_request.
-    When FY2027 data arrives, all charts break. Steps:
-      1. Add a /api/v1/reference/amount-columns endpoint that returns the list
-         of amount column names present in budget_lines schema
-      2. In loadCharts(), fetch this list first and use it to build chart labels
-      3. Update aggregation endpoint to return dynamic column sums
-      4. Update chart dataset construction to iterate over dynamic FY list
-    Acceptance: Charts auto-adapt when new FY columns are added to the schema.
-
-TODO 3.B1-c / VIZ-002 [Group: LION] [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add error handling and loading indicators to chart API calls.
-    Currently if an API call fails, the chart silently shows nothing. Steps:
-      1. Wrap each fetch() in try/catch
-      2. Show a user-friendly error message in the chart card on failure
-      3. Add a loading spinner to each chart-card while data loads
-      4. Disable FY selector during loading to prevent double-fetches
-    Acceptance: Network errors show message instead of blank charts.
-
-TODO 3.B2-b / VIZ-003 [Group: LION] [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add service filter to charts page.
-    Currently charts show all services. Add filter controls to scope charts
-    to specific services. Steps:
-      1. Add service multi-select dropdown next to the FY selector
-      2. Pass selected services as query parameter to aggregation API
-      3. Update loadCharts() to include service filter in fetch URLs
-    Acceptance: Users can filter charts by service/agency.
-
-TODO 3.B3-b / VIZ-004 [Group: LION] [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    Add print-friendly styles for the charts page.
-    Charts should be printable for reports and briefings. Steps:
-      1. Add @media print {} rules in main.css
-      2. Hide navigation, filters, and interactive controls in print
-      3. Ensure charts render at full width in print layout
-      4. Add a "Print Charts" button that triggers window.print()
-    Acceptance: Ctrl+P produces a clean, readable chart printout.
-
-TODO 3.B4-a / VIZ-005 [Group: LION] [Complexity: MEDIUM] [Tokens: ~3000] [User: NO]
-    Add a "Budget Comparison" interactive chart.
-    Allow users to select two programs or services and overlay their budget
-    trends on a single chart for visual comparison. Steps:
-      1. Add a comparison mode with two entity selectors
-      2. Fetch aggregation data for both entities
-      3. Render overlapping bar or line chart using Chart.js
-      4. Include percent-change annotations between years
-    Acceptance: Users can visually compare two budget items side-by-side.
-#}
 {% extends "base.html" %}
 
 {% block title %}Charts — DoD Budget Explorer{% endblock %}
@@ -58,7 +5,8 @@ TODO 3.B4-a / VIZ-005 [Group: LION] [Complexity: MEDIUM] [Tokens: ~3000] [User: 
 {% block content %}
 <h2 style="margin-bottom:1rem">Budget Visualizations</h2>
 
-<div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem">
+<div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem;align-items:center">
+  {# FY selector #}
   <label style="font-size:.85rem">Fiscal Year:
     <select id="chart-fy" onchange="loadCharts()" style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid #ddd">
       {% for fy in fiscal_years %}
@@ -66,28 +14,72 @@ TODO 3.B4-a / VIZ-005 [Group: LION] [Complexity: MEDIUM] [Tokens: ~3000] [User: 
       {% endfor %}
     </select>
   </label>
+
+  {# VIZ-003: Service filter #}
+  <label style="font-size:.85rem">Service:
+    <select id="chart-service-filter" multiple
+            style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid #ddd;height:80px"
+            onchange="loadCharts()">
+    </select>
+  </label>
+
+  {# VIZ-004: Print button #}
+  <button class="btn btn-secondary btn-sm print-btn" onclick="window.print()" style="margin-left:auto">
+    🖨 Print Charts
+  </button>
 </div>
 
+{# VIZ-002: Loading indicator #}
+<div id="charts-loading" style="display:none;text-align:center;padding:2rem">
+  <span class="spinner"></span> Loading charts…
+</div>
+
+<div id="charts-grid-wrapper">
 <div class="charts-grid">
 
   {# 3.B2-a: Service comparison bar chart #}
-  <div class="chart-card">
-    <h3>FY26 Request by Service ($K)</h3>
+  <div class="chart-card" id="card-service">
+    <h3>FY Request by Service ($M)</h3>
+    <div id="err-service" style="display:none" class="empty-state" role="alert"></div>
     <canvas id="chart-service" height="200"></canvas>
   </div>
 
   {# 3.B1-a: Year-over-year trend #}
-  <div class="chart-card">
+  <div class="chart-card" id="card-yoy">
     <h3>Year-over-Year Totals by Exhibit Type</h3>
+    <div id="err-yoy" style="display:none" class="empty-state" role="alert"></div>
     <canvas id="chart-yoy" height="200"></canvas>
   </div>
 
   {# 3.B3-a: Top-N budget items #}
-  <div class="chart-card" style="grid-column: 1 / -1">
-    <h3>Top 10 Budget Line Items — FY26 Request ($K)</h3>
+  <div class="chart-card" id="card-topn" style="grid-column: 1 / -1">
+    <h3>Top 10 Budget Line Items — FY Request ($M)</h3>
+    <div id="err-topn" style="display:none" class="empty-state" role="alert"></div>
     <canvas id="chart-topn" height="120"></canvas>
   </div>
 
+  {# VIZ-005: Budget comparison chart #}
+  <div class="chart-card" id="card-compare" style="grid-column: 1 / -1">
+    <h3>Budget Comparison</h3>
+    <div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:.75rem;align-items:center">
+      <label style="font-size:.85rem">Entity A:
+        <select id="compare-a" onchange="loadComparison()"
+                style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid #ddd">
+          <option value="">— Select service —</option>
+        </select>
+      </label>
+      <label style="font-size:.85rem">Entity B:
+        <select id="compare-b" onchange="loadComparison()"
+                style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid #ddd">
+          <option value="">— Select service —</option>
+        </select>
+      </label>
+    </div>
+    <div id="err-compare" style="display:none" class="empty-state" role="alert"></div>
+    <canvas id="chart-compare" height="120"></canvas>
+  </div>
+
+</div>
 </div>
 {% endblock %}
 
@@ -101,99 +93,344 @@ const COLORS = [
   '#0891b2','#c2410c','#065f46','#92400e','#1e1b4b',
 ];
 
-let chartService, chartYoY, chartTopN;
+let chartService, chartYoY, chartTopN, chartCompare;
 
-async function loadCharts() {
-  const fy = document.getElementById('chart-fy').value;
-
-  // ── Service bar chart (3.B2-a) ──────────────────────────────────────────
-  const svcResp = await fetch(`${API}/aggregations?group_by=service&fiscal_year=${fy}`);
-  const svcData = await svcResp.json();
-  const svcRows = svcData.rows.filter(r => r.total_fy2026_request);
-  const svcLabels = svcRows.map(r => r.group_value || 'Unknown');
-  const svcAmts   = svcRows.map(r => (r.total_fy2026_request || 0) / 1000);  // $M
-
-  if (chartService) chartService.destroy();
-  chartService = new Chart(document.getElementById('chart-service'), {
-    type: 'bar',
-    data: {
-      labels: svcLabels,
-      datasets: [{
-        label: 'FY26 Request ($M)',
-        data: svcAmts,
-        backgroundColor: COLORS,
-        borderRadius: 4,
-      }],
-    },
-    options: {
-      indexAxis: 'y',
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { ticks: { callback: v => '$' + v.toLocaleString() + 'M' } },
-      },
-    },
-  });
-
-  // ── Year-over-year chart (3.B1-a) ──────────────────────────────────────
-  const yoyResp = await fetch(`${API}/aggregations?group_by=fiscal_year`);
-  const yoyData = await yoyResp.json();
-  const yoyLabels = yoyData.rows.map(r => r.group_value || '?');
-  const yoyFy24   = yoyData.rows.map(r => (r.total_fy2024_actual  || 0) / 1000);
-  const yoyFy25   = yoyData.rows.map(r => (r.total_fy2025_enacted || 0) / 1000);
-  const yoyFy26   = yoyData.rows.map(r => (r.total_fy2026_request || 0) / 1000);
-
-  if (chartYoY) chartYoY.destroy();
-  chartYoY = new Chart(document.getElementById('chart-yoy'), {
-    type: 'bar',
-    data: {
-      labels: yoyLabels,
-      datasets: [
-        { label: 'FY24 Actual',   data: yoyFy24, backgroundColor: '#cbd5e1', borderRadius: 3 },
-        { label: 'FY25 Enacted',  data: yoyFy25, backgroundColor: '#2563eb', borderRadius: 3 },
-        { label: 'FY26 Request',  data: yoyFy26, backgroundColor: '#16a34a', borderRadius: 3 },
-      ],
-    },
-    options: {
-      plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
-      scales: { x: { stacked: false }, y: { ticks: { callback: v => '$' + v.toLocaleString() + 'M' } } },
-    },
-  });
-
-  // ── Top-N chart (3.B3-a) ────────────────────────────────────────────────
-  const topResp = await fetch(
-    `${API}/budget-lines?sort_by=amount_fy2026_request&sort_dir=desc&limit=10&fiscal_year=${fy}`
-  );
-  const topData = await topResp.json();
-  const topLabels = topData.items.map(r => {
-    const title = r.line_item_title || r.account_title || 'Unknown';
-    const org   = r.organization_name ? ` (${r.organization_name})` : '';
-    return title.length > 40 ? title.slice(0, 38) + '…' + org : title + org;
-  });
-  const topAmts = topData.items.map(r => (r.amount_fy2026_request || 0) / 1000);
-
-  if (chartTopN) chartTopN.destroy();
-  chartTopN = new Chart(document.getElementById('chart-topn'), {
-    type: 'bar',
-    data: {
-      labels: topLabels,
-      datasets: [{
-        label: 'FY26 Request ($M)',
-        data: topAmts,
-        backgroundColor: COLORS,
-        borderRadius: 4,
-      }],
-    },
-    options: {
-      indexAxis: 'y',
-      plugins: { legend: { display: false } },
-      scales: {
-        x: { ticks: { callback: v => '$' + v.toLocaleString() + 'M' } },
-      },
-    },
-  });
+// VIZ-001: Helper to extract FY amount columns dynamically from aggregation rows
+function extractFYColumns(rows) {
+  if (!rows || !rows.length) return [];
+  // Find all keys matching total_fy\d+ patterns
+  const keys = Object.keys(rows[0]).filter(k => /^total_fy\d+/.test(k));
+  // Sort by year
+  return keys.sort();
 }
 
-// Initial load
-loadCharts();
+// VIZ-001: Map column name to a readable label
+function fyColLabel(col) {
+  // total_fy2024_actual → FY24 Actual, total_fy2026_request → FY26 Request
+  const m = col.match(/total_fy(\d{4})_(\w+)/);
+  if (!m) return col;
+  return `FY${m[1].slice(-2)} ${m[2].charAt(0).toUpperCase() + m[2].slice(1)}`;
+}
+
+// VIZ-002: Show error in a chart card
+function showError(errId, canvasId, msg) {
+  const errEl = document.getElementById(errId);
+  const canvas = document.getElementById(canvasId);
+  if (errEl) { errEl.textContent = msg; errEl.style.display = ''; }
+  if (canvas) canvas.style.display = 'none';
+}
+
+function clearError(errId, canvasId) {
+  const errEl = document.getElementById(errId);
+  const canvas = document.getElementById(canvasId);
+  if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+  if (canvas) canvas.style.display = '';
+}
+
+// VIZ-003: Get selected services
+function getSelectedServices() {
+  const sel = document.getElementById('chart-service-filter');
+  if (!sel) return [];
+  return Array.from(sel.selectedOptions).map(o => o.value);
+}
+
+// Build aggregation URL with optional service filter
+function aggURL(groupBy, fy) {
+  let url = `${API}/aggregations?group_by=${groupBy}`;
+  if (fy) url += `&fiscal_year=${fy}`;
+  const services = getSelectedServices();
+  services.forEach(s => url += `&service=${encodeURIComponent(s)}`);
+  return url;
+}
+
+// VIZ-002: Loading state
+function setLoading(loading) {
+  const indicator = document.getElementById('charts-loading');
+  const wrapper   = document.getElementById('charts-grid-wrapper');
+  if (indicator) indicator.style.display = loading ? '' : 'none';
+  if (wrapper)   wrapper.style.opacity   = loading ? '0.4' : '1';
+  // Disable FY selector during loading
+  const fysel = document.getElementById('chart-fy');
+  if (fysel) fysel.disabled = loading;
+  const svcsel = document.getElementById('chart-service-filter');
+  if (svcsel) svcsel.disabled = loading;
+}
+
+async function loadCharts() {
+  setLoading(true);
+  const fy = document.getElementById('chart-fy').value;
+
+  try {
+    await Promise.all([
+      loadServiceChart(fy),
+      loadYoYChart(),
+      loadTopNChart(fy),
+    ]);
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ── Service bar chart (3.B2-a + VIZ-001 + VIZ-002 + VIZ-003) ─────────────────
+async function loadServiceChart(fy) {
+  clearError('err-service', 'chart-service');
+  try {
+    const resp = await fetch(aggURL('service', fy));
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    // VIZ-001: find the best amount column dynamically
+    const cols = extractFYColumns(data.rows);
+    // Prefer a request column for the selected FY, fall back to any col
+    const reqCol = cols.find(c => c.includes(fy) && c.includes('request'))
+                || cols.find(c => c.includes('request'))
+                || cols[cols.length - 1];
+
+    if (!reqCol) {
+      showError('err-service', 'chart-service', 'No amount data available.');
+      return;
+    }
+
+    const svcRows = data.rows.filter(r => r[reqCol]);
+    const svcLabels = svcRows.map(r => r.group_value || 'Unknown');
+    const svcAmts   = svcRows.map(r => (r[reqCol] || 0) / 1000);  // $M
+
+    if (chartService) chartService.destroy();
+    chartService = new Chart(document.getElementById('chart-service'), {
+      type: 'bar',
+      data: {
+        labels: svcLabels,
+        datasets: [{
+          label: `${fyColLabel(reqCol)} ($M)`,
+          data: svcAmts,
+          backgroundColor: COLORS,
+          borderRadius: 4,
+        }],
+      },
+      options: {
+        indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { callback: v => '$' + v.toLocaleString() + 'M' } },
+        },
+      },
+    });
+  } catch (err) {
+    showError('err-service', 'chart-service', `Failed to load: ${err.message}`);
+  }
+}
+
+// ── Year-over-year chart (3.B1-a + VIZ-001 + VIZ-002) ────────────────────────
+async function loadYoYChart() {
+  clearError('err-yoy', 'chart-yoy');
+  try {
+    const resp = await fetch(aggURL('fiscal_year', null));
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    // VIZ-001: dynamically discover FY amount columns
+    const cols = extractFYColumns(data.rows);
+    const yoyLabels = data.rows.map(r => r.group_value || '?');
+
+    if (!cols.length) {
+      showError('err-yoy', 'chart-yoy', 'No amount columns found.');
+      return;
+    }
+
+    // Build a dataset per discovered column
+    const datasets = cols.map((col, i) => ({
+      label: fyColLabel(col),
+      data:  data.rows.map(r => (r[col] || 0) / 1000),
+      backgroundColor: COLORS[i % COLORS.length],
+      borderRadius: 3,
+    }));
+
+    if (chartYoY) chartYoY.destroy();
+    chartYoY = new Chart(document.getElementById('chart-yoy'), {
+      type: 'bar',
+      data: { labels: yoyLabels, datasets },
+      options: {
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
+        scales: { x: { stacked: false }, y: { ticks: { callback: v => '$' + v.toLocaleString() + 'M' } } },
+      },
+    });
+  } catch (err) {
+    showError('err-yoy', 'chart-yoy', `Failed to load: ${err.message}`);
+  }
+}
+
+// ── Top-N chart (3.B3-a + VIZ-001 + VIZ-002) ─────────────────────────────────
+async function loadTopNChart(fy) {
+  clearError('err-topn', 'chart-topn');
+  try {
+    const services = getSelectedServices();
+    let url = `${API}/budget-lines?sort_by=amount_fy2026_request&sort_dir=desc&limit=10&fiscal_year=${fy}`;
+    services.forEach(s => url += `&service=${encodeURIComponent(s)}`);
+
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    if (!data.items || !data.items.length) {
+      showError('err-topn', 'chart-topn', 'No data for selected filters.');
+      return;
+    }
+
+    // VIZ-001: detect best amount column dynamically
+    const sampleItem = data.items[0];
+    const amtKeys = Object.keys(sampleItem).filter(k => k.startsWith('amount_') && k.includes('request'));
+    const amtCol = amtKeys.find(k => k.includes('2026')) || amtKeys[0] || 'amount_fy2026_request';
+
+    const topLabels = data.items.map(r => {
+      const title = r.line_item_title || r.account_title || 'Unknown';
+      const org   = r.organization_name ? ` (${r.organization_name})` : '';
+      return title.length > 40 ? title.slice(0, 38) + '…' + org : title + org;
+    });
+    const topAmts = data.items.map(r => (r[amtCol] || 0) / 1000);
+
+    if (chartTopN) chartTopN.destroy();
+    chartTopN = new Chart(document.getElementById('chart-topn'), {
+      type: 'bar',
+      data: {
+        labels: topLabels,
+        datasets: [{
+          label: 'Request ($M)',
+          data: topAmts,
+          backgroundColor: COLORS,
+          borderRadius: 4,
+        }],
+      },
+      options: {
+        indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { callback: v => '$' + v.toLocaleString() + 'M' } },
+        },
+      },
+    });
+  } catch (err) {
+    showError('err-topn', 'chart-topn', `Failed to load: ${err.message}`);
+  }
+}
+
+// ── VIZ-005: Budget Comparison chart ──────────────────────────────────────────
+async function loadComparison() {
+  const a = document.getElementById('compare-a').value;
+  const b = document.getElementById('compare-b').value;
+  clearError('err-compare', 'chart-compare');
+
+  if (!a || !b) {
+    if (chartCompare) { chartCompare.destroy(); chartCompare = null; }
+    return;
+  }
+
+  try {
+    const [respA, respB] = await Promise.all([
+      fetch(`${API}/aggregations?group_by=fiscal_year&service=${encodeURIComponent(a)}`),
+      fetch(`${API}/aggregations?group_by=fiscal_year&service=${encodeURIComponent(b)}`),
+    ]);
+    if (!respA.ok || !respB.ok) throw new Error('API error');
+    const [dataA, dataB] = await Promise.all([respA.json(), respB.json()]);
+
+    const cols = extractFYColumns(dataA.rows);
+    // Use the request columns for comparison
+    const reqCols = cols.filter(c => c.includes('request'));
+    const col = reqCols[reqCols.length - 1] || cols[cols.length - 1];
+
+    if (!col) {
+      showError('err-compare', 'chart-compare', 'No amount data available for comparison.');
+      return;
+    }
+
+    const labelsA = dataA.rows.map(r => r.group_value || '?');
+    const labelsB = dataB.rows.map(r => r.group_value || '?');
+    const allLabels = [...new Set([...labelsA, ...labelsB])].sort();
+
+    function getAmt(rows, label) {
+      const row = rows.find(r => r.group_value === label);
+      return row ? (row[col] || 0) / 1000 : 0;
+    }
+
+    const amtsA = allLabels.map(l => getAmt(dataA.rows, l));
+    const amtsB = allLabels.map(l => getAmt(dataB.rows, l));
+
+    if (chartCompare) chartCompare.destroy();
+    chartCompare = new Chart(document.getElementById('chart-compare'), {
+      type: 'bar',
+      data: {
+        labels: allLabels,
+        datasets: [
+          { label: a, data: amtsA, backgroundColor: COLORS[0], borderRadius: 3 },
+          { label: b, data: amtsB, backgroundColor: COLORS[1], borderRadius: 3 },
+        ],
+      },
+      options: {
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              afterLabel: function(ctx) {
+                // VIZ-005: percent-change annotation
+                const idxA = ctx.datasetIndex === 0 ? 0 : 1;
+                const idxB = idxA === 0 ? 1 : 0;
+                const a = ctx.chart.data.datasets[idxA].data[ctx.dataIndex] || 0;
+                const b = ctx.chart.data.datasets[idxB].data[ctx.dataIndex] || 0;
+                if (b === 0) return '';
+                const pct = ((a - b) / b * 100).toFixed(1);
+                return `vs other: ${pct > 0 ? '+' : ''}${pct}%`;
+              },
+            },
+          },
+        },
+        scales: {
+          y: { ticks: { callback: v => '$' + v.toLocaleString() + 'M' } },
+        },
+      },
+    });
+  } catch (err) {
+    showError('err-compare', 'chart-compare', `Failed to load comparison: ${err.message}`);
+  }
+}
+
+// ── Populate service dropdowns (VIZ-003 + VIZ-005) ────────────────────────────
+async function populateServiceDropdowns() {
+  try {
+    const resp = await fetch(`${API}/reference/services`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    const services = data.services || data.items || data;
+
+    // Service filter multi-select (VIZ-003)
+    const filterSel = document.getElementById('chart-service-filter');
+    if (filterSel) {
+      services.forEach(svc => {
+        const opt = document.createElement('option');
+        opt.value = svc.code || svc;
+        opt.textContent = svc.code || svc;
+        filterSel.appendChild(opt);
+      });
+    }
+
+    // Comparison selectors (VIZ-005)
+    ['compare-a', 'compare-b'].forEach(id => {
+      const sel = document.getElementById(id);
+      if (!sel) return;
+      services.forEach(svc => {
+        const opt = document.createElement('option');
+        opt.value = svc.code || svc;
+        opt.textContent = svc.code || svc;
+        sel.appendChild(opt);
+      });
+    });
+  } catch (e) {
+    // Silently ignore if reference endpoint unavailable
+  }
+}
+
+// ── Initial load ───────────────────────────────────────────────────────────────
+(async function init() {
+  await populateServiceDropdowns();
+  await loadCharts();
+})();
 </script>
 {% endblock %}

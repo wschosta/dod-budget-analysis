@@ -87,9 +87,9 @@ def _iter_rows(conn: sqlite3.Connection, sql: str, params: list[Any]):
         yield from batch
 
 
-@router.get("", summary="Download search results as CSV or JSON")
+@router.get("", summary="Download search results as CSV, JSON, or Excel")
 def download(
-    fmt: str = Query("csv", pattern="^(csv|json)$", description="Output format"),
+    fmt: str = Query("csv", pattern="^(csv|json|xlsx)$", description="Output format"),
     fiscal_year: list[str] | None = Query(None),
     service: list[str] | None = Query(None),
     exhibit_type: list[str] | None = Query(None),
@@ -98,9 +98,17 @@ def download(
         10_000, ge=1, le=100_000,
         description="Max rows to export (default 10,000)",
     ),
+    columns: list[str] | None = Query(None, description="FE-011: Subset of columns to export"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> StreamingResponse:
-    """Stream budget line items as CSV or JSON (newline-delimited)."""
+    """Stream budget line items as CSV, JSON (newline-delimited), or Excel."""
+    # FE-011: filter columns to those requested (and valid)
+    export_cols = (
+        [c for c in columns if c in _DOWNLOAD_COLUMNS]
+        if columns
+        else _DOWNLOAD_COLUMNS
+    ) or _DOWNLOAD_COLUMNS
+
     # Build WHERE clause
     conditions: list[str] = []
     params: list[Any] = []
@@ -123,19 +131,19 @@ def download(
         params.extend(pe_number)
 
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
-    col_list = ", ".join(_DOWNLOAD_COLUMNS)
+    col_list = ", ".join(export_cols)
     sql = f"SELECT {col_list} FROM budget_lines {where} LIMIT {limit}"
 
     if fmt == "csv":
         def csv_stream():
             buf = io.StringIO()
-            writer = csv.DictWriter(buf, fieldnames=_DOWNLOAD_COLUMNS)
+            writer = csv.DictWriter(buf, fieldnames=export_cols)
             writer.writeheader()
             yield buf.getvalue()
             for row in _iter_rows(conn, sql, params):
                 buf.seek(0)
                 buf.truncate()
-                writer.writerow(dict(zip(_DOWNLOAD_COLUMNS, row)))
+                writer.writerow(dict(zip(export_cols, row)))
                 yield buf.getvalue()
 
         return StreamingResponse(
@@ -144,10 +152,34 @@ def download(
             headers={"Content-Disposition": "attachment; filename=budget_lines.csv"},
         )
 
+    if fmt == "xlsx":
+        # JS-001: Excel export using openpyxl write_only mode
+        import openpyxl
+
+        def xlsx_bytes() -> bytes:
+            wb = openpyxl.Workbook(write_only=True)
+            ws = wb.create_sheet("Budget Lines")
+            ws.append(export_cols)  # header row
+            for row in _iter_rows(conn, sql, params):
+                ws.append(list(row))
+            buf = io.BytesIO()
+            wb.save(buf)
+            return buf.getvalue()
+
+        content = xlsx_bytes()
+        return StreamingResponse(
+            iter([content]),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": "attachment; filename=budget_lines.xlsx",
+                "Content-Length": str(len(content)),
+            },
+        )
+
     # JSON newline-delimited (NDJSON)
     def json_stream():
         for row in _iter_rows(conn, sql, params):
-            d = dict(zip(_DOWNLOAD_COLUMNS, row))
+            d = dict(zip(export_cols, row))
             yield json.dumps(d, default=str) + "\n"
 
     return StreamingResponse(

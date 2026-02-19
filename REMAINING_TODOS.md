@@ -23,7 +23,7 @@ without user intervention (except `OH MY` group items).
 
 | Group | Count | Est. Total Tokens | Autonomous |
 |-------|-------|-------------------|------------|
-| LION | 22 | ~32,300 | Yes |
+| LION | 0 remaining (27/27 ✅ DONE) | ~32,300 | Yes |
 | TIGER | 35 | ~56,300 | Yes |
 | BEAR | 25 | ~39,500 | Yes |
 | OH MY | 12 | ~18,500 | No |
@@ -37,58 +37,58 @@ without user intervention (except `OH MY` group items).
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| FE-001 | 3.A3-c | `templates/index.html`, `api/routes/frontend.py` | LOW | ~1500 | Add amount range (min/max) filters to filter sidebar |
-| FE-002 | 3.A3-d | `templates/index.html`, `api/routes/frontend.py` | LOW | ~1500 | Add appropriation filter dropdown |
-| FE-003 | 3.A3-e | `templates/partials/results.html`, `static/css/main.css` | LOW | ~1000 | Add active filter chips above results |
-| FE-010 | 3.A4-c | `templates/partials/results.html`, `api/routes/frontend.py` | LOW | ~1500 | Add page-size selector to pagination |
-| FE-011 | 3.A4-d | `templates/partials/results.html`, `api/routes/download.py` | LOW | ~1000 | Export visible columns only option |
-| FE-012 | 3.C5-a | `templates/index.html`, `templates/partials/results.html` | LOW | ~1500 | Add contextual help tooltips to all labels |
+| FE-001 | 3.A3-c | `templates/index.html`, `api/routes/frontend.py` | LOW | ~1500 | ~~Add amount range (min/max) filters to filter sidebar~~ ✅ DONE |
+| FE-002 | 3.A3-d | `templates/index.html`, `api/routes/frontend.py` | LOW | ~1500 | ~~Add appropriation filter dropdown~~ ✅ DONE |
+| FE-003 | 3.A3-e | `templates/partials/results.html`, `static/css/main.css` | LOW | ~1000 | ~~Add active filter chips above results~~ ✅ DONE |
+| FE-010 | 3.A4-c | `templates/partials/results.html`, `api/routes/frontend.py` | LOW | ~1500 | ~~Add page-size selector to pagination~~ ✅ DONE |
+| FE-011 | 3.A4-d | `templates/partials/results.html`, `api/routes/download.py` | LOW | ~1000 | ~~Export visible columns only option~~ ✅ DONE |
+| FE-012 | 3.C5-a | `templates/index.html`, `templates/partials/results.html` | LOW | ~1500 | ~~Add contextual help tooltips to all labels~~ ✅ DONE |
 
 ### Detail Panel (templates/partials/detail.html, api/routes/frontend.py)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| FE-006 | 3.A6-b | `templates/partials/detail.html`, `api/routes/frontend.py` | MEDIUM | ~3000 | Add "Related Items" section across fiscal years |
-| FE-007 | 3.A6-c | `templates/partials/detail.html` | LOW | ~1000 | Add "Download This Item" and "Source Document" buttons |
+| FE-006 | 3.A6-b | `templates/partials/detail.html`, `api/routes/frontend.py` | MEDIUM | ~3000 | ~~Add "Related Items" section across fiscal years~~ ✅ DONE |
+| FE-007 | 3.A6-c | `templates/partials/detail.html` | LOW | ~1000 | ~~Add "Download This Item" and "Source Document" buttons~~ ✅ DONE |
 
 ### Accessibility (templates/base.html, static/css/main.css)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| FE-004 | 3.A7-c | `templates/base.html`, `static/css/main.css` | LOW | ~1000 | Add skip-to-content link |
-| FE-005 | 3.A7-d | `templates/base.html`, `templates/index.html` | MEDIUM | ~2000 | Add ARIA live regions for HTMX updates |
-| FE-008 | 3.A7-e | `templates/base.html` | LOW | ~1000 | Add SRI integrity hashes to CDN scripts |
-| FE-009 | 3.A7-f | `templates/base.html` | LOW | ~800 | Add meta description and Open Graph tags |
+| FE-004 | 3.A7-c | `templates/base.html`, `static/css/main.css` | LOW | ~1000 | ~~Add skip-to-content link~~ ✅ DONE |
+| FE-005 | 3.A7-d | `templates/base.html`, `templates/index.html` | MEDIUM | ~2000 | ~~Add ARIA live regions for HTMX updates~~ ✅ DONE |
+| FE-008 | 3.A7-e | `templates/base.html` | LOW | ~1000 | ~~Add SRI integrity hashes to CDN scripts~~ ✅ DONE |
+| FE-009 | 3.A7-f | `templates/base.html` | LOW | ~800 | ~~Add meta description and Open Graph tags~~ ✅ DONE |
 
 ### CSS (static/css/main.css)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| CSS-001 | 3.A7-g | `static/css/main.css` | LOW | ~1500 | Add :focus-visible styles for keyboard nav |
-| CSS-002 | 3.A7-h | `static/css/main.css` | LOW | ~1000 | Add .skip-link styles |
-| CSS-003 | 3.A7-i | `static/css/main.css` | LOW | ~1500 | Add .filter-chip styles |
-| CSS-004 | 3.A7-j | `static/css/main.css` | MEDIUM | ~2000 | Add @media print styles |
-| OPT-CSS-001 | — | `static/css/main.css` | LOW | ~1000 | Add CSS custom property spacing scale |
+| CSS-001 | 3.A7-g | `static/css/main.css` | LOW | ~1500 | ~~Add :focus-visible styles for keyboard nav~~ ✅ DONE |
+| CSS-002 | 3.A7-h | `static/css/main.css` | LOW | ~1000 | ~~Add .skip-link styles~~ ✅ DONE |
+| CSS-003 | 3.A7-i | `static/css/main.css` | LOW | ~1500 | ~~Add .filter-chip styles~~ ✅ DONE |
+| CSS-004 | 3.A7-j | `static/css/main.css` | MEDIUM | ~2000 | ~~Add @media print styles~~ ✅ DONE |
+| OPT-CSS-001 | — | `static/css/main.css` | LOW | ~1000 | ~~Add CSS custom property spacing scale~~ ✅ DONE |
 
 ### JavaScript (static/js/app.js)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| JS-001 | 3.A5-b | `static/js/app.js`, `api/routes/download.py` | MEDIUM | ~2000 | Add Excel (.xlsx) export support |
-| JS-002 | 3.A5-c | `static/js/app.js` | LOW | ~1500 | Show estimated result count in download modal |
-| JS-003 | 3.A3-f | `static/js/app.js` | LOW | ~1000 | Add keyboard shortcut for search (/ or Ctrl+K) |
-| JS-004 | 3.A6-d | `static/js/app.js` | LOW | ~1000 | Add keyboard navigation for detail panel |
-| OPT-JS-001 | — | `static/js/app.js` | LOW | ~1000 | Debounce filter form changes |
+| JS-001 | 3.A5-b | `static/js/app.js`, `api/routes/download.py` | MEDIUM | ~2000 | ~~Add Excel (.xlsx) export support~~ ✅ DONE |
+| JS-002 | 3.A5-c | `static/js/app.js` | LOW | ~1500 | ~~Show estimated result count in download modal~~ ✅ DONE |
+| JS-003 | 3.A3-f | `static/js/app.js` | LOW | ~1000 | ~~Add keyboard shortcut for search (/ or Ctrl+K)~~ ✅ DONE |
+| JS-004 | 3.A6-d | `static/js/app.js` | LOW | ~1000 | ~~Add keyboard navigation for detail panel~~ ✅ DONE |
+| OPT-JS-001 | — | `static/js/app.js` | LOW | ~1000 | ~~Debounce filter form changes~~ ✅ DONE |
 
 ### Charts & Visualization (templates/charts.html)
 
 | ID | Roadmap | File(s) | Complexity | Tokens | Description |
 |----|---------|---------|------------|--------|-------------|
-| VIZ-001 | 3.B1-b | `templates/charts.html`, `api/routes/aggregations.py` | MEDIUM | ~2500 | Make chart FY columns dynamic |
-| VIZ-002 | 3.B1-c | `templates/charts.html` | LOW | ~1500 | Add error handling and loading indicators |
-| VIZ-003 | 3.B2-b | `templates/charts.html` | LOW | ~1500 | Add service filter to charts page |
-| VIZ-004 | 3.B3-b | `templates/charts.html`, `static/css/main.css` | MEDIUM | ~2000 | Add print-friendly chart styles |
-| VIZ-005 | 3.B4-a | `templates/charts.html` | MEDIUM | ~3000 | Add budget comparison interactive chart |
+| VIZ-001 | 3.B1-b | `templates/charts.html`, `api/routes/aggregations.py` | MEDIUM | ~2500 | ~~Make chart FY columns dynamic~~ ✅ DONE |
+| VIZ-002 | 3.B1-c | `templates/charts.html` | LOW | ~1500 | ~~Add error handling and loading indicators~~ ✅ DONE |
+| VIZ-003 | 3.B2-b | `templates/charts.html` | LOW | ~1500 | ~~Add service filter to charts page~~ ✅ DONE |
+| VIZ-004 | 3.B3-b | `templates/charts.html`, `static/css/main.css` | MEDIUM | ~2000 | ~~Add print-friendly chart styles~~ ✅ DONE |
+| VIZ-005 | 3.B4-a | `templates/charts.html` | MEDIUM | ~3000 | ~~Add budget comparison interactive chart~~ ✅ DONE |
 
 ---
 
