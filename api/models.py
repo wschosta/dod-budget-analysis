@@ -106,6 +106,11 @@ class AggregationRow(BaseModel):
     total_fy2026_request: float | None = Field(None, description="Sum of FY2026 request amounts in $K")
     total_fy2025_enacted: float | None = Field(None, description="Sum of FY2025 enacted amounts in $K")
     total_fy2024_actual: float | None = Field(None, description="Sum of FY2024 actual amounts in $K")
+    # AGG-001: dynamic FY totals (includes all discovered FY columns)
+    fy_totals: dict[str, Any] | None = Field(None, description="All FY amount sums keyed by column name")
+    # AGG-002: percentage and YoY delta
+    pct_of_total: float | None = Field(None, description="Percentage of grand total for latest FY")
+    yoy_change_pct: float | None = Field(None, description="Year-over-year change percentage (latest vs prior FY)")
 
 
 class AggregationResponse(BaseModel):

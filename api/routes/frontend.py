@@ -10,9 +10,8 @@ Routes:
     GET /partials/results       → partials/results.html (HTMX swap target)
     GET /partials/detail/{id}   → partials/detail.html (HTMX swap target)
 
-──────────────────────────────────────────────────────────────────────────────
-TODOs for this file
-──────────────────────────────────────────────────────────────────────────────
+OPT-FE-001: _build_where uses shared utils/query.py builder (DRY).
+OPT-FE-002: Reference data queries cached with TTL to reduce DB hits.
 
 TODO 3.A3-c / FE-001 [Group: LION] [Complexity: LOW] [Tokens: ~1500] [User: NO]
     Add amount range (min/max) filter support.
@@ -42,25 +41,6 @@ TODO 3.A6-b / FE-006 [Group: LION] [Complexity: MEDIUM] [Tokens: ~3000] [User: N
       2. Fall back to matching on organization_name + line_item_title
       3. Pass related_items list to detail.html template
     Acceptance: Detail panel shows same program across fiscal years.
-
-TODO OPT-FE-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    Extract _build_where() into a shared utility module (DRY).
-    The WHERE clause builder is duplicated between api/routes/budget_lines.py
-    and this file (imported from budget_lines). The download.py route also
-    has its own inline WHERE builder. Consolidate into utils/query.py:
-      1. Create utils/query.py with build_where_clause() function
-      2. Import in budget_lines.py, frontend.py, and download.py
-      3. Add tests in tests/test_query_utils.py
-    Acceptance: Single WHERE builder used by all routes; all tests pass.
-
-TODO OPT-FE-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Cache reference data queries to avoid repeated DB hits.
-    _get_services(), _get_exhibit_types(), _get_fiscal_years() query the DB
-    on every page load. These change rarely. Steps:
-      1. Add simple in-memory cache with TTL (e.g., 5 minutes)
-      2. Use functools.lru_cache or a timestamp-based dict cache
-      3. Optionally add a POST /admin/refresh-cache endpoint
-    Acceptance: Reference queries hit DB once per 5 minutes, not per request.
 """
 
 import sqlite3
@@ -71,12 +51,20 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from api.database import get_db
-from api.routes.budget_lines import _ALLOWED_SORT, _build_where
+from api.routes.budget_lines import _ALLOWED_SORT
+from utils.cache import TTLCache
+from utils.query import build_where_clause
+from utils import sanitize_fts5_query
 
 router = APIRouter(tags=["frontend"])
 
 # Templates instance is set by create_app() after mounting.
 _templates: Jinja2Templates | None = None
+
+# OPT-FE-002: TTL caches for reference data (5-minute TTL)
+_services_cache: TTLCache = TTLCache(maxsize=4, ttl_seconds=300)
+_exhibit_types_cache: TTLCache = TTLCache(maxsize=4, ttl_seconds=300)
+_fiscal_years_cache: TTLCache = TTLCache(maxsize=4, ttl_seconds=300)
 
 
 def set_templates(t: Jinja2Templates) -> None:
@@ -90,43 +78,61 @@ def _tmpl() -> Jinja2Templates:
     return _templates
 
 
-# ── Reference helpers ─────────────────────────────────────────────────────────
+# ── Reference helpers (OPT-FE-002: cached) ────────────────────────────────────
 
 def _get_services(conn: sqlite3.Connection) -> list[dict]:
+    cache_key = ("services", id(conn))
+    cached = _services_cache.get(cache_key)
+    if cached is not None:
+        return cached
     try:
         rows = conn.execute(
             "SELECT code, full_name FROM services_agencies ORDER BY code"
         ).fetchall()
-        return [dict(r) for r in rows]
+        result = [dict(r) for r in rows]
     except Exception:
         rows = conn.execute(
             "SELECT DISTINCT organization_name AS code FROM budget_lines "
             "WHERE organization_name IS NOT NULL ORDER BY organization_name"
         ).fetchall()
-        return [{"code": r["code"], "full_name": r["code"]} for r in rows]
+        result = [{"code": r["code"], "full_name": r["code"]} for r in rows]
+    _services_cache.set(cache_key, result)
+    return result
 
 
 def _get_exhibit_types(conn: sqlite3.Connection) -> list[dict]:
+    cache_key = ("exhibit_types", id(conn))
+    cached = _exhibit_types_cache.get(cache_key)
+    if cached is not None:
+        return cached
     try:
         rows = conn.execute(
             "SELECT code, display_name FROM exhibit_types ORDER BY code"
         ).fetchall()
-        return [dict(r) for r in rows]
+        result = [dict(r) for r in rows]
     except Exception:
         rows = conn.execute(
             "SELECT DISTINCT exhibit_type AS code FROM budget_lines "
             "WHERE exhibit_type IS NOT NULL ORDER BY exhibit_type"
         ).fetchall()
-        return [{"code": r["code"], "display_name": r["code"]} for r in rows]
+        result = [{"code": r["code"], "display_name": r["code"]} for r in rows]
+    _exhibit_types_cache.set(cache_key, result)
+    return result
 
 
 def _get_fiscal_years(conn: sqlite3.Connection) -> list[dict]:
+    cache_key = ("fiscal_years", id(conn))
+    cached = _fiscal_years_cache.get(cache_key)
+    if cached is not None:
+        return cached
     rows = conn.execute(
         "SELECT fiscal_year, COUNT(*) AS row_count FROM budget_lines "
         "WHERE fiscal_year IS NOT NULL "
         "GROUP BY fiscal_year ORDER BY fiscal_year"
     ).fetchall()
-    return [{"fiscal_year": r["fiscal_year"], "row_count": r["row_count"]} for r in rows]
+    result = [{"fiscal_year": r["fiscal_year"], "row_count": r["row_count"]} for r in rows]
+    _fiscal_years_cache.set(cache_key, result)
+    return result
 
 
 def _parse_filters(request: Request) -> dict[str, Any]:
@@ -155,7 +161,8 @@ def _query_results(
     page     = filters["page"]
     offset   = (page - 1) * page_size
 
-    where, params = _build_where(
+    # OPT-FE-001: Use shared WHERE builder from utils/query.py
+    where, params = build_where_clause(
         fiscal_year=filters["fiscal_year"] or None,
         service=filters["service"] or None,
         exhibit_type=filters["exhibit_type"] or None,
@@ -168,7 +175,6 @@ def _query_results(
     fts_ids: list[int] | None = None
     if q:
         try:
-            from utils import sanitize_fts5_query
             safe_q = sanitize_fts5_query(q)
         except Exception:
             safe_q = q.replace('"', '""')

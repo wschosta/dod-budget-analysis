@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.database import get_db
 from api.models import BudgetLineDetailOut, BudgetLineOut, PaginatedResponse
+from utils.query import build_where_clause, build_order_clause
 
 router = APIRouter(prefix="/budget-lines", tags=["budget-lines"])
 
@@ -51,36 +52,14 @@ def _build_where(
     pe_number: list[str] | None,
     appropriation_code: list[str] | None,
 ) -> tuple[str, list[Any]]:
-    conditions: list[str] = []
-    params: list[Any] = []
-
-    if fiscal_year:
-        placeholders = ",".join("?" * len(fiscal_year))
-        conditions.append(f"fiscal_year IN ({placeholders})")
-        params.extend(fiscal_year)
-
-    if service:
-        sub = " OR ".join("organization_name LIKE ?" for _ in service)
-        conditions.append(f"({sub})")
-        params.extend(f"%{s}%" for s in service)
-
-    if exhibit_type:
-        placeholders = ",".join("?" * len(exhibit_type))
-        conditions.append(f"exhibit_type IN ({placeholders})")
-        params.extend(exhibit_type)
-
-    if pe_number:
-        placeholders = ",".join("?" * len(pe_number))
-        conditions.append(f"pe_number IN ({placeholders})")
-        params.extend(pe_number)
-
-    if appropriation_code:
-        placeholders = ",".join("?" * len(appropriation_code))
-        conditions.append(f"appropriation_code IN ({placeholders})")
-        params.extend(appropriation_code)
-
-    where = "WHERE " + " AND ".join(conditions) if conditions else ""
-    return where, params
+    """Build WHERE clause — delegates to shared utils/query.py builder."""
+    return build_where_clause(
+        fiscal_year=fiscal_year,
+        service=service,
+        exhibit_type=exhibit_type,
+        pe_number=pe_number,
+        appropriation_code=appropriation_code,
+    )
 
 
 @router.get("", response_model=PaginatedResponse, summary="List budget lines")
@@ -103,7 +82,13 @@ def list_budget_lines(
             detail=f"sort_by must be one of: {sorted(_ALLOWED_SORT)}",
         )
 
-    where, params = _build_where(fiscal_year, service, exhibit_type, pe_number, appropriation_code)
+    where, params = build_where_clause(
+        fiscal_year=fiscal_year,
+        service=service,
+        exhibit_type=exhibit_type,
+        pe_number=pe_number,
+        appropriation_code=appropriation_code,
+    )
     direction = "DESC" if sort_dir == "desc" else "ASC"
 
     count_sql = f"SELECT COUNT(*) FROM budget_lines {where}"
