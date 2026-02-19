@@ -1,26 +1,3 @@
-{# Detail panel partial — loaded on row click (3.A6-a)
-
-TODO 3.A6-b / FE-006 [Group: LION] [Complexity: MEDIUM] [Tokens: ~3000] [User: NO]
-    Add "Related Items" section showing the same program across fiscal years.
-    The wireframe (docs/UI_WIREFRAMES.md section 7) shows Related Items with
-    FY links. Steps:
-      1. In detail_partial() in api/routes/frontend.py, query budget_lines for
-         rows matching same pe_number OR (organization_name + line_item_title)
-         across different fiscal_years
-      2. Pass related_items list to template context
-      3. Add "Related Fiscal Years" section after the Funding section below
-      4. Render each as: FY | Amount | hx-get link to load that detail
-      5. Handle case where no related items exist (hide section)
-    Acceptance: Detail panel shows the same program across available FYs.
-
-TODO 3.A6-c / FE-007 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Add "Download This Item" and "Source Document" buttons to detail panel.
-    Steps:
-      1. Add download link calling /api/v1/download with item-specific filter
-      2. Add "View Original Document" link mapping source_file to DoD URL
-      3. Style buttons consistently with existing .btn classes
-    Acceptance: Users can download single item and link to source document.
-#}
 {% if item %}
 <div class="detail-panel" id="detail-panel">
   <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:.5rem;flex-wrap:wrap">
@@ -116,5 +93,47 @@ TODO 3.A6-c / FE-007 [Group: LION] [Complexity: LOW] [Tokens: ~1000] [User: NO]
     {% if item.sheet_name %} · Sheet: {{ item.sheet_name }}{% endif %}
     {% if item.row_number %} · Row {{ item.row_number }}{% endif %}
   </p>
+
+  {# FE-006: Related Items across fiscal years #}
+  {% if related_items %}
+  <h4 style="margin-top:1rem;margin-bottom:.5rem;font-size:.85rem;color:var(--clr-gray-700)">
+    Related Fiscal Years
+  </h4>
+  <div style="display:flex;flex-wrap:wrap;gap:.4rem">
+    {% for rel in related_items %}
+    <button class="btn btn-secondary btn-sm"
+            hx-get="/partials/detail/{{ rel.id }}"
+            hx-target="#detail-container"
+            hx-swap="innerHTML"
+            title="{{ rel.line_item_title or rel.organization_name or 'Budget Line' }}">
+      FY{{ rel.fiscal_year }}
+      {% if rel.amount_fy2026_request is not none %}
+        <span style="font-size:.75rem;color:var(--clr-gray-700)">
+          (${{ "{:,.0f}".format(rel.amount_fy2026_request) }}K)
+        </span>
+      {% endif %}
+    </button>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# FE-007: Download This Item + Source Document buttons #}
+  <div style="margin-top:1rem;display:flex;gap:.5rem;flex-wrap:wrap">
+    <a href="/api/v1/download?fmt=csv&limit=1{% if item.pe_number %}&pe_number={{ item.pe_number }}{% endif %}&fiscal_year={{ item.fiscal_year }}"
+       class="btn btn-secondary btn-sm"
+       download
+       title="Download this line item as CSV">
+      ↓ Download This Item
+    </a>
+    {% if item.source_file %}
+    <a href="https://comptroller.defense.gov/Budget-Materials/"
+       class="btn btn-secondary btn-sm"
+       target="_blank"
+       rel="noopener"
+       title="Source: {{ item.source_file }}">
+      ↗ Source Document
+    </a>
+    {% endif %}
+  </div>
 </div>
 {% endif %}
