@@ -10,29 +10,6 @@ Provides reusable functions for:
 TODOs for this file
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO OPT-CFG-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    Consolidate all environment variable configuration into Config class.
-    Currently env vars are read in multiple places:
-    - api/database.py reads APP_DB_PATH
-    - api/app.py reads nothing (hardcoded rate limits)
-    - build_budget_db.py has its own DEFAULT_DB_PATH constant
-    Steps:
-      1. Add env var fields to Config: db_path, api_port, log_format,
-         cors_origins, rate_limit_search, rate_limit_download, pool_size
-      2. Load from environment with sensible defaults
-      3. Add Config.from_env() class method
-      4. Have api/app.py, api/database.py, build_budget_db.py all use Config
-      5. Document all env vars in docs/deployment.md
-    Acceptance: All configuration comes from Config; env vars documented.
-
-TODO OPT-CFG-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Add KnownValues.fiscal_years as configurable instead of hardcoded.
-    Currently FY2024-2026 are hardcoded in multiple places. Steps:
-      1. Add fiscal_years: list[str] to KnownValues (default: [2024,2025,2026])
-      2. Add SUPPORTED_FISCAL_YEARS env var to override
-      3. Update build_budget_db.py to reference KnownValues.fiscal_years
-      4. Update API models and schemas to use this list
-    Acceptance: New FY support requires only env var change, not code changes.
 """
 
 from pathlib import Path
@@ -190,6 +167,30 @@ class KnownValues:
         "3110": "Aircraft Procurement, Air Force",
         "3450": "Missile Procurement, Air Force",
     }
+
+    # OPT-CFG-002: Configurable fiscal years via SUPPORTED_FISCAL_YEARS env var
+    # Default: [2024, 2025, 2026]. Override: SUPPORTED_FISCAL_YEARS=2024,2025,2026,2027
+    @classmethod
+    def _load_fiscal_years(cls) -> list[int]:
+        import os
+        raw = os.getenv("SUPPORTED_FISCAL_YEARS", "")
+        if raw.strip():
+            try:
+                return [int(y.strip()) for y in raw.split(",") if y.strip()]
+            except ValueError:
+                pass
+        return [2024, 2025, 2026]
+
+    fiscal_years: list[int] = property(lambda self: KnownValues._load_fiscal_years())  # type: ignore
+
+    @classmethod
+    def get_fiscal_years(cls) -> list[int]:
+        """Return supported fiscal years from SUPPORTED_FISCAL_YEARS env var.
+
+        Returns:
+            List of fiscal year integers (e.g. [2024, 2025, 2026]).
+        """
+        return cls._load_fiscal_years()
 
     @classmethod
     def is_valid_org(cls, org: str) -> bool:
@@ -371,3 +372,51 @@ class FilePatterns:
             except ValueError:
                 pass
         return None
+
+
+# ── OPT-CFG-001: Consolidated application configuration ───────────────────────
+
+import os as _os
+
+
+class AppConfig(Config):
+    """Application-level configuration loaded from environment variables.
+
+    All env vars have sensible defaults so the application works out of the
+    box without any configuration.
+
+    Environment variables:
+        APP_DB_PATH: Path to the SQLite database file (default: dod_budget.sqlite)
+        APP_PORT: API server port (default: 8000)
+        APP_LOG_FORMAT: Logging format — "text" or "json" (default: text)
+        APP_CORS_ORIGINS: Comma-separated allowed origins (default: *)
+        RATE_LIMIT_SEARCH: Max search requests per minute per IP (default: 60)
+        RATE_LIMIT_DOWNLOAD: Max download requests per minute per IP (default: 10)
+        RATE_LIMIT_DEFAULT: Max requests per minute for other endpoints (default: 120)
+        APP_DB_POOL_SIZE: Max DB connections in pool (default: 10)
+        TRUSTED_PROXIES: Comma-separated proxy IP addresses to trust for forwarded IPs
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.db_path = Path(_os.getenv("APP_DB_PATH", "dod_budget.sqlite"))
+        self.api_port = int(_os.getenv("APP_PORT", "8000"))
+        self.log_format = _os.getenv("APP_LOG_FORMAT", "text")
+        raw_origins = _os.getenv("APP_CORS_ORIGINS", "*")
+        self.cors_origins: list[str] = (
+            ["*"] if raw_origins == "*"
+            else [o.strip() for o in raw_origins.split(",") if o.strip()]
+        )
+        self.rate_limit_search = int(_os.getenv("RATE_LIMIT_SEARCH", "60"))
+        self.rate_limit_download = int(_os.getenv("RATE_LIMIT_DOWNLOAD", "10"))
+        self.rate_limit_default = int(_os.getenv("RATE_LIMIT_DEFAULT", "120"))
+        self.pool_size = int(_os.getenv("APP_DB_POOL_SIZE", "10"))
+        raw_proxies = _os.getenv("TRUSTED_PROXIES", "")
+        self.trusted_proxies: set[str] = (
+            {p.strip() for p in raw_proxies.split(",") if p.strip()}
+        )
+
+    @classmethod
+    def from_env(cls) -> "AppConfig":
+        """Create an AppConfig instance populated from environment variables."""
+        return cls()

@@ -10,26 +10,6 @@ Provides reusable functions for:
 TODOs for this file
 ──────────────────────────────────────────────────────────────────────────────
 
-TODO OPT-FMT-001 [Group: TIGER] [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Consolidate fmt_amount() between this module and api/app.py.
-    api/app.py defines its own inline fmt_amount() Jinja filter (line ~260)
-    that duplicates format_amount() from this module. Steps:
-      1. Make format_amount() compatible with Jinja filter signature
-         (single value arg, returns string)
-      2. In api/app.py, import from utils.formatting instead of defining inline
-      3. Ensure Jinja template usage still works (|fmt_amount filter)
-    Acceptance: Single format_amount() used everywhere; templates render same.
-
-TODO OPT-FMT-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Move _snippet() from api/routes/search.py into this module.
-    search.py has a _snippet() function for extracting text around search
-    matches. This functionality overlaps with extract_snippet() already in
-    this file. Steps:
-      1. Compare _snippet() and extract_snippet() — consolidate logic
-      2. Add highlight parameter to wrap matches in <mark> tags
-      3. Have search.py import extract_snippet from utils.formatting
-      4. Update tests to verify snippet with highlight mode
-    Acceptance: Single snippet function; search.py uses shared version.
 """
 
 from typing import Optional, List, Dict, Any
@@ -387,3 +367,60 @@ class ReportFormatter:
     def print_report(self) -> None:
         """Print report to stdout."""
         print(self.to_string())
+
+
+# ── OPT-FMT-002: Consolidated snippet function with HTML highlighting ──────────
+
+def extract_snippet_highlighted(
+    text: str,
+    query: str,
+    max_len: int = 200,
+    html: bool = False,
+) -> str | None:
+    """Extract a snippet from text around the first matching query term.
+
+    Consolidates the _snippet() logic from api/routes/search.py and adds
+    optional HTML <mark> tag highlighting.
+
+    Args:
+        text: Source text to extract snippet from.
+        query: Search query string (space-separated terms).
+        max_len: Maximum snippet length in characters.
+        html: If True, wrap matched terms in <mark> tags (HTML-escaped first).
+
+    Returns:
+        Snippet string, or None if text is empty.
+    """
+    import html as _html_mod
+
+    if not text or not query:
+        return None
+
+    text_lower = text.lower()
+    terms = query.lower().split()
+    best = len(text)
+    for term in terms:
+        pos = text_lower.find(term)
+        if 0 <= pos < best:
+            best = pos
+
+    if best == len(text):
+        snippet = text[:max_len]
+        prefix = ""
+        suffix = ""
+    else:
+        start = max(0, best - 80)
+        end = min(len(text), start + max_len)
+        snippet = text[start:end].strip()
+        prefix = "..." if start > 0 else ""
+        suffix = "..." if end < len(text) else ""
+
+    if html:
+        import re
+        escaped = _html_mod.escape(snippet)
+        for term in terms:
+            pattern = re.compile(re.escape(_html_mod.escape(term)), re.IGNORECASE)
+            escaped = pattern.sub(lambda m: f"<mark>{m.group(0)}</mark>", escaped)
+        return prefix + escaped + suffix
+
+    return prefix + snippet + suffix

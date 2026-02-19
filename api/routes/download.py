@@ -1,52 +1,13 @@
 """
 GET /api/v1/download endpoint (Step 2.C4-a).
 
-Streams large result sets as CSV or JSON without loading everything into memory.
-Accepts the same filter parameters as /budget-lines.
+Streams large result sets as CSV, JSON, or Excel without loading everything
+into memory. Accepts the same filter parameters as /budget-lines.
 
-──────────────────────────────────────────────────────────────────────────────
-TODOs for this file
-──────────────────────────────────────────────────────────────────────────────
-
-TODO 3.A5-b / DL-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2500] [User: NO]
-    Add Excel (.xlsx) export format.
-    The wireframe (docs/UI_WIREFRAMES.md section 4) shows Excel as a download
-    option. Steps:
-      1. Add fmt=xlsx to the Query() pattern: "^(csv|json|xlsx)$"
-      2. Use openpyxl (already a dependency) to create an in-memory workbook
-      3. Write headers and stream rows in batches using openpyxl's
-         write_only mode for memory efficiency
-      4. Return as StreamingResponse with Content-Type
-         application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
-      5. Add Content-Disposition with .xlsx filename
-    Acceptance: /api/v1/download?fmt=xlsx returns valid Excel workbook.
-
-TODO OPT-DL-001 [Group: TIGER] [Complexity: MEDIUM] [Tokens: ~2000] [User: NO]
-    DRY: Replace inline WHERE clause builder with shared utility.
-    This file builds its own WHERE clause (lines 61-81) identical to the one
-    in budget_lines.py. Steps:
-      1. Import build_where_clause from utils/query.py (see OPT-FE-001)
-      2. Replace inline conditions/params construction with the shared function
-      3. Add keyword search (q) filter support to downloads
-    Acceptance: Download uses same WHERE builder as budget-lines; tests pass.
-
-TODO DL-002 [Group: TIGER] [Complexity: LOW] [Tokens: ~1500] [User: NO]
-    Add keyword search filter to downloads.
-    Currently downloads only support structured filters (FY, service, etc.)
-    but not free-text search. The wireframe shows downloads apply ALL current
-    filters including search text. Steps:
-      1. Add q: str = Query(None) parameter to the download endpoint
-      2. If q is provided, join with budget_lines_fts via MATCH
-      3. Test with combined filters + search term
-    Acceptance: /api/v1/download?q=missile&fmt=csv returns FTS-filtered results.
-
-TODO DL-003 [Group: TIGER] [Complexity: LOW] [Tokens: ~1000] [User: NO]
-    Add export row count header for client progress tracking.
-    Steps:
-      1. Before streaming, COUNT(*) the filtered result set
-      2. Add X-Total-Count header to the StreamingResponse
-      3. Frontend can use this to show download progress percentage
-    Acceptance: Response includes X-Total-Count header with row count.
+DL-001: Excel (.xlsx) export via openpyxl write_only mode.
+DL-002: Keyword search filter (q) for FTS-filtered downloads.
+DL-003: X-Total-Count header for client progress tracking.
+OPT-DL-001: Uses shared WHERE builder from utils/query.py.
 """
 
 import csv
@@ -59,6 +20,8 @@ from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 
 from api.database import get_db
+from utils import sanitize_fts5_query
+from utils.query import build_where_clause
 
 router = APIRouter(prefix="/download", tags=["download"])
 
@@ -87,6 +50,54 @@ def _iter_rows(conn: sqlite3.Connection, sql: str, params: list[Any]):
         yield from batch
 
 
+def _build_download_sql(
+    fiscal_year: list[str] | None,
+    service: list[str] | None,
+    exhibit_type: list[str] | None,
+    pe_number: list[str] | None,
+    q: str | None,
+    conn: sqlite3.Connection,
+    limit: int,
+    export_cols: list[str],
+) -> tuple[str, list[Any], int]:
+    """Build the download SQL with all filters applied.
+
+    Returns:
+        (sql, params, total_count)
+    """
+    # DL-002: Handle FTS keyword filter
+    fts_ids: list[int] | None = None
+    if q and q.strip():
+        try:
+            safe_q = sanitize_fts5_query(q.strip())
+            fts_rows = conn.execute(
+                "SELECT rowid FROM budget_lines_fts WHERE budget_lines_fts MATCH ?",
+                (safe_q,),
+            ).fetchall()
+            fts_ids = [r[0] for r in fts_rows]
+        except Exception:
+            fts_ids = []
+
+    # OPT-DL-001: Use shared WHERE builder
+    where, params = build_where_clause(
+        fiscal_year=fiscal_year,
+        service=service,
+        exhibit_type=exhibit_type,
+        pe_number=pe_number,
+        fts_ids=fts_ids,
+    )
+
+    # DL-003: Count first for X-Total-Count header
+    count_sql = f"SELECT COUNT(*) FROM budget_lines {where}"
+    total = conn.execute(count_sql, params).fetchone()[0]
+
+    col_list = ", ".join(export_cols)
+    sql = f"SELECT {col_list} FROM budget_lines {where} LIMIT {limit}"
+
+    return sql, params, total
+
+
+
 @router.get("", summary="Download search results as CSV, JSON, or Excel")
 def download(
     fmt: str = Query("csv", pattern="^(csv|json|xlsx)$", description="Output format"),
@@ -94,6 +105,8 @@ def download(
     service: list[str] | None = Query(None),
     exhibit_type: list[str] | None = Query(None),
     pe_number: list[str] | None = Query(None),
+    # DL-002: keyword search filter
+    q: str | None = Query(None, description="Keyword search filter (FTS5)"),
     limit: int = Query(
         10_000, ge=1, le=100_000,
         description="Max rows to export (default 10,000)",
@@ -109,30 +122,19 @@ def download(
         else _DOWNLOAD_COLUMNS
     ) or _DOWNLOAD_COLUMNS
 
-    # Build WHERE clause
-    conditions: list[str] = []
-    params: list[Any] = []
+    sql, params, total_count = _build_download_sql(
+        fiscal_year=fiscal_year,
+        service=service,
+        exhibit_type=exhibit_type,
+        pe_number=pe_number,
+        q=q,
+        conn=conn,
+        limit=limit,
+        export_cols=export_cols,
+    )
 
-    if fiscal_year:
-        ph = ",".join("?" * len(fiscal_year))
-        conditions.append(f"fiscal_year IN ({ph})")
-        params.extend(fiscal_year)
-    if service:
-        sub = " OR ".join("organization_name LIKE ?" for _ in service)
-        conditions.append(f"({sub})")
-        params.extend(f"%{s}%" for s in service)
-    if exhibit_type:
-        ph = ",".join("?" * len(exhibit_type))
-        conditions.append(f"exhibit_type IN ({ph})")
-        params.extend(exhibit_type)
-    if pe_number:
-        ph = ",".join("?" * len(pe_number))
-        conditions.append(f"pe_number IN ({ph})")
-        params.extend(pe_number)
-
-    where = "WHERE " + " AND ".join(conditions) if conditions else ""
-    col_list = ", ".join(export_cols)
-    sql = f"SELECT {col_list} FROM budget_lines {where} LIMIT {limit}"
+    # DL-003: X-Total-Count header
+    extra_headers: dict[str, str] = {"X-Total-Count": str(total_count)}
 
     if fmt == "csv":
         def csv_stream():
@@ -149,17 +151,20 @@ def download(
         return StreamingResponse(
             csv_stream(),
             media_type="text/csv",
-            headers={"Content-Disposition": "attachment; filename=budget_lines.csv"},
+            headers={
+                "Content-Disposition": "attachment; filename=budget_lines.csv",
+                **extra_headers,
+            },
         )
 
     if fmt == "xlsx":
-        # JS-001: Excel export using openpyxl write_only mode
+        # DL-001/JS-001: Excel export using openpyxl write_only mode
         import openpyxl
 
         def xlsx_bytes() -> bytes:
             wb = openpyxl.Workbook(write_only=True)
             ws = wb.create_sheet("Budget Lines")
-            ws.append(export_cols)  # header row
+            ws.append(export_cols)  # header row (FE-011: respects column subset)
             for row in _iter_rows(conn, sql, params):
                 ws.append(list(row))
             buf = io.BytesIO()
@@ -173,6 +178,7 @@ def download(
             headers={
                 "Content-Disposition": "attachment; filename=budget_lines.xlsx",
                 "Content-Length": str(len(content)),
+                **extra_headers,
             },
         )
 
@@ -186,6 +192,7 @@ def download(
         json_stream(),
         media_type="application/x-ndjson",
         headers={
-            "Content-Disposition": "attachment; filename=budget_lines.ndjson"
+            "Content-Disposition": "attachment; filename=budget_lines.ndjson",
+            **extra_headers,
         },
     )
