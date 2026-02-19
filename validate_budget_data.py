@@ -13,9 +13,9 @@ Usage:
 
 Status: Core validation checks implemented (1.B6-b, 1.B6-c, 1.B6-e, 1.B6-f, 1.B6-g)
 
-──────────────────────────────────────────────────────────────────────────────
+---
 Remaining TODOs
-──────────────────────────────────────────────────────────────────────────────
+---
 
 DONE 1.B6-a: check_fiscal_year_coverage() added — flags orgs missing expected FYs.
 DONE 1.B6-d: check_column_types() added — detects text in numeric amount columns.

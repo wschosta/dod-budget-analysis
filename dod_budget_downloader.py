@@ -26,9 +26,9 @@ Usage Examples
   python dod_budget_downloader.py --years all --sources all    # Everything
   python dod_budget_downloader.py --no-gui                     # Terminal-only mode
 
-──────────────────────────────────────────────────────────────────────────────
+---
 Roadmap TODOs for this file (Step 1.A)
-──────────────────────────────────────────────────────────────────────────────
+---
 
 TODO 1.A1-a [Complexity: LOW] [Tokens: ~1500] [User: YES — needs network + live env]
     Audit source coverage by running --list --years all --sources all.

@@ -15,9 +15,9 @@ Usage:
     python refresh_data.py --dry-run --years 2026           # Preview without downloading
     python refresh_data.py --help                           # Show full options
 
-──────────────────────────────────────────────────────────────────────────────
+---
 TODOs for this file
-──────────────────────────────────────────────────────────────────────────────
+---
 
 DONE REFRESH-001: Stages 2 (build) and 3 (validate) now call Python functions
   directly instead of subprocess. Stage 1 (download) still uses subprocess

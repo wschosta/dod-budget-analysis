@@ -11,9 +11,9 @@ Usage:
     python build_budget_db.py --rebuild        # Force full rebuild
     python build_budget_db.py --db mydb.sqlite # Custom database path
 
-──────────────────────────────────────────────────────────────────────────────
+---
 Phase 1 Roadmap Tasks for this file (Steps 1.B3 – 1.B5)
-──────────────────────────────────────────────────────────────────────────────
+---
 **Status:** Foundation + key enhancements implemented (1.B2-a year-agnostic
 column mapping, 1.B2-c multi-row headers, 1.B2-d FY normalization,
 1.B3-a monetary normalization, 1.B3-b currency_year, 1.B4-a PE numbers,

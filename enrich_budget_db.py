@@ -9,7 +9,7 @@ Runs after build_budget_db.py to populate the enrichment tables:
 
 Usage:
     python enrich_budget_db.py                          # all phases, no LLM
-    python enrich_budget_db.py --with-llm               # enable LLM tagging (needs ANTHROPIC_API_KEY)
+    python enrich_budget_db.py --with-llm               # enable LLM tagging (needs API key)
     python enrich_budget_db.py --phases 1,2             # run only phases 1 and 2
     python enrich_budget_db.py --rebuild                # drop and rebuild enrichment tables
     python enrich_budget_db.py --db path/to/db.sqlite   # custom DB path
@@ -45,7 +45,8 @@ _TAXONOMY: list[tuple[str, list[str]]] = [
     ("c2",                [r"command\s+and\s+control", r"\bC2\b", r"\bC3\b", r"\bC4ISR\b"]),
     ("isr",               [r"\bISR\b", r"intelligence.*surveillance.*reconnaissance",
                            r"reconnaissance"]),
-    ("electronic-warfare", [r"electronic\s+warfare", r"\bEW\b", r"jamming", r"electronic\s+attack"]),
+    ("electronic-warfare", [
+        r"electronic\s+warfare", r"\bEW\b", r"jamming", r"electronic\s+attack"]),
     ("missile-defense",   [r"missile\s+defense", r"\bBMD\b", r"ballistic\s+missile",
                            r"interceptor"]),
     ("directed-energy",   [r"directed\s+energy", r"\bDEW\b", r"high[- ]energy\s+laser",
@@ -90,11 +91,11 @@ _COMPILED_TAXONOMY: list[tuple[str, list[re.Pattern]]] = [
 _BUDGET_ACTIVITY_TAGS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"6\.1|basic\s+research",           re.IGNORECASE), "basic-research"),
     (re.compile(r"6\.2|applied\s+research",         re.IGNORECASE), "applied-research"),
-    (re.compile(r"6\.3|advanced\s+technology",      re.IGNORECASE), "advanced-technology-development"),
-    (re.compile(r"6\.4|advanced\s+component",       re.IGNORECASE), "advanced-component-development"),
-    (re.compile(r"6\.5|system\s+development",       re.IGNORECASE), "system-development-demonstration"),
-    (re.compile(r"6\.6|rdt.*management",            re.IGNORECASE), "rdte-management-support"),
-    (re.compile(r"6\.7|operational\s+system",       re.IGNORECASE), "operational-system-development"),
+    (re.compile(r"6\.3|advanced\s+technology",  re.IGNORECASE), "advanced-technology-development"),
+    (re.compile(r"6\.4|advanced\s+component",   re.IGNORECASE), "advanced-component-development"),
+    (re.compile(r"6\.5|system\s+development",   re.IGNORECASE), "system-development-demonstration"),
+    (re.compile(r"6\.6|rdt.*management",        re.IGNORECASE), "rdte-management-support"),
+    (re.compile(r"6\.7|operational\s+system",   re.IGNORECASE), "operational-system-development"),
 ]
 
 _APPROP_TAGS: dict[str, str] = {

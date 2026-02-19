@@ -14,9 +14,9 @@ Usage:
     python search_budget.py --sources
     python search_budget.py --interactive
 
-──────────────────────────────────────────────────────────────────────────────
+---
 TODOs for this file
-──────────────────────────────────────────────────────────────────────────────
+---
 
 DONE FIX-004: No line-length violations found; precommit checks pass.
 DONE SEARCH-001: search_budget_lines() and search_pdf_pages() are already
