@@ -107,6 +107,21 @@ _TAXONOMY: list[tuple[str, list[str]]] = [
     ("munitions",         [r"munition", r"ammunition", r"\bJDAM\b", r"\bSDB\b",
                            r"precision\s+guided"]),
     ("missile",           [r"\bmissile\b", r"\bAIM-\d", r"\bAGM-\d", r"cruise\s+missile"]),
+    ("quantum",           [r"quantum", r"post[- ]quantum", r"quantum\s+computing",
+                           r"quantum\s+sensing"]),
+    ("microelectronics",  [r"microelectronic", r"semiconductor", r"chip\s+fabricat",
+                           r"integrated\s+circuit", r"\bASIC\b", r"\bFPGA\b"]),
+    ("5g-comms",          [r"\b5G\b", r"fifth[- ]generation\s+(?:network|comm)",
+                           r"open\s+RAN", r"\bO-RAN\b"]),
+    ("counter-terrorism", [r"counter[- ]?terror", r"\bCT\b.*(?:mission|operation)",
+                           r"counter[- ]?insurgency"]),
+    ("arctic",            [r"arctic", r"polar\s+region", r"cold[- ]weather\s+operation"]),
+    ("indo-pacific",      [r"indo[- ]pacific", r"\bPACOM\b", r"\bINDOPACOM\b",
+                           r"Pacific\s+Deterrence"]),
+    ("submarine",         [r"submarine", r"\bsub(?:surface)?\b.*(?:warfare|vehicle)",
+                           r"undersea", r"torpedo"]),
+    ("medical",           [r"medical\s+(?:research|readiness)", r"combat\s+casualty",
+                           r"military\s+health", r"\bDHP\b"]),
 ]
 
 # Pre-compile all taxonomy patterns

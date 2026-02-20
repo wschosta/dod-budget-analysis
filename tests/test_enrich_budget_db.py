@@ -401,3 +401,23 @@ class TestHelpers:
         tag_names = [t[1] for t in tags]
         assert "cyber" in tag_names
         assert "space" in tag_names
+
+    def test_tags_from_keywords_quantum(self):
+        tags = _tags_from_keywords("0602120A", "quantum computing research for cryptography")
+        tag_names = [t[1] for t in tags]
+        assert "quantum" in tag_names
+
+    def test_tags_from_keywords_microelectronics(self):
+        tags = _tags_from_keywords("0602120A", "microelectronics fabrication and ASIC design")
+        tag_names = [t[1] for t in tags]
+        assert "microelectronics" in tag_names
+
+    def test_tags_from_keywords_5g(self):
+        tags = _tags_from_keywords("0602120A", "5G tactical network implementation")
+        tag_names = [t[1] for t in tags]
+        assert "5g-comms" in tag_names
+
+    def test_tags_from_keywords_submarine(self):
+        tags = _tags_from_keywords("0602120A", "submarine warfare and undersea systems")
+        tag_names = [t[1] for t in tags]
+        assert "submarine" in tag_names
