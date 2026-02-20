@@ -260,18 +260,31 @@ def get_pe(
     except Exception:
         pass
 
+    # Exhibit type breakdown — which exhibits have data for this PE
+    exhibit_rows = conn.execute("""
+        SELECT exhibit_type,
+               COUNT(*) AS line_count,
+               SUM(COALESCE(amount_fy2026_request, 0)) AS fy2026_total
+        FROM budget_lines
+        WHERE pe_number = ? AND exhibit_type IS NOT NULL
+        GROUP BY exhibit_type
+        ORDER BY fy2026_total DESC
+    """, (pe_number,)).fetchall()
+
     return {
         "pe_number": pe_number,
         "index": index,
         "funding": [_row_dict(r) for r in funding_rows],
         "tags": [_row_dict(r) for r in tag_rows],
         "related": [_row_dict(r) for r in related_rows],
+        "exhibits": [_row_dict(r) for r in exhibit_rows],
         "summary": {
             "funding_rows": len(funding_rows),
             "tag_count": len(tag_rows),
             "description_count": desc_count,
             "related_count": len(related_rows),
             "pdf_page_count": pdf_page_count,
+            "exhibit_count": len(exhibit_rows),
         },
     }
 

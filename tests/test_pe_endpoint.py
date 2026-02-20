@@ -274,6 +274,16 @@ class TestGetPe:
         assert s["description_count"] == 2
         assert s["related_count"] == 1
 
+    def test_exhibits_breakdown(self, populated_db):
+        result = get_pe("0602120A", conn=populated_db)
+        assert "exhibits" in result
+        assert isinstance(result["exhibits"], list)
+        assert result["summary"]["exhibit_count"] >= 1
+        for ex in result["exhibits"]:
+            assert "exhibit_type" in ex
+            assert "line_count" in ex
+            assert "fy2026_total" in ex
+
     def test_not_found_raises_404(self, db):
         with pytest.raises(HTTPException) as exc_info:
             get_pe("9999999X", conn=db)
