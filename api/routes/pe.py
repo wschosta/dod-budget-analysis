@@ -70,6 +70,8 @@ def get_top_changes(
     direction: str | None = Query(
         None, description="Filter: 'increase', 'decrease', or None for both"),
     service: str | None = Query(None, description="Filter by service/org"),
+    min_delta: float | None = Query(
+        None, description="Minimum absolute delta to include (in thousands)"),
     sort_by: str | None = Query(
         None, description="Sort: delta (default, abs value), pct_change, fy2026_request"),
     limit: int = Query(20, ge=1, le=100),
@@ -129,6 +131,8 @@ def get_top_changes(
         if direction == "increase" and delta <= 0:
             continue
         if direction == "decrease" and delta >= 0:
+            continue
+        if min_delta is not None and abs(delta) < min_delta:
             continue
 
         d["pct_change"] = (
