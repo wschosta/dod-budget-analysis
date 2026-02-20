@@ -846,6 +846,50 @@ def run_phase4(conn: sqlite3.Connection) -> int:
             total += len(insert_buf)
             insert_buf = []
 
+    # 4c: Extract cross-references from budget_lines.extra_fields JSON.
+    # LION-102 stores additional_pe_numbers in extra_fields for rows where
+    # multiple PE numbers were found in the same cell.
+    xref_count = 0
+    try:
+        xref_rows = conn.execute("""
+            SELECT pe_number, extra_fields, source_file, fiscal_year
+            FROM budget_lines
+            WHERE extra_fields IS NOT NULL AND pe_number IS NOT NULL
+        """).fetchall()
+    except Exception:
+        xref_rows = []
+
+    for primary_pe, extra_json, src_file, fy in xref_rows:
+        try:
+            data = json.loads(extra_json)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        additional = data.get("additional_pe_numbers", [])
+        for ref_pe in additional:
+            if ref_pe == primary_pe or ref_pe not in known_pes:
+                continue
+            insert_buf.append((
+                primary_pe, ref_pe, fy, src_file, None,
+                f"Co-occurrence in budget line extra_fields",
+                "excel_co_occurrence", 0.85,
+            ))
+
+    if insert_buf:
+        try:
+            conn.executemany("""
+                INSERT OR IGNORE INTO pe_lineage
+                    (source_pe, referenced_pe, fiscal_year, source_file,
+                     page_number, context_snippet, link_type, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, insert_buf)
+            conn.commit()
+            xref_count = len(insert_buf)
+            total += xref_count
+        except Exception as exc:
+            print(f"  WARNING: Error inserting Excel cross-references: {exc}")
+
+    if xref_count:
+        print(f"  4c: {xref_count} Excel co-occurrence links added.")
     print(f"  Done. {total} lineage rows inserted.")
     return total
 

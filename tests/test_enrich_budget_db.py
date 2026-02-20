@@ -57,7 +57,8 @@ def _make_db() -> sqlite3.Connection:
             amount_fy2026_total REAL,
             quantity_fy2024 REAL,
             quantity_fy2025 REAL,
-            quantity_fy2026_request REAL
+            quantity_fy2026_request REAL,
+            extra_fields TEXT
         );
 
         CREATE TABLE pdf_pages (
@@ -368,6 +369,27 @@ class TestPhase4:
         self._setup(conn)
         count = run_phase4(conn)
         assert count == 0
+
+    def test_excel_co_occurrence(self, conn):
+        """PE cross-references in extra_fields generate lineage rows."""
+        self._setup(conn)
+        import json
+        # Add extra_fields with additional PE references
+        conn.execute("""
+            UPDATE budget_lines SET extra_fields = ?
+            WHERE pe_number = '0602120A'
+        """, (json.dumps({"additional_pe_numbers": ["0603000A"]}),))
+        conn.commit()
+        count = run_phase4(conn)
+        assert count > 0
+        row = conn.execute("""
+            SELECT * FROM pe_lineage
+            WHERE source_pe = '0602120A'
+              AND referenced_pe = '0603000A'
+              AND link_type = 'excel_co_occurrence'
+        """).fetchone()
+        assert row is not None
+        assert row["confidence"] >= 0.8
 
 
 # ── Utility function tests ────────────────────────────────────────────────────
