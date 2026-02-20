@@ -45,6 +45,9 @@ echo Database: %APP_DB_PATH%
 if "%APP_DB_PATH%"=="" echo Database: dod_budget.sqlite
 echo.
 
+REM Open the browser after a short delay so the server has time to start
+start "" cmd /c "timeout /t 2 /nobreak >nul & start http://localhost:%PORT%"
+
 python -m uvicorn api.app:app --host 0.0.0.0 --port %PORT% --reload --log-level info
 
 if %errorlevel% neq 0 (

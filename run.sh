@@ -22,4 +22,7 @@ echo "Starting DoD Budget Explorer on http://localhost:${PORT}"
 echo "Database: ${APP_DB_PATH:-dod_budget.sqlite}"
 echo ""
 
+# Open the browser after a short delay so the server has time to start
+(sleep 2 && python -m webbrowser "http://localhost:${PORT}") &
+
 exec python -m uvicorn api.app:app --host 0.0.0.0 --port "$PORT" --reload --log-level info
