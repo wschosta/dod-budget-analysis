@@ -169,6 +169,9 @@ def aggregate(
     return result
 
 
+_hierarchy_cache: TTLCache = TTLCache(maxsize=16, ttl_seconds=300)
+
+
 @router.get("/hierarchy", summary="Hierarchical budget breakdown for treemap")
 def hierarchy(
     fiscal_year: str | None = FQuery(None, description="Filter by fiscal year"),
@@ -177,7 +180,13 @@ def hierarchy(
     """Return Service > Appropriation > Program hierarchy for treemap visualization.
 
     Returns items with service, appropriation, program title, PE number, and amount.
+    Results are cached for 300 seconds per (fiscal_year, conn) combination.
     """
+    cache_key = ("hierarchy", fiscal_year, id(conn))
+    cached = _hierarchy_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     conditions: list[str] = [
         "amount_fy2026_request IS NOT NULL",
         "organization_name IS NOT NULL",
@@ -205,4 +214,6 @@ def hierarchy(
         params,
     ).fetchall()
 
-    return {"items": [dict(r) for r in rows]}
+    result = {"items": [dict(r) for r in rows]}
+    _hierarchy_cache.set(cache_key, result)
+    return result
