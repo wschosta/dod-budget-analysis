@@ -45,7 +45,16 @@ The minimum viable product focuses on **Use Case 1 (Targeted Reporting)** and th
 - [ ] Image export of formatted table (for presentations)
 - [ ] All exports include data source attribution (exhibit type, fiscal year, budget submission)
 
-### 1.5 Data Display Decisions (RESOLVED)
+### 1.5 Navigation (RESOLVED)
+- [ ] Nav order: Home → Search/Results → Charts → Programs → About → API Docs
+- [ ] Programs remains a top-level nav item (contingent on program data availability)
+
+### 1.6 Visual Foundations
+- [ ] Global amount formatting toggle ($K / $M / $B) -- all values on screen use the same unit simultaneously
+- [ ] Colorblind-friendly default chart palette; user-selectable alternative palettes (deuteranopia, protanopia, tritanopia, high-contrast)
+- [ ] Dark mode fully polished -- migrate all hardcoded inline colors to CSS custom properties
+
+### 1.7 Data Display Decisions (RESOLVED)
 - **Chart types (MVP):** Bar charts, stacked bar/area charts, sortable tables, Spruill charts
 - **Chart types (deferred):** Sankey/river charts → Phase 3
 - **Data granularity:** Project-level detail (not just PE-level). Tags applied at project level where available. Accomplishment text viewable year-over-year.
@@ -133,7 +142,9 @@ These questions (from GUI_DECISIONS_AND_QUESTIONS.md) need resolution before the
 | ~~2.2 -- Data granularity (PE-level vs. project-level)?~~ | ~~Phase 1.2, Phase 1.5~~ | ~~Data & Display~~ | **RESOLVED** |
 | ~~2.3 -- Inflation-adjusted dollars?~~ | ~~Phase 1.5, Phase 2.1~~ | ~~Data & Display~~ | **RESOLVED** |
 | ~~2.4 -- "Formatted table" export definition?~~ | ~~Phase 1.4~~ | ~~Data & Display~~ | **RESOLVED** |
-| 4.5 -- Amount formatting toggle ($K / $M / $B)? | Phase 1.2 | Visual Design | OPEN |
+| ~~4.3 -- Dark mode polished?~~ | ~~Phase 4~~ | ~~Visual Design~~ | **RESOLVED** |
+| ~~4.4 -- Colorblind-friendly palette?~~ | ~~Phase 1, Phase 2~~ | ~~Visual Design~~ | **RESOLVED** |
+| ~~4.5 -- Amount formatting toggle ($K / $M / $B)?~~ | ~~Phase 1.2~~ | ~~Visual Design~~ | **RESOLVED** |
 | 5.1 -- WCAG 2.1 AA target? | Phase 4.2 | Accessibility | OPEN |
 
 ---

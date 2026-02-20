@@ -128,26 +128,56 @@ Export formats supported:
 
 ## 3. Navigation & Information Architecture
 
-| # | Question / Decision | Priority | Context |
-|---|---------------------|----------|---------|
-| 3.1 | **Is the current nav order correct?** Dashboard, Search, Charts, Programs, About, API Docs. | **Medium** | In `base.html` lines 52-57, Dashboard appears first but Search is the `/` route. Users clicking the site title "DoD Budget Explorer" go to Search, not Dashboard, creating a potential disconnect. |
-| 3.2 | **Should "Programs" be a top-level nav item or a sub-section of Search?** | **Medium** | Programs is conceptually a filtered, enriched view of the same budget data. It could be a tab within Search rather than a separate page, reducing navigation fragmentation. |
-| 3.3 | **Should the API Docs link open in a new tab (current behavior) or be an in-app page?** | **Low** | `base.html` line 57 uses `target="_blank"`. The Swagger UI (`/docs`) and ReDoc (`/redoc`) are both available. Opening in a new tab is standard for developer docs but may surprise non-technical users. |
-| 3.4 | **Is the footer adequate?** Should it include version info, last data refresh date, or data coverage statistics? | **Low** | The footer (`base.html` lines 71-79) currently shows only the data source link, a disclaimer, an API link, and a Feedback button. The app version (`1.0.0` from `app.py`) and data freshness ("refreshed weekly via GitHub Actions") are not surfaced to end users. |
+| # | Question / Decision | Priority | Status | Context |
+|---|---------------------|----------|--------|---------|
+| 3.1 | **Nav order: Home, Search/Results, Charts, Programs, About, API Docs** | **Medium** | **RESOLVED** | Confirmed. Home is the hybrid landing page. Search is the primary workflow entry point. |
+| 3.2 | **Programs as a top-level nav item** | **Medium** | **RESOLVED** | Confirmed as top-level, contingent on identifying program information from the data. |
+| 3.3 | **Should the API Docs link open in a new tab (current behavior) or be an in-app page?** | **Low** | **OPEN** | `base.html` line 57 uses `target="_blank"`. Opening in a new tab is standard for developer docs but may surprise non-technical users. |
+| 3.4 | **Is the footer adequate?** Should it include version info, last data refresh date, or data coverage statistics? | **Low** | **OPEN** | The footer currently shows only the data source link, a disclaimer, an API link, and a Feedback button. |
+
+### 3.1 -- Nav Order (RESOLVED)
+
+**Confirmed:** Home (hybrid landing) → Search/Results → Charts → Programs → About → API Docs
+
+### 3.2 -- Programs as Top-Level Nav (RESOLVED)
+
+Programs stays as a **top-level nav item**, provided the app can identify and surface program information from the budget data. If program-level data is available, a dedicated page is warranted rather than burying it as a tab within Search.
 
 ---
 
 ## 4. Visual Design & Style Preferences
 
-| # | Question / Decision | Priority | Context |
-|---|---------------------|----------|---------|
-| 4.1 | **Color palette: Should the current navy/blue/gray theme reference official DoD branding?** | **Low** | CSS custom properties in `main.css` lines 7-17 define `--clr-navy: #1a3a5c`, `--clr-blue: #2563eb`, etc. These are functional but generic. Official DoD visual identity guidelines exist and could lend credibility. |
-| 4.2 | **Typography: Should the app use a specific typeface instead of `system-ui`?** | **Low** | `main.css` line 83: `font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif`. System fonts load instantly but vary across platforms. A defined typeface (e.g., Inter, Source Sans Pro) would ensure visual consistency. |
-| 4.3 | **Dark mode: Several hardcoded colors bypass CSS custom properties and do not adapt to dark mode.** Should dark mode be fully polished? | **Medium** | Specific instances found in template inline styles: `color:#555` appears in `index.html` line 174 and `results.html` line 132; `color:#888` in `results.html` line 51. The selected-row highlight `#dbeafe` in `main.css` line 331 is a hardcoded light-blue that does not invert in dark mode. The `border:1px solid #ddd` in `charts.html` lines 11, 22, 72, 78 also remains unchanged. |
-| 4.4 | **Chart colors: Should the 10-color palette be colorblind-friendly?** Should there be a colorblind mode toggle? | **Medium** | `charts.html` line 123 defines `COLORS = ['#2563eb','#16a34a','#d97706','#dc2626','#7c3aed','#0891b2','#c2410c','#065f46','#92400e','#1e1b4b']`. The green (`#16a34a`) and red (`#dc2626`) pair is problematic for red-green colorblind users, which affects approximately 8% of males. |
-| 4.5 | **Should amount formatting include a toggle between $K (current), $M, and $B?** | **Medium** | All amounts display in $K in the results table (via the `fmt_amount` Jinja filter) and in $M in the charts (divided by 1000 in JavaScript). There is no user control. For large programs (billions), $K values like `8,234,567.0` are harder to scan than `$8.2B`. |
-| 4.6 | **Should there be data density options (compact / comfortable / spacious) for table rows?** | **Low** | The results table uses fixed padding. Analysts viewing many rows may prefer compact density; casual users may prefer spacious. |
-| 4.7 | **Print styles: Is the current print format the desired one?** | **Low** | `main.css` lines 735-814 hide the sidebar, header, footer, buttons, and pagination for print. The page size is set to landscape. The print header (`.print-header` in `index.html` lines 131-140) shows active filters and print date. Should the print output include summary totals, a page count, or a footer with the source URL? |
+| # | Question / Decision | Priority | Status | Context |
+|---|---------------------|----------|--------|---------|
+| 4.1 | **Color palette: Should the current navy/blue/gray theme reference official DoD branding?** | **Low** | **OPEN** | CSS custom properties in `main.css` lines 7-17 define `--clr-navy: #1a3a5c`, `--clr-blue: #2563eb`, etc. These are functional but generic. |
+| 4.2 | **Typography: Should the app use a specific typeface instead of `system-ui`?** | **Low** | **OPEN** | System fonts load instantly but vary across platforms. A defined typeface would ensure visual consistency. |
+| 4.3 | **Dark mode: fully polished** | **Medium** | **RESOLVED** | See decision below. |
+| 4.4 | **Chart colors: colorblind-friendly default with user-selectable palettes** | **Medium** | **RESOLVED** | See decision below. |
+| 4.5 | **Amount formatting: global toggle ($K / $M / $B)** | **Medium** | **RESOLVED** | See decision below. |
+| 4.6 | **Should there be data density options (compact / comfortable / spacious) for table rows?** | **Low** | **OPEN** | The results table uses fixed padding. Analysts viewing many rows may prefer compact density; casual users may prefer spacious. |
+| 4.7 | **Print styles: Is the current print format the desired one?** | **Low** | **OPEN** | Print styles exist but may need summary totals, page count, or source URL footer. |
+
+### 4.3 -- Dark Mode: Fully Polished (RESOLVED)
+
+Dark mode should be **fully polished**, not just a toggle that half-works. This means:
+- Migrate all hardcoded inline colors (`#555`, `#888`, `#dbeafe`, `#ddd`, etc.) to CSS custom properties that adapt to dark mode
+- Ensure all chart elements, borders, and backgrounds respond to the theme
+- Test both modes thoroughly before shipping
+
+### 4.4 -- Chart Color Palette: Colorblind-Friendly Default (RESOLVED)
+
+- The **default palette** should be colorblind-friendly (avoid problematic red/green pairs)
+- Users should be able to **choose their own color scheme** from a set of options (e.g., default, high-contrast, warm, cool)
+- Different colorblind-friendly palettes (deuteranopia, protanopia, tritanopia) should be available as selectable options
+- This is an accessibility feature, not just a cosmetic preference
+
+### 4.5 -- Amount Formatting: Global Toggle (RESOLVED)
+
+- A **global toggle** lets the user switch between $K, $M, and $B display
+- **All numbers on the screen use the same unit at the same time** -- no mixing of $K, $M, and $B values side by side
+- This prevents misreading: if everything shows $M, there's no risk of confusing 1K with 1M with 1B
+- The toggle applies to tables, charts, exports, and any displayed amounts
+- Default unit can be auto-selected based on the data range, but user override takes precedence
 
 ---
 
@@ -216,6 +246,11 @@ Export formats supported:
 - **2.2** -- Project-level detail with tagging at project level. Accomplishment text viewable year-over-year
 - **2.3** -- Source fidelity: display exactly what budget docs report, never adjust numbers. Toggle if both nominal and constant-year exist in source
 - **2.4** -- Formatted table = styled Excel (.xlsx), with PDF and image export options
+- **3.1** -- Nav order: Home → Search/Results → Charts → Programs → About → API Docs
+- **3.2** -- Programs is a top-level nav item (contingent on program data availability)
+- **4.3** -- Dark mode fully polished (migrate hardcoded colors to CSS custom properties)
+- **4.4** -- Colorblind-friendly default palette; user-selectable alternative palettes
+- **4.5** -- Global amount toggle ($K / $M / $B) -- all values on screen use the same unit simultaneously
 
 ### Remaining High-Priority Open Items
 1. **2.5** -- Fix the Amount Range filter to operate on the correct column context.
@@ -224,8 +259,8 @@ Export formats supported:
 
 ### Open Questions Still Under Discussion
 - **Section 2** -- Remaining items (2.5-2.11): amount filter behavior, related items logic, programs page, compare feature, advanced search, saved views
-- **Section 3** -- Navigation & Information Architecture
-- **Section 4** -- Visual Design & Style Preferences
+- **Section 3** -- Remaining items (3.3-3.4): API docs behavior, footer content
+- **Section 4** -- Remaining items (4.1-4.2, 4.6-4.7): color palette, typography, data density, print styles
 - **Section 5** -- Accessibility
 - **Section 6** -- Performance & Responsiveness
 - **Section 7** -- Feature Gaps & Enhancements
