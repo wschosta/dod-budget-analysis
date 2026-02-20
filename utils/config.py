@@ -388,6 +388,7 @@ class AppConfig(Config):
     Environment variables:
         APP_DB_PATH: Path to the SQLite database file (default: dod_budget.sqlite)
         APP_PORT: API server port (default: 8000)
+        APP_HOST: API server bind address (default: 127.0.0.1)
         APP_LOG_FORMAT: Logging format — "text" or "json" (default: text)
         APP_CORS_ORIGINS: Comma-separated allowed origins (default: *)
         RATE_LIMIT_SEARCH: Max search requests per minute per IP (default: 60)
@@ -401,6 +402,7 @@ class AppConfig(Config):
         super().__init__()
         self.db_path = Path(_os.getenv("APP_DB_PATH", "dod_budget.sqlite"))
         self.api_port = int(_os.getenv("APP_PORT", "8000"))
+        self.api_host = _os.getenv("APP_HOST", "127.0.0.1")
         self.log_format = _os.getenv("APP_LOG_FORMAT", "text")
         raw_origins = _os.getenv("APP_CORS_ORIGINS", "*")
         self.cors_origins: list[str] = (

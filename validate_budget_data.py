@@ -132,14 +132,14 @@ def check_null_heavy_rows(conn: sqlite3.Connection) -> dict:
 
 def check_unknown_exhibit_types(conn: sqlite3.Connection) -> dict:
     """1.B6-e: Flag exhibit types not in the known set."""
-    placeholders = ",".join(f"'{t}'" for t in KNOWN_EXHIBIT_TYPES)
+    placeholders = ",".join("?" for _ in KNOWN_EXHIBIT_TYPES)
     cur = conn.execute(f"""
         SELECT exhibit_type, COUNT(*) as cnt
         FROM budget_lines
         WHERE exhibit_type NOT IN ({placeholders})
         GROUP BY exhibit_type
         ORDER BY cnt DESC
-    """)
+    """, list(KNOWN_EXHIBIT_TYPES))
     rows = [{"exhibit_type": r[0], "count": r[1]} for r in cur.fetchall()]
     return {
         "name": "unknown_exhibit_types",

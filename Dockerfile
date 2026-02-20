@@ -46,7 +46,8 @@ COPY refresh_data.py        .
 
 # Database mount point — override with -v at runtime or COPY in CI builds
 # The health endpoint at /health returns 503 if the DB is absent.
-ENV APP_DB_PATH=/app/dod_budget.sqlite
+ENV APP_DB_PATH=/app/dod_budget.sqlite \
+    APP_HOST=0.0.0.0
 
 # Switch to non-root user
 RUN chown -R appuser:appuser /app

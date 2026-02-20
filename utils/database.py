@@ -14,6 +14,7 @@ TODOs for this file
 """
 
 import logging
+import re
 import sqlite3
 import time
 import threading
@@ -22,6 +23,27 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 _logger = logging.getLogger("dod_budget_api.queries")
+
+# Regex for valid SQL identifiers: letters, digits, underscores only
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _validate_identifier(name: str, kind: str = "identifier") -> str:
+    """Validate that a string is a safe SQL identifier.
+
+    Args:
+        name: The identifier to validate.
+        kind: Description of the identifier (for error messages).
+
+    Returns:
+        The validated identifier string.
+
+    Raises:
+        ValueError: If the name is not a valid SQL identifier.
+    """
+    if not _IDENTIFIER_RE.match(name):
+        raise ValueError(f"Invalid SQL {kind}: {name!r}")
+    return name
 
 # ── TIGER-011: Slow query log ────────────────────────────────────────────────
 
@@ -152,6 +174,7 @@ def get_table_count(conn: sqlite3.Connection, table: str) -> int:
     Returns:
         Number of rows in table
     """
+    _validate_identifier(table, "table name")
     result = conn.execute(f"SELECT COUNT(*) as cnt FROM {table}").fetchone()
     return result['cnt'] if result else 0
 
@@ -166,6 +189,7 @@ def get_table_schema(conn: sqlite3.Connection, table: str) -> List[Dict[str, Any
     Returns:
         List of column info dicts with keys: name, type, notnull, default_value, pk
     """
+    _validate_identifier(table, "table name")
     cursor = conn.execute(f"PRAGMA table_info({table})")
     columns = cursor.fetchall()
     return [dict(col) for col in columns]
@@ -203,6 +227,10 @@ def create_fts5_index(conn: sqlite3.Connection, table: str, fts_table: str,
         create_fts5_index(conn, 'budget_lines', 'budget_lines_fts',
                          ['title', 'description'])
     """
+    _validate_identifier(table, "table name")
+    _validate_identifier(fts_table, "FTS table name")
+    for col in columns:
+        _validate_identifier(col, "column name")
     cols_str = ', '.join(columns)
 
     if rebuild:
@@ -234,6 +262,7 @@ def disable_fts5_triggers(conn: sqlite3.Connection, table: str) -> None:
         conn: SQLite connection
         table: Source table name (triggers are named {table}_ai, {table}_ad, {table}_au)
     """
+    _validate_identifier(table, "table name")
     for suffix in ['ai', 'ad', 'au']:
         conn.execute(f"DROP TRIGGER IF EXISTS {table}_{suffix}")
 
@@ -246,6 +275,8 @@ def enable_fts5_triggers(conn: sqlite3.Connection, table: str, fts_table: str) -
         table: Source table name
         fts_table: FTS5 table name
     """
+    _validate_identifier(table, "table name")
+    _validate_identifier(fts_table, "FTS table name")
     # Insert trigger
     conn.execute(f"""
         CREATE TRIGGER {table}_ai AFTER INSERT ON {table} BEGIN
@@ -317,6 +348,7 @@ def get_amount_columns(conn: sqlite3.Connection, table: str = "budget_lines") ->
     Returns:
         Sorted list of column names that start with "amount_fy".
     """
+    _validate_identifier(table, "table name")
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
     return sorted(
         r[1] for r in rows if r[1].startswith("amount_fy")
@@ -333,6 +365,7 @@ def get_quantity_columns(conn: sqlite3.Connection, table: str = "budget_lines") 
     Returns:
         Sorted list of column names that start with "quantity_fy".
     """
+    _validate_identifier(table, "table name")
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
     return sorted(
         r[1] for r in rows if r[1].startswith("quantity_fy")
@@ -368,6 +401,11 @@ def batch_upsert(
     if not rows:
         return 0
 
+    _validate_identifier(table, "table name")
+    for col in columns:
+        _validate_identifier(col, "column name")
+    for col in conflict_columns:
+        _validate_identifier(col, "conflict column name")
     cols_str = ", ".join(columns)
     placeholders = ", ".join("?" * len(columns))
     conflict_str = ", ".join(conflict_columns)
@@ -426,11 +464,15 @@ class QueryBuilder:
 
     def from_table(self, table: str) -> "QueryBuilder":
         """Set the FROM table."""
+        _validate_identifier(table, "table name")
         self._table = table
         return self
 
     def select(self, columns: List[str]) -> "QueryBuilder":
         """Set the SELECT column list."""
+        for col in columns:
+            if col != "*":
+                _validate_identifier(col, "column name")
         self._columns = columns
         return self
 
@@ -447,6 +489,7 @@ class QueryBuilder:
 
     def order_by(self, column: str, direction: str = "ASC") -> "QueryBuilder":
         """Set ORDER BY clause."""
+        _validate_identifier(column, "column name")
         direction = "DESC" if direction.upper() == "DESC" else "ASC"
         self._order = f"ORDER BY {column} {direction}"
         return self
