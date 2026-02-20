@@ -72,7 +72,10 @@ def dashboard_summary(
         totals AS (
             SELECT COUNT(*) AS total_lines,
                    SUM(fy26) AS total_fy26_request,
-                   SUM(fy25) AS total_fy25_enacted
+                   SUM(fy25) AS total_fy25_enacted,
+                   COUNT(DISTINCT pe_number) AS distinct_pes,
+                   COUNT(DISTINCT fiscal_year) AS distinct_fys,
+                   COUNT(DISTINCT organization_name) AS distinct_services
             FROM base
         ),
         by_service AS (
@@ -102,7 +105,10 @@ def dashboard_summary(
             'totals' AS section, json_object(
                 'total_lines', t.total_lines,
                 'total_fy26_request', t.total_fy26_request,
-                'total_fy25_enacted', t.total_fy25_enacted
+                'total_fy25_enacted', t.total_fy25_enacted,
+                'distinct_pes', t.distinct_pes,
+                'distinct_fys', t.distinct_fys,
+                'distinct_services', t.distinct_services
             ) AS data
         FROM totals t
         UNION ALL

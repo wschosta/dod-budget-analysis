@@ -203,6 +203,15 @@ class TestDashboardAPI:
         assert "total_lines" in data["totals"]
         assert data["totals"]["total_lines"] == 3
 
+    def test_summary_totals_has_distinct_counts(self, app_client):
+        resp = app_client.get("/api/v1/dashboard/summary")
+        data = resp.json()
+        totals = data["totals"]
+        assert "distinct_pes" in totals
+        assert "distinct_fys" in totals
+        assert "distinct_services" in totals
+        assert totals["distinct_pes"] >= 1
+
     def test_summary_has_by_service(self, app_client):
         resp = app_client.get("/api/v1/dashboard/summary")
         data = resp.json()
