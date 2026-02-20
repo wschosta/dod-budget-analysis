@@ -33,8 +33,8 @@ _ALLOWED_GROUPS = {
     "budget_activity": "budget_activity_title",
 }
 
-# OPT-AGG-001: 60-second TTL cache keyed on (group_by, fiscal_year, service, exhibit_type)
-_agg_cache: TTLCache = TTLCache(maxsize=128, ttl_seconds=60)
+# OPT-AGG-001: 300-second TTL cache (matches dashboard) keyed on filter params
+_agg_cache: TTLCache = TTLCache(maxsize=128, ttl_seconds=300)
 
 
 def _cache_key(
@@ -42,12 +42,14 @@ def _cache_key(
     fiscal_year: list[str] | None,
     service: list[str] | None,
     exhibit_type: list[str] | None,
+    conn_id: int = 0,
 ) -> tuple:
     return (
         group_by,
         tuple(sorted(fiscal_year or [])),
         tuple(sorted(service or [])),
         tuple(sorted(exhibit_type or [])),
+        conn_id,
     )
 
 
@@ -78,13 +80,19 @@ def aggregate(
     AGG-001: Amount columns are discovered dynamically from the schema so new
     fiscal year columns (FY2027+) are included automatically.
     AGG-002: Each row includes pct_of_total and yoy_change_pct.
-    OPT-AGG-001: Results are cached for 60 seconds per unique filter combination.
+    OPT-AGG-001: Results are cached for 300 seconds per unique filter combination.
     """
     if group_by not in _ALLOWED_GROUPS:
         raise HTTPException(
             status_code=400,
             detail=f"group_by must be one of: {sorted(_ALLOWED_GROUPS.keys())}",
         )
+
+    # OPT-AGG-001: Check cache before querying
+    key = _cache_key(group_by, fiscal_year, service, exhibit_type, id(conn))
+    cached = _agg_cache.get(key)
+    if cached is not None:
+        return cached
 
     col = _ALLOWED_GROUPS[group_by]
     where, params = build_where_clause(
@@ -156,7 +164,9 @@ def aggregate(
             yoy_change_pct=yoy_change_pct,
         ))
 
-    return AggregationResponse(group_by=group_by, rows=enriched)
+    result = AggregationResponse(group_by=group_by, rows=enriched)
+    _agg_cache.set(key, result)
+    return result
 
 
 @router.get("/hierarchy", summary="Hierarchical budget breakdown for treemap")
