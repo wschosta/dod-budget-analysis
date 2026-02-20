@@ -103,6 +103,7 @@ class SearchResponse(BaseModel):
     pdf_page_count: int = Field(0, description="Number of pdf_page results in this page")
     limit: int = Field(..., description="Maximum results per page", examples=[20])
     offset: int = Field(..., description="Pagination offset", examples=[0])
+    has_more: bool = Field(False, description="Whether more results exist beyond this page")
     results: list[SearchResultItem] = Field(..., description="List of search result items")
 
 

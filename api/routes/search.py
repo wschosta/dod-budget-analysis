@@ -195,6 +195,10 @@ def search(
         raise HTTPException(status_code=400, detail="Query contains no searchable terms")
 
     results: list[SearchResultItem] = []
+    # Fetch limit+1 rows per type to detect if more results exist
+    fetch_limit = limit + 1
+    bl_has_more = False
+    pdf_has_more = False
 
     if type in ("both", "excel"):
         try:
@@ -204,12 +208,15 @@ def search(
                 fiscal_year=fiscal_year,
                 service=service,
                 exhibit_type=exhibit_type,
-                limit=limit,
+                limit=fetch_limit,
                 offset=offset,
             )
             rows = conn.execute(sql, params).fetchall()
         except Exception:
             rows = []
+        if len(rows) > limit:
+            bl_has_more = True
+            rows = rows[:limit]
         for row in rows:
             d = dict(row)
             score = d.pop("score", None)
@@ -231,11 +238,14 @@ def search(
     if type in ("both", "pdf"):
         try:
             sql, params = _pdf_select(
-                fts_query, fiscal_year, exhibit_type, limit, offset
+                fts_query, fiscal_year, exhibit_type, fetch_limit, offset
             )
             rows = conn.execute(sql, params).fetchall()
         except Exception:
             rows = []
+        if len(rows) > limit:
+            pdf_has_more = True
+            rows = rows[:limit]
         for row in rows:
             d = dict(row)
             score = d.pop("score", None)
@@ -259,6 +269,7 @@ def search(
         pdf_page_count=pdf_count,
         limit=limit,
         offset=offset,
+        has_more=bl_has_more or pdf_has_more,
         results=results,
     )
 

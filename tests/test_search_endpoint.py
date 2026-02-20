@@ -175,6 +175,19 @@ class TestSearch:
         assert result.pdf_page_count == 0
         assert result.budget_line_count == result.total
 
+    def test_has_more_false_when_all_fit(self, db):
+        """has_more is False when all results fit within limit."""
+        result = _search(db, "Apache", limit=20)
+        assert result.has_more is False
+
+    def test_has_more_true_when_truncated(self, db):
+        """has_more is True when results were truncated by limit."""
+        # There are 2 budget lines, so limit=1 should set has_more
+        result = _search(db, "Army OR Navy OR Aircraft OR Shipbuilding",
+                         type="excel", limit=1)
+        assert result.has_more is True
+        assert len(result.results) == 1
+
 
 # ── Suggest/autocomplete tests ─────────────────────────────────────────────
 
