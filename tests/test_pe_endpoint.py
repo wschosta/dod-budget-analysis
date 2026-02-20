@@ -485,29 +485,29 @@ class TestGetPeRelated:
 
 class TestListPes:
     def test_returns_all(self, populated_db):
-        result = list_pes(tag=None, q=None, service=None, budget_type=None,
+        result = list_pes(tag=None, q=None, service=None, budget_type=None, approp=None,
                           fy=None, limit=25, offset=0, conn=populated_db)
         assert result["total"] == 2
 
     def test_filter_by_service(self, populated_db):
-        result = list_pes(tag=None, q=None, service="Army", budget_type=None,
+        result = list_pes(tag=None, q=None, service="Army", budget_type=None, approp=None,
                           fy=None, limit=25, offset=0, conn=populated_db)
         assert result["total"] == 1
         assert result["items"][0]["pe_number"] == "0602120A"
 
     def test_filter_by_budget_type(self, populated_db):
         result = list_pes(tag=None, q=None, service=None, budget_type="rdte",
-                          fy=None, limit=25, offset=0, conn=populated_db)
+                          approp=None, fy=None, limit=25, offset=0, conn=populated_db)
         assert result["total"] == 2
 
     def test_filter_by_fy(self, populated_db):
-        result = list_pes(tag=None, q=None, service=None, budget_type=None,
+        result = list_pes(tag=None, q=None, service=None, budget_type=None, approp=None,
                           fy="2025", limit=25, offset=0, conn=populated_db)
         # Only 0602120A has FY2025
         assert result["total"] == 1
 
     def test_filter_by_tag(self, populated_db):
-        result = list_pes(tag=["radar"], q=None, service=None, budget_type=None,
+        result = list_pes(tag=["radar"], q=None, service=None, budget_type=None, approp=None,
                           fy=None, limit=25, offset=0, conn=populated_db)
         assert result["total"] == 1
         assert result["items"][0]["pe_number"] == "0602120A"
@@ -515,36 +515,36 @@ class TestListPes:
     def test_multi_tag_and_logic(self, populated_db):
         # Both "army" and "radar" → 0602120A only
         result = list_pes(tag=["army", "radar"], q=None, service=None,
-                          budget_type=None, fy=None, limit=25, offset=0,
-                          conn=populated_db)
+                          budget_type=None, approp=None, fy=None, limit=25,
+                          offset=0, conn=populated_db)
         assert result["total"] == 1
 
     def test_topic_query(self, populated_db):
-        result = list_pes(tag=None, q="radar", service=None, budget_type=None,
+        result = list_pes(tag=None, q="radar", service=None, budget_type=None, approp=None,
                           fy=None, limit=25, offset=0, conn=populated_db)
         assert result["total"] == 1
 
     def test_items_include_tags(self, populated_db):
-        result = list_pes(tag=None, q=None, service="Army", budget_type=None,
+        result = list_pes(tag=None, q=None, service="Army", budget_type=None, approp=None,
                           fy=None, limit=25, offset=0, conn=populated_db)
         tags = result["items"][0]["tags"]
         assert isinstance(tags, list)
         assert len(tags) > 0
 
     def test_pagination(self, populated_db):
-        result = list_pes(tag=None, q=None, service=None, budget_type=None,
+        result = list_pes(tag=None, q=None, service=None, budget_type=None, approp=None,
                           fy=None, limit=1, offset=0, conn=populated_db)
         assert result["total"] == 2
         assert len(result["items"]) == 1
 
     def test_fiscal_years_parsed_as_list(self, populated_db):
-        result = list_pes(tag=None, q=None, service=None, budget_type=None,
+        result = list_pes(tag=None, q=None, service=None, budget_type=None, approp=None,
                           fy=None, limit=25, offset=0, conn=populated_db)
         for item in result["items"]:
             assert isinstance(item["fiscal_years"], list)
 
     def test_enrichment_status_indicators(self, populated_db):
-        result = list_pes(tag=None, q=None, service=None, budget_type=None,
+        result = list_pes(tag=None, q=None, service=None, budget_type=None, approp=None,
                           fy=None, limit=25, offset=0, conn=populated_db)
         pe_items = {i["pe_number"]: i for i in result["items"]}
         # 0602120A has descriptions and lineage in the fixture
@@ -555,13 +555,28 @@ class TestListPes:
         assert pe_items["0603000A"]["has_related"] is False
 
     def test_funding_total_included(self, populated_db):
-        result = list_pes(tag=None, q=None, service=None, budget_type=None,
+        result = list_pes(tag=None, q=None, service=None, budget_type=None, approp=None,
                           fy=None, limit=25, offset=0, conn=populated_db)
         pe_items = {i["pe_number"]: i for i in result["items"]}
         # 0602120A has 1400 + 1400 + 700 = 3500 in fy2026_request
         assert pe_items["0602120A"]["total_fy2026_request"] == 3500.0
         # 0603000A has 9000
         assert pe_items["0603000A"]["total_fy2026_request"] == 9000.0
+
+    def test_filter_by_approp(self, populated_db):
+        """Appropriation title substring filter restricts PE results."""
+        result = list_pes(tag=None, q=None, service=None, budget_type=None,
+                          approp="RDT&E", fy=None, limit=25,
+                          offset=0, conn=populated_db)
+        # Both PEs have RDTE appropriation title
+        assert result["total"] == 2
+
+    def test_filter_by_approp_no_match(self, populated_db):
+        """Non-matching appropriation returns empty."""
+        result = list_pes(tag=None, q=None, service=None, budget_type=None,
+                          approp="Nonexistent Appropriation", fy=None,
+                          limit=25, offset=0, conn=populated_db)
+        assert result["total"] == 0
 
 
 # ── list_tags tests ───────────────────────────────────────────────────────────

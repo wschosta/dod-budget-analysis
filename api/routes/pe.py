@@ -545,6 +545,7 @@ def list_pes(
     q: str | None = Query(None, description="Free-text topic search via FTS5"),
     service: str | None = Query(None, description="Filter by service/org name"),
     budget_type: str | None = Query(None, description="Filter by budget type"),
+    approp: str | None = Query(None, description="Filter by appropriation title (substring)"),
     fy: str | None = Query(None, description="Filter to PEs present in a fiscal year"),
     limit: int = Query(25, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -578,6 +579,15 @@ def list_pes(
     if budget_type:
         conditions.append("p.budget_type = ?")
         params.append(budget_type)
+
+    # Appropriation filter (matches PE numbers that appear in budget_lines
+    # with a matching appropriation_title)
+    if approp:
+        conditions.append("""p.pe_number IN (
+            SELECT DISTINCT pe_number FROM budget_lines
+            WHERE appropriation_title LIKE ?
+        )""")
+        params.append(f"%{approp}%")
 
     # Fiscal year filter (pe_index.fiscal_years is a JSON array)
     if fy:
