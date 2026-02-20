@@ -275,6 +275,13 @@ class TestGetPe:
         assert s["description_count"] == 2
         assert s["related_count"] == 1
 
+    def test_summary_funding_totals(self, populated_db):
+        """Summary includes pre-computed funding totals."""
+        result = get_pe("0602120A", conn=populated_db)
+        s = result["summary"]
+        assert s["total_fy2026_request"] == 3500.0  # 1400+1400+700
+        assert s["total_fy2025_enacted"] == 3000.0  # 1200+1200+600
+
     def test_exhibits_breakdown(self, populated_db):
         result = get_pe("0602120A", conn=populated_db)
         assert "exhibits" in result

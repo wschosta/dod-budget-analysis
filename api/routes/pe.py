@@ -310,6 +310,12 @@ def get_pe(
             "related_count": len(related_rows),
             "pdf_page_count": pdf_page_count,
             "exhibit_count": len(exhibit_rows),
+            "total_fy2026_request": sum(
+                r["amount_fy2026_request"] or 0 for r in funding_rows
+            ),
+            "total_fy2025_enacted": sum(
+                r["amount_fy2025_enacted"] or 0 for r in funding_rows
+            ),
         },
     }
 
