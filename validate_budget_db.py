@@ -16,6 +16,13 @@ Usage:
 TODOs for this file
 ---
 
+LION-108-val: Add validation checks for LION schema changes.
+    After LION-100/103/106 are implemented, add checks for:
+    (a) pdf_pages.fiscal_year is non-null (warn if >5% null)
+    (b) pdf_pe_numbers table has rows for PDFs containing PE-like text
+    (c) pe_tags.source_files is non-null for all rows
+    These are integrated into validate_all() as new check functions.
+
 """
 
 import argparse

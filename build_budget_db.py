@@ -64,6 +64,45 @@ OPT-BUILD-001 [DONE]: Parallelize Excel file ingestion using ProcessPoolExecutor
     _extract_excel_rows() is a standalone worker that extracts rows without DB access.
     build_database() uses ProcessPoolExecutor for Excel when workers > 1.
     Rows are merged back into the main DB via batch INSERT in the main process.
+
+──────────────────────────────────────────────────────────────────────────────
+LION TODOs — Database Import Alignment & Integrity (Review)
+──────────────────────────────────────────────────────────────────────────────
+
+LION-100: Add fiscal_year and exhibit_type columns to pdf_pages table.
+    Currently pdf_pages only stores source_file and source_category. The FY is
+    not recorded until enrichment infers it from the file path. This means the
+    GUI cannot filter PDF content by FY directly, and enrichment depends on
+    fragile path parsing. Fix: extract FY from the directory path (e.g.
+    FY2026/Comptroller/file.pdf → "FY 2026") and exhibit_type from the filename
+    during PDF ingestion. Store both on each pdf_pages row. Update the schema
+    in create_database() and the INSERT in ingest_pdf_file()/_extract_pdf_data().
+
+LION-101: Validate fiscal year from sheet name against directory path.
+    _normalise_fiscal_year() infers FY solely from the Excel sheet name. If a
+    sheet is named "Data" or "Summary" (no FY), the value passes through as-is
+    and becomes a non-standard fiscal_year string in budget_lines. Fix: also
+    extract FY from the directory path as a fallback. When both are available,
+    log a warning if they disagree. When the sheet name yields no FY, use the
+    directory-derived value. Add this to both ingest_excel_file() and
+    _extract_excel_rows().
+
+LION-102: Extract ALL PE numbers per cell, not just the first match.
+    _extract_pe_number() returns only re.search() (first match). Some cells
+    contain multiple PE references (e.g. "0602702E / 0603000A"). Fix: change
+    to re.findall(), return the first as pe_number (primary), and store any
+    additional PEs in extra_fields JSON under key "additional_pe_numbers".
+    This preserves backward compatibility while capturing secondary references.
+
+LION-103: Create pdf_pe_numbers junction table populated during PDF ingestion.
+    Currently PE-to-PDF linking only happens during enrichment Phase 2, which
+    scans pdf_pages text after the fact. Fix: during ingest_pdf_file(), scan
+    each page's text for PE numbers and insert rows into a new
+    pdf_pe_numbers(pdf_page_id, pe_number, page_number, source_file, fiscal_year)
+    table. This pre-computes the PE-to-page mapping, enabling direct joins
+    without the expensive enrichment scan, and ensures every PE mention in
+    every PDF is captured at ingestion time.
+
 """
 
 import argparse

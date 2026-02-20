@@ -13,6 +13,35 @@ Usage:
     python enrich_budget_db.py --phases 1,2             # run only phases 1 and 2
     python enrich_budget_db.py --rebuild                # drop and rebuild enrichment tables
     python enrich_budget_db.py --db path/to/db.sqlite   # custom DB path
+
+──────────────────────────────────────────────────────────────────────────────
+LION TODOs — Enrichment Alignment & Tag Quality
+──────────────────────────────────────────────────────────────────────────────
+
+LION-104: Include budget_lines text fields in keyword tagging.
+    Phase 3 currently only applies keyword tags from pe_descriptions text
+    (PDF narratives). Many PEs have no PDF description but DO have descriptive
+    text in budget_lines.line_item_title, budget_activity_title, and
+    account_title. Fix: when building the combined text for keyword matching,
+    also concatenate these budget_lines text fields. This ensures PEs without
+    PDF coverage still receive appropriate keyword tags.
+
+LION-105: Differentiate confidence scoring by tag source.
+    All tags currently get confidence=1.0 regardless of source quality.
+    Fix: use 1.0 for structured tags (direct field match), 0.9 for keyword
+    matches from budget_lines title fields (high signal, short text), 0.8
+    for keyword matches from PDF narrative text (longer text, more context
+    noise), and 0.7 for LLM-generated tags. This enables the GUI to rank
+    and filter tags by reliability.
+
+LION-106: Add source_files tracking to pe_tags table.
+    pe_tags has no provenance — cannot trace which source file(s) contributed
+    a given tag. Fix: add a source_files TEXT column (JSON array of filenames)
+    to pe_tags. During structured tagging, record the budget_lines source_file.
+    During keyword tagging, record the pe_descriptions source_file(s). This
+    enables data lineage auditing and selective tag invalidation when source
+    data is corrected.
+
 """
 
 from __future__ import annotations

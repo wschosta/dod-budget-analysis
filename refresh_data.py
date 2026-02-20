@@ -27,6 +27,22 @@ DONE REFRESH-004: Progress file (refresh_progress.json) written at each stage
   transition. Deleted on successful completion.
 DONE REFRESH-005: --schedule flag for periodic refresh (daily/weekly/monthly).
   Uses a sleep loop with configurable --at-hour.
+
+──────────────────────────────────────────────────────────────────────────────
+LION TODOs — Rebuild Orchestration
+──────────────────────────────────────────────────────────────────────────────
+
+LION-107: Add rebuild orchestration with timing and integrity checks.
+    The current refresh_data.py runs download → build → validate → report but
+    does NOT run enrichment (enrich_budget_db.py). After a rebuild, the
+    enrichment tables (pe_index, pe_descriptions, pe_tags, pe_lineage) are
+    stale or empty. Fix: add a Stage 2b between build and validate that runs
+    enrich_budget_db.enrich() with rebuild=True. Add timing output for each
+    stage. Also add a post-enrichment integrity check that verifies:
+    (a) every PE in budget_lines has a pe_index entry,
+    (b) pe_tags is non-empty,
+    (c) pe_descriptions covers expected PE/FY combinations.
+
 """
 
 # DONE [Group: BEAR] BEAR-010: Data refresh e2e test — tests/test_bear_refresh_e2e.py (14 tests)

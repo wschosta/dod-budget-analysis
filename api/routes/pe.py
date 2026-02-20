@@ -5,6 +5,11 @@ Supports the three core GUI use cases:
   1. PE lookup by number — funding table by year, sub-elements, related PEs, descriptions
   2. Topic/tag search — find PE lines matching a tag or free-text topic
   3. Export — Spruill-style funding table (CSV) or ZIP of PDF pages for a PE set
+
+Note: The following LION TODOs affect this file's queries:
+  LION-100: pdf_pages now has fiscal_year/exhibit_type — update PDF-related queries.
+  LION-103: pdf_pe_numbers junction table — can use direct JOIN instead of text scan.
+  LION-106: pe_tags.source_files — include in tag response for provenance display.
 """
 
 from __future__ import annotations
