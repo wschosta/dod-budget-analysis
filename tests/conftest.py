@@ -434,6 +434,22 @@ def bad_excel(tmp_path_factory) -> Path:
     return path
 
 
+# ── Cache clearing ────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _clear_api_caches():
+    """Clear server-side caches before each test to prevent cross-test contamination."""
+    try:
+        from api.routes.aggregations import _agg_cache, _hierarchy_cache
+        from api.routes.dashboard import _summary_cache
+        _agg_cache.clear()
+        _hierarchy_cache.clear()
+        _summary_cache.clear()
+    except ImportError:
+        pass
+    yield
+
+
 # ── Function-scoped helpers ───────────────────────────────────────────────────
 
 @pytest.fixture()
