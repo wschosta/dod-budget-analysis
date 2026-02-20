@@ -11,7 +11,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from api.routes.reference import list_services, list_exhibit_types, list_fiscal_years
+from api.routes.reference import (
+    list_services, list_exhibit_types, list_fiscal_years,
+    list_appropriations, list_budget_types,
+)
 from api.routes.aggregations import aggregate, _ALLOWED_GROUPS
 
 
@@ -57,12 +60,14 @@ def db_with_ref_tables():
             amount_fy2025_enacted REAL,
             amount_fy2026_request REAL,
             appropriation_code TEXT,
-            budget_activity_title TEXT
+            appropriation_title TEXT,
+            budget_activity_title TEXT,
+            budget_type TEXT
         );
-        INSERT INTO budget_lines VALUES (1, 'FY 2026', 'Army', 'p1', 800, 900, 1000, '3010', 'Aircraft');
-        INSERT INTO budget_lines VALUES (2, 'FY 2026', 'Army', 'r1', 1600, 1800, 2000, '3600', 'Missiles');
-        INSERT INTO budget_lines VALUES (3, 'FY 2026', 'Navy', 'p1', 300, 400, 500, '3010', 'Ships');
-        INSERT INTO budget_lines VALUES (4, 'FY 2025', 'Army', 'p1', 1300, 1400, 1500, '3010', 'Aircraft');
+        INSERT INTO budget_lines VALUES (1, 'FY 2026', 'Army', 'p1', 800, 900, 1000, '3010', 'Aircraft Procurement', 'Aircraft', 'Procurement');
+        INSERT INTO budget_lines VALUES (2, 'FY 2026', 'Army', 'r1', 1600, 1800, 2000, '3600', 'RDT&E', 'Missiles', 'RDT&E');
+        INSERT INTO budget_lines VALUES (3, 'FY 2026', 'Navy', 'p1', 300, 400, 500, '3010', 'Aircraft Procurement', 'Ships', 'Procurement');
+        INSERT INTO budget_lines VALUES (4, 'FY 2025', 'Army', 'p1', 1300, 1400, 1500, '3010', 'Aircraft Procurement', 'Aircraft', 'Procurement');
     """)
     yield conn
     conn.close()
@@ -170,6 +175,32 @@ class TestListFiscalYears:
         conn.close()
 
 
+class TestListAppropriations:
+    def test_returns_codes_with_counts(self, db_with_ref_tables):
+        import json
+        resp = list_appropriations(db_with_ref_tables)
+        items = json.loads(resp.body)
+        assert len(items) >= 1
+        assert all("code" in item for item in items)
+        assert all("row_count" in item for item in items)
+
+    def test_has_title(self, db_with_ref_tables):
+        import json
+        resp = list_appropriations(db_with_ref_tables)
+        items = json.loads(resp.body)
+        assert any(item.get("title") is not None for item in items)
+
+
+class TestListBudgetTypes:
+    def test_returns_types_with_counts(self, db_with_ref_tables):
+        import json
+        resp = list_budget_types(db_with_ref_tables)
+        items = json.loads(resp.body)
+        assert len(items) >= 1
+        types = {item["budget_type"] for item in items}
+        assert "Procurement" in types
+
+
 class TestAllowedGroups:
     def test_has_expected_keys(self):
         assert "service" in _ALLOWED_GROUPS
@@ -183,7 +214,7 @@ class TestAggregate:
     def test_group_by_service(self, db_with_ref_tables):
         result = aggregate(
             group_by="service", fiscal_year=None, service=None,
-            exhibit_type=None, conn=db_with_ref_tables,
+            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
         )
         assert result.group_by == "service"
         assert len(result.rows) == 2  # Army and Navy
@@ -191,21 +222,21 @@ class TestAggregate:
     def test_group_by_fiscal_year(self, db_with_ref_tables):
         result = aggregate(
             group_by="fiscal_year", fiscal_year=None, service=None,
-            exhibit_type=None, conn=db_with_ref_tables,
+            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
         )
         assert len(result.rows) == 2  # FY 2025 and FY 2026
 
     def test_group_by_exhibit_type(self, db_with_ref_tables):
         result = aggregate(
             group_by="exhibit_type", fiscal_year=None, service=None,
-            exhibit_type=None, conn=db_with_ref_tables,
+            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
         )
         assert len(result.rows) == 2  # p1 and r1
 
     def test_filter_by_fiscal_year(self, db_with_ref_tables):
         result = aggregate(
             group_by="service", fiscal_year=["FY 2026"], service=None,
-            exhibit_type=None, conn=db_with_ref_tables,
+            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
         )
         # Only FY 2026 rows: Army (2) and Navy (1)
         assert len(result.rows) == 2
@@ -213,7 +244,7 @@ class TestAggregate:
     def test_filter_by_service(self, db_with_ref_tables):
         result = aggregate(
             group_by="exhibit_type", fiscal_year=None, service=["Army"],
-            exhibit_type=None, conn=db_with_ref_tables,
+            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
         )
         # Army has p1 and r1
         assert len(result.rows) == 2
@@ -221,7 +252,7 @@ class TestAggregate:
     def test_filter_by_exhibit_type(self, db_with_ref_tables):
         result = aggregate(
             group_by="service", fiscal_year=None, service=None,
-            exhibit_type=["p1"], conn=db_with_ref_tables,
+            exhibit_type=["p1"], appropriation_code=None, conn=db_with_ref_tables,
         )
         # p1: Army and Navy
         assert len(result.rows) == 2
@@ -230,7 +261,7 @@ class TestAggregate:
         result = aggregate(
             group_by="service", fiscal_year=["FY 2026"],
             service=["Army"], exhibit_type=["p1"],
-            conn=db_with_ref_tables,
+            appropriation_code=None, conn=db_with_ref_tables,
         )
         assert len(result.rows) == 1
         assert result.rows[0].group_value == "Army"
@@ -241,13 +272,60 @@ class TestAggregate:
         with pytest.raises(HTTPException) as exc_info:
             aggregate(
                 group_by="invalid", fiscal_year=None, service=None,
-                exhibit_type=None, conn=db_with_ref_tables,
+                exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
             )
         assert exc_info.value.status_code == 400
 
     def test_empty_result(self, db_with_ref_tables):
         result = aggregate(
             group_by="service", fiscal_year=["FY 2030"], service=None,
-            exhibit_type=None, conn=db_with_ref_tables,
+            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
         )
         assert len(result.rows) == 0
+
+    def test_rows_with_amount_present(self, db_with_ref_tables):
+        """Each aggregation row includes rows_with_amount count."""
+        result = aggregate(
+            group_by="service", fiscal_year=None, service=None,
+            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
+        )
+        for row in result.rows:
+            assert row.rows_with_amount is not None
+            assert row.rows_with_amount <= row.row_count
+
+    def test_rows_with_amount_excludes_nulls(self, db_with_ref_tables):
+        """rows_with_amount excludes rows with NULL latest-FY amount."""
+        # Add a row with NULL amount_fy2026_request
+        db_with_ref_tables.execute(
+            "INSERT INTO budget_lines VALUES (99, 'FY 2026', 'Army', 'p1',"
+            " 100, 200, NULL, '3010', 'Test Approp', 'Test', 'Procurement')"
+        )
+        result = aggregate(
+            group_by="service", fiscal_year=None, service=None,
+            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
+        )
+        army_row = next(r for r in result.rows if r.group_value == "Army")
+        # Army now has 4 rows (3 original + 1 NULL) but only 3 with amount
+        assert army_row.row_count == 4
+        assert army_row.rows_with_amount == 3
+
+    def test_group_by_budget_type(self, db_with_ref_tables):
+        """group_by=budget_type returns groups per budget type."""
+        result = aggregate(
+            group_by="budget_type", fiscal_year=None, service=None,
+            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
+        )
+        types = {r.group_value for r in result.rows}
+        assert "Procurement" in types
+        assert "RDT&E" in types
+
+    def test_filter_by_appropriation_code(self, db_with_ref_tables):
+        """appropriation_code filter narrows to matching budget lines."""
+        result = aggregate(
+            group_by="service", fiscal_year=None, service=None,
+            exhibit_type=None, appropriation_code=["3010"],
+            conn=db_with_ref_tables,
+        )
+        # Only rows with appropriation_code=3010 (3 of 4 rows)
+        total_rows = sum(r.row_count for r in result.rows)
+        assert total_rows == 3

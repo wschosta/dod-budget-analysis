@@ -18,8 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 for _mod in ("pdfplumber", "openpyxl", "pandas"):
     sys.modules.setdefault(_mod, types.ModuleType(_mod))
 
-from build_budget_db import create_database
-from validate_budget_db import (
+from build_budget_db import create_database  # noqa: E402
+from validate_budget_db import (  # noqa: E402
     check_missing_years,
     check_duplicates,
     check_zero_amounts,
@@ -28,6 +28,13 @@ from validate_budget_db import (
     check_ingestion_errors,
     check_unit_consistency,
     check_empty_files,
+    check_enrichment_orphans,
+    check_enrichment_staleness,
+    check_extreme_outliers,
+    check_pe_org_consistency,
+    check_budget_activity_consistency,
+    check_fy_column_null_rates,
+    check_expected_indexes,
     _get_amount_columns,
     generate_report,
 )
@@ -342,3 +349,439 @@ def test_generate_report_verbose_shows_detail(conn, capsys):
     out = capsys.readouterr().out
     # Verbose mode should show at least one issue detail
     assert "ERROR" in out or "WARNING" in out or "INFO" in out
+
+
+# ── Budget Type Values ────────────────────────────────────────────────────────
+
+from validate_budget_db import (  # noqa: E402
+    check_budget_type_values,
+    check_pdf_pages_fiscal_year,
+    check_pdf_pe_numbers_populated,
+    check_pe_tags_source_files,
+)
+
+
+def test_budget_type_known_values(conn):
+    """Known budget_type values → no issues."""
+    _insert_line(conn, budget_type="RDT&E")
+    issues = check_budget_type_values(conn)
+    assert len(issues) == 0
+
+
+def test_budget_type_unknown_flagged(conn):
+    """Unknown budget_type → info-level issue."""
+    _insert_line(conn, budget_type="weird_type")
+    issues = check_budget_type_values(conn)
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "info"
+    assert issues[0]["budget_type"] == "weird_type"
+
+
+# ── LION-108-val: PDF Pages Fiscal Year ──────────────────────────────────────
+
+
+def test_pdf_pages_fy_all_populated(conn):
+    """All pdf_pages have fiscal_year → no issues."""
+    conn.execute(
+        "INSERT INTO pdf_pages (source_file, source_category, fiscal_year, "
+        "page_number, page_text) VALUES (?, ?, ?, ?, ?)",
+        ("r2.pdf", "Army", "FY 2026", 1, "test text"),
+    )
+    conn.commit()
+    issues = check_pdf_pages_fiscal_year(conn)
+    assert len(issues) == 0
+
+
+def test_pdf_pages_fy_null_warning(conn):
+    """pdf_pages with NULL fiscal_year → warning when >5%."""
+    for i in range(20):
+        fy = None if i < 5 else "FY 2026"  # 25% null
+        conn.execute(
+            "INSERT INTO pdf_pages (source_file, source_category, fiscal_year, "
+            "page_number, page_text) VALUES (?, ?, ?, ?, ?)",
+            ("r2.pdf", "Army", fy, i, "text"),
+        )
+    conn.commit()
+    issues = check_pdf_pages_fiscal_year(conn)
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "warning"
+    assert issues[0]["null_count"] == 5
+
+
+def test_pdf_pages_fy_null_info_when_low(conn):
+    """pdf_pages with low NULL fiscal_year rate → info."""
+    for i in range(100):
+        fy = None if i == 0 else "FY 2026"  # 1% null
+        conn.execute(
+            "INSERT INTO pdf_pages (source_file, source_category, fiscal_year, "
+            "page_number, page_text) VALUES (?, ?, ?, ?, ?)",
+            ("r2.pdf", "Army", fy, i, "text"),
+        )
+    conn.commit()
+    issues = check_pdf_pages_fiscal_year(conn)
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "info"
+
+
+def test_pdf_pages_fy_empty_table(conn):
+    """Empty pdf_pages → no issues."""
+    issues = check_pdf_pages_fiscal_year(conn)
+    assert len(issues) == 0
+
+
+# ── LION-108-val: PDF PE Numbers Junction ────────────────────────────────────
+
+def test_pdf_pe_numbers_populated(conn):
+    """pdf_pe_numbers with data → info-level report."""
+    conn.execute(
+        "INSERT INTO pdf_pe_numbers (pdf_page_id, pe_number, page_number, "
+        "source_file, fiscal_year) VALUES (?, ?, ?, ?, ?)",
+        (1, "0602120A", 1, "r2.pdf", "FY 2026"),
+    )
+    conn.commit()
+    issues = check_pdf_pe_numbers_populated(conn)
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "info"
+    assert issues[0]["junction_count"] == 1
+
+
+def test_pdf_pe_numbers_empty_with_pe_pages(conn):
+    """pdf_pe_numbers empty but pdf_pages has PE text → warning."""
+    conn.execute(
+        "INSERT INTO pdf_pages (source_file, source_category, page_number, page_text) "
+        "VALUES (?, ?, ?, ?)",
+        ("r2.pdf", "Army", 1, "PE 0602120A radar program"),
+    )
+    conn.commit()
+    issues = check_pdf_pe_numbers_populated(conn)
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "warning"
+
+
+# ── LION-108-val: PE Tags Source Files ───────────────────────────────────────
+
+def test_pe_tags_source_files_populated(conn):
+    """pe_tags with source_files → no issues."""
+    conn.execute("""
+        INSERT INTO pe_index (pe_number, display_title) VALUES ('0602120A', 'Radar')
+    """)
+    conn.execute("""
+        INSERT INTO pe_tags (pe_number, tag, tag_source, confidence, source_files)
+        VALUES ('0602120A', 'army', 'structured', 1.0, '["r1.xlsx"]')
+    """)
+    conn.commit()
+    issues = check_pe_tags_source_files(conn)
+    assert len(issues) == 0
+
+
+def test_pe_tags_source_files_null_warning(conn):
+    """pe_tags with NULL source_files → warning."""
+    conn.execute("""
+        INSERT INTO pe_index (pe_number, display_title) VALUES ('0602120A', 'Radar')
+    """)
+    conn.execute("""
+        INSERT INTO pe_tags (pe_number, tag, tag_source, confidence, source_files)
+        VALUES ('0602120A', 'army', 'structured', 1.0, NULL)
+    """)
+    conn.commit()
+    issues = check_pe_tags_source_files(conn)
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "warning"
+    assert issues[0]["null_count"] == 1
+
+
+def test_pe_tags_source_files_empty_table(conn):
+    """Empty pe_tags → no issues."""
+    issues = check_pe_tags_source_files(conn)
+    assert len(issues) == 0
+
+
+# ── Enrichment Orphans ───────────────────────────────────────────────────
+
+def test_enrichment_orphans_none(conn):
+    """No orphans when pe_descriptions refs match pe_index."""
+    conn.execute("INSERT INTO pe_index (pe_number, display_title) VALUES ('0602120A', 'Radar')")
+    conn.execute("""
+        INSERT INTO pe_descriptions (pe_number, fiscal_year, description_text)
+        VALUES ('0602120A', '2026', 'Radar program')
+    """)
+    conn.commit()
+    issues = check_enrichment_orphans(conn)
+    assert len(issues) == 0
+
+
+def test_enrichment_orphans_detected(conn):
+    """Orphaned pe_descriptions rows referencing unknown PE → warning."""
+    conn.execute("INSERT INTO pe_index (pe_number, display_title) VALUES ('0602120A', 'Radar')")
+    conn.execute("""
+        INSERT INTO pe_descriptions (pe_number, fiscal_year, description_text)
+        VALUES ('9999999X', '2026', 'Orphan description')
+    """)
+    conn.commit()
+    issues = check_enrichment_orphans(conn)
+    assert len(issues) >= 1
+    assert any(i["table"] == "pe_descriptions" for i in issues)
+    assert issues[0]["severity"] == "warning"
+
+
+def test_enrichment_orphans_empty_tables(conn):
+    """Empty enrichment tables → no issues."""
+    issues = check_enrichment_orphans(conn)
+    assert len(issues) == 0
+
+
+def test_enrichment_orphans_lineage_referenced_pe(conn):
+    """Orphaned pe_lineage.referenced_pe rows referencing unknown PE → warning."""
+    conn.execute("INSERT INTO pe_index (pe_number, display_title) VALUES ('0602120A', 'Radar')")
+    conn.execute("""
+        INSERT INTO pe_lineage (source_pe, referenced_pe, link_type)
+        VALUES ('0602120A', '9999999X', 'name_match')
+    """)
+    conn.commit()
+    issues = check_enrichment_orphans(conn)
+    assert len(issues) >= 1
+    assert any(i["table"] == "pe_lineage" and i["column"] == "referenced_pe" for i in issues)
+
+
+# ── Enrichment Staleness ─────────────────────────────────────────────────
+
+def test_enrichment_staleness_all_indexed(conn):
+    """All budget_lines PEs are in pe_index → no issues."""
+    _insert_line(conn, pe_number="0602120A")
+    conn.execute("INSERT INTO pe_index (pe_number, display_title) VALUES ('0602120A', 'Radar')")
+    conn.commit()
+    issues = check_enrichment_staleness(conn)
+    assert len(issues) == 0
+
+
+def test_enrichment_staleness_missing_pe(conn):
+    """PE in budget_lines but not pe_index → warning/info."""
+    _insert_line(conn, pe_number="0602120A")
+    _insert_line(conn, pe_number="0603000A")
+    conn.execute("INSERT INTO pe_index (pe_number, display_title) VALUES ('0602120A', 'Radar')")
+    conn.commit()
+    issues = check_enrichment_staleness(conn)
+    assert len(issues) == 1
+    assert issues[0]["missing_count"] == 1
+
+
+def test_enrichment_staleness_empty_pe_index(conn):
+    """No pe_index table rows → no issues (enrichment never ran)."""
+    issues = check_enrichment_staleness(conn)
+    assert len(issues) == 0
+
+
+# ── Extreme outlier tests ────────────────────────────────────────────────────
+
+def test_extreme_outliers_none(conn):
+    """Normal amounts produce no issues."""
+    _insert_line(conn, amount_fy2026_request=500_000)  # $500M — normal
+    conn.commit()
+    issues = check_extreme_outliers(conn)
+    assert len(issues) == 0
+
+
+def test_extreme_outliers_detected(conn):
+    """Amount > $1T triggers a warning."""
+    _insert_line(conn, amount_fy2026_request=2_000_000_000)  # $2T in thousands
+    conn.commit()
+    issues = check_extreme_outliers(conn)
+    assert len(issues) == 1
+    assert issues[0]["check"] == "extreme_outliers"
+    assert issues[0]["severity"] == "warning"
+    assert issues[0]["column"] == "amount_fy2026_request"
+
+
+def test_extreme_outliers_negative(conn):
+    """Large negative amount also triggers warning."""
+    _insert_line(conn, amount_fy2026_request=-1_500_000_000)
+    conn.commit()
+    issues = check_extreme_outliers(conn)
+    assert len(issues) == 1
+
+
+# ── PE org consistency tests ─────────────────────────────────────────────────
+
+def test_pe_org_consistency_single_org(conn):
+    """PE under one organization → no issues."""
+    _insert_line(conn, pe_number="0602120A", organization_name="Army")
+    _insert_line(conn, pe_number="0602120A", organization_name="Army",
+                 line_item="line2")
+    conn.commit()
+    issues = check_pe_org_consistency(conn)
+    assert len(issues) == 0
+
+
+def test_pe_org_consistency_multi_org(conn):
+    """Same PE under multiple organizations → warning."""
+    _insert_line(conn, pe_number="0602120A", organization_name="Army")
+    _insert_line(conn, pe_number="0602120A", organization_name="Navy",
+                 line_item="line2")
+    conn.commit()
+    issues = check_pe_org_consistency(conn)
+    assert len(issues) == 1
+    assert issues[0]["check"] == "pe_org_consistency"
+    assert issues[0]["severity"] == "warning"
+    assert "Army" in issues[0]["detail"]
+    assert "Navy" in issues[0]["detail"]
+
+
+# ── Budget activity consistency tests ────────────────────────────────────────
+
+def test_budget_activity_consistency_ok(conn):
+    """Few budget_activity_title variants within a PE → no issues."""
+    _insert_line(conn, pe_number="0602120A", line_item="line1",
+                 budget_activity_title="Applied Research")
+    _insert_line(conn, pe_number="0602120A", line_item="line2",
+                 budget_activity_title="Applied Research")
+    conn.commit()
+    issues = check_budget_activity_consistency(conn)
+    assert len(issues) == 0
+
+
+def test_budget_activity_consistency_too_many(conn):
+    """PE with >8 distinct budget_activity_title values → info issue."""
+    for i in range(10):
+        _insert_line(conn, pe_number="0602120A", line_item=f"line{i}",
+                     budget_activity_title=f"Activity Title {i}")
+    conn.commit()
+    issues = check_budget_activity_consistency(conn)
+    assert len(issues) == 1
+    assert issues[0]["check"] == "budget_activity_consistency"
+    assert issues[0]["severity"] == "info"
+    assert issues[0]["pe_number"] == "0602120A"
+
+
+# ── FY column null rate tests ────────────────────────────────────────────────
+
+def test_fy_null_rates_key_columns_populated(conn):
+    """Key FY columns all populated → those specific columns not flagged."""
+    _insert_line(conn, amount_fy2024_actual=100, amount_fy2025_enacted=110,
+                 amount_fy2026_request=120)
+    _insert_line(conn, amount_fy2024_actual=200, amount_fy2025_enacted=210,
+                 amount_fy2026_request=220, line_item="line2")
+    conn.commit()
+    issues = check_fy_column_null_rates(conn)
+    # Key columns (actual, enacted, request) should NOT be flagged
+    flagged_cols = {i["column"] for i in issues}
+    assert "amount_fy2024_actual" not in flagged_cols
+    assert "amount_fy2025_enacted" not in flagged_cols
+    assert "amount_fy2026_request" not in flagged_cols
+
+
+def test_fy_null_rates_high_nulls(conn):
+    """Column with >50% NULLs triggers warning."""
+    # Insert 3 rows where amount_fy2024_actual is NULL
+    for i in range(3):
+        _insert_line(conn, amount_fy2024_actual=None,
+                     amount_fy2025_enacted=100, amount_fy2026_request=100,
+                     line_item=f"null_row_{i}")
+    # Insert 1 row with populated value
+    _insert_line(conn, amount_fy2024_actual=100,
+                 amount_fy2025_enacted=100, amount_fy2026_request=100,
+                 line_item="good_row")
+    conn.commit()
+    issues = check_fy_column_null_rates(conn)
+    # amount_fy2024_actual is 75% NULL → warning
+    fy24_issues = [i for i in issues if i["column"] == "amount_fy2024_actual"]
+    assert len(fy24_issues) == 1
+    assert fy24_issues[0]["severity"] == "warning"
+    assert fy24_issues[0]["null_pct"] == 75.0
+
+
+# ── check_duplicate_budget_lines ─────────────────────────────────────────────
+
+from validate_budget_db import check_duplicate_budget_lines  # noqa: E402
+
+
+def test_duplicate_budget_lines_none(conn):
+    """No duplicates → no issues."""
+    _insert_line(conn, pe_number="0601101A", source_file="a.xlsx",
+                 exhibit_type="r1", fiscal_year="2026",
+                 line_item_title="Research", organization_name="Army")
+    _insert_line(conn, pe_number="0601102A", source_file="a.xlsx",
+                 exhibit_type="r1", fiscal_year="2026",
+                 line_item_title="Applied", organization_name="Army")
+    conn.commit()
+    issues = check_duplicate_budget_lines(conn)
+    assert len(issues) == 0
+
+
+def test_duplicate_budget_lines_detected(conn):
+    """Same PE + source + exhibit + FY + title → flagged as duplicate."""
+    for _ in range(3):
+        _insert_line(conn, pe_number="0601101A", source_file="a.xlsx",
+                     exhibit_type="r1", fiscal_year="2026",
+                     line_item_title="Research", organization_name="Army")
+    conn.commit()
+    issues = check_duplicate_budget_lines(conn)
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "warning"
+    assert issues[0]["duplicate_count"] == 3
+
+
+# ── check_source_file_tracking ───────────────────────────────────────────────
+
+from validate_budget_db import check_source_file_tracking  # noqa: E402
+
+
+def test_source_file_tracking_all_tracked(conn):
+    """All source files tracked in ingested_files → no issues."""
+    _insert_line(conn, source_file="a.xlsx")
+    conn.execute(
+        "INSERT INTO ingested_files (file_path, file_type, row_count, status) "
+        "VALUES ('a.xlsx', 'xlsx', 1, 'ok')"
+    )
+    conn.commit()
+    issues = check_source_file_tracking(conn)
+    assert len(issues) == 0
+
+
+def test_source_file_tracking_untracked(conn):
+    """Source file in budget_lines but not in ingested_files → flagged."""
+    _insert_line(conn, source_file="missing.xlsx")
+    conn.commit()
+    issues = check_source_file_tracking(conn)
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "info"
+    assert "missing.xlsx" in issues[0]["samples"]
+
+
+# ── check_expected_indexes ───────────────────────────────────────────────
+
+
+def test_expected_indexes_all_present(conn):
+    """No issues when all expected indexes exist."""
+    # Create all expected indexes
+    for idx_name, cols in [
+        ("idx_bl_exhibit", "exhibit_type"),
+        ("idx_bl_org", "organization_name"),
+        ("idx_bl_fy", "fiscal_year"),
+        ("idx_bl_pe", "pe_number"),
+        ("idx_bl_approp", "appropriation_code"),
+        ("idx_bl_pe_fy", "pe_number, fiscal_year"),
+        ("idx_bl_org_amount", "organization_name, amount_fy2026_request"),
+        ("idx_bl_exhibit_fy", "exhibit_type, fiscal_year"),
+        ("idx_bl_approp_amount", "appropriation_code, amount_fy2026_request"),
+        ("idx_bl_org_approp_line", "organization_name, appropriation_code, line_item_title"),
+        ("idx_bl_budget_type", "budget_type"),
+        ("idx_bl_fy_org", "fiscal_year, organization_name"),
+        ("idx_bl_pe_amount", "pe_number, amount_fy2026_request"),
+        ("idx_bl_budget_type_amount", "budget_type, amount_fy2026_request"),
+    ]:
+        conn.execute(
+            f"CREATE INDEX IF NOT EXISTS {idx_name} ON budget_lines({cols})"
+        )
+    conn.commit()
+    issues = check_expected_indexes(conn)
+    assert len(issues) == 0
+
+
+def test_expected_indexes_missing(conn):
+    """Missing indexes are flagged as warnings."""
+    # Don't create any indexes — all expected ones should be missing
+    issues = check_expected_indexes(conn)
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "warning"
+    assert issues[0]["count"] > 0
+    assert len(issues[0]["missing_indexes"]) > 0

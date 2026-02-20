@@ -376,7 +376,7 @@ class FilePatterns:
 
 # ── OPT-CFG-001: Consolidated application configuration ───────────────────────
 
-import os as _os
+import os as _os  # noqa: E402
 
 
 class AppConfig(Config):

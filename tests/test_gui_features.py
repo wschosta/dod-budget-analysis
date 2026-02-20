@@ -73,7 +73,8 @@ def app_client(tmp_path_factory):
             pe_number TEXT,
             tag TEXT,
             tag_source TEXT,
-            confidence REAL DEFAULT 1.0
+            confidence REAL DEFAULT 1.0,
+            source_files TEXT
         );
         CREATE TABLE pe_lineage (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -138,10 +139,10 @@ def app_client(tmp_path_factory):
             ('0604800F', 'F-22A Raptor', 'Air Force', 'Procurement',
              '["2025"]', '["p1"]');
 
-        INSERT INTO pe_tags VALUES (NULL, '0604131A', 'aviation', 'structured', 1.0);
-        INSERT INTO pe_tags VALUES (NULL, '0604131A', 'rotary-wing', 'keyword', 0.9);
-        INSERT INTO pe_tags VALUES (NULL, '0603292N', 'aviation', 'structured', 1.0);
-        INSERT INTO pe_tags VALUES (NULL, '0603292N', 'stealth', 'keyword', 0.8);
+        INSERT INTO pe_tags VALUES (NULL, '0604131A', 'aviation', 'structured', 1.0, '["army_r1.xlsx"]');
+        INSERT INTO pe_tags VALUES (NULL, '0604131A', 'rotary-wing', 'keyword', 0.9, '["army_r2.pdf"]');
+        INSERT INTO pe_tags VALUES (NULL, '0603292N', 'aviation', 'structured', 1.0, '["navy_r1.xlsx"]');
+        INSERT INTO pe_tags VALUES (NULL, '0603292N', 'stealth', 'keyword', 0.8, '["navy_r2.pdf"]');
 
         INSERT INTO pe_lineage VALUES
             (NULL, '0604131A', '0603292N', 'name_match', 0.6, '2026', 'aviation context');
@@ -202,6 +203,15 @@ class TestDashboardAPI:
         assert "total_lines" in data["totals"]
         assert data["totals"]["total_lines"] == 3
 
+    def test_summary_totals_has_distinct_counts(self, app_client):
+        resp = app_client.get("/api/v1/dashboard/summary")
+        data = resp.json()
+        totals = data["totals"]
+        assert "distinct_pes" in totals
+        assert "distinct_fys" in totals
+        assert "distinct_services" in totals
+        assert totals["distinct_pes"] >= 1
+
     def test_summary_has_by_service(self, app_client):
         resp = app_client.get("/api/v1/dashboard/summary")
         data = resp.json()
@@ -221,11 +231,67 @@ class TestDashboardAPI:
         assert "by_appropriation" in data
         assert len(data["by_appropriation"]) > 0
 
+    def test_summary_has_by_budget_type(self, app_client):
+        resp = app_client.get("/api/v1/dashboard/summary")
+        data = resp.json()
+        assert "by_budget_type" in data
+        assert isinstance(data["by_budget_type"], list)
+
+    def test_summary_has_freshness(self, app_client):
+        resp = app_client.get("/api/v1/dashboard/summary")
+        data = resp.json()
+        assert "freshness" in data
+        assert isinstance(data["freshness"], dict)
+
+    def test_summary_has_source_stats(self, app_client):
+        resp = app_client.get("/api/v1/dashboard/summary")
+        data = resp.json()
+        assert "source_stats" in data
+        assert isinstance(data["source_stats"], dict)
+
+    def test_summary_has_by_exhibit_type(self, app_client):
+        resp = app_client.get("/api/v1/dashboard/summary")
+        data = resp.json()
+        assert "by_exhibit_type" in data
+        assert isinstance(data["by_exhibit_type"], list)
+        assert len(data["by_exhibit_type"]) > 0
+
     def test_summary_is_cached(self, app_client):
         """Second call should use cache (both should return same data)."""
         resp1 = app_client.get("/api/v1/dashboard/summary")
         resp2 = app_client.get("/api/v1/dashboard/summary")
         assert resp1.json()["totals"] == resp2.json()["totals"]
+
+    def test_summary_fiscal_year_filter(self, app_client):
+        """fiscal_year filter restricts to matching rows only."""
+        resp = app_client.get("/api/v1/dashboard/summary?fiscal_year=2026")
+        assert resp.status_code == 200
+        data = resp.json()
+        # Test data has 2 rows with FY 2026 and 1 with FY 2025
+        assert data["totals"]["total_lines"] == 2
+
+    def test_summary_fiscal_year_no_match(self, app_client):
+        """Non-existent fiscal year returns zero totals."""
+        resp = app_client.get("/api/v1/dashboard/summary?fiscal_year=2099")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["totals"]["total_lines"] == 0
+
+    def test_summary_service_filter(self, app_client):
+        """service filter restricts to matching organization rows."""
+        resp = app_client.get("/api/v1/dashboard/summary?service=Army")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["totals"]["total_lines"] == 1  # Only Army row
+
+    def test_summary_service_and_fiscal_year_combined(self, app_client):
+        """Both service and fiscal_year filters narrow results."""
+        resp = app_client.get(
+            "/api/v1/dashboard/summary?service=Navy&fiscal_year=2026"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["totals"]["total_lines"] == 1  # Navy + FY2026
 
 
 # ── Hierarchy endpoint ────────────────────────────────────────────────────────
@@ -246,9 +312,30 @@ class TestHierarchyEndpoint:
         item = resp.json()["items"][0]
         assert "service" in item
         assert "amount" in item
+        assert "prev_amount" in item
+        assert "pct_of_total" in item
+
+    def test_hierarchy_has_grand_total(self, app_client):
+        resp = app_client.get("/api/v1/aggregations/hierarchy")
+        data = resp.json()
+        assert "grand_total" in data
+        assert data["grand_total"] > 0
 
     def test_hierarchy_with_fiscal_year_filter(self, app_client):
         resp = app_client.get("/api/v1/aggregations/hierarchy?fiscal_year=2026")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "items" in data
+
+    def test_hierarchy_with_service_filter(self, app_client):
+        resp = app_client.get("/api/v1/aggregations/hierarchy?service=Army")
+        assert resp.status_code == 200
+        data = resp.json()
+        for item in data["items"]:
+            assert item["service"] == "Army"
+
+    def test_hierarchy_with_exhibit_type_filter(self, app_client):
+        resp = app_client.get("/api/v1/aggregations/hierarchy?exhibit_type=p1")
         assert resp.status_code == 200
         data = resp.json()
         assert "items" in data

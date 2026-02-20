@@ -17,10 +17,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import types
 sys.modules.setdefault("pdfplumber", types.ModuleType("pdfplumber"))
 
-from build_budget_db import _detect_exhibit_type, _map_columns
-from exhibit_catalog import find_matching_columns
+from build_budget_db import _detect_exhibit_type, _map_columns  # noqa: E402
+from exhibit_catalog import find_matching_columns  # noqa: E402
 
-import openpyxl
+import openpyxl  # noqa: E402
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 EXPECTED_DIR = FIXTURES_DIR / "expected"

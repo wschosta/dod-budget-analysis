@@ -25,7 +25,6 @@ Test strategy
   "main thread is not in main loop" never appears in stderr.
 """
 
-import gc
 import subprocess
 import sys
 import textwrap

@@ -43,7 +43,7 @@ class TestSyntaxValidation:
             except SyntaxError as e:
                 errors.append(f"{py_file}: {e}")
 
-        assert not errors, f"Syntax errors found:\n" + "\n".join(errors)
+        assert not errors, "Syntax errors found:\n" + "\n".join(errors)
 
 
 class TestImportValidation:
@@ -146,7 +146,7 @@ class TestCodeQuality:
                     if re.search(r"\bpdb\.set_trace\(\)", line):
                         errors.append(f"{py_file}:{i}: pdb.set_trace() found")
 
-        assert not errors, f"Debug statements found:\n" + "\n".join(errors)
+        assert not errors, "Debug statements found:\n" + "\n".join(errors)
 
     def test_no_hardcoded_secrets(self):
         """Detect potential hardcoded secrets."""
@@ -167,7 +167,7 @@ class TestCodeQuality:
                         if re.search(pattern, line, re.IGNORECASE):
                             errors.append(f"{py_file}:{i}: {desc}")
 
-        assert not errors, f"Potential secrets found:\n" + "\n".join(errors)
+        assert not errors, "Potential secrets found:\n" + "\n".join(errors)
 
     def test_no_excessive_debugging_prints(self):
         """Library modules should not have debug/temporary print statements.
@@ -209,7 +209,7 @@ class TestCodeQuality:
                             errors.append(f"{py_file}:{i}: debug print statement")
                             break
 
-        assert len(errors) < 5, f"Debug prints found:\n" + "\n".join(errors[:5])
+        assert len(errors) < 5, "Debug prints found:\n" + "\n".join(errors[:5])
 
 
 class TestNamingShadowing:

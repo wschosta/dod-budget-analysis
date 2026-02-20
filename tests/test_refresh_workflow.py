@@ -6,11 +6,9 @@ logging behaviour, and webhook notification logic without network calls.
 """
 import json
 import sys
-from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

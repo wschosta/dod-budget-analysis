@@ -1497,7 +1497,7 @@ def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
         alt_url = (
             f"https://www.secnav.navy.mil/fmc/fmb/Pages/Fiscal-Year-{year}.aspx"
         )
-        print(f"  [Navy] Primary URL returned 0 files, trying alternate URL...")
+        print("  [Navy] Primary URL returned 0 files, trying alternate URL...")
         files = _browser_extract_links(alt_url)
 
     _save_cache(cache_key, files)

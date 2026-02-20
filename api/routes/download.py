@@ -30,14 +30,15 @@ _DOWNLOAD_COLUMNS = [
     "account", "account_title", "organization_name",
     "budget_activity_title", "sub_activity_title",
     "line_item", "line_item_title", "pe_number",
-    "appropriation_code", "appropriation_title",
+    "appropriation_code", "appropriation_title", "budget_type",
     "amount_fy2024_actual", "amount_fy2025_enacted", "amount_fy2025_supplemental",
     "amount_fy2025_total", "amount_fy2026_request", "amount_fy2026_reconciliation",
     "amount_fy2026_total", "amount_type", "amount_unit", "currency_year",
 ]
 
 _ALLOWED_SORT = {"id", "source_file", "exhibit_type", "fiscal_year",
-                 "organization_name", "amount_fy2026_request"}
+                 "organization_name", "amount_fy2026_request", "budget_type",
+                 "pe_number", "appropriation_code"}
 
 
 def _iter_rows(conn: sqlite3.Connection, sql: str, params: list[Any]):
@@ -55,10 +56,16 @@ def _build_download_sql(
     service: list[str] | None,
     exhibit_type: list[str] | None,
     pe_number: list[str] | None,
+    appropriation_code: list[str] | None,
     q: str | None,
     conn: sqlite3.Connection,
     limit: int,
     export_cols: list[str],
+    sort_by: str = "id",
+    sort_dir: str = "asc",
+    min_amount: float | None = None,
+    max_amount: float | None = None,
+    budget_type: list[str] | None = None,
 ) -> tuple[str, list[Any], int]:
     """Build the download SQL with all filters applied.
 
@@ -84,6 +91,10 @@ def _build_download_sql(
         service=service,
         exhibit_type=exhibit_type,
         pe_number=pe_number,
+        appropriation_code=appropriation_code,
+        budget_type=budget_type,
+        min_amount=min_amount,
+        max_amount=max_amount,
         fts_ids=fts_ids,
     )
 
@@ -92,7 +103,10 @@ def _build_download_sql(
     total = conn.execute(count_sql, params).fetchone()[0]
 
     col_list = ", ".join(export_cols)
-    sql = f"SELECT {col_list} FROM budget_lines {where} LIMIT {limit}"
+    sort_col = sort_by if sort_by in _ALLOWED_SORT else "id"
+    direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
+    sql = (f"SELECT {col_list} FROM budget_lines {where} "
+           f"ORDER BY {sort_col} {direction} LIMIT {limit}")
 
     return sql, params, total
 
@@ -105,8 +119,14 @@ def download(
     service: list[str] | None = Query(None),
     exhibit_type: list[str] | None = Query(None),
     pe_number: list[str] | None = Query(None),
+    appropriation_code: list[str] | None = Query(None, description="Filter by appropriation code(s)"),
+    budget_type: list[str] | None = Query(None, description="Filter by budget type (RDT&E, Procurement, etc.)"),
     # DL-002: keyword search filter
     q: str | None = Query(None, description="Keyword search filter (FTS5)"),
+    min_amount: float | None = Query(None, description="Min FY2026 request amount"),
+    max_amount: float | None = Query(None, description="Max FY2026 request amount"),
+    sort_by: str = Query("id", description="Column to sort by"),
+    sort_dir: str = Query("asc", pattern="^(asc|desc)$", description="Sort direction"),
     # FIX-017: Download a single item by ID (used by detail panel)
     item_id: int | None = Query(None, description="Download a specific budget line by ID"),
     limit: int = Query(
@@ -136,10 +156,16 @@ def download(
             service=service,
             exhibit_type=exhibit_type,
             pe_number=pe_number,
+            appropriation_code=appropriation_code,
             q=q,
             conn=conn,
             limit=limit,
             export_cols=export_cols,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            min_amount=min_amount,
+            max_amount=max_amount,
+            budget_type=budget_type,
         )
 
     # DL-003: X-Total-Count header

@@ -16,6 +16,11 @@ Usage:
 TODOs for this file
 ---
 
+DONE LION-108-val: Validation checks for LION schema changes.
+    (a) check_pdf_pages_fiscal_year — warns if >5% of pdf_pages have NULL fiscal_year
+    (b) check_pdf_pe_numbers_populated — warns if junction table is empty/missing
+    (c) check_pe_tags_source_files — warns if pe_tags.source_files has NULLs
+
 """
 
 import argparse
@@ -760,6 +765,607 @@ def check_integrity(conn: sqlite3.Connection) -> list[dict]:
     return issues
 
 
+# ── Budget type validation ────────────────────────────────────────────────
+
+_KNOWN_BUDGET_TYPES = {
+    "MilPers", "O&M", "Procurement", "RDT&E", "Revolving", "Construction",
+    # Also accept lowercase/variants that appear in enrichment
+    "milpers", "om", "procurement", "rdte", "revolving", "construction",
+}
+
+
+def check_budget_type_values(conn: sqlite3.Connection) -> list[dict]:
+    """Check that budget_type values are from the known set.
+
+    Flags unknown values as info-level (may indicate new exhibit types
+    or data format changes).
+    """
+    issues = []
+    try:
+        rows = conn.execute("""
+            SELECT budget_type, COUNT(*) AS cnt
+            FROM budget_lines
+            WHERE budget_type IS NOT NULL
+            GROUP BY budget_type
+        """).fetchall()
+    except Exception:
+        return []
+
+    for row in rows:
+        bt = row[0]
+        if bt not in _KNOWN_BUDGET_TYPES:
+            issues.append({
+                "check": "budget_type_values",
+                "severity": "info",
+                "detail": f"Unknown budget_type '{bt}' ({row[1]} rows)",
+                "budget_type": bt,
+                "count": row[1],
+            })
+
+    return issues
+
+
+# ── LION-108-val: Validation checks for LION schema changes ──────────────
+
+def check_pdf_pages_fiscal_year(conn: sqlite3.Connection) -> list[dict]:
+    """LION-108-val(a): Check that pdf_pages.fiscal_year is populated.
+
+    After LION-100, every pdf_pages row should have a fiscal_year derived
+    from the directory path.  Warns if >5% of rows are NULL.
+    """
+    issues = []
+    try:
+        total = conn.execute(
+            "SELECT COUNT(*) AS c FROM pdf_pages"
+        ).fetchone()["c"]
+    except Exception:
+        return []
+
+    if total == 0:
+        return []
+
+    try:
+        null_fy = conn.execute(
+            "SELECT COUNT(*) AS c FROM pdf_pages WHERE fiscal_year IS NULL"
+        ).fetchone()["c"]
+    except Exception:
+        # Column may not exist in older databases
+        return [{
+            "check": "pdf_pages_fiscal_year",
+            "severity": "warning",
+            "detail": "pdf_pages table missing fiscal_year column (LION-100 not applied)",
+        }]
+
+    if null_fy > 0:
+        pct = null_fy / total * 100
+        severity = "warning" if pct > 5 else "info"
+        issues.append({
+            "check": "pdf_pages_fiscal_year",
+            "severity": severity,
+            "detail": (
+                f"{null_fy}/{total} pdf_pages rows ({pct:.1f}%) have NULL fiscal_year"
+            ),
+            "null_count": null_fy,
+            "total": total,
+            "null_pct": round(pct, 2),
+        })
+
+    return issues
+
+
+def check_pdf_pe_numbers_populated(conn: sqlite3.Connection) -> list[dict]:
+    """LION-108-val(b): Check that pdf_pe_numbers has rows for PE-containing PDFs.
+
+    After LION-103, the pdf_pe_numbers junction table should be populated
+    during ingestion.  Warns if the table exists but is empty while pdf_pages
+    has text mentioning PE-like patterns.
+    """
+    issues = []
+
+    if not _table_exists(conn, "pdf_pe_numbers"):
+        return [{
+            "check": "pdf_pe_numbers_populated",
+            "severity": "warning",
+            "detail": "pdf_pe_numbers table does not exist (LION-103 not applied)",
+        }]
+
+    junction_count = conn.execute(
+        "SELECT COUNT(*) AS c FROM pdf_pe_numbers"
+    ).fetchone()["c"]
+
+    if junction_count == 0:
+        # Check if there are any pdf_pages that might contain PE numbers
+        try:
+            pe_pages = conn.execute("""
+                SELECT COUNT(*) AS c FROM pdf_pages
+                WHERE page_text LIKE '%0_0_____%'
+            """).fetchone()["c"]
+        except Exception:
+            pe_pages = 0
+
+        if pe_pages > 0:
+            issues.append({
+                "check": "pdf_pe_numbers_populated",
+                "severity": "warning",
+                "detail": (
+                    f"pdf_pe_numbers is empty but {pe_pages} pdf_pages "
+                    "may contain PE numbers — re-run ingestion with LION-103"
+                ),
+                "pe_page_estimate": pe_pages,
+            })
+    else:
+        issues.append({
+            "check": "pdf_pe_numbers_populated",
+            "severity": "info",
+            "detail": f"pdf_pe_numbers has {junction_count:,} PE-page links",
+            "junction_count": junction_count,
+        })
+
+    return issues
+
+
+def check_pe_tags_source_files(conn: sqlite3.Connection) -> list[dict]:
+    """LION-108-val(c): Check that pe_tags.source_files is populated.
+
+    After LION-106, every pe_tags row should have a non-null source_files
+    JSON array for provenance tracking.
+    """
+    issues = []
+
+    if not _table_exists(conn, "pe_tags"):
+        return []
+
+    try:
+        total = conn.execute(
+            "SELECT COUNT(*) AS c FROM pe_tags"
+        ).fetchone()["c"]
+    except Exception:
+        return []
+
+    if total == 0:
+        return []
+
+    try:
+        null_src = conn.execute(
+            "SELECT COUNT(*) AS c FROM pe_tags WHERE source_files IS NULL"
+        ).fetchone()["c"]
+    except Exception:
+        return [{
+            "check": "pe_tags_source_files",
+            "severity": "warning",
+            "detail": "pe_tags table missing source_files column (LION-106 not applied)",
+        }]
+
+    if null_src > 0:
+        issues.append({
+            "check": "pe_tags_source_files",
+            "severity": "warning",
+            "detail": (
+                f"{null_src}/{total} pe_tags rows have NULL source_files — "
+                "re-run enrichment Phase 3 with LION-106"
+            ),
+            "null_count": null_src,
+            "total": total,
+        })
+
+    return issues
+
+
+def check_budget_activity_consistency(conn: sqlite3.Connection) -> list[dict]:
+    """Detect suspiciously many budget_activity_title variants within a PE.
+
+    Within a single (pe_number, exhibit_type) group, the number of
+    distinct budget_activity_title values should be small (usually 1-5).
+    Groups with >8 distinct titles may indicate parsing artifacts where
+    line-item titles were misread as budget activity titles.
+
+    Severity: INFO
+    """
+    issues = []
+    try:
+        rows = conn.execute("""
+            SELECT pe_number, exhibit_type,
+                   COUNT(DISTINCT budget_activity_title) AS title_count
+            FROM budget_lines
+            WHERE pe_number IS NOT NULL
+              AND budget_activity_title IS NOT NULL
+              AND budget_activity_title != ''
+            GROUP BY pe_number, exhibit_type
+            HAVING title_count > 8
+            ORDER BY title_count DESC
+            LIMIT 30
+        """).fetchall()
+    except Exception:
+        return []
+
+    for r in rows:
+        titles = conn.execute(
+            "SELECT DISTINCT budget_activity_title FROM budget_lines "
+            "WHERE pe_number = ? AND exhibit_type = ? "
+            "AND budget_activity_title IS NOT NULL AND budget_activity_title != '' "
+            "LIMIT 5",
+            (r["pe_number"], r["exhibit_type"]),
+        ).fetchall()
+        title_list = [t[0] for t in titles]
+        issues.append({
+            "check": "budget_activity_consistency",
+            "severity": "info",
+            "detail": (
+                f"PE {r['pe_number']} ({r['exhibit_type']}) "
+                f"has {r['title_count']} distinct budget_activity_title values — "
+                f"e.g., {'; '.join(title_list[:3])}"
+            ),
+            "pe_number": r["pe_number"],
+            "exhibit_type": r["exhibit_type"],
+            "title_count": r["title_count"],
+            "titles": title_list,
+        })
+
+    return issues
+
+
+def check_extreme_outliers(conn: sqlite3.Connection) -> list[dict]:
+    """Flag amount values that are implausibly large (> $1 trillion).
+
+    Amounts are stored in thousands; $1T = 1,000,000,000 thousands.
+    Values exceeding this suggest a parsing error (e.g., reading a
+    quantity column as a dollar amount, or a misplaced decimal).
+
+    Severity: WARNING
+    """
+    issues = []
+    amount_cols = _get_amount_columns(conn)
+    threshold = 1_000_000_000  # $1T in thousands
+
+    for col in amount_cols:
+        try:
+            rows = conn.execute(f"""
+                SELECT source_file, exhibit_type, pe_number,
+                       organization_name, {col} AS value
+                FROM budget_lines
+                WHERE ABS({col}) > ?
+                ORDER BY ABS({col}) DESC
+                LIMIT 20
+            """, (threshold,)).fetchall()
+        except Exception:
+            continue
+
+        if rows:
+            issues.append({
+                "check": "extreme_outliers",
+                "severity": "warning",
+                "detail": (
+                    f"{len(rows)} row(s) in {col} exceed $1 trillion — "
+                    "likely a parsing error"
+                ),
+                "column": col,
+                "count": len(rows),
+                "samples": [
+                    f"{r['source_file']} / {r['pe_number'] or '?'} "
+                    f"({r['organization_name']}): ${r['value']:,.0f}K"
+                    for r in rows[:5]
+                ],
+            })
+
+    return issues
+
+
+def check_pe_org_consistency(conn: sqlite3.Connection) -> list[dict]:
+    """Detect PE numbers assigned to multiple organizations.
+
+    When the same PE number appears under different organization_name
+    values in budget_lines, it may indicate a data mapping issue or
+    a PE that was transferred between services.
+
+    Severity: WARNING
+    """
+    issues = []
+    try:
+        rows = conn.execute("""
+            SELECT pe_number, COUNT(DISTINCT organization_name) AS org_count
+            FROM budget_lines
+            WHERE pe_number IS NOT NULL AND pe_number != ''
+              AND organization_name IS NOT NULL AND organization_name != ''
+            GROUP BY pe_number
+            HAVING org_count > 1
+            ORDER BY org_count DESC
+            LIMIT 30
+        """).fetchall()
+    except Exception:
+        return []
+
+    for r in rows:
+        orgs = conn.execute(
+            "SELECT DISTINCT organization_name FROM budget_lines "
+            "WHERE pe_number = ? AND organization_name IS NOT NULL",
+            (r["pe_number"],),
+        ).fetchall()
+        org_list = [o[0] for o in orgs]
+        issues.append({
+            "check": "pe_org_consistency",
+            "severity": "warning",
+            "detail": (
+                f"PE {r['pe_number']} assigned to {r['org_count']} organizations: "
+                f"{', '.join(org_list[:5])}"
+            ),
+            "pe_number": r["pe_number"],
+            "organizations": org_list,
+        })
+
+    return issues
+
+
+def check_enrichment_orphans(conn: sqlite3.Connection) -> list[dict]:
+    """Detect enrichment rows that reference PE numbers not in pe_index.
+
+    Orphans occur when pe_index is rebuilt (--rebuild) but enrichment
+    tables retain data from a prior run with different PE numbers.
+    """
+    issues = []
+    if not _table_exists(conn, "pe_index"):
+        return []
+
+    checks = [
+        ("pe_descriptions", "pe_number"),
+        ("pe_tags", "pe_number"),
+        ("pe_lineage", "source_pe"),
+        ("pe_lineage", "referenced_pe"),
+    ]
+    for table, col in checks:
+        if not _table_exists(conn, table):
+            continue
+        try:
+            orphans = conn.execute(f"""
+                SELECT COUNT(*) AS c FROM {table} t
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM pe_index p WHERE p.pe_number = t.{col}
+                )
+            """).fetchone()["c"]
+        except Exception:
+            continue
+
+        if orphans > 0:
+            issues.append({
+                "check": "enrichment_orphans",
+                "severity": "warning",
+                "detail": (
+                    f"{orphans} row(s) in {table}.{col} reference PE numbers "
+                    "not found in pe_index — re-run enrichment with --rebuild"
+                ),
+                "table": table,
+                "column": col,
+                "orphan_count": orphans,
+            })
+
+    return issues
+
+
+def check_enrichment_staleness(conn: sqlite3.Connection) -> list[dict]:
+    """Detect PE numbers in budget_lines that are missing from pe_index.
+
+    When new budget data is ingested without re-running enrichment, PEs
+    appear in budget_lines but not pe_index. This makes them invisible
+    in the Program Explorer and tag/topic search.
+    """
+    issues = []
+    if not _table_exists(conn, "pe_index"):
+        return []
+
+    try:
+        row = conn.execute("""
+            SELECT COUNT(DISTINCT b.pe_number) AS missing_count
+            FROM budget_lines b
+            WHERE b.pe_number IS NOT NULL
+              AND b.pe_number != ''
+              AND NOT EXISTS (
+                  SELECT 1 FROM pe_index p WHERE p.pe_number = b.pe_number
+              )
+        """).fetchone()
+    except Exception:
+        return []
+
+    missing = row["missing_count"]
+    if missing == 0:
+        return []
+
+    total_bl_pes = conn.execute(
+        "SELECT COUNT(DISTINCT pe_number) FROM budget_lines "
+        "WHERE pe_number IS NOT NULL AND pe_number != ''"
+    ).fetchone()[0]
+
+    pct = round((missing / total_bl_pes) * 100, 1) if total_bl_pes > 0 else 0
+
+    severity = "warning" if pct > 5 else "info"
+    issues.append({
+        "check": "enrichment_staleness",
+        "severity": severity,
+        "detail": (
+            f"{missing}/{total_bl_pes} PE number(s) ({pct}%) in budget_lines "
+            "are not in pe_index — run enrich_budget_db.py to update"
+        ),
+        "missing_count": missing,
+        "total_pe_count": total_bl_pes,
+        "pct_missing": pct,
+    })
+    return issues
+
+
+def check_fy_column_null_rates(conn: sqlite3.Connection) -> list[dict]:
+    """Flag FY amount columns where >50% of values are NULL.
+
+    High NULL rates in a specific column suggest incomplete data
+    extraction (e.g., a parser couldn't read that column from certain
+    exhibit types).
+
+    Severity: WARNING if >50%, INFO if >25%
+    """
+    issues = []
+    amount_cols = _get_amount_columns(conn)
+    if not amount_cols:
+        return issues
+
+    try:
+        total_rows = conn.execute(
+            "SELECT COUNT(*) AS c FROM budget_lines"
+        ).fetchone()["c"]
+    except Exception:
+        return []
+
+    if total_rows == 0:
+        return []
+
+    for col in amount_cols:
+        try:
+            null_count = conn.execute(
+                f"SELECT COUNT(*) AS c FROM budget_lines WHERE {col} IS NULL"
+            ).fetchone()["c"]
+        except Exception:
+            continue
+
+        pct = round(null_count / total_rows * 100, 1)
+        if pct > 25:
+            severity = "warning" if pct > 50 else "info"
+            issues.append({
+                "check": "fy_column_null_rates",
+                "severity": severity,
+                "detail": (
+                    f"{col}: {null_count:,}/{total_rows:,} rows ({pct}%) are NULL"
+                ),
+                "column": col,
+                "null_count": null_count,
+                "total_rows": total_rows,
+                "null_pct": pct,
+            })
+
+    return issues
+
+
+def check_duplicate_budget_lines(conn: sqlite3.Connection) -> list[dict]:
+    """Flag budget lines that appear to be exact duplicates.
+
+    Detects rows sharing the same (source_file, exhibit_type, fiscal_year,
+    pe_number, line_item_title, organization_name) — these typically indicate
+    a row was ingested multiple times from the same source.
+    """
+    issues: list[dict] = []
+    try:
+        rows = conn.execute("""
+            SELECT source_file, exhibit_type, fiscal_year,
+                   pe_number, line_item_title, organization_name,
+                   COUNT(*) AS cnt
+            FROM budget_lines
+            WHERE pe_number IS NOT NULL AND line_item_title IS NOT NULL
+            GROUP BY source_file, exhibit_type, fiscal_year,
+                     pe_number, line_item_title, organization_name
+            HAVING COUNT(*) > 1
+            ORDER BY COUNT(*) DESC
+            LIMIT 20
+        """).fetchall()
+
+        for r in rows:
+            issues.append({
+                "check": "duplicate_budget_lines",
+                "severity": "warning",
+                "detail": (
+                    f"PE {r['pe_number']} / {r['line_item_title']} in "
+                    f"{r['source_file']} ({r['exhibit_type']}, FY{r['fiscal_year']}): "
+                    f"{r['cnt']} copies"
+                ),
+                "pe_number": r["pe_number"],
+                "source_file": r["source_file"],
+                "duplicate_count": r["cnt"],
+            })
+    except Exception:
+        pass
+
+    return issues
+
+
+def check_source_file_tracking(conn: sqlite3.Connection) -> list[dict]:
+    """Flag source files in budget_lines that are not tracked in ingested_files.
+
+    Ensures all data provenance is recorded — every source file that contributed
+    budget lines should have a corresponding entry in ingested_files.
+    """
+    issues: list[dict] = []
+    try:
+        rows = conn.execute("""
+            SELECT DISTINCT bl.source_file
+            FROM budget_lines bl
+            WHERE bl.source_file IS NOT NULL
+              AND bl.source_file NOT IN (
+                  SELECT file_path FROM ingested_files
+              )
+            LIMIT 20
+        """).fetchall()
+
+        if rows:
+            untracked = [r[0] for r in rows]
+            issues.append({
+                "check": "source_file_tracking",
+                "severity": "info",
+                "detail": (
+                    f"{len(untracked)} source file(s) in budget_lines not tracked "
+                    f"in ingested_files"
+                ),
+                "count": len(untracked),
+                "samples": untracked[:10],
+            })
+    except Exception:
+        pass  # ingested_files may not exist
+
+    return issues
+
+
+def check_expected_indexes(conn: sqlite3.Connection) -> list[dict]:
+    """Verify that key performance indexes exist on budget_lines.
+
+    Missing indexes degrade query performance for dashboard, aggregation,
+    and PE detail endpoints.  This check warns about any expected indexes
+    that are absent so they can be recreated.
+    """
+    issues: list[dict] = []
+
+    expected_indexes = {
+        "idx_bl_exhibit", "idx_bl_org", "idx_bl_fy", "idx_bl_pe",
+        "idx_bl_approp", "idx_bl_pe_fy", "idx_bl_org_amount",
+        "idx_bl_exhibit_fy", "idx_bl_approp_amount",
+        "idx_bl_org_approp_line", "idx_bl_budget_type",
+        "idx_bl_fy_org", "idx_bl_pe_amount", "idx_bl_budget_type_amount",
+    }
+
+    try:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_bl_%'"
+        ).fetchall()
+        existing = {r[0] for r in rows}
+        missing = expected_indexes - existing
+
+        if missing:
+            issues.append({
+                "check": "expected_indexes",
+                "severity": "warning",
+                "detail": (
+                    f"{len(missing)} expected budget_lines index(es) missing: "
+                    f"{', '.join(sorted(missing))}"
+                ),
+                "count": len(missing),
+                "missing_indexes": sorted(missing),
+            })
+    except Exception:
+        pass
+
+    return issues
+
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    r = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (name,)
+    ).fetchone()
+    return r is not None
+
+
 ALL_CHECKS = [
     ("Missing Fiscal Years", check_missing_years),
     ("Duplicate Rows", check_duplicates),
@@ -774,10 +1380,23 @@ ALL_CHECKS = [
     ("Database Integrity", check_integrity),                      # SCHEMA-003
     ("YoY Budget Anomalies", check_yoy_budget_anomalies),        # TIGER-001
     ("Appropriation Title Consistency", check_appropriation_title_consistency),  # TIGER-002
+    ("Budget Activity Consistency", check_budget_activity_consistency),  # BA title consistency
     ("Line Item Rollups", check_line_item_rollups),              # TIGER-003
     ("Referential Integrity", check_referential_integrity),      # TIGER-004
     ("Expected FY Columns", check_expected_fy_columns),          # TIGER-005
     ("PDF Extraction Quality", check_pdf_extraction_quality),    # TIGER-006
+    ("Budget Type Values", check_budget_type_values),              # Budget type ref check
+    ("PDF Pages Fiscal Year", check_pdf_pages_fiscal_year),      # LION-108-val(a)
+    ("PDF PE Numbers Junction", check_pdf_pe_numbers_populated), # LION-108-val(b)
+    ("PE Tags Source Files", check_pe_tags_source_files),        # LION-108-val(c)
+    ("Extreme Amount Outliers", check_extreme_outliers),              # Outlier detection
+    ("PE Org Consistency", check_pe_org_consistency),                # Multi-org PE detection
+    ("Enrichment Orphans", check_enrichment_orphans),              # Orphan detection
+    ("Enrichment Staleness", check_enrichment_staleness),          # Stale PE detection
+    ("FY Column Null Rates", check_fy_column_null_rates),          # NULL percentage check
+    ("Duplicate Budget Lines", check_duplicate_budget_lines),      # Duplicate row detection
+    ("Source File Tracking", check_source_file_tracking),          # Provenance tracking
+    ("Expected Indexes", check_expected_indexes),                    # Performance index check
 ]
 
 

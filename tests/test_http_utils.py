@@ -9,7 +9,6 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -240,7 +239,7 @@ class TestCacheManager:
 
     def test_creates_cache_dir(self, tmp_path):
         cache_dir = tmp_path / "deep" / "nested" / "cache"
-        cm = CacheManager(cache_dir=cache_dir)
+        CacheManager(cache_dir=cache_dir)
         assert cache_dir.exists()
 
     def test_cache_path_sanitized(self, tmp_path):

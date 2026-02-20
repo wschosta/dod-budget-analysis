@@ -9,13 +9,11 @@ AGG-002: pct_of_total and yoy_change_pct added to each row.
 OPT-AGG-001: Server-side TTL cache (60 seconds) for aggregation queries.
 """
 
-import json
 import sqlite3
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi import Query as FQuery
-from fastapi.responses import JSONResponse
 
 from api.database import get_db
 from api.models import AggregationResponse, AggregationRow
@@ -31,10 +29,11 @@ _ALLOWED_GROUPS = {
     "appropriation":  "appropriation_code",
     "exhibit_type":   "exhibit_type",
     "budget_activity": "budget_activity_title",
+    "budget_type":    "budget_type",
 }
 
-# OPT-AGG-001: 60-second TTL cache keyed on (group_by, fiscal_year, service, exhibit_type)
-_agg_cache: TTLCache = TTLCache(maxsize=128, ttl_seconds=60)
+# OPT-AGG-001: 300-second TTL cache (matches dashboard) keyed on filter params
+_agg_cache: TTLCache = TTLCache(maxsize=128, ttl_seconds=300)
 
 
 def _cache_key(
@@ -42,12 +41,14 @@ def _cache_key(
     fiscal_year: list[str] | None,
     service: list[str] | None,
     exhibit_type: list[str] | None,
+    appropriation_code: list[str] | None = None,
 ) -> tuple:
     return (
         group_by,
         tuple(sorted(fiscal_year or [])),
         tuple(sorted(service or [])),
         tuple(sorted(exhibit_type or [])),
+        tuple(sorted(appropriation_code or [])),
     )
 
 
@@ -71,6 +72,7 @@ def aggregate(
     fiscal_year: list[str] | None = FQuery(None, description="Pre-filter by fiscal year(s)"),
     service: list[str] | None = FQuery(None, description="Pre-filter by service name"),
     exhibit_type: list[str] | None = FQuery(None, description="Pre-filter by exhibit type"),
+    appropriation_code: list[str] | None = FQuery(None, description="Pre-filter by appropriation code(s)"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> AggregationResponse:
     """Aggregate budget totals grouped by the specified dimension.
@@ -78,7 +80,7 @@ def aggregate(
     AGG-001: Amount columns are discovered dynamically from the schema so new
     fiscal year columns (FY2027+) are included automatically.
     AGG-002: Each row includes pct_of_total and yoy_change_pct.
-    OPT-AGG-001: Results are cached for 60 seconds per unique filter combination.
+    OPT-AGG-001: Results are cached for 300 seconds per unique filter combination.
     """
     if group_by not in _ALLOWED_GROUPS:
         raise HTTPException(
@@ -86,11 +88,19 @@ def aggregate(
             detail=f"group_by must be one of: {sorted(_ALLOWED_GROUPS.keys())}",
         )
 
+    # OPT-AGG-001: Check cache before querying
+    key = _cache_key(group_by, fiscal_year, service, exhibit_type,
+                     appropriation_code=appropriation_code)
+    cached = _agg_cache.get(key)
+    if cached is not None:
+        return cached
+
     col = _ALLOWED_GROUPS[group_by]
     where, params = build_where_clause(
         fiscal_year=fiscal_year,
         service=service,
         exhibit_type=exhibit_type,
+        appropriation_code=appropriation_code,
     )
 
     # AGG-001: Discover FY amount columns dynamically
@@ -102,10 +112,12 @@ def aggregate(
         f"SUM({c}) AS {c}" for c in amount_cols
     )
 
+    latest_count_expr = f"COUNT({amount_cols[-1]}) AS rows_with_amount"
     sql = f"""
         SELECT
             {col} AS group_value,
             COUNT(*) AS row_count,
+            {latest_count_expr},
             {sum_exprs}
         FROM budget_lines
         {where}
@@ -148,6 +160,7 @@ def aggregate(
         enriched.append(AggregationRow(
             group_value=r.get("group_value"),
             row_count=r.get("row_count", 0),
+            rows_with_amount=r.get("rows_with_amount"),
             total_fy2026_request=r.get(fy26_col) if fy26_col else latest_val,
             total_fy2025_enacted=r.get(fy25_col),
             total_fy2024_actual=r.get(fy24_col),
@@ -156,20 +169,40 @@ def aggregate(
             yoy_change_pct=yoy_change_pct,
         ))
 
-    return AggregationResponse(group_by=group_by, rows=enriched)
+    result = AggregationResponse(group_by=group_by, rows=enriched)
+    _agg_cache.set(key, result)
+    return result
+
+
+_hierarchy_cache: TTLCache = TTLCache(maxsize=16, ttl_seconds=300)
 
 
 @router.get("/hierarchy", summary="Hierarchical budget breakdown for treemap")
 def hierarchy(
     fiscal_year: str | None = FQuery(None, description="Filter by fiscal year"),
+    service: str | None = FQuery(None, description="Filter by service/organization name"),
+    exhibit_type: str | None = FQuery(None, description="Filter by exhibit type"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
     """Return Service > Appropriation > Program hierarchy for treemap visualization.
 
     Returns items with service, appropriation, program title, PE number, and amount.
+    Results are cached for 300 seconds per unique filter combination.
     """
+    cache_key = ("hierarchy", fiscal_year, service, exhibit_type)
+    cached = _hierarchy_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # Use dynamic FY column detection (consistent with main aggregation endpoint)
+    amount_cols = get_amount_columns(conn)
+    fy26_col = next((c for c in amount_cols if "fy2026_request" in c),
+                    "amount_fy2026_request")
+    fy25_col = next((c for c in amount_cols if "fy2025_enacted" in c),
+                    "amount_fy2025_enacted")
+
     conditions: list[str] = [
-        "amount_fy2026_request IS NOT NULL",
+        f"{fy26_col} IS NOT NULL",
         "organization_name IS NOT NULL",
     ]
     params: list[Any] = []
@@ -177,6 +210,12 @@ def hierarchy(
     if fiscal_year:
         conditions.append("fiscal_year = ?")
         params.append(fiscal_year)
+    if service:
+        conditions.append("organization_name = ?")
+        params.append(service)
+    if exhibit_type:
+        conditions.append("exhibit_type = ?")
+        params.append(exhibit_type)
 
     where = "WHERE " + " AND ".join(conditions)
 
@@ -186,13 +225,26 @@ def hierarchy(
         f"appropriation_title AS approp_title, "
         f"line_item_title AS program, "
         f"pe_number, "
-        f"SUM(amount_fy2026_request) AS amount "
+        f"SUM({fy26_col}) AS amount, "
+        f"SUM(COALESCE({fy25_col}, 0)) AS prev_amount "
         f"FROM budget_lines "
         f"{where} "
         f"GROUP BY organization_name, appropriation_code, line_item_title "
-        f"HAVING SUM(amount_fy2026_request) > 0 "
-        f"ORDER BY SUM(amount_fy2026_request) DESC",
+        f"HAVING SUM({fy26_col}) > 0 "
+        f"ORDER BY SUM({fy26_col}) DESC",
         params,
     ).fetchall()
 
-    return {"items": [dict(r) for r in rows]}
+    grand_total = sum(r["amount"] or 0 for r in rows) if rows else 0
+    items = []
+    for r in rows:
+        d = dict(r)
+        d["pct_of_total"] = (
+            round(d["amount"] / grand_total * 100, 2)
+            if grand_total and d["amount"] else None
+        )
+        items.append(d)
+
+    result = {"items": items, "grand_total": grand_total}
+    _hierarchy_cache.set(cache_key, result)
+    return result

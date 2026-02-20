@@ -32,7 +32,6 @@ router = APIRouter(tags=["frontend"])
 # LION-001: Custom HTML error handlers for 404/500 pages
 def register_error_handlers(app) -> None:
     """Register custom exception handlers that render branded error pages."""
-    from starlette.exceptions import HTTPException as StarletteHTTPException
 
     @app.exception_handler(404)
     async def not_found_handler(request: Request, exc):
@@ -434,8 +433,11 @@ def programs(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HT
             tags = tag_result.get("tags", [])[:30]
 
             pe_result = list_pes(tag=None, q=None, service=None,
-                                budget_type=None, fy=None,
-                                limit=25, offset=0, conn=conn)
+                                budget_type=None, approp=None, account=None,
+                                ba=None, exhibit=None, fy=None,
+                                sort_by=None, sort_dir=None,
+                                count_only=False, limit=25, offset=0,
+                                conn=conn)
             items = pe_result.get("items", [])
             total = pe_result.get("total", 0)
         except Exception:
@@ -501,8 +503,9 @@ def program_list_partial(
                 tag=tag_values,
                 q=params.get("q") or None,
                 service=params.get("service") or None,
-                budget_type=None, fy=None,
-                limit=25, offset=0, conn=conn,
+                budget_type=None, approp=None, account=None, ba=None,
+                exhibit=None, fy=None, sort_by=None, sort_dir=None,
+                count_only=False, limit=25, offset=0, conn=conn,
             )
             items = result.get("items", [])
             total = result.get("total", 0)
@@ -530,7 +533,7 @@ def program_descriptions_partial(
     if _table_exists(conn, "pe_descriptions"):
         try:
             from api.routes.pe import get_pe_descriptions
-            result = get_pe_descriptions(pe_number, fy=None, limit=10, offset=0, conn=conn)
+            result = get_pe_descriptions(pe_number, fy=None, section=None, limit=10, offset=0, conn=conn)
             descriptions = result.get("descriptions", [])
             total = result.get("total", 0)
         except Exception:

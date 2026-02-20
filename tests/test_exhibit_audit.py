@@ -7,7 +7,6 @@ without requiring openpyxl or any file I/O.
 import sys
 from pathlib import Path
 
-import pytest
 
 # Add both the scripts dir and the repo root to the path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))

@@ -6,7 +6,6 @@ Also covers build_budget_db.py fixes:
 - ingested_files error-path INSERT (column-count bug fix)
 - build_database raising FileNotFoundError instead of sys.exit
 """
-import sqlite3
 import sys
 import types
 from pathlib import Path
@@ -22,7 +21,7 @@ from search_budget import _sanitize_fts5_query, _highlight_terms, _extract_snipp
 for _mod in ("pdfplumber", "openpyxl", "pandas"):
     sys.modules.setdefault(_mod, types.ModuleType(_mod))
 
-from build_budget_db import create_database, build_database
+from build_budget_db import create_database, build_database  # noqa: E402
 
 
 # ── _sanitize_fts5_query ─────────────────────────────────────────────────────

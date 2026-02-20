@@ -65,10 +65,20 @@ class _ConnectionPool:
         """Open a new read-only connection with standard pragmas."""
         # OPT-DB-002: open read-only via URI
         uri = f"file:{self._db_path}?mode=ro"
-        conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+        conn = sqlite3.connect(uri, uri=True, check_same_thread=False,
+                               timeout=10)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
+        # WAL journal_mode may fail on read-only connections for databases
+        # not already in WAL mode — ignore errors gracefully.
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.OperationalError:
+            pass
+        conn.execute("PRAGMA busy_timeout=5000")
         return conn
 
     def acquire(self) -> sqlite3.Connection:
@@ -130,22 +140,25 @@ def _make_conn(db_path: Path, read_only: bool = False) -> sqlite3.Connection:
     """
     if read_only:
         uri = f"file:{db_path}?mode=ro"
-        conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+        conn = sqlite3.connect(uri, uri=True, check_same_thread=False,
+                               timeout=10)
         conn.row_factory = sqlite3.Row
-        # read-only connections don't support WAL or synchronous pragmas
+        conn.execute("PRAGMA busy_timeout=5000")
         return conn
-    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    conn = sqlite3.connect(str(db_path), check_same_thread=False,
+                           timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
 def get_db() -> Generator[sqlite3.Connection, None, None]:
     """FastAPI dependency: yield a SQLite connection, close on exit.
 
-    OPT-DB-001: Attempts to use connection pool for efficiency.
-    OPT-DB-002: Connections opened in read-only mode where supported.
+    OPT-DB-002: Connections opened with WAL mode, busy_timeout, and
+    NORMAL synchronous for resilience under concurrent access.
     OPT-DB-003: Raises HTTP 503 with a friendly message if the database file
     is missing, instead of a cryptic SQLite error.
 

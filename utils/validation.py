@@ -404,7 +404,7 @@ def check_yoy_outliers(
 
 # ── VAL-003: JSON export for ValidationResult ─────────────────────────────────
 
-import json as _json
+import json as _json  # noqa: E402
 
 
 def _add_to_json(cls):
@@ -421,6 +421,6 @@ def _add_to_json(cls):
 
 
 # Monkey-patch ValidationResult with to_json()
-ValidationResult.to_json = lambda self, indent=2: _json.dumps(  # type: ignore[method-assign]
+ValidationResult.to_json = lambda self, indent=2: _json.dumps(  # type: ignore[method-assign, attr-defined]
     self.to_dict(), indent=indent, default=str
 )

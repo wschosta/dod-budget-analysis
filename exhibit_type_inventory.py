@@ -79,22 +79,22 @@ class ExhibitInventory:
             try:
                 self.total_files += 1
                 exhibit_type = self._detect_exhibit_type(file_path.name)
-                
+
                 wb = openpyxl.load_workbook(str(file_path), read_only=True)
                 for sheet_name in wb.sheetnames:
                     self.total_sheets += 1
                     ws = wb[sheet_name]
-                    
+
                     headers = self._extract_headers(ws)
                     header_sig = " | ".join(headers[:10])  # First 10 columns as signature
-                    
+
                     self.exhibits[exhibit_type]["files"].append(str(file_path.relative_to(self.docs_dir)))
                     self.exhibits[exhibit_type]["sheets"].add(sheet_name)
                     self.exhibits[exhibit_type]["headers"].add(header_sig[:100])
-                    
+
                     if self.verbose:
                         print(f"  ✓ {file_path.name} / {sheet_name}")
-                
+
                 wb.close()
 
             except Exception as e:
@@ -123,12 +123,12 @@ class ExhibitInventory:
             report_lines.append(f"  Files:       {len(set(data['files']))}")
             report_lines.append(f"  Sheets:      {len(data['sheets'])}")
             report_lines.append(f"  Header Sigs: {len(data['headers'])}")
-            
+
             if self.verbose:
                 report_lines.append("\n  Sheet Names:")
                 for sheet in sorted(data["sheets"]):
                     report_lines.append(f"    - {sheet}")
-                
+
                 report_lines.append("\n  Header Signatures (first 3):")
                 for i, header_sig in enumerate(sorted(data["headers"])[:3]):
                     report_lines.append(f"    [{i+1}] {header_sig[:70]}")
@@ -152,10 +152,10 @@ class ExhibitInventory:
                 "sheets": sorted(info["sheets"]),
                 "header_signatures": sorted(info["headers"]),
             }
-        
+
         with open(output_path, "w") as f:
             json.dump(data, f, indent=2)
-        
+
         print(f"✓ Exported JSON to {output_path}")
 
     def export_csv(self, output_path: Path):
@@ -169,7 +169,7 @@ class ExhibitInventory:
                 "HeaderSignatures",
                 "SampleFiles"
             ])
-            
+
             for exhibit_type in sorted(self.exhibits.keys()):
                 data = self.exhibits[exhibit_type]
                 sample_files = " | ".join(sorted(set(data["files"]))[:2])
@@ -180,7 +180,7 @@ class ExhibitInventory:
                     len(data["headers"]),
                     sample_files,
                 ])
-        
+
         print(f"✓ Exported CSV to {output_path}")
 
 
@@ -245,7 +245,7 @@ Examples:
     # Export if requested
     if args.export_json:
         inventory.export_json(args.export_json)
-    
+
     if args.export_csv:
         inventory.export_csv(args.export_csv)
 

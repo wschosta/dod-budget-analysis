@@ -15,7 +15,10 @@ Run with: pytest tests/test_optimizations.py -v --tb=short
 """
 
 import re
+import sqlite3
+import tempfile
 import time
+from pathlib import Path
 
 import pytest
 
@@ -175,6 +178,49 @@ class TestPerformanceBenchmarks:
         elapsed_time = (time.perf_counter() - start) * 1_000_000
         avg_time = elapsed_time / 100000
         print(f"\nWhitespace normalization: {avg_time:.3f} \u00b5s per operation")
+
+
+class TestApiConnectionPool:
+    """Verify API connection pool acquires and releases connections."""
+
+    @staticmethod
+    def _create_test_db(tmpdir):
+        db_path = Path(tmpdir) / "test.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("CREATE TABLE test (id INTEGER)")
+        conn.commit()
+        conn.close()
+        return db_path
+
+    def test_pool_acquire_release(self):
+        """Pool reuses connections after release."""
+        from api.database import _ConnectionPool
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._create_test_db(tmpdir)
+            pool = _ConnectionPool(db_path, max_size=2)
+            c1 = pool.acquire()
+            assert isinstance(c1, sqlite3.Connection)
+            pool.release(c1)
+            c2 = pool.acquire()
+            # Should get the same connection back from the pool
+            assert c2 is c1
+            pool.release(c2)
+            pool.close_all()
+
+    def test_pool_busy_timeout(self):
+        """Connections from pool have busy_timeout set."""
+        from api.database import _ConnectionPool
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = self._create_test_db(tmpdir)
+            pool = _ConnectionPool(db_path, max_size=2)
+            c = pool.acquire()
+            timeout = c.execute("PRAGMA busy_timeout").fetchone()[0]
+            assert timeout == 5000
+            pool.release(c)
+            pool.close_all()
 
 
 if __name__ == "__main__":

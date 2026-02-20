@@ -90,7 +90,7 @@ class SearchResultItem(BaseModel):
     id: int = Field(..., description="Row ID in the source table", examples=[1001])
     source_file: str = Field(..., description="Source XLSX or PDF filename")
     snippet: str | None = Field(None, description="Context snippet around the matching text")
-    score: float | None = Field(None, description="BM25 relevance score (higher = more relevant)")
+    score: float | None = Field(None, description="BM25 relevance score (lower/more negative = more relevant)")
     data: dict[str, Any] = Field(..., description="Full row fields as key-value pairs")
 
 
@@ -99,8 +99,11 @@ class SearchResponse(BaseModel):
     model_config = {"json_schema_extra": {"examples": [{"query": "hypersonic missile", "total": 42, "limit": 20, "offset": 0, "results": [{"result_type": "budget_line", "id": 1001, "source_file": "fy2026_navy_r2.xlsx", "snippet": "...advanced <mark>hypersonic</mark> <mark>missile</mark> defense...", "score": 12.5, "data": {"pe_number": "0603576N", "organization_name": "Navy"}}]}]}}
     query: str = Field(..., description="The original search query string", examples=["hypersonic missile"])
     total: int = Field(..., description="Total number of matching results returned", examples=[42])
+    budget_line_count: int = Field(0, description="Number of budget_line results in this page")
+    pdf_page_count: int = Field(0, description="Number of pdf_page results in this page")
     limit: int = Field(..., description="Maximum results per page", examples=[20])
     offset: int = Field(..., description="Pagination offset", examples=[0])
+    has_more: bool = Field(False, description="Whether more results exist beyond this page")
     results: list[SearchResultItem] = Field(..., description="List of search result items")
 
 
@@ -110,6 +113,7 @@ class AggregationRow(BaseModel):
     """One row of a GROUP BY aggregation result."""
     group_value: str | None = Field(None, description="The grouped field value", examples=["Army"])
     row_count: int = Field(..., description="Number of budget lines in this group", examples=[4200])
+    rows_with_amount: int | None = Field(None, description="Rows with non-NULL latest FY amount")
     total_fy2026_request: float | None = Field(None, description="Sum of FY2026 request amounts in $K")
     total_fy2025_enacted: float | None = Field(None, description="Sum of FY2025 enacted amounts in $K")
     total_fy2024_actual: float | None = Field(None, description="Sum of FY2024 actual amounts in $K")
@@ -134,6 +138,9 @@ class PaginatedResponse(BaseModel):
     total: int = Field(..., description="Total matching rows (before pagination)", examples=[3842])
     limit: int = Field(..., description="Page size used", examples=[25])
     offset: int = Field(..., description="Offset of this page", examples=[0])
+    page: int = Field(..., description="Current page number (0-indexed)", examples=[0])
+    page_count: int = Field(..., description="Total number of pages", examples=[154])
+    has_next: bool = Field(..., description="Whether there is a next page")
     items: list[BudgetLineOut] = Field(..., description="Budget line items for this page")
 
 
@@ -159,6 +166,6 @@ class FeedbackType(str, Enum):
 class FeedbackSubmission(BaseModel):
     """User feedback submission payload."""
     type: FeedbackType = Field(..., description="Feedback category", examples=["bug"])
-    description: str = Field(..., min_length=10, description="Feedback details (min 10 chars)", examples=["The search results for 'F-35' are missing FY2025 data rows."])
+    description: str = Field(..., min_length=10, max_length=5000, description="Feedback details (10-5000 chars)", examples=["The search results for 'F-35' are missing FY2025 data rows."])
     email: str | None = Field(None, description="Optional contact email", examples=["user@example.com"])
     page_url: str | None = Field(None, description="Page where the issue was observed", examples=["/search?q=F-35"])

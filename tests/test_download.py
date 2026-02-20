@@ -17,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from api.routes.download import _iter_rows, _DOWNLOAD_COLUMNS, _ALLOWED_SORT
+from api.routes.download import _iter_rows, _DOWNLOAD_COLUMNS, _ALLOWED_SORT, _build_download_sql
 from fastapi.testclient import TestClient
 from api.app import create_app
 
@@ -88,6 +88,50 @@ class TestDownloadAllowedSort:
         assert "id" in _ALLOWED_SORT
         assert "source_file" in _ALLOWED_SORT
         assert "amount_fy2026_request" in _ALLOWED_SORT
+
+
+class TestBuildDownloadSql:
+    def test_appropriation_code_filter(self, dl_db):
+        """appropriation_code filter restricts results."""
+        dl_db.execute("UPDATE budget_lines SET appropriation_code = '3010' WHERE id = 1")
+        dl_db.execute("UPDATE budget_lines SET appropriation_code = '1506' WHERE id = 2")
+        dl_db.commit()
+
+        sql, params, total = _build_download_sql(
+            fiscal_year=None, service=None, exhibit_type=None,
+            pe_number=None, appropriation_code=["3010"], q=None,
+            conn=dl_db, limit=100, export_cols=_DOWNLOAD_COLUMNS,
+        )
+        assert total == 1
+        rows = list(_iter_rows(dl_db, sql, params))
+        assert len(rows) == 1
+
+    def test_min_max_amount_filter(self, dl_db):
+        """min_amount and max_amount restrict results."""
+        dl_db.execute("UPDATE budget_lines SET amount_fy2026_request = 500 WHERE id = 1")
+        dl_db.execute("UPDATE budget_lines SET amount_fy2026_request = 1500 WHERE id = 2")
+        dl_db.execute("UPDATE budget_lines SET amount_fy2026_request = 3000 WHERE id = 3")
+        dl_db.commit()
+
+        sql, params, total = _build_download_sql(
+            fiscal_year=None, service=None, exhibit_type=None,
+            pe_number=None, appropriation_code=None, q=None,
+            conn=dl_db, limit=100, export_cols=_DOWNLOAD_COLUMNS,
+            min_amount=1000.0, max_amount=2000.0,
+        )
+        assert total == 1  # Only id=2 with amount=1500
+
+    def test_sort_order_applied(self, dl_db):
+        """sort_by and sort_dir affect result ordering."""
+        sql_desc, params_desc, _ = _build_download_sql(
+            fiscal_year=None, service=None, exhibit_type=None,
+            pe_number=None, appropriation_code=None, q=None,
+            conn=dl_db, limit=100, export_cols=_DOWNLOAD_COLUMNS,
+            sort_by="id", sort_dir="desc",
+        )
+        rows = list(_iter_rows(dl_db, sql_desc, params_desc))
+        ids = [r[0] for r in rows]
+        assert ids == sorted(ids, reverse=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -215,7 +259,7 @@ class TestNDJSONDownload:
 
     def test_ndjson_valid_json_per_line(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=json")
-        lines = [l for l in resp.text.strip().split("\n") if l]
+        lines = [line for line in resp.text.strip().split("\n") if line]
         assert len(lines) == 20
         for line in lines:
             obj = json.loads(line)
@@ -230,7 +274,7 @@ class TestNDJSONDownload:
 
     def test_ndjson_empty_result_no_content(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=json&service=NonExistentService")
-        lines = [l for l in resp.text.strip().split("\n") if l]
+        lines = [line for line in resp.text.strip().split("\n") if line]
         assert len(lines) == 0
 
 
