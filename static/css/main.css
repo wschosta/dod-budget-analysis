@@ -328,7 +328,8 @@ td {
   vertical-align: top;
 }
 tr:hover td { background: var(--clr-sky); cursor: pointer; }
-tr.selected td { background: #dbeafe; }
+/* FIX-013: Use CSS variable instead of hardcoded color for dark mode compat */
+tr.selected td { background: var(--clr-sky); }
 .td-amount { text-align: right; font-variant-numeric: tabular-nums; }
 .td-org { font-weight: 600; white-space: nowrap; }
 .badge {
