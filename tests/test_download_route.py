@@ -90,6 +90,22 @@ class TestBuildDownloadSql:
         assert len(rows) == 1
 
 
+    def test_min_max_amount_filter(self, db):
+        """min_amount and max_amount restrict results."""
+        # Set amounts on specific rows
+        db.execute("UPDATE budget_lines SET amount_fy2026_request = 500 WHERE id = 1")
+        db.execute("UPDATE budget_lines SET amount_fy2026_request = 1500 WHERE id = 2")
+        db.execute("UPDATE budget_lines SET amount_fy2026_request = 3000 WHERE id = 3")
+        db.commit()
+
+        sql, params, total = _build_download_sql(
+            fiscal_year=None, service=None, exhibit_type=None,
+            pe_number=None, appropriation_code=None, q=None,
+            conn=db, limit=100, export_cols=_DOWNLOAD_COLUMNS,
+            min_amount=1000.0, max_amount=2000.0,
+        )
+        assert total == 1  # Only id=2 with amount=1500
+
     def test_sort_order_applied(self, db):
         """sort_by and sort_dir affect result ordering."""
         sql_asc, params_asc, _ = _build_download_sql(

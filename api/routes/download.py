@@ -62,6 +62,8 @@ def _build_download_sql(
     export_cols: list[str],
     sort_by: str = "id",
     sort_dir: str = "asc",
+    min_amount: float | None = None,
+    max_amount: float | None = None,
 ) -> tuple[str, list[Any], int]:
     """Build the download SQL with all filters applied.
 
@@ -88,6 +90,8 @@ def _build_download_sql(
         exhibit_type=exhibit_type,
         pe_number=pe_number,
         appropriation_code=appropriation_code,
+        min_amount=min_amount,
+        max_amount=max_amount,
         fts_ids=fts_ids,
     )
 
@@ -115,6 +119,8 @@ def download(
     appropriation_code: list[str] | None = Query(None, description="Filter by appropriation code(s)"),
     # DL-002: keyword search filter
     q: str | None = Query(None, description="Keyword search filter (FTS5)"),
+    min_amount: float | None = Query(None, description="Min FY2026 request amount"),
+    max_amount: float | None = Query(None, description="Max FY2026 request amount"),
     sort_by: str = Query("id", description="Column to sort by"),
     sort_dir: str = Query("asc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(
@@ -144,6 +150,8 @@ def download(
         export_cols=export_cols,
         sort_by=sort_by,
         sort_dir=sort_dir,
+        min_amount=min_amount,
+        max_amount=max_amount,
     )
 
     # DL-003: X-Total-Count header
