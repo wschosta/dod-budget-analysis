@@ -289,6 +289,19 @@ class TestGetPe:
             get_pe("9999999X", conn=db)
         assert exc_info.value.status_code == 404
 
+    def test_malformed_pe_returns_400(self, db):
+        """Malformed PE number (wrong format) raises 400 before DB query."""
+        with pytest.raises(HTTPException) as exc_info:
+            get_pe("INVALID", conn=db)
+        assert exc_info.value.status_code == 400
+        assert "Invalid PE number format" in str(exc_info.value.detail)
+
+    def test_malformed_pe_short_returns_400(self, db):
+        """Too-short PE number raises 400."""
+        with pytest.raises(HTTPException) as exc_info:
+            get_pe("123A", conn=db)
+        assert exc_info.value.status_code == 400
+
 
 # ── get_pe_years tests ────────────────────────────────────────────────────────
 

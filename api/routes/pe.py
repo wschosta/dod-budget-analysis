@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 import sqlite3
 import zipfile
 from pathlib import Path
@@ -29,6 +30,18 @@ from api.database import get_db, get_db_path
 from utils.strings import sanitize_fts5_query
 
 router = APIRouter(prefix="/pe", tags=["pe"])
+
+_PE_FORMAT = re.compile(r"^[0-9]{7}[A-Z]{1,2}$")
+
+
+def _validate_pe_number(pe_number: str) -> None:
+    """Raise 400 if pe_number is obviously malformed."""
+    if not _PE_FORMAT.match(pe_number):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid PE number format: '{pe_number}'. "
+                   f"Expected 7 digits + 1-2 uppercase letters (e.g., 0602702E).",
+        )
 
 
 # ── Helper: row → dict ────────────────────────────────────────────────────────
@@ -206,6 +219,7 @@ def get_pe(
     - Tags from all sources
     - Related PE numbers (definite + suggested)
     """
+    _validate_pe_number(pe_number)
     row = conn.execute(
         "SELECT * FROM pe_index WHERE pe_number = ?", (pe_number,)
     ).fetchone()
@@ -300,6 +314,7 @@ def get_pe_years(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
     """Return a year × amount matrix for a PE — the primary funding table."""
+    _validate_pe_number(pe_number)
     rows = conn.execute("""
         SELECT
             fiscal_year,
@@ -339,6 +354,7 @@ def get_pe_changes(
     increases, decreases, and new/terminated line items. Useful for
     identifying programs gaining or losing funding.
     """
+    _validate_pe_number(pe_number)
     rows = conn.execute("""
         SELECT
             line_item_title,
@@ -404,6 +420,7 @@ def get_pe_subelements(
     - P-5 procurement line items (exhibit_type = p5)
     - Budget activity breakdowns within R-1/P-1 summary rows
     """
+    _validate_pe_number(pe_number)
     params: list[Any] = [pe_number]
     fy_clause = ""
     if fy:
@@ -893,6 +910,7 @@ def export_pe_table(
              FY2025 Total, FY2026 Request, FY2026 Total, % Change (25→26),
              Qty FY2024, Qty FY2025, Qty FY2026 Request
     """
+    _validate_pe_number(pe_number)
     rows = conn.execute("""
         SELECT
             pe_number, line_item_title, organization_name,
