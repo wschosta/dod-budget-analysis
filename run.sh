@@ -11,6 +11,13 @@ cd "$(dirname "$0")"
 
 PORT="${1:-${APP_PORT:-8000}}"
 
+# Auto-install dependencies if uvicorn is not available
+if ! python -c "import uvicorn" 2>/dev/null; then
+    echo "uvicorn not found — installing dependencies..."
+    echo ""
+    pip install -r requirements.txt
+fi
+
 echo "Starting DoD Budget Explorer on http://localhost:${PORT}"
 echo "Database: ${APP_DB_PATH:-dod_budget.sqlite}"
 echo ""

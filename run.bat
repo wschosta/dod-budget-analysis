@@ -15,6 +15,29 @@ if "%1"=="" (
 )
 if not "%APP_PORT%"=="" if "%1"=="" set PORT=%APP_PORT%
 
+REM Auto-install dependencies if uvicorn is not available
+python -c "import uvicorn" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo uvicorn not found — installing dependencies...
+    echo.
+    pip install -r requirements.txt
+    if %errorlevel% neq 0 (
+        echo.
+        echo -------------------------------------------------------
+        echo ERROR: Failed to install dependencies.
+        echo.
+        echo Common fixes:
+        echo   1. Install Python 3.8+ from https://www.python.org
+        echo      Make sure "Add Python to PATH" is checked.
+        echo   2. Try manually:  pip install -r requirements.txt
+        echo -------------------------------------------------------
+        echo.
+        pause
+        exit /b 1
+    )
+    echo.
+)
+
 echo Starting DoD Budget Explorer on http://localhost:%PORT%
 echo Database: %APP_DB_PATH%
 if "%APP_DB_PATH%"=="" echo Database: dod_budget.sqlite
