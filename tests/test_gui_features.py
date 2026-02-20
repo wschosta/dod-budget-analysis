@@ -246,6 +246,21 @@ class TestDashboardAPI:
         resp2 = app_client.get("/api/v1/dashboard/summary")
         assert resp1.json()["totals"] == resp2.json()["totals"]
 
+    def test_summary_fiscal_year_filter(self, app_client):
+        """fiscal_year filter restricts to matching rows only."""
+        resp = app_client.get("/api/v1/dashboard/summary?fiscal_year=2026")
+        assert resp.status_code == 200
+        data = resp.json()
+        # Test data has 2 rows with FY 2026 and 1 with FY 2025
+        assert data["totals"]["total_lines"] == 2
+
+    def test_summary_fiscal_year_no_match(self, app_client):
+        """Non-existent fiscal year returns zero totals."""
+        resp = app_client.get("/api/v1/dashboard/summary?fiscal_year=2099")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["totals"]["total_lines"] == 0
+
 
 # ── Hierarchy endpoint ────────────────────────────────────────────────────────
 

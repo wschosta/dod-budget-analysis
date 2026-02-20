@@ -3,7 +3,7 @@
 import json
 import sqlite3
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from api.database import get_db
 from utils.cache import TTLCache
@@ -23,7 +23,10 @@ def _detect_fy_columns(conn: sqlite3.Connection) -> tuple[str, str]:
 
 
 @router.get("/summary", summary="Dashboard summary statistics")
-def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
+def dashboard_summary(
+    fiscal_year: str | None = Query(None, description="Filter by fiscal year (e.g. '2026')"),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> dict:
     """Return aggregated statistics for the dashboard overview page.
 
     Includes:
@@ -34,13 +37,21 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
     - Top 6 appropriation categories
     - Budget type distribution (RDT&E, Procurement, O&M, etc.)
     - Enrichment coverage metrics
+
+    Pass fiscal_year to restrict all aggregations to a single FY.
     """
-    cache_key = ("dashboard_summary", id(conn))
+    cache_key = ("dashboard_summary", id(conn), fiscal_year)
     cached = _summary_cache.get(cache_key)
     if cached is not None:
         return cached
 
     fy26_col, fy25_col = _detect_fy_columns(conn)
+
+    fy_filter = ""
+    fy_params: list = []
+    if fiscal_year:
+        fy_filter = "WHERE fiscal_year = ?"
+        fy_params = [fiscal_year]
 
     # Batch the main budget_lines aggregations into a single CTE query.
     # This scans the table once instead of 4 separate passes.
@@ -51,6 +62,7 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
                    id, line_item_title, pe_number,
                    {fy26_col} AS fy26, {fy25_col} AS fy25
             FROM budget_lines
+            {fy_filter}
         ),
         totals AS (
             SELECT COUNT(*) AS total_lines,
@@ -104,7 +116,7 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
                         'appropriation_title', a.appropriation_title,
                         'total', a.total)
         ) FROM by_approp a
-    """).fetchall()
+    """, fy_params).fetchall()
 
     # Parse the batch result
     sections = {row[0]: json.loads(row[1]) for row in batch_result}
@@ -114,12 +126,16 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
     by_approp = sections.get("by_appropriation", [])
 
     # Top 10 programs — needs its own query since it returns individual rows
+    tp_where = f"WHERE {fy26_col} IS NOT NULL"
+    if fiscal_year:
+        tp_where += " AND fiscal_year = ?"
     top_programs_rows = conn.execute(
         f"SELECT id, line_item_title, organization_name, pe_number, "
         f"{fy26_col} as fy26_request, {fy25_col} as fy25_enacted "
         f"FROM budget_lines "
-        f"WHERE {fy26_col} IS NOT NULL "
-        f"ORDER BY {fy26_col} DESC LIMIT 10"
+        f"{tp_where} "
+        f"ORDER BY {fy26_col} DESC LIMIT 10",
+        fy_params,
     ).fetchall()
 
     # Enrichment coverage — how much of the database is enriched
@@ -161,9 +177,10 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
                    SUM({fy25_col}) AS prev_total,
                    COUNT(*) AS line_count
             FROM budget_lines
+            {fy_filter}
             GROUP BY COALESCE(budget_type, 'Unknown')
             ORDER BY SUM(COALESCE({fy26_col}, 0)) DESC
-        """).fetchall()
+        """, fy_params).fetchall()
         by_budget_type = [dict(r) for r in bt_rows]
     except Exception:
         pass  # budget_type column may not exist
