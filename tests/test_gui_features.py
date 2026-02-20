@@ -240,6 +240,13 @@ class TestDashboardAPI:
         assert "source_stats" in data
         assert isinstance(data["source_stats"], dict)
 
+    def test_summary_has_by_exhibit_type(self, app_client):
+        resp = app_client.get("/api/v1/dashboard/summary")
+        data = resp.json()
+        assert "by_exhibit_type" in data
+        assert isinstance(data["by_exhibit_type"], list)
+        assert len(data["by_exhibit_type"]) > 0
+
     def test_summary_is_cached(self, app_client):
         """Second call should use cache (both should return same data)."""
         resp1 = app_client.get("/api/v1/dashboard/summary")

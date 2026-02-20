@@ -193,6 +193,22 @@ def dashboard_summary(
     except Exception:
         pass  # budget_type column may not exist
 
+    # Exhibit type distribution
+    by_exhibit_type: list[dict] = []
+    try:
+        et_rows = conn.execute(f"""
+            SELECT COALESCE(exhibit_type, 'Unknown') AS exhibit_type,
+                   SUM({fy26_col}) AS total,
+                   COUNT(*) AS line_count
+            FROM budget_lines
+            {fy_filter}
+            GROUP BY COALESCE(exhibit_type, 'Unknown')
+            ORDER BY SUM(COALESCE({fy26_col}, 0)) DESC
+        """, fy_params).fetchall()
+        by_exhibit_type = [dict(r) for r in et_rows]
+    except Exception:
+        pass
+
     # Source file stats — Excel vs PDF file counts and totals
     source_stats: dict = {}
     try:
@@ -246,6 +262,7 @@ def dashboard_summary(
         "by_fiscal_year": by_fy,
         "by_appropriation": by_approp,
         "by_budget_type": by_budget_type,
+        "by_exhibit_type": by_exhibit_type,
         "source_stats": source_stats,
         "enrichment": enrichment,
         "freshness": freshness,
