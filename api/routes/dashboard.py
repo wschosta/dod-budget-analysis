@@ -86,12 +86,48 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
         f"ORDER BY SUM(COALESCE({fy26_col}, 0)) DESC LIMIT 6"
     ).fetchall()
 
+    # Enrichment coverage — how much of the database is enriched
+    enrichment = {}
+    try:
+        distinct_pes = conn.execute(
+            "SELECT COUNT(DISTINCT pe_number) AS c FROM budget_lines "
+            "WHERE pe_number IS NOT NULL"
+        ).fetchone()["c"]
+        pe_index_count = conn.execute(
+            "SELECT COUNT(*) AS c FROM pe_index"
+        ).fetchone()["c"]
+        pe_with_tags = conn.execute(
+            "SELECT COUNT(DISTINCT pe_number) AS c FROM pe_tags"
+        ).fetchone()["c"]
+        pe_with_desc = conn.execute(
+            "SELECT COUNT(DISTINCT pe_number) AS c FROM pe_descriptions"
+        ).fetchone()["c"]
+        total_tags = conn.execute(
+            "SELECT COUNT(*) AS c FROM pe_tags"
+        ).fetchone()["c"]
+        enrichment = {
+            "total_pes": distinct_pes,
+            "pe_index_coverage": pe_index_count,
+            "pe_with_tags": pe_with_tags,
+            "pe_with_descriptions": pe_with_desc,
+            "total_tags": total_tags,
+            "pct_indexed": round(pe_index_count / distinct_pes * 100, 1)
+            if distinct_pes > 0 else 0,
+            "pct_tagged": round(pe_with_tags / distinct_pes * 100, 1)
+            if distinct_pes > 0 else 0,
+            "pct_described": round(pe_with_desc / distinct_pes * 100, 1)
+            if distinct_pes > 0 else 0,
+        }
+    except Exception:
+        pass  # Enrichment tables may not exist yet
+
     result = {
         "totals": totals,
         "by_service": [dict(r) for r in by_service_rows],
         "top_programs": [dict(r) for r in top_programs_rows],
         "by_fiscal_year": [dict(r) for r in by_fy_rows],
         "by_appropriation": [dict(r) for r in by_approp_rows],
+        "enrichment": enrichment,
     }
 
     _summary_cache.set(cache_key, result)
