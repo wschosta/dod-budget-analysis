@@ -167,6 +167,69 @@ def get_pe_years(
     return {"pe_number": pe_number, "years": [_row_dict(r) for r in rows]}
 
 
+# ── GET /api/v1/pe/{pe_number}/changes ────────────────────────────────────
+
+@router.get(
+    "/{pe_number}/changes",
+    summary="Year-over-year funding changes for a PE",
+)
+def get_pe_changes(
+    pe_number: str,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> dict:
+    """Return year-over-year funding deltas for a PE.
+
+    Compares FY2025 enacted/total vs FY2026 request to surface budget
+    increases, decreases, and new/terminated line items. Useful for
+    identifying programs gaining or losing funding.
+    """
+    rows = conn.execute("""
+        SELECT
+            line_item_title,
+            exhibit_type,
+            SUM(COALESCE(amount_fy2025_total, 0))     AS fy2025_total,
+            SUM(COALESCE(amount_fy2026_request, 0))    AS fy2026_request,
+            SUM(COALESCE(amount_fy2026_request, 0))
+                - SUM(COALESCE(amount_fy2025_total, 0)) AS delta,
+            CASE
+                WHEN SUM(COALESCE(amount_fy2025_total, 0)) = 0
+                     AND SUM(COALESCE(amount_fy2026_request, 0)) > 0
+                    THEN 'new'
+                WHEN SUM(COALESCE(amount_fy2025_total, 0)) > 0
+                     AND SUM(COALESCE(amount_fy2026_request, 0)) = 0
+                    THEN 'terminated'
+                WHEN SUM(COALESCE(amount_fy2026_request, 0))
+                     > SUM(COALESCE(amount_fy2025_total, 0))
+                    THEN 'increase'
+                WHEN SUM(COALESCE(amount_fy2026_request, 0))
+                     < SUM(COALESCE(amount_fy2025_total, 0))
+                    THEN 'decrease'
+                ELSE 'flat'
+            END AS change_type
+        FROM budget_lines
+        WHERE pe_number = ?
+        GROUP BY line_item_title, exhibit_type
+        HAVING fy2025_total != 0 OR fy2026_request != 0
+        ORDER BY ABS(delta) DESC
+    """, (pe_number,)).fetchall()
+
+    # Compute PE-level totals
+    total_fy25 = sum(r["fy2025_total"] or 0 for r in rows)
+    total_fy26 = sum(r["fy2026_request"] or 0 for r in rows)
+    pct_change = None
+    if total_fy25 and total_fy25 != 0:
+        pct_change = round(((total_fy26 - total_fy25) / abs(total_fy25)) * 100, 1)
+
+    return {
+        "pe_number": pe_number,
+        "total_fy2025": total_fy25,
+        "total_fy2026_request": total_fy26,
+        "total_delta": total_fy26 - total_fy25,
+        "pct_change": pct_change,
+        "line_items": [_row_dict(r) for r in rows],
+    }
+
+
 # ── GET /api/v1/pe/{pe_number}/subelements ────────────────────────────────────
 
 @router.get(

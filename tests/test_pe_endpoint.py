@@ -22,6 +22,7 @@ from fastapi import HTTPException
 from api.routes.pe import (
     get_pe,
     get_pe_years,
+    get_pe_changes,
     get_pe_subelements,
     get_pe_descriptions,
     get_pe_related,
@@ -295,6 +296,34 @@ class TestGetPeYears:
         with pytest.raises(HTTPException) as exc_info:
             get_pe_years("9999999X", conn=db)
         assert exc_info.value.status_code == 404
+
+
+# ── get_pe_changes tests ─────────────────────────────────────────────────
+
+class TestGetPeChanges:
+    def test_returns_changes(self, populated_db):
+        result = get_pe_changes("0602120A", conn=populated_db)
+        assert result["pe_number"] == "0602120A"
+        assert "total_fy2025" in result
+        assert "total_fy2026_request" in result
+        assert "total_delta" in result
+        assert "pct_change" in result
+        assert "line_items" in result
+
+    def test_delta_calculation(self, populated_db):
+        result = get_pe_changes("0602120A", conn=populated_db)
+        assert result["total_delta"] == result["total_fy2026_request"] - result["total_fy2025"]
+
+    def test_line_items_sorted_by_delta(self, populated_db):
+        result = get_pe_changes("0602120A", conn=populated_db)
+        if len(result["line_items"]) >= 2:
+            deltas = [abs(li["delta"]) for li in result["line_items"]]
+            assert deltas == sorted(deltas, reverse=True)
+
+    def test_empty_pe_returns_empty(self, db):
+        result = get_pe_changes("9999999X", conn=db)
+        assert result["total_delta"] == 0
+        assert len(result["line_items"]) == 0
 
 
 # ── get_pe_subelements tests ──────────────────────────────────────────────────
