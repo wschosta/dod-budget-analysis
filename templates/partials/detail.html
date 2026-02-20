@@ -123,7 +123,8 @@
 
   {# FE-007: Download This Item + Source Document buttons #}
   <div style="margin-top:1rem;display:flex;gap:.5rem;flex-wrap:wrap">
-    <a href="/api/v1/download?fmt=csv&limit=1{% if item.pe_number %}&pe_number={{ item.pe_number }}{% endif %}&fiscal_year={{ item.fiscal_year }}"
+    {# FIX-017: Use item_id for exact single-row download instead of PE/FY filter #}
+    <a href="/api/v1/download?fmt=csv&item_id={{ item.id }}"
        class="btn btn-secondary btn-sm"
        download
        title="Download this line item as CSV">
