@@ -168,6 +168,28 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
     except Exception:
         pass  # budget_type column may not exist
 
+    # Data freshness — when was the database last built/updated?
+    freshness: dict = {}
+    try:
+        bp = conn.execute("""
+            SELECT checkpoint_time, notes, status
+            FROM build_progress
+            ORDER BY checkpoint_time DESC LIMIT 1
+        """).fetchone()
+        if bp:
+            freshness["last_build"] = bp["checkpoint_time"]
+            freshness["last_build_status"] = bp["status"]
+            if bp["notes"]:
+                freshness["last_build_notes"] = bp["notes"]
+        ds = conn.execute("""
+            SELECT MAX(last_updated) AS most_recent
+            FROM data_sources WHERE last_updated IS NOT NULL
+        """).fetchone()
+        if ds and ds["most_recent"]:
+            freshness["data_sources_updated"] = ds["most_recent"]
+    except Exception:
+        pass  # Tables may not exist
+
     result = {
         "totals": totals,
         "by_service": by_service,
@@ -176,6 +198,7 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
         "by_appropriation": by_approp,
         "by_budget_type": by_budget_type,
         "enrichment": enrichment,
+        "freshness": freshness,
     }
 
     _summary_cache.set(cache_key, result)
