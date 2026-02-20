@@ -529,6 +529,19 @@ def test_enrichment_orphans_empty_tables(conn):
     assert len(issues) == 0
 
 
+def test_enrichment_orphans_lineage_referenced_pe(conn):
+    """Orphaned pe_lineage.referenced_pe rows referencing unknown PE → warning."""
+    conn.execute("INSERT INTO pe_index (pe_number, display_title) VALUES ('0602120A', 'Radar')")
+    conn.execute("""
+        INSERT INTO pe_lineage (source_pe, referenced_pe, link_type)
+        VALUES ('0602120A', '9999999X', 'name_match')
+    """)
+    conn.commit()
+    issues = check_enrichment_orphans(conn)
+    assert len(issues) >= 1
+    assert any(i["table"] == "pe_lineage" and i["column"] == "referenced_pe" for i in issues)
+
+
 # ── Enrichment Staleness ─────────────────────────────────────────────────
 
 def test_enrichment_staleness_all_indexed(conn):

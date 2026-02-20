@@ -1109,6 +1109,7 @@ def check_enrichment_orphans(conn: sqlite3.Connection) -> list[dict]:
         ("pe_descriptions", "pe_number"),
         ("pe_tags", "pe_number"),
         ("pe_lineage", "source_pe"),
+        ("pe_lineage", "referenced_pe"),
     ]
     for table, col in checks:
         if not _table_exists(conn, table):
