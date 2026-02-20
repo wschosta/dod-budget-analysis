@@ -147,7 +147,13 @@ def get_top_changes(
         )
         items.append(d)
 
-    return {"count": len(items), "items": items}
+    # Summary breakdown by change type
+    type_counts: dict[str, int] = {}
+    for item in items:
+        ct = item.get("change_type", "unknown")
+        type_counts[ct] = type_counts.get(ct, 0) + 1
+
+    return {"count": len(items), "by_change_type": type_counts, "items": items}
 
 
 # ── GET /api/v1/pe/compare ───────────────────────────────────────────────────

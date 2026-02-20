@@ -422,6 +422,15 @@ class TestGetTopChanges:
                                  sort_by=None, limit=20, conn=populated_db)
         assert len(result["items"]) < all_count
 
+    def test_by_change_type_summary(self, populated_db):
+        """Response includes by_change_type dict summing items per type."""
+        result = get_top_changes(direction=None, service=None, min_delta=None,
+                                 sort_by=None, limit=20, conn=populated_db)
+        assert "by_change_type" in result
+        assert isinstance(result["by_change_type"], dict)
+        # Sum of all type counts should equal total items
+        assert sum(result["by_change_type"].values()) == len(result["items"])
+
 
 # ── compare_pes tests ────────────────────────────────────────────────────
 
