@@ -365,55 +365,61 @@ def run_phase2(conn: sqlite3.Connection) -> int:
     total_desc = 0
     insert_buf: list[tuple] = []
 
+    errors: list[str] = []
     for i, source_file in enumerate(pdf_files, 1):
-        fy = _extract_fy_from_path(source_file)
+        try:
+            fy = _extract_fy_from_path(source_file)
 
-        pages = conn.execute("""
-            SELECT page_number, page_text FROM pdf_pages
-            WHERE source_file = ?
-            ORDER BY page_number
-        """, (source_file,)).fetchall()
+            pages = conn.execute("""
+                SELECT page_number, page_text FROM pdf_pages
+                WHERE source_file = ?
+                ORDER BY page_number
+            """, (source_file,)).fetchall()
 
-        # Group consecutive pages that mention the same PE into runs
-        # pe_number → (first_page, last_page, accumulated_text, sections)
-        pe_runs: dict[str, dict] = {}
+            # Group consecutive pages that mention the same PE into runs
+            # pe_number → (first_page, last_page, accumulated_text, sections)
+            pe_runs: dict[str, dict] = {}
 
-        for page_num, page_text in pages:
-            if not page_text:
-                continue
-            found = set(PE_NUMBER.findall(page_text))
-            for pe in found:
-                if pe not in known_pes:
+            for page_num, page_text in pages:
+                if not page_text:
                     continue
-                if pe not in pe_runs:
-                    pe_runs[pe] = {
-                        "page_start": page_num,
-                        "page_end": page_num,
-                        "text": page_text,
-                    }
-                else:
-                    pe_runs[pe]["page_end"] = page_num
-                    pe_runs[pe]["text"] += "\n\n" + page_text
+                found = set(PE_NUMBER.findall(page_text))
+                for pe in found:
+                    if pe not in known_pes:
+                        continue
+                    if pe not in pe_runs:
+                        pe_runs[pe] = {
+                            "page_start": page_num,
+                            "page_end": page_num,
+                            "text": page_text,
+                        }
+                    else:
+                        pe_runs[pe]["page_end"] = page_num
+                        pe_runs[pe]["text"] += "\n\n" + page_text
 
-        # For each PE run in this file, extract narrative sections
-        for pe, run in pe_runs.items():
-            sections = parse_narrative_sections(run["text"])
-            if sections:
-                for sec in sections:
-                    insert_buf.append((
-                        pe, fy, source_file,
-                        run["page_start"], run["page_end"],
-                        sec["header"], sec["text"],
-                    ))
-            else:
-                # No recognised section headers — store full text under blank header
-                text = run["text"][:4000]  # cap at 4KB
-                if text.strip():
-                    insert_buf.append((
-                        pe, fy, source_file,
-                        run["page_start"], run["page_end"],
-                        None, text,
-                    ))
+            # For each PE run in this file, extract narrative sections
+            for pe, run in pe_runs.items():
+                sections = parse_narrative_sections(run["text"])
+                if sections:
+                    for sec in sections:
+                        insert_buf.append((
+                            pe, fy, source_file,
+                            run["page_start"], run["page_end"],
+                            sec["header"], sec["text"],
+                        ))
+                else:
+                    # No recognised section headers — store full text under blank header
+                    text = run["text"][:4000]  # cap at 4KB
+                    if text.strip():
+                        insert_buf.append((
+                            pe, fy, source_file,
+                            run["page_start"], run["page_end"],
+                            None, text,
+                        ))
+        except Exception as exc:
+            errors.append(f"{source_file}: {exc}")
+            print(f"  WARNING: Error processing {source_file}: {exc}")
+            continue
 
         if insert_buf and (i % 50 == 0 or i == len(pdf_files)):
             conn.executemany("""
@@ -437,6 +443,12 @@ def run_phase2(conn: sqlite3.Connection) -> int:
         conn.commit()
         total_desc += len(insert_buf)
 
+    if errors:
+        print(f"  WARNING: {len(errors)} file(s) had errors during Phase 2:")
+        for err in errors[:5]:
+            print(f"    - {err}")
+        if len(errors) > 5:
+            print(f"    ... and {len(errors) - 5} more")
     print(f"  Done. {total_desc} description rows inserted.")
     return total_desc
 
