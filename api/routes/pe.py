@@ -120,6 +120,63 @@ def get_top_changes(
     return {"count": len(items), "items": items}
 
 
+# ── GET /api/v1/pe/compare ───────────────────────────────────────────────────
+
+@router.get(
+    "/compare",
+    summary="Side-by-side funding comparison of two or more PEs",
+)
+def compare_pes(
+    pe: list[str] = Query(..., description="PE numbers to compare (2-10)"),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> dict:
+    """Return funding data for multiple PEs side by side.
+
+    Each PE entry includes its title, organization, and funding amounts
+    for FY2024-FY2026. Useful for the comparison chart view.
+    """
+    if len(pe) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 PE numbers required")
+    if len(pe) > 10:
+        raise HTTPException(status_code=400, detail="Maximum 10 PE numbers for comparison")
+
+    ph = ",".join("?" * len(pe))
+
+    # Get index info
+    index_rows = conn.execute(
+        f"SELECT pe_number, display_title, organization_name, budget_type "
+        f"FROM pe_index WHERE pe_number IN ({ph})", pe,
+    ).fetchall()
+    index_map = {r["pe_number"]: _row_dict(r) for r in index_rows}
+
+    # Get funding aggregates per PE
+    funding_rows = conn.execute(f"""
+        SELECT
+            pe_number,
+            SUM(COALESCE(amount_fy2024_actual, 0))  AS fy2024_actual,
+            SUM(COALESCE(amount_fy2025_enacted, 0)) AS fy2025_enacted,
+            SUM(COALESCE(amount_fy2025_total, 0))   AS fy2025_total,
+            SUM(COALESCE(amount_fy2026_request, 0)) AS fy2026_request,
+            SUM(COALESCE(amount_fy2026_total, 0))   AS fy2026_total
+        FROM budget_lines
+        WHERE pe_number IN ({ph})
+        GROUP BY pe_number
+    """, pe).fetchall()
+    funding_map = {r["pe_number"]: _row_dict(r) for r in funding_rows}
+
+    items = []
+    for p in pe:
+        entry = {
+            "pe_number": p,
+            "display_title": index_map.get(p, {}).get("display_title"),
+            "organization_name": index_map.get(p, {}).get("organization_name"),
+            "funding": funding_map.get(p, {}),
+        }
+        items.append(entry)
+
+    return {"count": len(items), "items": items}
+
+
 # ── GET /api/v1/pe/{pe_number} ────────────────────────────────────────────────
 
 @router.get(

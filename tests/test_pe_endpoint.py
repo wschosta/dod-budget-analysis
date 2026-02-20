@@ -24,6 +24,7 @@ from api.routes.pe import (
     get_pe_years,
     get_pe_changes,
     get_top_changes,
+    compare_pes,
     get_pe_subelements,
     get_pe_descriptions,
     get_pe_related,
@@ -367,6 +368,40 @@ class TestGetTopChanges:
         valid_types = {"new", "terminated", "increase", "decrease", "flat"}
         for item in result["items"]:
             assert item["change_type"] in valid_types
+
+
+# ── compare_pes tests ────────────────────────────────────────────────────
+
+class TestComparePes:
+    def test_compare_two_pes(self, populated_db):
+        result = compare_pes(pe=["0602120A", "0603000A"], conn=populated_db)
+        assert result["count"] == 2
+        pe_nums = [i["pe_number"] for i in result["items"]]
+        assert "0602120A" in pe_nums
+        assert "0603000A" in pe_nums
+
+    def test_items_have_funding(self, populated_db):
+        result = compare_pes(pe=["0602120A", "0603000A"], conn=populated_db)
+        for item in result["items"]:
+            assert "funding" in item
+            if item["pe_number"] == "0603000A":
+                assert item["funding"]["fy2026_request"] == 9000.0
+
+    def test_items_have_metadata(self, populated_db):
+        result = compare_pes(pe=["0602120A", "0603000A"], conn=populated_db)
+        for item in result["items"]:
+            assert "display_title" in item
+            assert "organization_name" in item
+
+    def test_too_few_pes_raises_400(self, populated_db):
+        with pytest.raises(HTTPException) as exc_info:
+            compare_pes(pe=["0602120A"], conn=populated_db)
+        assert exc_info.value.status_code == 400
+
+    def test_too_many_pes_raises_400(self, populated_db):
+        with pytest.raises(HTTPException) as exc_info:
+            compare_pes(pe=[f"{i:07d}A" for i in range(11)], conn=populated_db)
+        assert exc_info.value.status_code == 400
 
 
 # ── get_pe_subelements tests ──────────────────────────────────────────────────
