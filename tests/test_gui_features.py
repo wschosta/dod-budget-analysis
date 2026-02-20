@@ -296,6 +296,14 @@ class TestHierarchyEndpoint:
         item = resp.json()["items"][0]
         assert "service" in item
         assert "amount" in item
+        assert "prev_amount" in item
+        assert "pct_of_total" in item
+
+    def test_hierarchy_has_grand_total(self, app_client):
+        resp = app_client.get("/api/v1/aggregations/hierarchy")
+        data = resp.json()
+        assert "grand_total" in data
+        assert data["grand_total"] > 0
 
     def test_hierarchy_with_fiscal_year_filter(self, app_client):
         resp = app_client.get("/api/v1/aggregations/hierarchy?fiscal_year=2026")

@@ -222,7 +222,8 @@ def hierarchy(
         f"appropriation_title AS approp_title, "
         f"line_item_title AS program, "
         f"pe_number, "
-        f"SUM(amount_fy2026_request) AS amount "
+        f"SUM(amount_fy2026_request) AS amount, "
+        f"SUM(COALESCE(amount_fy2025_enacted, 0)) AS prev_amount "
         f"FROM budget_lines "
         f"{where} "
         f"GROUP BY organization_name, appropriation_code, line_item_title "
@@ -231,6 +232,16 @@ def hierarchy(
         params,
     ).fetchall()
 
-    result = {"items": [dict(r) for r in rows]}
+    grand_total = sum(r["amount"] or 0 for r in rows) if rows else 0
+    items = []
+    for r in rows:
+        d = dict(r)
+        d["pct_of_total"] = (
+            round(d["amount"] / grand_total * 100, 2)
+            if grand_total and d["amount"] else None
+        )
+        items.append(d)
+
+    result = {"items": items, "grand_total": grand_total}
     _hierarchy_cache.set(cache_key, result)
     return result
