@@ -188,8 +188,12 @@ def _parse_filters(request: Request) -> dict[str, Any]:
         "sort_by":           params.get("sort_by", "id"),
         "sort_dir":          params.get("sort_dir", "asc"),
         "page":              max(1, int(params.get("page", 1))),
-        "page_size":         min(100, max(10, int(params.get("page_size", 25)))),
+        # EAGLE-4: Expanded page size cap from 100 to 200
+        "page_size":         min(200, max(10, int(params.get("page_size", 25)))),
     }
+
+# EAGLE-4: Page size options for template dropdown
+PAGE_SIZE_OPTIONS = [25, 50, 100, 200]
 
 
 def _query_results(
@@ -317,6 +321,8 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLR
             # EAGLE-1: Dynamic amount column context for FY selector
             "amount_column":        filters.get("amount_column", DEFAULT_AMOUNT_COLUMN),
             "fiscal_year_columns":  FISCAL_YEAR_COLUMN_LABELS,
+            # EAGLE-4: Pagination options for template dropdown
+            "page_size_options":    PAGE_SIZE_OPTIONS,
             **results,
         },
     )
@@ -367,6 +373,8 @@ def results_partial(
             # EAGLE-1: Dynamic amount column context
             "amount_column": filters.get("amount_column", DEFAULT_AMOUNT_COLUMN),
             "fiscal_year_columns": FISCAL_YEAR_COLUMN_LABELS,
+            # EAGLE-4: Pagination options
+            "page_size_options": PAGE_SIZE_OPTIONS,
             **results,
         },
     )
