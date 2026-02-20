@@ -30,6 +30,8 @@ from validate_budget_db import (
     check_empty_files,
     check_enrichment_orphans,
     check_enrichment_staleness,
+    check_extreme_outliers,
+    check_pe_org_consistency,
     _get_amount_columns,
     generate_report,
 )
@@ -551,3 +553,58 @@ def test_enrichment_staleness_empty_pe_index(conn):
     """No pe_index table rows → no issues (enrichment never ran)."""
     issues = check_enrichment_staleness(conn)
     assert len(issues) == 0
+
+
+# ── Extreme outlier tests ────────────────────────────────────────────────────
+
+def test_extreme_outliers_none(conn):
+    """Normal amounts produce no issues."""
+    _insert_line(conn, amount_fy2026_request=500_000)  # $500M — normal
+    conn.commit()
+    issues = check_extreme_outliers(conn)
+    assert len(issues) == 0
+
+
+def test_extreme_outliers_detected(conn):
+    """Amount > $1T triggers a warning."""
+    _insert_line(conn, amount_fy2026_request=2_000_000_000)  # $2T in thousands
+    conn.commit()
+    issues = check_extreme_outliers(conn)
+    assert len(issues) == 1
+    assert issues[0]["check"] == "extreme_outliers"
+    assert issues[0]["severity"] == "warning"
+    assert issues[0]["column"] == "amount_fy2026_request"
+
+
+def test_extreme_outliers_negative(conn):
+    """Large negative amount also triggers warning."""
+    _insert_line(conn, amount_fy2026_request=-1_500_000_000)
+    conn.commit()
+    issues = check_extreme_outliers(conn)
+    assert len(issues) == 1
+
+
+# ── PE org consistency tests ─────────────────────────────────────────────────
+
+def test_pe_org_consistency_single_org(conn):
+    """PE under one organization → no issues."""
+    _insert_line(conn, pe_number="0602120A", organization_name="Army")
+    _insert_line(conn, pe_number="0602120A", organization_name="Army",
+                 line_item="line2")
+    conn.commit()
+    issues = check_pe_org_consistency(conn)
+    assert len(issues) == 0
+
+
+def test_pe_org_consistency_multi_org(conn):
+    """Same PE under multiple organizations → warning."""
+    _insert_line(conn, pe_number="0602120A", organization_name="Army")
+    _insert_line(conn, pe_number="0602120A", organization_name="Navy",
+                 line_item="line2")
+    conn.commit()
+    issues = check_pe_org_consistency(conn)
+    assert len(issues) == 1
+    assert issues[0]["check"] == "pe_org_consistency"
+    assert issues[0]["severity"] == "warning"
+    assert "Army" in issues[0]["detail"]
+    assert "Navy" in issues[0]["detail"]

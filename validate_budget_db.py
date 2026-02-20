@@ -951,6 +951,97 @@ def check_pe_tags_source_files(conn: sqlite3.Connection) -> list[dict]:
     return issues
 
 
+def check_extreme_outliers(conn: sqlite3.Connection) -> list[dict]:
+    """Flag amount values that are implausibly large (> $1 trillion).
+
+    Amounts are stored in thousands; $1T = 1,000,000,000 thousands.
+    Values exceeding this suggest a parsing error (e.g., reading a
+    quantity column as a dollar amount, or a misplaced decimal).
+
+    Severity: WARNING
+    """
+    issues = []
+    amount_cols = _get_amount_columns(conn)
+    threshold = 1_000_000_000  # $1T in thousands
+
+    for col in amount_cols:
+        try:
+            rows = conn.execute(f"""
+                SELECT source_file, exhibit_type, pe_number,
+                       organization_name, {col} AS value
+                FROM budget_lines
+                WHERE ABS({col}) > ?
+                ORDER BY ABS({col}) DESC
+                LIMIT 20
+            """, (threshold,)).fetchall()
+        except Exception:
+            continue
+
+        if rows:
+            issues.append({
+                "check": "extreme_outliers",
+                "severity": "warning",
+                "detail": (
+                    f"{len(rows)} row(s) in {col} exceed $1 trillion — "
+                    "likely a parsing error"
+                ),
+                "column": col,
+                "count": len(rows),
+                "samples": [
+                    f"{r['source_file']} / {r['pe_number'] or '?'} "
+                    f"({r['organization_name']}): ${r['value']:,.0f}K"
+                    for r in rows[:5]
+                ],
+            })
+
+    return issues
+
+
+def check_pe_org_consistency(conn: sqlite3.Connection) -> list[dict]:
+    """Detect PE numbers assigned to multiple organizations.
+
+    When the same PE number appears under different organization_name
+    values in budget_lines, it may indicate a data mapping issue or
+    a PE that was transferred between services.
+
+    Severity: WARNING
+    """
+    issues = []
+    try:
+        rows = conn.execute("""
+            SELECT pe_number, COUNT(DISTINCT organization_name) AS org_count
+            FROM budget_lines
+            WHERE pe_number IS NOT NULL AND pe_number != ''
+              AND organization_name IS NOT NULL AND organization_name != ''
+            GROUP BY pe_number
+            HAVING org_count > 1
+            ORDER BY org_count DESC
+            LIMIT 30
+        """).fetchall()
+    except Exception:
+        return []
+
+    for r in rows:
+        orgs = conn.execute(
+            "SELECT DISTINCT organization_name FROM budget_lines "
+            "WHERE pe_number = ? AND organization_name IS NOT NULL",
+            (r["pe_number"],),
+        ).fetchall()
+        org_list = [o[0] for o in orgs]
+        issues.append({
+            "check": "pe_org_consistency",
+            "severity": "warning",
+            "detail": (
+                f"PE {r['pe_number']} assigned to {r['org_count']} organizations: "
+                f"{', '.join(org_list[:5])}"
+            ),
+            "pe_number": r["pe_number"],
+            "organizations": org_list,
+        })
+
+    return issues
+
+
 def check_enrichment_orphans(conn: sqlite3.Connection) -> list[dict]:
     """Detect enrichment rows that reference PE numbers not in pe_index.
 
@@ -1075,6 +1166,8 @@ ALL_CHECKS = [
     ("PDF Pages Fiscal Year", check_pdf_pages_fiscal_year),      # LION-108-val(a)
     ("PDF PE Numbers Junction", check_pdf_pe_numbers_populated), # LION-108-val(b)
     ("PE Tags Source Files", check_pe_tags_source_files),        # LION-108-val(c)
+    ("Extreme Amount Outliers", check_extreme_outliers),              # Outlier detection
+    ("PE Org Consistency", check_pe_org_consistency),                # Multi-org PE detection
     ("Enrichment Orphans", check_enrichment_orphans),              # Orphan detection
     ("Enrichment Staleness", check_enrichment_staleness),          # Stale PE detection
 ]
