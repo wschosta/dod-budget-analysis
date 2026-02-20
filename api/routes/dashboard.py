@@ -25,6 +25,7 @@ def _detect_fy_columns(conn: sqlite3.Connection) -> tuple[str, str]:
 @router.get("/summary", summary="Dashboard summary statistics")
 def dashboard_summary(
     fiscal_year: str | None = Query(None, description="Filter by fiscal year (e.g. '2026')"),
+    service: str | None = Query(None, description="Filter by service/organization name"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
     """Return aggregated statistics for the dashboard overview page.
@@ -38,20 +39,24 @@ def dashboard_summary(
     - Budget type distribution (RDT&E, Procurement, O&M, etc.)
     - Enrichment coverage metrics
 
-    Pass fiscal_year to restrict all aggregations to a single FY.
+    Pass fiscal_year and/or service to restrict all aggregations.
     """
-    cache_key = ("dashboard_summary", id(conn), fiscal_year)
+    cache_key = ("dashboard_summary", id(conn), fiscal_year, service)
     cached = _summary_cache.get(cache_key)
     if cached is not None:
         return cached
 
     fy26_col, fy25_col = _detect_fy_columns(conn)
 
-    fy_filter = ""
+    conditions: list[str] = []
     fy_params: list = []
     if fiscal_year:
-        fy_filter = "WHERE fiscal_year = ?"
-        fy_params = [fiscal_year]
+        conditions.append("fiscal_year = ?")
+        fy_params.append(fiscal_year)
+    if service:
+        conditions.append("organization_name = ?")
+        fy_params.append(service)
+    fy_filter = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     # Batch the main budget_lines aggregations into a single CTE query.
     # This scans the table once instead of 4 separate passes.
@@ -126,9 +131,12 @@ def dashboard_summary(
     by_approp = sections.get("by_appropriation", [])
 
     # Top 10 programs — needs its own query since it returns individual rows
-    tp_where = f"WHERE {fy26_col} IS NOT NULL"
+    tp_conditions = [f"{fy26_col} IS NOT NULL"]
     if fiscal_year:
-        tp_where += " AND fiscal_year = ?"
+        tp_conditions.append("fiscal_year = ?")
+    if service:
+        tp_conditions.append("organization_name = ?")
+    tp_where = "WHERE " + " AND ".join(tp_conditions)
     top_programs_rows = conn.execute(
         f"SELECT id, line_item_title, organization_name, pe_number, "
         f"{fy26_col} as fy26_request, {fy25_col} as fy25_enacted "

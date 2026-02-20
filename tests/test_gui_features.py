@@ -261,6 +261,22 @@ class TestDashboardAPI:
         data = resp.json()
         assert data["totals"]["total_lines"] == 0
 
+    def test_summary_service_filter(self, app_client):
+        """service filter restricts to matching organization rows."""
+        resp = app_client.get("/api/v1/dashboard/summary?service=Army")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["totals"]["total_lines"] == 1  # Only Army row
+
+    def test_summary_service_and_fiscal_year_combined(self, app_client):
+        """Both service and fiscal_year filters narrow results."""
+        resp = app_client.get(
+            "/api/v1/dashboard/summary?service=Navy&fiscal_year=2026"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["totals"]["total_lines"] == 1  # Navy + FY2026
+
 
 # ── Hierarchy endpoint ────────────────────────────────────────────────────────
 
