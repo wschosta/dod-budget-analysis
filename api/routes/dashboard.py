@@ -168,6 +168,30 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
     except Exception:
         pass  # budget_type column may not exist
 
+    # Source file stats — Excel vs PDF file counts and totals
+    source_stats: dict = {}
+    try:
+        sf_row = conn.execute("""
+            SELECT
+                COUNT(DISTINCT CASE WHEN file_type = 'xlsx' THEN file_path END) AS excel_files,
+                COUNT(DISTINCT CASE WHEN file_type = 'pdf' THEN file_path END) AS pdf_files,
+                SUM(CASE WHEN file_type = 'xlsx' THEN row_count ELSE 0 END) AS excel_rows,
+                SUM(CASE WHEN file_type = 'pdf' THEN row_count ELSE 0 END) AS pdf_pages,
+                COUNT(DISTINCT file_path) AS total_files
+            FROM ingested_files
+            WHERE status = 'ok'
+        """).fetchone()
+        if sf_row:
+            source_stats = {
+                "excel_files": sf_row["excel_files"],
+                "pdf_files": sf_row["pdf_files"],
+                "excel_rows": sf_row["excel_rows"] or 0,
+                "pdf_pages": sf_row["pdf_pages"] or 0,
+                "total_files": sf_row["total_files"],
+            }
+    except Exception:
+        pass  # ingested_files may not exist
+
     # Data freshness — when was the database last built/updated?
     freshness: dict = {}
     try:
@@ -197,6 +221,7 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
         "by_fiscal_year": by_fy,
         "by_appropriation": by_approp,
         "by_budget_type": by_budget_type,
+        "source_stats": source_stats,
         "enrichment": enrichment,
         "freshness": freshness,
     }

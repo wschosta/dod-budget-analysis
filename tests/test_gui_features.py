@@ -234,6 +234,12 @@ class TestDashboardAPI:
         assert "freshness" in data
         assert isinstance(data["freshness"], dict)
 
+    def test_summary_has_source_stats(self, app_client):
+        resp = app_client.get("/api/v1/dashboard/summary")
+        data = resp.json()
+        assert "source_stats" in data
+        assert isinstance(data["source_stats"], dict)
+
     def test_summary_is_cached(self, app_client):
         """Second call should use cache (both should return same data)."""
         resp1 = app_client.get("/api/v1/dashboard/summary")
