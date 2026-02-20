@@ -183,25 +183,48 @@ Dark mode should be **fully polished**, not just a toggle that half-works. This 
 
 ## 5. Accessibility
 
-| # | Question / Decision | Priority | Context |
-|---|---------------------|----------|---------|
-| 5.1 | **Should WCAG 2.1 AA be the target compliance level?** | **High** | Several accessibility features are already in place: skip-link (`base.html` line 40), `aria-live` regions (`index.html` lines 148-156), keyboard shortcuts (`/`, `Ctrl+K`, `Escape` in `app.js` lines 336-377), `focus-visible` outlines (`main.css` lines 604-613), and screen-reader-only text (`.sr-only` class). These suggest AA was intended but has not been formally verified. |
-| 5.2 | **Color contrast: Do all text/background combinations meet the 4.5:1 ratio?** | **High** | Inline styles using `color:#555` on white backgrounds yield a contrast ratio of approximately 4.6:1, which barely passes AA for normal text but fails for the smaller font sizes (`.78rem`, `.75rem`) where those colors are used. `color:#888` on white yields only 3.5:1, which fails AA. In dark mode, these hardcoded colors would appear against dark backgrounds with even worse contrast. |
-| 5.3 | **Screen reader experience: Is the HTMX partial swap approach providing adequate announcements?** | **Medium** | The `#results-container` div has `aria-live="polite"` and `aria-atomic="false"` (`index.html` lines 153-156). When HTMX swaps in new content, assistive technology should announce changes, but partial swaps of large HTML tables may produce noisy or incomplete announcements. Has this been tested with NVDA, JAWS, or VoiceOver? |
-| 5.4 | **Should there be a "reduce motion" mode that suppresses skeleton loading animations and chart transitions?** | **Low** | Skeleton rows (`.skeleton-loading` in `results.html`) use CSS animation. Chart.js uses default animation on render. Users with vestibular disorders may prefer reduced motion. A `@media (prefers-reduced-motion: reduce)` rule could disable these. |
-| 5.5 | **Table rows are clickable but lack explicit `role="button"` or `tabindex="0"`.** Should table row selection be fully keyboard-accessible via arrow keys? | **Medium** | In `results.html` line 123, `<tr>` elements have `hx-get` and `onclick="selectRow(this)"` but no `tabindex` or ARIA role to indicate they are interactive. Keyboard-only users cannot tab to individual rows or use arrow keys to navigate. |
+| # | Question / Decision | Priority | Status | Context |
+|---|---------------------|----------|--------|---------|
+| 5.1 | **WCAG 2.1 AA is the target compliance level** | **High** | **RESOLVED** | MVP requirement. See decision below. |
+| 5.2 | **Color contrast must meet 4.5:1 ratio** | **High** | **RESOLVED** | MVP requirement. See decision below. |
+| 5.3 | **Screen reader experience: Is the HTMX partial swap approach providing adequate announcements?** | **Medium** | **OPEN** | The `#results-container` div has `aria-live="polite"` and `aria-atomic="false"`. Partial swaps of large HTML tables may produce noisy or incomplete announcements. Needs testing with NVDA, JAWS, or VoiceOver. |
+| 5.4 | **Should there be a "reduce motion" mode that suppresses skeleton loading animations and chart transitions?** | **Low** | **OPEN** | A `@media (prefers-reduced-motion: reduce)` rule could disable animations. |
+| 5.5 | **Table rows are clickable but lack explicit `role="button"` or `tabindex="0"`.** Should table row selection be fully keyboard-accessible via arrow keys? | **Medium** | **OPEN** | `<tr>` elements have `hx-get` and `onclick` but no `tabindex` or ARIA role. |
+
+### 5.1 -- WCAG 2.1 AA: MVP Requirement (RESOLVED)
+
+**WCAG 2.1 AA is the target compliance level for the MVP.** This is not deferred -- it ships with the first release. The codebase already has many AA foundations in place (skip-link, aria-live regions, keyboard shortcuts, focus-visible outlines, sr-only text). Remaining work is to formally audit and close the gaps.
+
+### 5.2 -- Color Contrast Fixes: MVP Requirement (RESOLVED)
+
+All text/background combinations must meet the **4.5:1 contrast ratio** required by WCAG 2.1 AA. Known failures to fix:
+- `color:#888` on white (3.5:1) -- **fails AA**, must be darkened
+- `color:#555` on white (4.6:1) -- barely passes for normal text but **fails at smaller font sizes** (`.78rem`, `.75rem`)
+- All hardcoded colors must also be verified against dark mode backgrounds
+- This work is a prerequisite for the dark mode polish (decision 4.3)
 
 ---
 
 ## 6. Performance & Responsiveness
 
-| # | Question / Decision | Priority | Context |
-|---|---------------------|----------|---------|
-| 6.1 | **Mobile experience: Should the filter sidebar be a collapsible drawer instead of stacking above results?** | **Medium** | At `max-width: 768px` (`main.css` line 570), the `.search-layout` grid collapses to a single column, placing the entire filter panel above the results. On mobile, users must scroll past all filters before seeing any data. A slide-in drawer or collapsible accordion would improve the experience. |
-| 6.2 | **Tablet experience: There is no breakpoint between 480px and 768px.** Should one be added? | **Low** | `main.css` has breakpoints at 768px (line 570) and 480px (line 599). Tablets in portrait mode (around 600px) fall into the mobile layout, which may waste horizontal space. |
-| 6.3 | **Should charts be lazy-loaded (only render when scrolled into view)?** | **Low** | The Charts page loads all 7 charts simultaneously via `Promise.all` in `charts.html` line 196. On slow connections or devices, this makes 6+ API calls at once. `IntersectionObserver` could defer rendering off-screen charts. |
-| 6.4 | **Should search results support infinite scroll instead of (or in addition to) pagination?** | **Low** | Current pagination (`results.html` lines 157-194) uses HTMX page buttons. Infinite scroll would provide a more fluid browse experience but complicates URL state and "share this view" workflows. |
-| 6.5 | **CDN dependencies: Should HTMX, Chart.js, and the treemap plugin be self-hosted for reliability?** | **Medium** | `base.html` lines 28-32 load three scripts from `unpkg.com` and `cdn.jsdelivr.net`. If either CDN experiences an outage, the entire application breaks. Self-hosting (or using a fallback loader) would improve reliability. Note: SRI integrity hashes were previously added but removed due to version mismatches (`FIX-001`). |
+| # | Question / Decision | Priority | Status | Context |
+|---|---------------------|----------|--------|---------|
+| 6.1 | **Filter sidebar becomes a collapsible drawer on small screens** | **Medium** | **RESOLVED** | See decision below. |
+| 6.2 | **Tablet experience: There is no breakpoint between 480px and 768px.** Should one be added? | **Low** | **OPEN** | Tablets in portrait mode (~600px) fall into the mobile layout. |
+| 6.3 | **Should charts be lazy-loaded (only render when scrolled into view)?** | **Low** | **OPEN** | Charts page loads all 7 charts simultaneously. |
+| 6.4 | **Should search results support infinite scroll instead of pagination?** | **Low** | **OPEN** | Infinite scroll complicates URL state and "share this view" workflows. |
+| 6.5 | **CDN dependencies: Keep external for now, revisit post-release** | **Medium** | **RESOLVED** | See decision below. |
+
+### 6.1 -- Collapsible Filter Drawer on Small Screens (RESOLVED)
+
+The filter sidebar should become a **collapsible drawer** (slide-in or accordion) on small screens instead of stacking above results. This:
+- Prevents users from scrolling past all filters before seeing any data
+- Establishes a familiar UX pattern for an eventual mobile rollout
+- **Note: Full mobile-optimized layout is NOT part of MVP scope.** The collapsible drawer is a responsive improvement for the desktop app on narrow viewports.
+
+### 6.5 -- CDN Dependencies: Keep for Now (RESOLVED)
+
+External CDN loading of HTMX, Chart.js, and treemap plugin is **acceptable for initial release**. Self-hosting should be revisited post-release as a reliability improvement. Current approach is pragmatic for MVP velocity.
 
 ---
 
@@ -251,18 +274,20 @@ Dark mode should be **fully polished**, not just a toggle that half-works. This 
 - **4.3** -- Dark mode fully polished (migrate hardcoded colors to CSS custom properties)
 - **4.4** -- Colorblind-friendly default palette; user-selectable alternative palettes
 - **4.5** -- Global amount toggle ($K / $M / $B) -- all values on screen use the same unit simultaneously
+- **5.1** -- WCAG 2.1 AA is the target -- MVP requirement, not deferred
+- **5.2** -- Color contrast fixes are MVP requirement (4.5:1 ratio for all text/background combinations)
+- **6.1** -- Collapsible filter drawer on small screens (full mobile rollout is NOT MVP)
+- **6.5** -- CDN dependencies acceptable for initial release; revisit self-hosting post-release
 
 ### Remaining High-Priority Open Items
 1. **2.5** -- Fix the Amount Range filter to operate on the correct column context.
-2. **5.1** -- Confirm WCAG 2.1 AA as the target accessibility standard.
-3. **5.2** -- Audit and fix color contrast failures (particularly `#555` and `#888` on light/dark backgrounds).
 
 ### Open Questions Still Under Discussion
 - **Section 2** -- Remaining items (2.5-2.11): amount filter behavior, related items logic, programs page, compare feature, advanced search, saved views
 - **Section 3** -- Remaining items (3.3-3.4): API docs behavior, footer content
 - **Section 4** -- Remaining items (4.1-4.2, 4.6-4.7): color palette, typography, data density, print styles
-- **Section 5** -- Accessibility
-- **Section 6** -- Performance & Responsiveness
+- **Section 5** -- Remaining items (5.3-5.5): screen reader testing, reduce motion, keyboard nav for table rows
+- **Section 6** -- Remaining items (6.2-6.4): tablet breakpoint, lazy-load charts, infinite scroll
 - **Section 7** -- Feature Gaps & Enhancements
 - **Section 8** -- Technical Debt & Architecture
 

@@ -54,7 +54,19 @@ The minimum viable product focuses on **Use Case 1 (Targeted Reporting)** and th
 - [ ] Colorblind-friendly default chart palette; user-selectable alternative palettes (deuteranopia, protanopia, tritanopia, high-contrast)
 - [ ] Dark mode fully polished -- migrate all hardcoded inline colors to CSS custom properties
 
-### 1.7 Data Display Decisions (RESOLVED)
+### 1.7 Accessibility (MVP Requirement)
+- [ ] WCAG 2.1 AA compliance audit and remediation
+- [ ] Fix all color contrast failures (4.5:1 ratio minimum for all text/background combinations)
+- [ ] Darken `#888` text (currently 3.5:1 -- fails AA)
+- [ ] Verify `#555` text at small font sizes (`.78rem`, `.75rem`)
+- [ ] Verify all colors against dark mode backgrounds
+- [ ] Full keyboard navigation for table rows (`tabindex`, arrow keys, Enter to expand)
+
+### 1.8 Responsive Layout
+- [ ] Collapsible filter drawer on small screens (replaces stacking above results)
+- [ ] Note: Full mobile-optimized layout is NOT MVP scope
+
+### 1.9 Data Display Decisions (RESOLVED)
 - **Chart types (MVP):** Bar charts, stacked bar/area charts, sortable tables, Spruill charts
 - **Chart types (deferred):** Sankey/river charts → Phase 3
 - **Data granularity:** Project-level detail (not just PE-level). Tags applied at project level where available. Accomplishment text viewable year-over-year.
@@ -112,17 +124,14 @@ Focuses on **Use Case 3 (Browsing)** and the **General Public** persona.
 - [ ] Linked news articles explaining year-over-year changes in specific programs
 - [ ] Requires data pipeline for news ingestion and PE-line matching
 
-### 4.2 Accessibility Hardening
-- [ ] WCAG 2.1 AA audit and remediation
-- [ ] Color contrast fixes
-- [ ] Full keyboard navigation for table rows
-- [ ] Screen reader testing (NVDA, JAWS, VoiceOver)
-- [ ] Reduced motion mode
+### 4.2 Accessibility Hardening (continued from Phase 1)
+- [ ] Screen reader testing (NVDA, JAWS, VoiceOver) -- verify HTMX partial swaps announce correctly
+- [ ] Reduced motion mode (`@media (prefers-reduced-motion: reduce)`)
 
 ### 4.3 Performance
 - [ ] Lazy-load charts (IntersectionObserver)
-- [ ] Self-host CDN dependencies for reliability
-- [ ] Mobile-optimized filter drawer
+- [ ] Self-host CDN dependencies for reliability (revisit post-initial release)
+- [ ] Full mobile-optimized layout (beyond the Phase 1 collapsible drawer)
 
 ### 4.4 Advanced Features
 - [ ] Saved views / named reports (if URL-based sharing proves insufficient)
@@ -145,7 +154,10 @@ These questions (from GUI_DECISIONS_AND_QUESTIONS.md) need resolution before the
 | ~~4.3 -- Dark mode polished?~~ | ~~Phase 4~~ | ~~Visual Design~~ | **RESOLVED** |
 | ~~4.4 -- Colorblind-friendly palette?~~ | ~~Phase 1, Phase 2~~ | ~~Visual Design~~ | **RESOLVED** |
 | ~~4.5 -- Amount formatting toggle ($K / $M / $B)?~~ | ~~Phase 1.2~~ | ~~Visual Design~~ | **RESOLVED** |
-| 5.1 -- WCAG 2.1 AA target? | Phase 4.2 | Accessibility | OPEN |
+| ~~5.1 -- WCAG 2.1 AA target?~~ | ~~Phase 1 (MVP)~~ | ~~Accessibility~~ | **RESOLVED** |
+| ~~5.2 -- Color contrast fixes?~~ | ~~Phase 1 (MVP)~~ | ~~Accessibility~~ | **RESOLVED** |
+| ~~6.1 -- Collapsible filter drawer?~~ | ~~Phase 1 (MVP)~~ | ~~Responsiveness~~ | **RESOLVED** |
+| ~~6.5 -- CDN self-hosting?~~ | ~~Post-release~~ | ~~Performance~~ | **RESOLVED (deferred)** |
 
 ---
 
