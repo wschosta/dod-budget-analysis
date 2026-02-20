@@ -31,6 +31,7 @@ _ALLOWED_GROUPS = {
     "appropriation":  "appropriation_code",
     "exhibit_type":   "exhibit_type",
     "budget_activity": "budget_activity_title",
+    "budget_type":    "budget_type",
 }
 
 # OPT-AGG-001: 300-second TTL cache (matches dashboard) keyed on filter params

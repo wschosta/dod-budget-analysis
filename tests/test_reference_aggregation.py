@@ -57,12 +57,13 @@ def db_with_ref_tables():
             amount_fy2025_enacted REAL,
             amount_fy2026_request REAL,
             appropriation_code TEXT,
-            budget_activity_title TEXT
+            budget_activity_title TEXT,
+            budget_type TEXT
         );
-        INSERT INTO budget_lines VALUES (1, 'FY 2026', 'Army', 'p1', 800, 900, 1000, '3010', 'Aircraft');
-        INSERT INTO budget_lines VALUES (2, 'FY 2026', 'Army', 'r1', 1600, 1800, 2000, '3600', 'Missiles');
-        INSERT INTO budget_lines VALUES (3, 'FY 2026', 'Navy', 'p1', 300, 400, 500, '3010', 'Ships');
-        INSERT INTO budget_lines VALUES (4, 'FY 2025', 'Army', 'p1', 1300, 1400, 1500, '3010', 'Aircraft');
+        INSERT INTO budget_lines VALUES (1, 'FY 2026', 'Army', 'p1', 800, 900, 1000, '3010', 'Aircraft', 'Procurement');
+        INSERT INTO budget_lines VALUES (2, 'FY 2026', 'Army', 'r1', 1600, 1800, 2000, '3600', 'Missiles', 'RDT&E');
+        INSERT INTO budget_lines VALUES (3, 'FY 2026', 'Navy', 'p1', 300, 400, 500, '3010', 'Ships', 'Procurement');
+        INSERT INTO budget_lines VALUES (4, 'FY 2025', 'Army', 'p1', 1300, 1400, 1500, '3010', 'Aircraft', 'Procurement');
     """)
     yield conn
     conn.close()
@@ -267,7 +268,7 @@ class TestAggregate:
         # Add a row with NULL amount_fy2026_request
         db_with_ref_tables.execute(
             "INSERT INTO budget_lines VALUES (99, 'FY 2026', 'Army', 'p1',"
-            " 100, 200, NULL, '3010', 'Test')"
+            " 100, 200, NULL, '3010', 'Test', 'Procurement')"
         )
         result = aggregate(
             group_by="service", fiscal_year=None, service=None,
@@ -277,3 +278,13 @@ class TestAggregate:
         # Army now has 4 rows (3 original + 1 NULL) but only 3 with amount
         assert army_row.row_count == 4
         assert army_row.rows_with_amount == 3
+
+    def test_group_by_budget_type(self, db_with_ref_tables):
+        """group_by=budget_type returns groups per budget type."""
+        result = aggregate(
+            group_by="budget_type", fiscal_year=None, service=None,
+            exhibit_type=None, conn=db_with_ref_tables,
+        )
+        types = {r.group_value for r in result.rows}
+        assert "Procurement" in types
+        assert "RDT&E" in types
