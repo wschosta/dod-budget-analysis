@@ -699,6 +699,18 @@ class TestListPes:
         # 0602120A has 1200 + 1200 + 600 = 3000 in fy2025_enacted
         assert pe_items["0602120A"]["total_fy2025_enacted"] == 3000.0
 
+    def test_yoy_change_pct_included(self, populated_db):
+        """PE list items include yoy_change_pct computed from FY25→FY26."""
+        result = list_pes(tag=None, q=None, service=None, budget_type=None,
+                          approp=None, account=None, ba=None, exhibit=None,
+                          fy=None, sort_by=None, sort_dir=None, count_only=False,
+                          limit=25, offset=0, conn=populated_db)
+        pe_items = {i["pe_number"]: i for i in result["items"]}
+        # 0602120A: fy26=3500, fy25=3000 → (3500-3000)/3000*100 = 16.67%
+        item = pe_items["0602120A"]
+        assert item["yoy_change_pct"] is not None
+        assert abs(item["yoy_change_pct"] - 16.67) < 0.01
+
     def test_pdf_page_count_included(self, populated_db):
         """Each PE item includes a pdf_page_count field."""
         result = list_pes(tag=None, q=None, service=None, budget_type=None,

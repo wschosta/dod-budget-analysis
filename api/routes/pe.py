@@ -886,8 +886,13 @@ def list_pes(
         d["tags"] = tags_by_pe.get(r["pe_number"], [])
         d["has_descriptions"] = r["pe_number"] in desc_pes
         d["has_related"] = r["pe_number"] in related_pes
-        d["total_fy2026_request"] = funding_by_pe.get(r["pe_number"], 0.0)
-        d["total_fy2025_enacted"] = funding_prev_by_pe.get(r["pe_number"], 0.0)
+        fy26 = funding_by_pe.get(r["pe_number"], 0.0)
+        fy25 = funding_prev_by_pe.get(r["pe_number"], 0.0)
+        d["total_fy2026_request"] = fy26
+        d["total_fy2025_enacted"] = fy25
+        d["yoy_change_pct"] = (
+            round((fy26 - fy25) / abs(fy25) * 100, 2) if fy25 else None
+        )
         d["pdf_page_count"] = pdf_pages_by_pe.get(r["pe_number"], 0)
         # Enrichment score: count of enrichment dimensions present (0-4)
         d["enrichment_score"] = sum([
