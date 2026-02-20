@@ -23,6 +23,7 @@ from api.routes.pe import (
     get_pe,
     get_pe_years,
     get_pe_changes,
+    get_top_changes,
     get_pe_subelements,
     get_pe_descriptions,
     get_pe_related,
@@ -324,6 +325,48 @@ class TestGetPeChanges:
         result = get_pe_changes("9999999X", conn=db)
         assert result["total_delta"] == 0
         assert len(result["line_items"]) == 0
+
+
+# ── get_top_changes tests ────────────────────────────────────────────────
+
+class TestGetTopChanges:
+    def test_returns_ranked_items(self, populated_db):
+        result = get_top_changes(direction=None, service=None, limit=20,
+                                 conn=populated_db)
+        assert result["count"] > 0
+        assert all("pe_number" in i for i in result["items"])
+
+    def test_items_sorted_by_abs_delta(self, populated_db):
+        result = get_top_changes(direction=None, service=None, limit=20,
+                                 conn=populated_db)
+        if len(result["items"]) >= 2:
+            deltas = [abs(i["delta"]) for i in result["items"]]
+            assert deltas == sorted(deltas, reverse=True)
+
+    def test_direction_filter_increase(self, populated_db):
+        result = get_top_changes(direction="increase", service=None, limit=20,
+                                 conn=populated_db)
+        for item in result["items"]:
+            assert item["delta"] > 0
+
+    def test_direction_filter_decrease(self, populated_db):
+        result = get_top_changes(direction="decrease", service=None, limit=20,
+                                 conn=populated_db)
+        for item in result["items"]:
+            assert item["delta"] < 0
+
+    def test_service_filter(self, populated_db):
+        result = get_top_changes(direction=None, service="Army", limit=20,
+                                 conn=populated_db)
+        for item in result["items"]:
+            assert "Army" in item["organization_name"]
+
+    def test_change_type_present(self, populated_db):
+        result = get_top_changes(direction=None, service=None, limit=20,
+                                 conn=populated_db)
+        valid_types = {"new", "terminated", "increase", "decrease", "flat"}
+        for item in result["items"]:
+            assert item["change_type"] in valid_types
 
 
 # ── get_pe_subelements tests ──────────────────────────────────────────────────

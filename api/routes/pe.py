@@ -47,6 +47,79 @@ def _json_list(val: str | None) -> list[str]:
         return []
 
 
+# ── GET /api/v1/pe/top-changes ────────────────────────────────────────────────
+
+@router.get(
+    "/top-changes",
+    summary="PEs with largest year-over-year funding changes",
+)
+def get_top_changes(
+    direction: str | None = Query(
+        None, description="Filter: 'increase', 'decrease', or None for both"),
+    service: str | None = Query(None, description="Filter by service/org"),
+    limit: int = Query(20, ge=1, le=100),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> dict:
+    """Return PEs ranked by absolute FY2025→FY2026 funding delta.
+
+    Useful for identifying programs gaining or losing significant funding.
+    Results include PE title, organization, and percentage change.
+    """
+    conditions = ["b.pe_number IS NOT NULL"]
+    params: list[Any] = []
+
+    if service:
+        conditions.append("b.organization_name LIKE ?")
+        params.append(f"%{service}%")
+
+    where = " AND ".join(conditions)
+
+    rows = conn.execute(f"""
+        SELECT
+            b.pe_number,
+            MAX(b.organization_name) AS organization_name,
+            MAX(b.line_item_title)   AS display_title,
+            SUM(COALESCE(b.amount_fy2025_total, 0))  AS fy2025_total,
+            SUM(COALESCE(b.amount_fy2026_request, 0)) AS fy2026_request,
+            SUM(COALESCE(b.amount_fy2026_request, 0))
+                - SUM(COALESCE(b.amount_fy2025_total, 0)) AS delta
+        FROM budget_lines b
+        WHERE {where}
+        GROUP BY b.pe_number
+        HAVING fy2025_total != 0 OR fy2026_request != 0
+        ORDER BY ABS(delta) DESC
+        LIMIT ?
+    """, params + [limit * 2]).fetchall()  # over-fetch for filtering
+
+    items = []
+    for r in rows:
+        if len(items) >= limit:
+            break
+        d = _row_dict(r)
+        fy25 = d["fy2025_total"] or 0
+        fy26 = d["fy2026_request"] or 0
+        delta = d["delta"] or 0
+
+        if direction == "increase" and delta <= 0:
+            continue
+        if direction == "decrease" and delta >= 0:
+            continue
+
+        d["pct_change"] = (
+            round(((fy26 - fy25) / abs(fy25)) * 100, 1) if fy25 != 0 else None
+        )
+        d["change_type"] = (
+            "new" if fy25 == 0 and fy26 > 0
+            else "terminated" if fy25 > 0 and fy26 == 0
+            else "increase" if delta > 0
+            else "decrease" if delta < 0
+            else "flat"
+        )
+        items.append(d)
+
+    return {"count": len(items), "items": items}
+
+
 # ── GET /api/v1/pe/{pe_number} ────────────────────────────────────────────────
 
 @router.get(
