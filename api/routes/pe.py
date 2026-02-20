@@ -605,6 +605,8 @@ def list_pes(
     approp: str | None = Query(None, description="Filter by appropriation title (substring)"),
     ba: str | None = Query(None, description="Filter by budget activity title (substring, e.g. '6.2')"),
     fy: str | None = Query(None, description="Filter to PEs present in a fiscal year"),
+    sort_by: str | None = Query(None, description="Sort field: pe_number (default), funding, name"),
+    sort_dir: str | None = Query(None, description="Sort direction: asc (default) or desc"),
     limit: int = Query(25, ge=1, le=200),
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(get_db),
@@ -685,13 +687,42 @@ def list_pes(
     count_sql = f"SELECT COUNT(DISTINCT p.pe_number) FROM {base_from} {where}"
     total = conn.execute(count_sql, params).fetchone()[0]
 
-    data_sql = f"""
-        SELECT DISTINCT p.pe_number, p.display_title, p.organization_name,
-               p.budget_type, p.fiscal_years, p.exhibit_types
-        FROM {base_from} {where}
-        ORDER BY p.pe_number
-        LIMIT ? OFFSET ?
-    """
+    # Determine sort column and direction
+    _SORT_ALLOWED = {"pe_number", "funding", "name"}
+    effective_sort = sort_by if sort_by in _SORT_ALLOWED else "pe_number"
+    direction = "DESC" if sort_dir == "desc" else "ASC"
+
+    if effective_sort == "funding":
+        # Join budget_lines SUM so ORDER BY can reference it
+        data_sql = f"""
+            SELECT DISTINCT p.pe_number, p.display_title, p.organization_name,
+                   p.budget_type, p.fiscal_years, p.exhibit_types,
+                   COALESCE(bl_sum.total, 0) AS _sort_funding
+            FROM {base_from}
+            LEFT JOIN (
+                SELECT pe_number, SUM(COALESCE(amount_fy2026_request, 0)) AS total
+                FROM budget_lines GROUP BY pe_number
+            ) bl_sum ON bl_sum.pe_number = p.pe_number
+            {where}
+            ORDER BY _sort_funding {direction}, p.pe_number
+            LIMIT ? OFFSET ?
+        """
+    elif effective_sort == "name":
+        data_sql = f"""
+            SELECT DISTINCT p.pe_number, p.display_title, p.organization_name,
+                   p.budget_type, p.fiscal_years, p.exhibit_types
+            FROM {base_from} {where}
+            ORDER BY p.display_title {direction}, p.pe_number
+            LIMIT ? OFFSET ?
+        """
+    else:
+        data_sql = f"""
+            SELECT DISTINCT p.pe_number, p.display_title, p.organization_name,
+                   p.budget_type, p.fiscal_years, p.exhibit_types
+            FROM {base_from} {where}
+            ORDER BY p.pe_number {direction}
+            LIMIT ? OFFSET ?
+        """
     rows = conn.execute(data_sql, params + [limit, offset]).fetchall()
 
     # Batch-fetch tags for all PEs in this page to avoid N+1 query pattern.
