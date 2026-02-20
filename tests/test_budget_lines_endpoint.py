@@ -78,6 +78,22 @@ def db():
         + ")",
         rows,
     )
+
+    # FTS5 virtual table for text search
+    conn.execute("""
+        CREATE VIRTUAL TABLE budget_lines_fts USING fts5(
+            account_title, line_item_title, budget_activity_title,
+            content='budget_lines', content_rowid='id',
+            tokenize='unicode61'
+        )
+    """)
+    conn.execute("""
+        INSERT INTO budget_lines_fts(rowid, account_title, line_item_title,
+            budget_activity_title)
+        SELECT id, account_title, line_item_title, budget_activity_title
+        FROM budget_lines
+    """)
+
     conn.commit()
     yield conn
     conn.close()
@@ -87,7 +103,7 @@ def _list(db, **kwargs):
     """Call list_budget_lines with all required defaults."""
     defaults = dict(
         fiscal_year=None, service=None, exhibit_type=None,
-        pe_number=None, appropriation_code=None,
+        pe_number=None, appropriation_code=None, q=None,
         min_amount=None, max_amount=None,
         sort_by="id", sort_dir="asc", limit=25, offset=0, conn=db,
     )
@@ -191,6 +207,23 @@ class TestListBudgetLines:
         assert result.page == 0
         assert result.page_count == 1
         assert result.has_next is False
+
+    def test_text_search(self, db):
+        """q parameter searches FTS5 index for matching terms."""
+        result = _list(db, q="Apache")
+        assert result.total >= 1
+        titles = [item.line_item_title for item in result.items]
+        assert "Apache Helicopter" in titles
+
+    def test_text_search_no_match(self, db):
+        """Non-matching text search returns zero results."""
+        result = _list(db, q="nonexistentterm")
+        assert result.total == 0
+
+    def test_text_search_combined_with_filter(self, db):
+        """q works alongside other filters."""
+        result = _list(db, q="Aircraft", fiscal_year=["FY 2026"])
+        assert result.total >= 1
 
 
 class TestGetBudgetLine:

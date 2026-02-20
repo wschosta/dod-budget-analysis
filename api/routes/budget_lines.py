@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from api.database import get_db
 from api.models import BudgetLineDetailOut, BudgetLineOut, PaginatedResponse
 from utils.query import build_where_clause, build_order_clause
+from utils.strings import sanitize_fts5_query
 
 router = APIRouter(prefix="/budget-lines", tags=["budget-lines"])
 
@@ -69,6 +70,7 @@ def list_budget_lines(
     exhibit_type: list[str] | None = Query(None, description="Filter by exhibit type(s)"),
     pe_number: list[str] | None = Query(None, description="Filter by PE number(s)"),
     appropriation_code: list[str] | None = Query(None, description="Filter by appropriation"),
+    q: str | None = Query(None, description="Free-text search across account/line-item titles"),
     min_amount: float | None = Query(None, description="Min FY2026 request amount (thousands)"),
     max_amount: float | None = Query(None, description="Max FY2026 request amount (thousands)"),
     sort_by: str = Query("id", description="Column to sort by"),
@@ -84,6 +86,20 @@ def list_budget_lines(
             detail=f"sort_by must be one of: {sorted(_ALLOWED_SORT)}",
         )
 
+    # FTS5 free-text search: resolve matching row IDs first
+    fts_ids: list[int] | None = None
+    if q:
+        safe_q = sanitize_fts5_query(q)
+        if safe_q:
+            try:
+                fts_rows = conn.execute(
+                    "SELECT rowid FROM budget_lines_fts WHERE budget_lines_fts MATCH ?",
+                    (safe_q,),
+                ).fetchall()
+                fts_ids = [r[0] for r in fts_rows]
+            except Exception:
+                fts_ids = []  # FTS table missing → no matches
+
     where, params = build_where_clause(
         fiscal_year=fiscal_year,
         service=service,
@@ -92,6 +108,7 @@ def list_budget_lines(
         appropriation_code=appropriation_code,
         min_amount=min_amount,
         max_amount=max_amount,
+        fts_ids=fts_ids,
     )
     direction = "DESC" if sort_dir == "desc" else "ASC"
 
