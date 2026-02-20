@@ -214,6 +214,8 @@ a:hover { text-decoration: underline; }
   color: var(--clr-gray-700);
   margin-bottom: .25rem;
 }
+/* TODO FIX-004: input[type="number"] is missing from this selector, so the
+   min/max amount range inputs are unstyled. Add input[type="number"]. */
 .filter-group select,
 .filter-group input[type="text"] {
   width: 100%;

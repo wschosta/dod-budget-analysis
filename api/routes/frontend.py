@@ -71,6 +71,11 @@ def _tmpl() -> Jinja2Templates:
 # ── Reference helpers (OPT-FE-002: cached) ────────────────────────────────────
 
 def _get_services(conn: sqlite3.Connection) -> list[dict]:
+    # TODO FIX-002: This queries services_agencies which contains BOTH seed data
+    # ("Army", "Air Force") AND backfilled data ("ARMY", "AF"), creating duplicates
+    # in the dropdown. Fix: query DISTINCT organization_name from budget_lines
+    # directly so the dropdown shows only values that exist in the actual data,
+    # with no duplicates.
     cache_key = ("services", id(conn))
     cached = _services_cache.get(cache_key)
     if cached is not None:
@@ -111,6 +116,10 @@ def _get_exhibit_types(conn: sqlite3.Connection) -> list[dict]:
 
 
 def _get_fiscal_years(conn: sqlite3.Connection) -> list[dict]:
+    # TODO FIX-003: The fiscal_year column contains invalid values like "Details"
+    # and "Emergency Disaster Relief Act" from parsing errors. These appear in the
+    # FY dropdown. Fix: filter to only values that look like valid fiscal years
+    # (numeric, e.g. "2024", "2025", "2026").
     cache_key = ("fiscal_years", id(conn))
     cached = _fiscal_years_cache.get(cache_key)
     if cached is not None:
@@ -236,6 +245,9 @@ def _query_results(
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = min(page, total_pages)
 
+    # TODO FIX-005: Only 3 amount columns are selected (FY24 actual, FY25 enacted,
+    # FY26 request). Add FY25 total and FY26 total columns so users can see more
+    # fiscal year data. Also add source_file so results can link to source material.
     rows = conn.execute(
         f"SELECT id, exhibit_type, fiscal_year, account, account_title, "
         f"organization_name, budget_activity_title, line_item_title, pe_number, "

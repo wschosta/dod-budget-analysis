@@ -39,7 +39,11 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
 
     fy26_col, fy25_col = _detect_fy_columns(conn)
 
-    # Grand totals
+    # TODO FIX-006: Grand totals sum ALL rows across all exhibit types, causing
+    # double-counting between summary exhibits (P-1, R-1, O-1, M-1) and detail
+    # exhibits (P-5, R-2). This inflates the FY26 total to ~$6.3T instead of
+    # ~$850B. Fix: exclude summary exhibits from the sum, and also exclude rows
+    # with invalid fiscal_year values (non-numeric like "Details").
     totals_row = conn.execute(
         f"SELECT COUNT(*) as total_lines, "
         f"SUM({fy26_col}) as total_fy26_request, "

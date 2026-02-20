@@ -50,6 +50,10 @@ def build_where_clause(
         conditions.append(f"fiscal_year IN ({placeholders})")
         params.extend(fiscal_year)
 
+    # TODO FIX-002b: Service filter uses LIKE %value% which is too broad.
+    # Selecting "AF" matches "CAAF" and other unrelated orgs.
+    # Fix: change to exact IN (...) matching since dropdown values now come
+    # directly from budget_lines.organization_name.
     if service:
         sub = " OR ".join("organization_name LIKE ?" for _ in service)
         conditions.append(f"({sub})")

@@ -22,7 +22,10 @@
   <meta property="og:description" content="Search and explore U.S. Department of Defense budget justification data across fiscal years, services, and appropriation accounts.">
   <meta property="og:type" content="website">
 
-  <!-- FE-008: CDN scripts with SRI integrity hashes -->
+  <!-- TODO FIX-001: SRI integrity hashes are incorrect, preventing HTMX and Chart.js
+       from loading. This breaks ALL interactive features: pagination, page-size selector,
+       filter form submission, charts, dashboard. Fix: remove incorrect SRI attributes
+       and update to current stable CDN versions. -->
   <!-- HTMX for dynamic page updates without full reloads -->
   <link rel="preconnect" href="https://unpkg.com">
   <script src="https://unpkg.com/htmx.org@1.9.10"

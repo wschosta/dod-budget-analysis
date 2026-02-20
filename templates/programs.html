@@ -25,6 +25,8 @@
                hx-include="#pe-filter-form">
       </div>
 
+      {# TODO FIX-008: Service dropdown shows duplicate entries from services_agencies
+         table. Same fix as FIX-002 — use deduplicated values from budget_lines. #}
       <div class="filter-group">
         <label for="pe-service">Service / Agency</label>
         <select id="pe-service" name="service">
