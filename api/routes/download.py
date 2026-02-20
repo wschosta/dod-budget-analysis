@@ -30,14 +30,15 @@ _DOWNLOAD_COLUMNS = [
     "account", "account_title", "organization_name",
     "budget_activity_title", "sub_activity_title",
     "line_item", "line_item_title", "pe_number",
-    "appropriation_code", "appropriation_title",
+    "appropriation_code", "appropriation_title", "budget_type",
     "amount_fy2024_actual", "amount_fy2025_enacted", "amount_fy2025_supplemental",
     "amount_fy2025_total", "amount_fy2026_request", "amount_fy2026_reconciliation",
     "amount_fy2026_total", "amount_type", "amount_unit", "currency_year",
 ]
 
 _ALLOWED_SORT = {"id", "source_file", "exhibit_type", "fiscal_year",
-                 "organization_name", "amount_fy2026_request"}
+                 "organization_name", "amount_fy2026_request", "budget_type",
+                 "pe_number", "appropriation_code"}
 
 
 def _iter_rows(conn: sqlite3.Connection, sql: str, params: list[Any]):
