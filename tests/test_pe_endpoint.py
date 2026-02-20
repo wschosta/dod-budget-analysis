@@ -332,42 +332,60 @@ class TestGetPeChanges:
 
 class TestGetTopChanges:
     def test_returns_ranked_items(self, populated_db):
-        result = get_top_changes(direction=None, service=None, limit=20,
-                                 conn=populated_db)
+        result = get_top_changes(direction=None, service=None, sort_by=None,
+                                 limit=20, conn=populated_db)
         assert result["count"] > 0
         assert all("pe_number" in i for i in result["items"])
 
     def test_items_sorted_by_abs_delta(self, populated_db):
-        result = get_top_changes(direction=None, service=None, limit=20,
-                                 conn=populated_db)
+        result = get_top_changes(direction=None, service=None, sort_by=None,
+                                 limit=20, conn=populated_db)
         if len(result["items"]) >= 2:
             deltas = [abs(i["delta"]) for i in result["items"]]
             assert deltas == sorted(deltas, reverse=True)
 
     def test_direction_filter_increase(self, populated_db):
-        result = get_top_changes(direction="increase", service=None, limit=20,
-                                 conn=populated_db)
+        result = get_top_changes(direction="increase", service=None, sort_by=None,
+                                 limit=20, conn=populated_db)
         for item in result["items"]:
             assert item["delta"] > 0
 
     def test_direction_filter_decrease(self, populated_db):
-        result = get_top_changes(direction="decrease", service=None, limit=20,
-                                 conn=populated_db)
+        result = get_top_changes(direction="decrease", service=None, sort_by=None,
+                                 limit=20, conn=populated_db)
         for item in result["items"]:
             assert item["delta"] < 0
 
     def test_service_filter(self, populated_db):
-        result = get_top_changes(direction=None, service="Army", limit=20,
-                                 conn=populated_db)
+        result = get_top_changes(direction=None, service="Army", sort_by=None,
+                                 limit=20, conn=populated_db)
         for item in result["items"]:
             assert "Army" in item["organization_name"]
 
     def test_change_type_present(self, populated_db):
-        result = get_top_changes(direction=None, service=None, limit=20,
-                                 conn=populated_db)
+        result = get_top_changes(direction=None, service=None, sort_by=None,
+                                 limit=20, conn=populated_db)
         valid_types = {"new", "terminated", "increase", "decrease", "flat"}
         for item in result["items"]:
             assert item["change_type"] in valid_types
+
+    def test_sort_by_fy2026_request(self, populated_db):
+        """sort_by=fy2026_request orders by FY2026 amount descending."""
+        result = get_top_changes(direction=None, service=None,
+                                 sort_by="fy2026_request", limit=20,
+                                 conn=populated_db)
+        if len(result["items"]) >= 2:
+            amounts = [i["fy2026_request"] for i in result["items"]]
+            assert amounts == sorted(amounts, reverse=True)
+
+    def test_sort_by_invalid_defaults_to_delta(self, populated_db):
+        """Invalid sort_by value falls back to delta ordering."""
+        result = get_top_changes(direction=None, service=None,
+                                 sort_by="bogus", limit=20,
+                                 conn=populated_db)
+        if len(result["items"]) >= 2:
+            deltas = [abs(i["delta"]) for i in result["items"]]
+            assert deltas == sorted(deltas, reverse=True)
 
 
 # ── compare_pes tests ────────────────────────────────────────────────────

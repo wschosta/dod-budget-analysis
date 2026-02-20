@@ -57,6 +57,8 @@ def get_top_changes(
     direction: str | None = Query(
         None, description="Filter: 'increase', 'decrease', or None for both"),
     service: str | None = Query(None, description="Filter by service/org"),
+    sort_by: str | None = Query(
+        None, description="Sort: delta (default, abs value), pct_change, fy2026_request"),
     limit: int = Query(20, ge=1, le=100),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
@@ -74,6 +76,17 @@ def get_top_changes(
 
     where = " AND ".join(conditions)
 
+    # Determine sort expression
+    _SORT_MAP = {
+        "delta": "ABS(delta) DESC",
+        "pct_change": (
+            "CASE WHEN SUM(COALESCE(b.amount_fy2025_total, 0)) = 0 "
+            "THEN 0 ELSE ABS(delta) / ABS(SUM(COALESCE(b.amount_fy2025_total, 0))) END DESC"
+        ),
+        "fy2026_request": "fy2026_request DESC",
+    }
+    order_expr = _SORT_MAP.get(sort_by, "ABS(delta) DESC") if sort_by else "ABS(delta) DESC"
+
     rows = conn.execute(f"""
         SELECT
             b.pe_number,
@@ -87,7 +100,7 @@ def get_top_changes(
         WHERE {where}
         GROUP BY b.pe_number
         HAVING fy2025_total != 0 OR fy2026_request != 0
-        ORDER BY ABS(delta) DESC
+        ORDER BY {order_expr}
         LIMIT ?
     """, params + [limit * 2]).fetchall()  # over-fetch for filtering
 
