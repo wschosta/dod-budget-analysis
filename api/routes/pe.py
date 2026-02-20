@@ -499,12 +499,34 @@ def list_pes(
                  "confidence": t["confidence"]}
             )
 
+    # Batch-fetch enrichment status for all PEs in this page.
+    # Uses COUNT > 0 checks so the UI can show coverage indicators.
+    desc_pes: set[str] = set()
+    related_pes: set[str] = set()
+    if pe_numbers:
+        ph = ",".join("?" * len(pe_numbers))
+        for r2 in conn.execute(
+            f"SELECT DISTINCT pe_number FROM pe_descriptions "
+            f"WHERE pe_number IN ({ph})", pe_numbers,
+        ).fetchall():
+            desc_pes.add(r2[0])
+        try:
+            for r2 in conn.execute(
+                f"SELECT DISTINCT source_pe FROM pe_lineage "
+                f"WHERE source_pe IN ({ph})", pe_numbers,
+            ).fetchall():
+                related_pes.add(r2[0])
+        except Exception:
+            pass
+
     items = []
     for r in rows:
         d = _row_dict(r)
         d["fiscal_years"] = _json_list(d.get("fiscal_years"))
         d["exhibit_types"] = _json_list(d.get("exhibit_types"))
         d["tags"] = tags_by_pe.get(r["pe_number"], [])
+        d["has_descriptions"] = r["pe_number"] in desc_pes
+        d["has_related"] = r["pe_number"] in related_pes
         items.append(d)
 
     return {"total": total, "limit": limit, "offset": offset, "items": items}

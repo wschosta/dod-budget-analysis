@@ -471,6 +471,17 @@ class TestListPes:
         for item in result["items"]:
             assert isinstance(item["fiscal_years"], list)
 
+    def test_enrichment_status_indicators(self, populated_db):
+        result = list_pes(tag=None, q=None, service=None, budget_type=None,
+                          fy=None, limit=25, offset=0, conn=populated_db)
+        pe_items = {i["pe_number"]: i for i in result["items"]}
+        # 0602120A has descriptions and lineage in the fixture
+        assert pe_items["0602120A"]["has_descriptions"] is True
+        assert pe_items["0602120A"]["has_related"] is True
+        # 0603000A has neither
+        assert pe_items["0603000A"]["has_descriptions"] is False
+        assert pe_items["0603000A"]["has_related"] is False
+
 
 # ── list_tags tests ───────────────────────────────────────────────────────────
 
