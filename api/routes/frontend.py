@@ -393,7 +393,8 @@ def programs(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HT
             pe_result = list_pes(tag=None, q=None, service=None,
                                 budget_type=None, approp=None, ba=None,
                                 fy=None, sort_by=None, sort_dir=None,
-                                limit=25, offset=0, conn=conn)
+                                count_only=False, limit=25, offset=0,
+                                conn=conn)
             items = pe_result.get("items", [])
             total = pe_result.get("total", 0)
         except Exception:
@@ -460,8 +461,8 @@ def program_list_partial(
                 q=params.get("q") or None,
                 service=params.get("service") or None,
                 budget_type=None, approp=None, ba=None, fy=None,
-                sort_by=None, sort_dir=None, limit=25, offset=0,
-                conn=conn,
+                sort_by=None, sort_dir=None, count_only=False,
+                limit=25, offset=0, conn=conn,
             )
             items = result.get("items", [])
             total = result.get("total", 0)

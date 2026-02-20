@@ -633,6 +633,7 @@ def list_pes(
     fy: str | None = Query(None, description="Filter to PEs present in a fiscal year"),
     sort_by: str | None = Query(None, description="Sort field: pe_number (default), funding, name"),
     sort_dir: str | None = Query(None, description="Sort direction: asc (default) or desc"),
+    count_only: bool = Query(False, description="Return only total count, skip item fetch"),
     limit: int = Query(25, ge=1, le=200),
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(get_db),
@@ -641,6 +642,7 @@ def list_pes(
 
     Tag filtering uses AND logic — all specified tags must be present.
     Free-text search uses FTS5 against description text.
+    Set count_only=true to get just the total without fetching items.
     """
     conditions: list[str] = []
     params: list[Any] = []
@@ -712,6 +714,9 @@ def list_pes(
 
     count_sql = f"SELECT COUNT(DISTINCT p.pe_number) FROM {base_from} {where}"
     total = conn.execute(count_sql, params).fetchone()[0]
+
+    if count_only:
+        return {"total": total, "limit": limit, "offset": offset, "items": []}
 
     # Determine sort column and direction
     _SORT_ALLOWED = {"pe_number", "funding", "name"}
