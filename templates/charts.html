@@ -8,7 +8,7 @@
 <div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem;align-items:center">
   {# FY selector #}
   <label style="font-size:.85rem">Fiscal Year:
-    <select id="chart-fy" onchange="loadCharts()" style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid #ddd">
+    <select id="chart-fy" onchange="loadCharts()" style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid var(--border-color)">
       {% for fy in fiscal_years %}
       <option value="{{ fy.fiscal_year }}">{{ fy.fiscal_year }}</option>
       {% endfor %}
@@ -18,7 +18,7 @@
   {# VIZ-003: Service filter #}
   <label style="font-size:.85rem">Service:
     <select id="chart-service-filter" multiple
-            style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid #ddd;height:80px"
+            style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid var(--border-color);height:80px"
             onchange="loadCharts()">
     </select>
   </label>
@@ -69,13 +69,13 @@
     <div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:.75rem;align-items:center">
       <label style="font-size:.85rem">Entity A:
         <select id="compare-a" onchange="loadComparison()"
-                style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid #ddd">
+                style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid var(--border-color)">
           <option value="">— Select service —</option>
         </select>
       </label>
       <label style="font-size:.85rem">Entity B:
         <select id="compare-b" onchange="loadComparison()"
-                style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid #ddd">
+                style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid var(--border-color)">
           <option value="">— Select service —</option>
         </select>
       </label>

@@ -49,7 +49,7 @@
   <div class="results-header">
     <span class="results-count">
       {{ "{:,}".format(total) }} result{{ "s" if total != 1 }} — page {{ page }} of {{ total_pages }}
-      <span style="font-size:.75rem;color:#888">(showing {{ items|length }})</span>
+      <span style="font-size:.75rem;color:var(--text-secondary)">(showing {{ items|length }})</span>
     </span>
 
     {# Column toggles (3.A4-b) — FIX-005: added FY25 total, FY26 total; FIX-007: added source #}
@@ -139,7 +139,7 @@
               {{ item.line_item_title or item.account_title or "—" }}
             </div>
             {% if item.budget_activity_title %}
-            <div style="font-size:.78rem;color:#555">{{ item.budget_activity_title }}</div>
+            <div style="font-size:.78rem;color:var(--text-secondary)">{{ item.budget_activity_title }}</div>
             {% endif %}
           </td>
           <td class="col-org td-org">{{ item.organization_name or "—" }}</td>
