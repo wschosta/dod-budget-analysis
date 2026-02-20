@@ -255,10 +255,12 @@ def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             source_pe        TEXT NOT NULL,
             referenced_pe    TEXT NOT NULL,
+            fiscal_year      TEXT,
+            source_file      TEXT,
+            page_number      INTEGER,
+            context_snippet  TEXT,
             link_type        TEXT NOT NULL,
             confidence       REAL DEFAULT 0.5,
-            fiscal_year      TEXT,
-            context_snippet  TEXT,
             UNIQUE(source_pe, referenced_pe, link_type, fiscal_year),
             FOREIGN KEY (source_pe) REFERENCES pe_index(pe_number)
         );

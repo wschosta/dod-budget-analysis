@@ -522,8 +522,9 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             source_file     TEXT,
             page_number     INTEGER,
             context_snippet TEXT,
-            link_type       TEXT,   -- "explicit_pe_ref" | "name_match"
-            confidence      REAL DEFAULT 1.0
+            link_type       TEXT NOT NULL,  -- "explicit_pe_ref" | "name_match"
+            confidence      REAL DEFAULT 0.5,
+            UNIQUE(source_pe, referenced_pe, link_type, fiscal_year)
         );
         CREATE INDEX IF NOT EXISTS idx_lineage_source ON pe_lineage(source_pe);
         CREATE INDEX IF NOT EXISTS idx_lineage_ref    ON pe_lineage(referenced_pe);
