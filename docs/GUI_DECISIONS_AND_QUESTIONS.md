@@ -230,29 +230,64 @@ External CDN loading of HTMX, Chart.js, and treemap plugin is **acceptable for i
 
 ## 7. Feature Gaps & Enhancements to Consider
 
-| # | Feature Idea | Priority | Notes |
-|---|--------------|----------|-------|
-| 7.1 | **Toast notifications** for user actions (download started, feedback submitted, URL copied, search saved). | **Medium** | The Share button (`index.html` line 104) copies a URL to clipboard via `copyShareURL()` but provides no visible confirmation to the user. The feedback form submission similarly provides no toast on success or failure. |
-| 7.2 | **Keyboard navigation through table rows** using arrow keys (Up/Down to move selection, Enter to expand detail). | **Medium** | Currently only click and HTMX-get trigger row detail. No `tabindex` on rows, no arrow-key handler. |
-| 7.3 | **Bulk actions**: Select multiple rows via checkboxes, then export selected or compare selected. | **Low** | `checkbox-select.js` is loaded globally (`base.html` line 85) but not visibly integrated into the results table. |
-| 7.4 | **Data dictionary / glossary page** explaining exhibit types, amount columns, appropriation codes, and PE number formats. | **Medium** | Tooltips on filter labels and column headers (`data-tooltip` attributes in `index.html` and `results.html`) provide some context, but a dedicated reference page would help new users. A `docs/data_dictionary.md` file exists in the repo but is not linked from the UI. |
-| 7.5 | **URL shortener or permalink service** for shared filtered views. | **Low** | The Share button copies the full URL with all query parameters, which can be very long. A server-side short URL would be cleaner for sharing. |
-| 7.6 | **Embed mode** for iframes: a `?embed=true` query parameter that hides the header and footer so the search or charts can be embedded in external sites. | **Low** | The `X-Frame-Options: DENY` header in `app.py` line 438 currently prevents any iframe embedding. Embed mode would require relaxing this for specific paths. |
-| 7.7 | **"Back to top" button** for the search results page after scrolling through long result sets. | **Low** | No current implementation. Long tables on mobile can leave users far from the filter sidebar. |
+| # | Feature Idea | Priority | Status | Notes |
+|---|--------------|----------|--------|-------|
+| 7.1 | **Toast notifications** for user actions (download started, feedback submitted, URL copied, search saved). | **Medium** | **RESOLVED -- MVP** | See decision below. |
+| 7.2 | **Keyboard navigation through table rows** using arrow keys (Up/Down to move selection, Enter to expand detail). | **Medium** | **OPEN** | Covered by accessibility (5.5). |
+| 7.3 | **Bulk actions**: Select multiple rows via checkboxes, then export selected or compare selected. | **Low** | **OPEN** | `checkbox-select.js` is loaded but not integrated. |
+| 7.4 | **Data dictionary / glossary page** explaining exhibit types, amount columns, appropriation codes, and PE number formats. | **Medium** | **RESOLVED -- MVP** | See decision below. |
+| 7.5 | **URL shortener or permalink service** for shared filtered views. | **Low** | **OPEN** | Post-release consideration. |
+| 7.6 | **Embed mode** for iframes. | **Low** | **OPEN** | Post-release consideration. |
+| 7.7 | **"Back to top" button** for long result sets. | **Low** | **OPEN** | Post-release consideration. |
+
+### 7.1 -- Toast Notifications: MVP (RESOLVED)
+
+Toast notifications should be included in the MVP. Users currently receive no visible feedback for:
+- URL copied to clipboard (Share button)
+- Download started / completed
+- Feedback submitted
+- Search saved
+
+A lightweight toast component (non-blocking, auto-dismiss) should provide confirmation for all user-initiated actions.
+
+### 7.4 -- Data Dictionary / Glossary Page: MVP (RESOLVED)
+
+A data dictionary / glossary page should be included in the MVP. This supports the **source transparency** design principle. The existing `docs/data_dictionary.md` can serve as the content source. The page should:
+- Explain exhibit types, amount columns, appropriation codes, and PE number formats
+- Be linked from the main navigation (under About or as a sub-page)
+- Complement the existing tooltip-based contextual help
 
 ---
 
 ## 8. Technical Debt & Architecture Questions
 
-| # | Question / Decision | Priority | Context |
-|---|---------------------|----------|---------|
-| 8.1 | **CSP uses `'unsafe-inline'` for both scripts and styles.** Should the app migrate to nonce-based CSP? | **Medium** | `app.py` line 429: `script-src 'self' unpkg.com cdn.jsdelivr.net 'unsafe-inline'`. The inline `<script>` block in `base.html` lines 9-16 (dark mode initialization) and the large inline `<script>` in `charts.html` lines 119-741 require `unsafe-inline`. Moving these to external `.js` files and using nonce-based CSP would improve security posture. |
-| 8.2 | **Should the inline chart JavaScript in `charts.html` (620+ lines) be extracted to a separate file?** | **Medium** | `charts.html` contains approximately 620 lines of inline JavaScript (lines 119-741) defining all chart loading functions. This prevents browser caching of the JS separately from the HTML, makes testing harder, and is the primary reason `'unsafe-inline'` is needed in the CSP. |
-| 8.3 | **Rate limiting defaults: Are 60 search/min and 10 download/min appropriate?** | **Low** | Defined in `app.py` lines 92-96 via `AppConfig`. The search limit (60/min) allows about 1 request per second, which could be restrictive for rapid filter toggling via HTMX (each filter change triggers a search request). The download limit (10/min) seems reasonable. |
-| 8.4 | **Caching strategy: The 5-minute TTL for reference data -- should this be configurable at runtime?** | **Low** | `frontend.py` lines 55-57 create `TTLCache` instances with `ttl_seconds=300`. This is hardcoded. If reference data rarely changes, a longer TTL would reduce database queries. If data is refreshed during a running session, a shorter TTL or cache-bust mechanism would help. |
-| 8.5 | **Error handling: Many chart and API failures are silently caught.** Should there be a global error toast? | **Medium** | In `charts.html` line 731, the `populateServiceDropdowns` function has an empty `catch(e) {}` block. In `frontend.py` lines 413-424 and 477-492, the Programs page catches all exceptions and silently returns empty results. Users see blank sections with no indication of what went wrong. |
-| 8.6 | **Inline styles are used extensively in templates.** Should these be migrated to CSS classes? | **Low** | Templates like `index.html`, `charts.html`, `results.html`, and `detail.html` contain numerous `style="..."` attributes for layout (flex, gap, margins, font sizes, colors). This makes the styles harder to maintain, overrides the cascade, and prevents dark-mode adaptation for hardcoded color values. |
-| 8.7 | **The dashboard page loads all data client-side via fetch calls.** Should it use server-side rendering like the Search page? | **Low** | `dashboard.html` renders an empty shell with placeholder stat cards (`--`) and hidden chart containers, then loads everything via `dashboard.js`. The Search page, by contrast, renders server-side via `_query_results()` in `frontend.py`. The inconsistency means the dashboard shows a loading spinner on every page visit while Search renders instantly. |
+| # | Question / Decision | Priority | Status | Context |
+|---|---------------------|----------|--------|---------|
+| 8.1 | **Migrate from `unsafe-inline` CSP to nonce-based CSP** | **Medium** | **RESOLVED -- MVP** | See decision below. |
+| 8.2 | **Extract inline chart JS (620+ lines) to separate file** | **Medium** | **RESOLVED -- MVP** | See decision below. Prerequisite for 8.1. |
+| 8.3 | **Rate limiting defaults: Are 60 search/min and 10 download/min appropriate?** | **Low** | **OPEN** | 60/min could be restrictive for rapid HTMX filter toggling. |
+| 8.4 | **Caching strategy: 5-minute TTL configurable at runtime?** | **Low** | **OPEN** | Currently hardcoded in `frontend.py`. |
+| 8.5 | **Replace silent error catching with user-visible error feedback** | **Medium** | **RESOLVED -- MVP** | See decision below. |
+| 8.6 | **Inline styles migration to CSS classes** | **Low** | **OPEN** | Partially addressed by dark mode polish (4.3) which requires moving hardcoded colors to CSS vars. |
+| 8.7 | **Dashboard SSR vs. client-side rendering** | **Low** | **OPEN** | Inconsistency with Search page approach. |
+
+### 8.1/8.2 -- Extract Inline JS and Migrate to Nonce-Based CSP: MVP (RESOLVED)
+
+The 620+ lines of inline JavaScript in `charts.html` should be **extracted to a separate `.js` file** for the MVP. This:
+- Enables browser caching of the JS separately from the HTML
+- Makes the JavaScript testable in isolation
+- **Removes the need for `'unsafe-inline'` in the CSP**, allowing migration to nonce-based CSP
+- Improves the overall security posture of the application
+
+The dark mode initialization script in `base.html` should also be extracted. Once all inline scripts are externalized, the CSP can be tightened to use nonces instead of `'unsafe-inline'`.
+
+### 8.5 -- Error Handling: User-Visible Feedback: MVP (RESOLVED)
+
+Silent error catching (empty `catch(e) {}` blocks, silently returning empty results) should be **replaced with user-visible error feedback** for the MVP. This includes:
+- Replacing empty catch blocks in chart loading with error messages shown in the chart container
+- Showing meaningful error states on the Programs page when exceptions occur (instead of silently returning empty)
+- Integrating with the toast notification system (7.1) for transient errors
+- Showing inline error states (e.g., "Failed to load chart -- try refreshing") for persistent failures
 
 ---
 
@@ -278,18 +313,22 @@ External CDN loading of HTMX, Chart.js, and treemap plugin is **acceptable for i
 - **5.2** -- Color contrast fixes are MVP requirement (4.5:1 ratio for all text/background combinations)
 - **6.1** -- Collapsible filter drawer on small screens (full mobile rollout is NOT MVP)
 - **6.5** -- CDN dependencies acceptable for initial release; revisit self-hosting post-release
+- **7.1** -- Toast notifications for user actions -- MVP
+- **7.4** -- Data dictionary / glossary page -- MVP (surface existing `docs/data_dictionary.md`)
+- **8.1/8.2** -- Extract inline JS to separate files, migrate to nonce-based CSP -- MVP
+- **8.5** -- Replace silent error catching with user-visible error feedback -- MVP
 
 ### Remaining High-Priority Open Items
 1. **2.5** -- Fix the Amount Range filter to operate on the correct column context.
 
-### Open Questions Still Under Discussion
-- **Section 2** -- Remaining items (2.5-2.11): amount filter behavior, related items logic, programs page, compare feature, advanced search, saved views
-- **Section 3** -- Remaining items (3.3-3.4): API docs behavior, footer content
-- **Section 4** -- Remaining items (4.1-4.2, 4.6-4.7): color palette, typography, data density, print styles
-- **Section 5** -- Remaining items (5.3-5.5): screen reader testing, reduce motion, keyboard nav for table rows
-- **Section 6** -- Remaining items (6.2-6.4): tablet breakpoint, lazy-load charts, infinite scroll
-- **Section 7** -- Feature Gaps & Enhancements
-- **Section 8** -- Technical Debt & Architecture
+### Open Questions (Lower Priority, Not Blocking MVP)
+- **Section 2** -- (2.6-2.11): multi-column amount filter, related items logic, programs page data source, compare feature, advanced search, saved views
+- **Section 3** -- (3.3-3.4): API docs behavior, footer content
+- **Section 4** -- (4.1-4.2, 4.6-4.7): color palette, typography, data density, print styles
+- **Section 5** -- (5.3-5.5): screen reader testing, reduce motion, keyboard nav for table rows
+- **Section 6** -- (6.2-6.4): tablet breakpoint, lazy-load charts, infinite scroll
+- **Section 7** -- (7.2-7.3, 7.5-7.7): bulk actions, permalink service, embed mode, back-to-top
+- **Section 8** -- (8.3-8.4, 8.6-8.7): rate limiting, caching TTL, inline styles, dashboard SSR
 
 ---
 

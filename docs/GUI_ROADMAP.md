@@ -66,7 +66,17 @@ The minimum viable product focuses on **Use Case 1 (Targeted Reporting)** and th
 - [ ] Collapsible filter drawer on small screens (replaces stacking above results)
 - [ ] Note: Full mobile-optimized layout is NOT MVP scope
 
-### 1.9 Data Display Decisions (RESOLVED)
+### 1.9 UX Polish
+- [ ] Toast notifications for user actions (URL copied, download started, feedback submitted, search saved)
+- [ ] Data dictionary / glossary page (surface existing `docs/data_dictionary.md` in the UI)
+
+### 1.10 Technical Foundations
+- [ ] Extract inline chart JS (620+ lines in `charts.html`) to separate `.js` file
+- [ ] Extract dark mode initialization script from `base.html` to external file
+- [ ] Migrate CSP from `'unsafe-inline'` to nonce-based
+- [ ] Replace silent error catching with user-visible error states (inline messages + toast notifications)
+
+### 1.11 Data Display Decisions (RESOLVED)
 - **Chart types (MVP):** Bar charts, stacked bar/area charts, sortable tables, Spruill charts
 - **Chart types (deferred):** Sankey/river charts → Phase 3
 - **Data granularity:** Project-level detail (not just PE-level). Tags applied at project level where available. Accomplishment text viewable year-over-year.
