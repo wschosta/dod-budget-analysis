@@ -222,6 +222,12 @@ class TestDashboardAPI:
         assert "by_appropriation" in data
         assert len(data["by_appropriation"]) > 0
 
+    def test_summary_has_by_budget_type(self, app_client):
+        resp = app_client.get("/api/v1/dashboard/summary")
+        data = resp.json()
+        assert "by_budget_type" in data
+        assert isinstance(data["by_budget_type"], list)
+
     def test_summary_is_cached(self, app_client):
         """Second call should use cache (both should return same data)."""
         resp1 = app_client.get("/api/v1/dashboard/summary")

@@ -32,6 +32,7 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
     - Top 10 programs with PE numbers
     - Year-over-year by fiscal year
     - Top 6 appropriation categories
+    - Budget type distribution (RDT&E, Procurement, O&M, etc.)
     - Enrichment coverage metrics
     """
     cache_key = ("dashboard_summary", id(conn))
@@ -150,12 +151,30 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
     except Exception:
         pass  # Enrichment tables may not exist yet
 
+    # Budget type distribution — separate query since budget_type
+    # isn't in the base CTE and may not exist in older schemas.
+    by_budget_type: list[dict] = []
+    try:
+        bt_rows = conn.execute(f"""
+            SELECT COALESCE(budget_type, 'Unknown') AS budget_type,
+                   SUM({fy26_col}) AS total,
+                   SUM({fy25_col}) AS prev_total,
+                   COUNT(*) AS line_count
+            FROM budget_lines
+            GROUP BY COALESCE(budget_type, 'Unknown')
+            ORDER BY SUM(COALESCE({fy26_col}, 0)) DESC
+        """).fetchall()
+        by_budget_type = [dict(r) for r in bt_rows]
+    except Exception:
+        pass  # budget_type column may not exist
+
     result = {
         "totals": totals,
         "by_service": by_service,
         "top_programs": [dict(r) for r in top_programs_rows],
         "by_fiscal_year": by_fy,
         "by_appropriation": by_approp,
+        "by_budget_type": by_budget_type,
         "enrichment": enrichment,
     }
 
