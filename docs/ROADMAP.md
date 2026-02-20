@@ -237,9 +237,9 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 
 | Group | Focus | Count | Est. Tokens | Instruction File |
 |-------|-------|-------|-------------|------------------|
-| **LION** | Frontend polish, UX, documentation | 10 | ~17,000 | `LION_INSTRUCTIONS.md` |
-| **TIGER** | Data quality validation, API enhancements | 11 | ~20,500 | `TIGER_INSTRUCTIONS.md` |
-| **BEAR** | Test suites, CI/CD, infrastructure | 12 | ~26,000 | `BEAR_INSTRUCTIONS.md` |
+| **LION** | Frontend polish, UX, documentation | 10 | ~17,000 | `docs/instructions/LION_INSTRUCTIONS.md` |
+| **TIGER** | Data quality validation, API enhancements | 11 | ~20,500 | `docs/instructions/TIGER_INSTRUCTIONS.md` |
+| **BEAR** | Test suites, CI/CD, infrastructure | 12 | ~26,000 | `docs/instructions/BEAR_INSTRUCTIONS.md` |
 
 **Items requiring external resources (12 items):**
 
@@ -250,7 +250,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | Hosting & Deployment (4.A) | 3 | Cloud account + domain + secrets |
 | Accessibility Audit (3.A) | 1 | Running UI + Lighthouse/axe-core |
 | Launch & Feedback (4.B) | 2 | Deployed application + community |
-| **Total** | **12** | See `OH_MY_INSTRUCTIONS.md` |
+| **Total** | **12** | See `docs/instructions/OH_MY_INSTRUCTIONS.md` |
 
 See [REMAINING_TODOS.md](REMAINING_TODOS.md) for detailed descriptions.
 Each LION/TIGER/BEAR instruction file is prompt-ready: open a new branch and run `execute the LION instructions`.

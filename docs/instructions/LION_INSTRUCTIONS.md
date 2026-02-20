@@ -177,4 +177,4 @@ Add a light/dark mode toggle:
 
 1. Run the full frontend test suite: `pytest tests/test_frontend_routes.py tests/test_accessibility.py tests/test_frontend_helpers.py -v`
 2. Mark all TODO items as DONE in the source files where you added `[Group: LION]` annotations
-3. Update `REMAINING_TODOS.md` to reflect completed items
+3. Update `docs/REMAINING_TODOS.md` to reflect completed items

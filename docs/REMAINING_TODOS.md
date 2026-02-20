@@ -29,7 +29,7 @@ without user intervention (except `OH MY` group items).
 | OH MY | — | 12 (unchanged) | ~18,500 | **No — needs human** |
 | **Total** | **87 done** | **45 new (12 BEAR done)** | **~82,000** | |
 
-**Instruction files:** See `LION_INSTRUCTIONS.md`, `TIGER_INSTRUCTIONS.md`, `BEAR_INSTRUCTIONS.md`, `OH_MY_INSTRUCTIONS.md` for prompt-ready agent instructions.
+**Instruction files:** See `docs/instructions/LION_INSTRUCTIONS.md`, `docs/instructions/TIGER_INSTRUCTIONS.md`, `docs/instructions/BEAR_INSTRUCTIONS.md`, `docs/instructions/OH_MY_INSTRUCTIONS.md` for prompt-ready agent instructions.
 
 ---
 

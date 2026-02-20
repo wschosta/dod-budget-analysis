@@ -2,7 +2,7 @@
 
 Catalog of all DoD budget data sources configured in `dod_budget_downloader.py`.
 
-> **Full reference:** See [DATA_SOURCES.md](../../DATA_SOURCES.md) in the project root for
+> **Full reference:** See [DATA_SOURCES.md](../DATA_SOURCES.md) for
 > complete URL templates, JSON schema, file-integrity notes, and coverage matrix.
 
 ---

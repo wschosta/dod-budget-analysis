@@ -28,7 +28,7 @@ class TestDockerfile:
         assert (PROJECT_ROOT / "Dockerfile").is_file()
 
     def test_dockerfile_multistage_exists(self):
-        assert (PROJECT_ROOT / "Dockerfile.multistage").is_file()
+        assert (PROJECT_ROOT / "docker" / "Dockerfile.multistage").is_file()
 
     def test_dockerfile_has_required_directives(self):
         content = (PROJECT_ROOT / "Dockerfile").read_text()
@@ -86,10 +86,10 @@ class TestDockerComposeStaging:
     """Validate docker-compose.staging.yml has production-like settings."""
 
     def test_staging_exists(self):
-        assert (PROJECT_ROOT / "docker-compose.staging.yml").is_file()
+        assert (PROJECT_ROOT / "docker" / "docker-compose.staging.yml").is_file()
 
     def test_staging_no_reload(self):
-        content = (PROJECT_ROOT / "docker-compose.staging.yml").read_text()
+        content = (PROJECT_ROOT / "docker" / "docker-compose.staging.yml").read_text()
         # Staging should NOT use --reload
         # Check command section for --reload absence in the web service command
         lines = content.split("\n")
@@ -105,7 +105,7 @@ class TestDockerComposeStaging:
             import yaml
         except ImportError:
             pytest.skip("pyyaml not installed")
-        content = (PROJECT_ROOT / "docker-compose.staging.yml").read_text()
+        content = (PROJECT_ROOT / "docker" / "docker-compose.staging.yml").read_text()
         data = yaml.safe_load(content)
         assert "backup" in data.get("services", {}), "Staging should have backup sidecar"
 

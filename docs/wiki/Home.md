@@ -4,7 +4,7 @@ Welcome to the project wiki for the **DoD Budget Analysis** tool — a public,
 web-facing, queryable database of Department of Defense budget data.
 
 > For the project roadmap and current status, see the
-> [README](../../README.md) and [ROADMAP](../../ROADMAP.md).
+> [README](../../README.md) and [ROADMAP](../ROADMAP.md).
 
 ---
 

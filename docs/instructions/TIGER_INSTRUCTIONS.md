@@ -207,4 +207,4 @@ Track and log slow queries for performance monitoring:
 1. Run: `pytest tests/test_validate_budget_db.py tests/test_validation.py tests/test_api_models.py tests/test_tiger_*.py -v`
 2. Run: `python validate_budget_db.py --json` to verify all new checks execute
 3. Mark all TODO items as DONE in-line where you added `[Group: TIGER]` annotations
-4. Update `REMAINING_TODOS.md` to reflect completed items
+4. Update `docs/REMAINING_TODOS.md` to reflect completed items
