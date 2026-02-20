@@ -60,6 +60,8 @@ def _build_download_sql(
     conn: sqlite3.Connection,
     limit: int,
     export_cols: list[str],
+    sort_by: str = "id",
+    sort_dir: str = "asc",
 ) -> tuple[str, list[Any], int]:
     """Build the download SQL with all filters applied.
 
@@ -94,7 +96,10 @@ def _build_download_sql(
     total = conn.execute(count_sql, params).fetchone()[0]
 
     col_list = ", ".join(export_cols)
-    sql = f"SELECT {col_list} FROM budget_lines {where} LIMIT {limit}"
+    sort_col = sort_by if sort_by in _ALLOWED_SORT else "id"
+    direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
+    sql = (f"SELECT {col_list} FROM budget_lines {where} "
+           f"ORDER BY {sort_col} {direction} LIMIT {limit}")
 
     return sql, params, total
 
@@ -110,6 +115,8 @@ def download(
     appropriation_code: list[str] | None = Query(None, description="Filter by appropriation code(s)"),
     # DL-002: keyword search filter
     q: str | None = Query(None, description="Keyword search filter (FTS5)"),
+    sort_by: str = Query("id", description="Column to sort by"),
+    sort_dir: str = Query("asc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(
         10_000, ge=1, le=100_000,
         description="Max rows to export (default 10,000)",
@@ -135,6 +142,8 @@ def download(
         conn=conn,
         limit=limit,
         export_cols=export_cols,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
     )
 
     # DL-003: X-Total-Count header

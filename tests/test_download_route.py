@@ -90,6 +90,19 @@ class TestBuildDownloadSql:
         assert len(rows) == 1
 
 
+    def test_sort_order_applied(self, db):
+        """sort_by and sort_dir affect result ordering."""
+        sql_asc, params_asc, _ = _build_download_sql(
+            fiscal_year=None, service=None, exhibit_type=None,
+            pe_number=None, appropriation_code=None, q=None,
+            conn=db, limit=100, export_cols=_DOWNLOAD_COLUMNS,
+            sort_by="id", sort_dir="desc",
+        )
+        rows = list(_iter_rows(db, sql_asc, params_asc))
+        ids = [r[0] for r in rows]
+        assert ids == sorted(ids, reverse=True)
+
+
 class TestAllowedSort:
     def test_has_common_sorts(self):
         assert "id" in _ALLOWED_SORT
