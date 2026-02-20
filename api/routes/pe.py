@@ -801,6 +801,20 @@ def list_pes(
         ).fetchall():
             funding_by_pe[r2[0]] = r2[1] or 0.0
 
+    # Batch-fetch PDF page counts from pdf_pe_numbers junction table
+    pdf_pages_by_pe: dict[str, int] = {}
+    if pe_numbers:
+        try:
+            ph = ",".join("?" * len(pe_numbers))
+            for r2 in conn.execute(
+                f"SELECT pe_number, COUNT(*) AS page_count "
+                f"FROM pdf_pe_numbers WHERE pe_number IN ({ph}) "
+                f"GROUP BY pe_number", pe_numbers,
+            ).fetchall():
+                pdf_pages_by_pe[r2[0]] = r2[1]
+        except Exception:
+            pass  # Table may not exist
+
     items = []
     for r in rows:
         d = _row_dict(r)
@@ -810,6 +824,7 @@ def list_pes(
         d["has_descriptions"] = r["pe_number"] in desc_pes
         d["has_related"] = r["pe_number"] in related_pes
         d["total_fy2026_request"] = funding_by_pe.get(r["pe_number"], 0.0)
+        d["pdf_page_count"] = pdf_pages_by_pe.get(r["pe_number"], 0)
         items.append(d)
 
     return {"total": total, "limit": limit, "offset": offset, "items": items}
