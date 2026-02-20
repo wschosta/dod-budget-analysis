@@ -995,6 +995,56 @@ def check_enrichment_orphans(conn: sqlite3.Connection) -> list[dict]:
     return issues
 
 
+def check_enrichment_staleness(conn: sqlite3.Connection) -> list[dict]:
+    """Detect PE numbers in budget_lines that are missing from pe_index.
+
+    When new budget data is ingested without re-running enrichment, PEs
+    appear in budget_lines but not pe_index. This makes them invisible
+    in the Program Explorer and tag/topic search.
+    """
+    issues = []
+    if not _table_exists(conn, "pe_index"):
+        return []
+
+    try:
+        row = conn.execute("""
+            SELECT COUNT(DISTINCT b.pe_number) AS missing_count
+            FROM budget_lines b
+            WHERE b.pe_number IS NOT NULL
+              AND b.pe_number != ''
+              AND NOT EXISTS (
+                  SELECT 1 FROM pe_index p WHERE p.pe_number = b.pe_number
+              )
+        """).fetchone()
+    except Exception:
+        return []
+
+    missing = row["missing_count"]
+    if missing == 0:
+        return []
+
+    total_bl_pes = conn.execute(
+        "SELECT COUNT(DISTINCT pe_number) FROM budget_lines "
+        "WHERE pe_number IS NOT NULL AND pe_number != ''"
+    ).fetchone()[0]
+
+    pct = round((missing / total_bl_pes) * 100, 1) if total_bl_pes > 0 else 0
+
+    severity = "warning" if pct > 5 else "info"
+    issues.append({
+        "check": "enrichment_staleness",
+        "severity": severity,
+        "detail": (
+            f"{missing}/{total_bl_pes} PE number(s) ({pct}%) in budget_lines "
+            "are not in pe_index — run enrich_budget_db.py to update"
+        ),
+        "missing_count": missing,
+        "total_pe_count": total_bl_pes,
+        "pct_missing": pct,
+    })
+    return issues
+
+
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     r = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
@@ -1026,6 +1076,7 @@ ALL_CHECKS = [
     ("PDF PE Numbers Junction", check_pdf_pe_numbers_populated), # LION-108-val(b)
     ("PE Tags Source Files", check_pe_tags_source_files),        # LION-108-val(c)
     ("Enrichment Orphans", check_enrichment_orphans),              # Orphan detection
+    ("Enrichment Staleness", check_enrichment_staleness),          # Stale PE detection
 ]
 
 
