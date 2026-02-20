@@ -232,3 +232,10 @@ class TestSuggest:
     def test_limit_respected(self, suggest_db):
         result = suggest(q="A", limit=2, conn=suggest_db)
         assert len(result) <= 2
+
+    def test_org_name_in_suggestions(self, suggest_db):
+        """Organization names appear in suggestions."""
+        result = suggest(q="Army", limit=10, conn=suggest_db)
+        org_entries = [s for s in result if s["field"] == "organization_name"]
+        assert len(org_entries) >= 1
+        assert any("Army" in s["value"] for s in org_entries)

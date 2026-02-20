@@ -354,4 +354,18 @@ def suggest(
         except Exception:
             pass
 
+    # organization_name
+    if len(suggestions) < limit:
+        try:
+            for r in conn.execute(
+                "SELECT DISTINCT organization_name AS value "
+                "FROM budget_lines "
+                "WHERE organization_name LIKE ? AND organization_name IS NOT NULL "
+                "LIMIT ?",
+                (contains_param, limit - len(suggestions)),
+            ).fetchall():
+                _add(r["value"], "organization_name")
+        except Exception:
+            pass
+
     return suggestions[:limit]
