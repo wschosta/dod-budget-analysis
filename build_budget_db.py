@@ -2348,6 +2348,14 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         conn.execute(
             "DELETE FROM pdf_pages WHERE source_file IN (SELECT path FROM _pdf_preclean)"
         )
+        # LION-103: Also clean junction table to prevent stale PE-to-page links
+        try:
+            conn.execute(
+                "DELETE FROM pdf_pe_numbers WHERE source_file IN "
+                "(SELECT path FROM _pdf_preclean)"
+            )
+        except Exception:
+            pass  # Table may not exist in older schemas
         conn.execute("DROP TABLE _pdf_preclean")
         conn.commit()
 
