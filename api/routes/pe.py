@@ -763,14 +763,16 @@ def list_pes(
     if pe_numbers:
         ph = ",".join("?" * len(pe_numbers))
         all_tags = conn.execute(
-            f"SELECT pe_number, tag, tag_source, confidence FROM pe_tags "
+            f"SELECT pe_number, tag, tag_source, confidence, source_files "
+            f"FROM pe_tags "
             f"WHERE pe_number IN ({ph}) ORDER BY confidence DESC, tag",
             pe_numbers,
         ).fetchall()
         for t in all_tags:
             tags_by_pe.setdefault(t["pe_number"], []).append(
                 {"tag": t["tag"], "tag_source": t["tag_source"],
-                 "confidence": t["confidence"]}
+                 "confidence": t["confidence"],
+                 "source_files": _json_list(t["source_files"])}
             )
 
     # Batch-fetch enrichment status and funding totals for all PEs in this page.

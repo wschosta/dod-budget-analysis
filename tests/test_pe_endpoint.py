@@ -639,6 +639,20 @@ class TestListPes:
             assert "pdf_page_count" in item
             assert isinstance(item["pdf_page_count"], int)
 
+    def test_tag_source_provenance_in_list(self, populated_db):
+        """Tag items in PE list include source_files provenance."""
+        result = list_pes(tag=None, q=None, service=None, budget_type=None,
+                          approp=None, ba=None, fy=None, sort_by=None,
+                          sort_dir=None, count_only=False, limit=25, offset=0,
+                          conn=populated_db)
+        # Find item with tags
+        items_with_tags = [i for i in result["items"] if i["tags"]]
+        assert len(items_with_tags) > 0
+        for item in items_with_tags:
+            for tag in item["tags"]:
+                assert "source_files" in tag
+                assert isinstance(tag["source_files"], list)
+
     def test_filter_by_approp(self, populated_db):
         """Appropriation title substring filter restricts PE results."""
         result = list_pes(tag=None, q=None, service=None, budget_type=None,
