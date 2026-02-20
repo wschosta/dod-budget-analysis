@@ -28,6 +28,7 @@ from validate_budget_db import (
     check_ingestion_errors,
     check_unit_consistency,
     check_empty_files,
+    check_enrichment_orphans,
     _get_amount_columns,
     generate_report,
 )
@@ -486,4 +487,38 @@ def test_pe_tags_source_files_null_warning(conn):
 def test_pe_tags_source_files_empty_table(conn):
     """Empty pe_tags → no issues."""
     issues = check_pe_tags_source_files(conn)
+    assert len(issues) == 0
+
+
+# ── Enrichment Orphans ───────────────────────────────────────────────────
+
+def test_enrichment_orphans_none(conn):
+    """No orphans when pe_descriptions refs match pe_index."""
+    conn.execute("INSERT INTO pe_index (pe_number, display_title) VALUES ('0602120A', 'Radar')")
+    conn.execute("""
+        INSERT INTO pe_descriptions (pe_number, fiscal_year, description_text)
+        VALUES ('0602120A', '2026', 'Radar program')
+    """)
+    conn.commit()
+    issues = check_enrichment_orphans(conn)
+    assert len(issues) == 0
+
+
+def test_enrichment_orphans_detected(conn):
+    """Orphaned pe_descriptions rows referencing unknown PE → warning."""
+    conn.execute("INSERT INTO pe_index (pe_number, display_title) VALUES ('0602120A', 'Radar')")
+    conn.execute("""
+        INSERT INTO pe_descriptions (pe_number, fiscal_year, description_text)
+        VALUES ('9999999X', '2026', 'Orphan description')
+    """)
+    conn.commit()
+    issues = check_enrichment_orphans(conn)
+    assert len(issues) >= 1
+    assert any(i["table"] == "pe_descriptions" for i in issues)
+    assert issues[0]["severity"] == "warning"
+
+
+def test_enrichment_orphans_empty_tables(conn):
+    """Empty enrichment tables → no issues."""
+    issues = check_enrichment_orphans(conn)
     assert len(issues) == 0

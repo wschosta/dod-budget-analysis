@@ -951,6 +951,50 @@ def check_pe_tags_source_files(conn: sqlite3.Connection) -> list[dict]:
     return issues
 
 
+def check_enrichment_orphans(conn: sqlite3.Connection) -> list[dict]:
+    """Detect enrichment rows that reference PE numbers not in pe_index.
+
+    Orphans occur when pe_index is rebuilt (--rebuild) but enrichment
+    tables retain data from a prior run with different PE numbers.
+    """
+    issues = []
+    if not _table_exists(conn, "pe_index"):
+        return []
+
+    checks = [
+        ("pe_descriptions", "pe_number"),
+        ("pe_tags", "pe_number"),
+        ("pe_lineage", "source_pe"),
+    ]
+    for table, col in checks:
+        if not _table_exists(conn, table):
+            continue
+        try:
+            orphans = conn.execute(f"""
+                SELECT COUNT(*) AS c FROM {table} t
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM pe_index p WHERE p.pe_number = t.{col}
+                )
+            """).fetchone()["c"]
+        except Exception:
+            continue
+
+        if orphans > 0:
+            issues.append({
+                "check": "enrichment_orphans",
+                "severity": "warning",
+                "detail": (
+                    f"{orphans} row(s) in {table}.{col} reference PE numbers "
+                    "not found in pe_index — re-run enrichment with --rebuild"
+                ),
+                "table": table,
+                "column": col,
+                "orphan_count": orphans,
+            })
+
+    return issues
+
+
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     r = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
@@ -981,6 +1025,7 @@ ALL_CHECKS = [
     ("PDF Pages Fiscal Year", check_pdf_pages_fiscal_year),      # LION-108-val(a)
     ("PDF PE Numbers Junction", check_pdf_pe_numbers_populated), # LION-108-val(b)
     ("PE Tags Source Files", check_pe_tags_source_files),        # LION-108-val(c)
+    ("Enrichment Orphans", check_enrichment_orphans),              # Orphan detection
 ]
 
 
