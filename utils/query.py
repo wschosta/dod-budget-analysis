@@ -20,6 +20,7 @@ def build_where_clause(
     exhibit_type: list[str] | None = None,
     pe_number: list[str] | None = None,
     appropriation_code: list[str] | None = None,
+    budget_type: list[str] | None = None,
     min_amount: float | None = None,
     max_amount: float | None = None,
     q: str | None = None,
@@ -33,6 +34,7 @@ def build_where_clause(
         exhibit_type: Filter by exhibit type(s).
         pe_number: Filter by PE number(s).
         appropriation_code: Filter by appropriation code(s).
+        budget_type: Filter by budget type(s) (e.g. RDT&E, Procurement).
         min_amount: Minimum amount_fy2026_request value.
         max_amount: Maximum amount_fy2026_request value.
         q: Free-text search (unused here — caller should use fts_ids).
@@ -69,6 +71,11 @@ def build_where_clause(
         placeholders = ",".join("?" * len(appropriation_code))
         conditions.append(f"appropriation_code IN ({placeholders})")
         params.extend(appropriation_code)
+
+    if budget_type:
+        placeholders = ",".join("?" * len(budget_type))
+        conditions.append(f"budget_type IN ({placeholders})")
+        params.extend(budget_type)
 
     if min_amount is not None:
         conditions.append("amount_fy2026_request >= ?")
