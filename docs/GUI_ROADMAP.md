@@ -11,6 +11,7 @@ This document tracks the phased implementation plan for the DoD Budget Explorer 
 3. **Clickable visuals** -- Every summary chart element acts as an implicit search. Clicking drills into the underlying data.
 4. **Reproducible views** -- URL query parameters encode the full view state. Any view can be bookmarked, shared, or recreated.
 5. **Source transparency** -- Users must always be able to see where data came from (exhibit type, fiscal year, budget submission).
+6. **Source fidelity** -- Never display budget data that does not come from a source document. The only exception is summations (totals computed from source data). Never adjust, inflate, or deflate numbers.
 
 ---
 
@@ -39,14 +40,17 @@ The minimum viable product focuses on **Use Case 1 (Targeted Reporting)** and th
 
 ### 1.4 Export
 - [ ] CSV export of current filtered results (with source metadata)
-- [ ] Formatted table export (Excel with headers, column formatting, totals row)
-- [ ] Export includes data source attribution (exhibit type, fiscal year, budget submission)
+- [ ] Styled Excel export (.xlsx) with headers, column widths, number formatting, totals row, and source attribution
+- [ ] PDF export of formatted table
+- [ ] Image export of formatted table (for presentations)
+- [ ] All exports include data source attribution (exhibit type, fiscal year, budget submission)
 
-### 1.5 Data & Display
-- [ ] Decide on chart types for MVP (see open question 2.1)
-- [ ] Decide on data granularity -- PE-level vs. project-level drill-down (see open question 2.2)
-- [ ] Decide on inflation-adjusted vs. nominal dollars (see open question 2.3)
-- [ ] Define "formatted table" export format (see open question 2.4)
+### 1.5 Data Display Decisions (RESOLVED)
+- **Chart types (MVP):** Bar charts, stacked bar/area charts, sortable tables, Spruill charts
+- **Chart types (deferred):** Sankey/river charts → Phase 3
+- **Data granularity:** Project-level detail (not just PE-level). Tags applied at project level where available. Accomplishment text viewable year-over-year.
+- **Dollar representation:** Display exactly what source documents report. If both nominal and constant-year figures exist, show both with a toggle. Never adjust numbers. Only exception: computed summations.
+- **Display hierarchy:** PE Line → Project(s) → Accomplishment text (by fiscal year)
 
 ---
 
@@ -57,7 +61,7 @@ Focuses on **Use Case 2 (Trend Analysis)** and serving the **Industry/Journalist
 ### 2.1 "Across" Analysis (one PE line over time)
 - [ ] Line/bar chart showing funding history for a selected PE line across all available fiscal years
 - [ ] Ability to overlay multiple PE lines on the same chart for comparison
-- [ ] Toggle between nominal and constant-year dollars (if decided in Phase 1)
+- [ ] If source documents provide both nominal and constant-year figures, toggle between views
 
 ### 2.2 "Down" Analysis (multiple PE lines in one fiscal year)
 - [ ] Stacked bar or grouped bar chart comparing selected PE lines within a fiscal year
@@ -123,14 +127,14 @@ Focuses on **Use Case 3 (Browsing)** and the **General Public** persona.
 
 These questions (from GUI_DECISIONS_AND_QUESTIONS.md) need resolution before their associated roadmap items can be fully specified:
 
-| Question | Blocks | Section |
-|----------|--------|---------|
-| 2.1 -- Must-have chart types for MVP? | Phase 1.5, Phase 2 | Data & Display |
-| 2.2 -- Data granularity (PE-level vs. project-level)? | Phase 1.2, Phase 1.5 | Data & Display |
-| 2.3 -- Inflation-adjusted dollars? | Phase 1.5, Phase 2.1 | Data & Display |
-| 2.4 -- "Formatted table" export definition? | Phase 1.4 | Data & Display |
-| 4.5 -- Amount formatting toggle ($K / $M / $B)? | Phase 1.2 | Visual Design |
-| 5.1 -- WCAG 2.1 AA target? | Phase 4.2 | Accessibility |
+| Question | Blocks | Section | Status |
+|----------|--------|---------|--------|
+| ~~2.1 -- Must-have chart types for MVP?~~ | ~~Phase 1.5, Phase 2~~ | ~~Data & Display~~ | **RESOLVED** |
+| ~~2.2 -- Data granularity (PE-level vs. project-level)?~~ | ~~Phase 1.2, Phase 1.5~~ | ~~Data & Display~~ | **RESOLVED** |
+| ~~2.3 -- Inflation-adjusted dollars?~~ | ~~Phase 1.5, Phase 2.1~~ | ~~Data & Display~~ | **RESOLVED** |
+| ~~2.4 -- "Formatted table" export definition?~~ | ~~Phase 1.4~~ | ~~Data & Display~~ | **RESOLVED** |
+| 4.5 -- Amount formatting toggle ($K / $M / $B)? | Phase 1.2 | Visual Design | OPEN |
+| 5.1 -- WCAG 2.1 AA target? | Phase 4.2 | Accessibility | OPEN |
 
 ---
 

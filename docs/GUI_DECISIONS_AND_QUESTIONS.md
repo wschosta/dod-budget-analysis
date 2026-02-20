@@ -68,15 +68,61 @@ Linking external news articles and program context descriptions to budget line i
 
 ## 2. Data & Functionality
 
-| # | Question / Decision | Priority | Context |
-|---|---------------------|----------|---------|
-| 2.1 | **The Amount Range filter is hardcoded to the `amount_fy2026_request` column.** Should it dynamically filter on whichever FY column(s) the user has visible via the column toggles? | **High** | In `frontend.py` lines 207-222, the WHERE clause explicitly references `amount_fy2026_request >= ?` and `amount_fy2026_request <= ?`. If a user hides FY26 columns and only shows FY24 Actual, the amount filter still operates on FY26, which is confusing. |
-| 2.2 | **Should users be able to filter by multiple amount columns simultaneously?** For example, "show lines where FY24 Actual > $10M AND FY26 Request > $15M." | **Low** | No current UI or backend support. Would require a more advanced filter builder. |
-| 2.3 | **How should "related items" in the detail panel be determined?** | **Medium** | `frontend.py` lines 362-386 first match on `pe_number`, then fall back to matching `organization_name + line_item_title`. The fallback may surface false positives (e.g., two different programs with the same generic title like "Program Management" at the same organization). Should the fallback be tightened or removed? |
-| 2.4 | **Should the Programs page require PE enrichment data, or should it work with just `budget_lines`?** | **Medium** | `frontend.py` line 412 checks `_table_exists(conn, "pe_index")` and silently returns an empty list if the table is absent. Users see an empty Programs page with no explanation. The `/programs/{pe_number}` route raises a 404 with a message to "Run enrich_budget_db.py." Should there be a more prominent UI notice, or should Programs derive cards from `budget_lines` directly? |
-| 2.5 | **Should there be a "compare" feature on the Search page?** Users would select 2+ rows via checkboxes and view a side-by-side comparison panel. | **Medium** | The `checkbox-select.js` script is already loaded in `base.html` (line 85), but no multi-row selection checkboxes appear in the results table. The infrastructure may be partially in place. |
-| 2.6 | **Is the autocomplete keyword search sufficient, or should there be advanced search with field-specific operators?** (e.g., `service:Army AND exhibit:R-2 AND amount>50000`) | **Low** | The current search uses FTS5 (`sanitize_fts5_query`) across all indexed text. Power users (analysts, researchers) may want structured queries. |
-| 2.7 | **Should there be saved views/dashboards with server-side persistence?** | **Low** | Saved searches currently use `localStorage` only (client-side). The "Save" button in `index.html` line 108 calls `saveCurrentSearch(name)` which stores to the browser. Sharing saved searches across devices or teams is not possible. |
+| # | Question / Decision | Priority | Status | Context |
+|---|---------------------|----------|--------|---------|
+| 2.1 | **Must-have chart types for MVP?** | **High** | **RESOLVED** | See decision below. |
+| 2.2 | **Data granularity -- PE-level vs. project-level?** | **High** | **RESOLVED** | See decision below. |
+| 2.3 | **Dollar normalization -- inflation-adjusted vs. nominal?** | **High** | **RESOLVED** | See decision below. |
+| 2.4 | **What does "formatted table" export mean?** | **Medium** | **RESOLVED** | See decision below. |
+| 2.5 | **Amount Range filter hardcoded to FY2026 column.** Should it dynamically filter on whichever FY column(s) the user has visible? | **High** | **OPEN** | In `frontend.py` lines 207-222, the WHERE clause explicitly references `amount_fy2026_request`. If a user hides FY26 columns and only shows FY24 Actual, the amount filter still operates on FY26. |
+| 2.6 | **Should users be able to filter by multiple amount columns simultaneously?** | **Low** | **OPEN** | No current UI or backend support. Would require a more advanced filter builder. |
+| 2.7 | **How should "related items" in the detail panel be determined?** | **Medium** | **OPEN** | `frontend.py` lines 362-386 first match on `pe_number`, then fall back to matching `organization_name + line_item_title`. The fallback may surface false positives. |
+| 2.8 | **Should the Programs page require PE enrichment data, or work with just `budget_lines`?** | **Medium** | **OPEN** | `frontend.py` line 412 checks `_table_exists(conn, "pe_index")` and silently returns an empty list if absent. |
+| 2.9 | **Should there be a "compare" feature on the Search page?** | **Medium** | **OPEN** | `checkbox-select.js` is loaded but no multi-row selection checkboxes appear in the results table. |
+| 2.10 | **Is the autocomplete keyword search sufficient, or should there be advanced search with field-specific operators?** | **Low** | **OPEN** | Current search uses FTS5 across all indexed text. Power users may want structured queries. |
+| 2.11 | **Should there be saved views/dashboards with server-side persistence?** | **Low** | **OPEN** | Saved searches currently use `localStorage` only. |
+
+### 2.1 -- Chart Types for MVP (RESOLVED)
+
+**MVP charts (Phase 1-2):**
+- Bar charts (year-over-year comparison for a PE line or group)
+- Stacked bar / area charts (showing how sub-items build up to a total)
+- Sortable, filterable tables
+- Spruill charts (classic analyst deliverable)
+
+**Deferred to Phase 3+ (nice-to-have):**
+- Sankey / river charts (budget rollup visualization showing how pieces build to total defense budget)
+
+### 2.2 -- Data Granularity: Project-Level Detail (RESOLVED)
+
+The GUI should drill down to **project-level detail**, not just PE-level summaries. This is critical because:
+- Some PE lines cover multiple programs, so PE-level aggregation can obscure important distinctions
+- Where available, **tagging should happen at the project level**, not the PE level
+- Accomplishment/plans text should be viewable year-over-year at the project level
+
+**Display hierarchy:** PE Line → Project(s) → Accomplishment text (by fiscal year)
+
+### 2.3 -- Dollar Representation: Source Fidelity (RESOLVED)
+
+**Core principle: Never display budget data that does not come from a source document. The only exception is summations (totals computed from source data).**
+
+- Do NOT attempt to adjust, inflate, or deflate any numbers
+- Display exactly what the budget documents report
+- If the budget documents contain both inflation-adjusted (constant-year) and nominal (then-year) figures, identify which is which and display both
+- A toggle may be offered to switch between the two views, but only when both are present in the source data
+- All displayed values must be traceable to their source document
+
+### 2.4 -- Formatted Table Export (RESOLVED)
+
+"Formatted table" means a **styled Excel workbook** with:
+- Proper column headers and formatting
+- Column widths, number formatting, totals row
+- Data source attribution
+
+Export formats supported:
+- **Excel (.xlsx)** -- primary format
+- **PDF** -- for sharing/printing
+- **Image** -- for embedding in presentations or reports
 
 ---
 
@@ -166,14 +212,18 @@ Linking external news articles and program context descriptions to budget line i
 - **1.4** -- Hybrid landing page: search bar over clickable summary visuals
 - **1.5** -- URL-based state for shareable/bookmarkable views
 - **1.6** -- News/context layer deferred to post-MVP
+- **2.1** -- MVP charts: bar, stacked bar, tables, Spruill. Sankey/river deferred to Phase 3
+- **2.2** -- Project-level detail with tagging at project level. Accomplishment text viewable year-over-year
+- **2.3** -- Source fidelity: display exactly what budget docs report, never adjust numbers. Toggle if both nominal and constant-year exist in source
+- **2.4** -- Formatted table = styled Excel (.xlsx), with PDF and image export options
 
 ### Remaining High-Priority Open Items
-1. **2.1** -- Fix the Amount Range filter to operate on the correct column context.
+1. **2.5** -- Fix the Amount Range filter to operate on the correct column context.
 2. **5.1** -- Confirm WCAG 2.1 AA as the target accessibility standard.
 3. **5.2** -- Audit and fix color contrast failures (particularly `#555` and `#888` on light/dark backgrounds).
 
 ### Open Questions Still Under Discussion
-- **Section 2** -- Data & Display (chart types, data granularity, dollar normalization, export format)
+- **Section 2** -- Remaining items (2.5-2.11): amount filter behavior, related items logic, programs page, compare feature, advanced search, saved views
 - **Section 3** -- Navigation & Information Architecture
 - **Section 4** -- Visual Design & Style Preferences
 - **Section 5** -- Accessibility
