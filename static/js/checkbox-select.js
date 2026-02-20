@@ -65,6 +65,11 @@ function initCheckboxSelect(selectEl) {
     });
   }
 
+  // FIX-018: Create chevron once and reuse to prevent duplication on each update
+  var chevron = document.createElement("span");
+  chevron.textContent = " \u25BE";
+  chevron.style.fontSize = ".7rem";
+
   function updateTriggerText() {
     var selected = Array.from(selectEl.selectedOptions);
     if (selected.length === 0) {
@@ -76,10 +81,6 @@ function initCheckboxSelect(selectEl) {
         return o.textContent.split(" (")[0];
       }).join(", ") + " +" + (selected.length - 2) + " more";
     }
-    // Add chevron
-    var chevron = document.createElement("span");
-    chevron.textContent = " \u25BE";
-    chevron.style.fontSize = ".7rem";
     trigger.appendChild(chevron);
   }
 
