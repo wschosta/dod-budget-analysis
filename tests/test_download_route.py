@@ -11,7 +11,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from api.routes.download import _iter_rows, _DOWNLOAD_COLUMNS, _ALLOWED_SORT
+from api.routes.download import _iter_rows, _DOWNLOAD_COLUMNS, _ALLOWED_SORT, _build_download_sql
 
 
 @pytest.fixture()
@@ -70,6 +70,24 @@ class TestDownloadColumns:
     def test_has_amount_columns(self):
         amount_cols = [c for c in _DOWNLOAD_COLUMNS if c.startswith("amount_")]
         assert len(amount_cols) >= 5
+
+
+class TestBuildDownloadSql:
+    def test_appropriation_code_filter(self, db):
+        """appropriation_code filter restricts results."""
+        # Set appropriation_code on one row
+        db.execute("UPDATE budget_lines SET appropriation_code = '3010' WHERE id = 1")
+        db.execute("UPDATE budget_lines SET appropriation_code = '1506' WHERE id = 2")
+        db.commit()
+
+        sql, params, total = _build_download_sql(
+            fiscal_year=None, service=None, exhibit_type=None,
+            pe_number=None, appropriation_code=["3010"], q=None,
+            conn=db, limit=100, export_cols=_DOWNLOAD_COLUMNS,
+        )
+        assert total == 1
+        rows = list(_iter_rows(db, sql, params))
+        assert len(rows) == 1
 
 
 class TestAllowedSort:

@@ -55,6 +55,7 @@ def _build_download_sql(
     service: list[str] | None,
     exhibit_type: list[str] | None,
     pe_number: list[str] | None,
+    appropriation_code: list[str] | None,
     q: str | None,
     conn: sqlite3.Connection,
     limit: int,
@@ -84,6 +85,7 @@ def _build_download_sql(
         service=service,
         exhibit_type=exhibit_type,
         pe_number=pe_number,
+        appropriation_code=appropriation_code,
         fts_ids=fts_ids,
     )
 
@@ -105,6 +107,7 @@ def download(
     service: list[str] | None = Query(None),
     exhibit_type: list[str] | None = Query(None),
     pe_number: list[str] | None = Query(None),
+    appropriation_code: list[str] | None = Query(None, description="Filter by appropriation code(s)"),
     # DL-002: keyword search filter
     q: str | None = Query(None, description="Keyword search filter (FTS5)"),
     limit: int = Query(
@@ -127,6 +130,7 @@ def download(
         service=service,
         exhibit_type=exhibit_type,
         pe_number=pe_number,
+        appropriation_code=appropriation_code,
         q=q,
         conn=conn,
         limit=limit,
