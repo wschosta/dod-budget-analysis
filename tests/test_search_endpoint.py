@@ -75,15 +75,18 @@ def db():
             (r[0], r[6], r[11], r[7]),
         )
 
-    # PDF pages table (optional)
+    # PDF pages table (LION-100: includes fiscal_year and exhibit_type)
     conn.execute("""
         CREATE TABLE pdf_pages (
             id INTEGER PRIMARY KEY,
             source_file TEXT,
             source_category TEXT,
+            fiscal_year TEXT,
+            exhibit_type TEXT,
             page_number INTEGER,
             page_text TEXT,
-            has_tables INTEGER
+            has_tables INTEGER,
+            table_data TEXT
         )
     """)
     conn.execute("""
@@ -95,8 +98,8 @@ def db():
     """)
 
     conn.execute(
-        "INSERT INTO pdf_pages VALUES (1, 'budget.pdf', 'Army', 5, "
-        "'The Apache helicopter program received additional funding.', 0)"
+        "INSERT INTO pdf_pages VALUES (1, 'budget.pdf', 'Army', 'FY 2026', 'r2', 5, "
+        "'The Apache helicopter program received additional funding.', 0, NULL)"
     )
     conn.execute(
         "INSERT INTO pdf_pages_fts(rowid, page_text) VALUES "

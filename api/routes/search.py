@@ -103,21 +103,48 @@ def _budget_select(
     return sql, [fts_query] + params + [limit, offset]
 
 
-def _pdf_select(fts_query: str, limit: int, offset: int) -> tuple[str, list[Any]]:
-    """Build the PDF pages search query with BM25 scoring via subquery JOIN."""
-    sql = """
+def _pdf_select(
+    fts_query: str,
+    fiscal_year: list[str] | None,
+    exhibit_type: list[str] | None,
+    limit: int,
+    offset: int,
+) -> tuple[str, list[Any]]:
+    """Build the PDF pages search query with BM25 scoring via subquery JOIN.
+
+    LION-100: Supports fiscal_year and exhibit_type filtering on pdf_pages
+    columns added during LION-100 schema update.
+    """
+    conditions: list[str] = []
+    params: list[Any] = [fts_query]
+
+    if fiscal_year:
+        placeholders = ",".join("?" * len(fiscal_year))
+        conditions.append(f"p.fiscal_year IN ({placeholders})")
+        params.extend(fiscal_year)
+    if exhibit_type:
+        placeholders = ",".join("?" * len(exhibit_type))
+        conditions.append(f"p.exhibit_type IN ({placeholders})")
+        params.extend(exhibit_type)
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    sql = f"""
         SELECT p.id, p.source_file, p.source_category, p.page_number,
-               p.page_text, p.has_tables, fts.score
+               p.page_text, p.has_tables, p.fiscal_year, p.exhibit_type,
+               fts.score
         FROM pdf_pages p
         JOIN (
             SELECT rowid, bm25(pdf_pages_fts) AS score
             FROM pdf_pages_fts
             WHERE pdf_pages_fts MATCH ?
         ) fts ON p.id = fts.rowid
+        {where}
         ORDER BY fts.score ASC
         LIMIT ? OFFSET ?
     """
-    return sql, [fts_query, limit, offset]
+    params.extend([limit, offset])
+    return sql, params
 
 
 @router.get(
@@ -203,7 +230,9 @@ def search(
 
     if type in ("both", "pdf"):
         try:
-            sql, params = _pdf_select(fts_query, limit, offset)
+            sql, params = _pdf_select(
+                fts_query, fiscal_year, exhibit_type, limit, offset
+            )
             rows = conn.execute(sql, params).fetchall()
         except Exception:
             rows = []
