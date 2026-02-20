@@ -22,23 +22,14 @@
   <meta property="og:description" content="Search and explore U.S. Department of Defense budget justification data across fiscal years, services, and appropriation accounts.">
   <meta property="og:type" content="website">
 
-  <!-- TODO FIX-001: SRI integrity hashes are incorrect, preventing HTMX and Chart.js
-       from loading. This breaks ALL interactive features: pagination, page-size selector,
-       filter form submission, charts, dashboard. Fix: remove incorrect SRI attributes
-       and update to current stable CDN versions. -->
+  <!-- FIX-001: Removed incorrect SRI integrity hashes that prevented HTMX and
+       Chart.js from loading. Updated to current stable CDN versions. -->
   <!-- HTMX for dynamic page updates without full reloads -->
-  <link rel="preconnect" href="https://unpkg.com">
-  <script src="https://unpkg.com/htmx.org@1.9.10"
-          integrity="sha384-D1Kt99CQMDuVetoL1lrYwg5t+9QdHe7NLX/SoJYkXDFfX37iInKRy5ViYgSibmK"
-          crossorigin="anonymous"></script>
-  <!-- Chart.js for visualizations (3.B*) -->
-  <link rel="preconnect" href="https://cdn.jsdelivr.net">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"
-          integrity="sha384-adDgSZjMlMxVMhMoAHMqLODe/TiKMc9oF3vOoRWJA3lMXpQ1nOKr7Ld5Bh7G5Kf"
-          crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <!-- Chart.js for visualizations -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <!-- chartjs-chart-treemap for hierarchical budget breakdowns -->
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@2.3.0/dist/chartjs-chart-treemap.min.js"
-          crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-treemap@2.3.1/dist/chartjs-chart-treemap.min.js"></script>
 
   <link rel="stylesheet" href="/static/css/main.css">
   {% block extra_head %}{% endblock %}

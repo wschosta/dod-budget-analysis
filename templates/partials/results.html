@@ -1,9 +1,7 @@
 <!-- DONE [Group: LION] LION-003: Loading skeleton animation for HTMX requests -->
 <!-- DONE [Group: LION] LION-004: "No results" empty state with clear-filters action -->
-{# TODO FIX-005: Only FY24 actual, FY25 enacted, FY26 request columns are shown.
-   Add FY25 total and FY26 total as toggleable columns.
-   TODO FIX-007: No source file links/references for each line item.
-   Add a source column or link icon showing the source file. #}
+{# FIX-005: Added FY25 total and FY26 total columns.
+   FIX-007: Added source file column. #}
 
 {# LION-003: Skeleton rows shown during HTMX loading (hidden by default, shown via .htmx-request) #}
 <div class="skeleton-loading" role="status" aria-live="polite" aria-label="Loading results">
@@ -53,7 +51,7 @@
       <span style="font-size:.75rem;color:#888">(showing {{ items|length }})</span>
     </span>
 
-    {# Column toggles (3.A4-b) #}
+    {# Column toggles (3.A4-b) — FIX-005: added FY25 total, FY26 total; FIX-007: added source #}
     <div class="col-toggles" id="col-toggles">
       <button class="col-toggle active" data-col="org"      onclick="toggleCol(this,'col-org')">Service</button>
       <button class="col-toggle active" data-col="fy"       onclick="toggleCol(this,'col-fy')">FY</button>
@@ -62,7 +60,10 @@
       <button class="col-toggle active" data-col="pe"       onclick="toggleCol(this,'col-pe')">PE#</button>
       <button class="col-toggle active" data-col="fy24"     onclick="toggleCol(this,'col-fy24')">FY24 Act.</button>
       <button class="col-toggle active" data-col="fy25"     onclick="toggleCol(this,'col-fy25')">FY25 Enact.</button>
+      <button class="col-toggle"        data-col="fy25tot"  onclick="toggleCol(this,'col-fy25tot')">FY25 Total</button>
       <button class="col-toggle active" data-col="fy26"     onclick="toggleCol(this,'col-fy26')">FY26 Req.</button>
+      <button class="col-toggle"        data-col="fy26tot"  onclick="toggleCol(this,'col-fy26tot')">FY26 Total</button>
+      <button class="col-toggle"        data-col="source"   onclick="toggleCol(this,'col-source')">Source</button>
     </div>
   </div>
 
@@ -103,6 +104,7 @@
             </a>
           </th>
           <th class="col-fy25 td-amount" data-tooltip="FY2025 enacted amount in thousands of dollars ($K). Enacted = signed into law by Congress.">FY25 Enacted ($K)</th>
+          <th class="col-fy25tot td-amount" style="display:none" data-tooltip="FY2025 total amount ($K) including supplementals.">FY25 Total ($K)</th>
           <th class="col-fy26 td-amount" data-tooltip="FY2026 budget request in thousands of dollars ($K). Request = President's budget submission to Congress.">
             <a hx-get="/partials/results" hx-target="#results-container"
                hx-push-url="true"
@@ -112,6 +114,8 @@
               {% if sort_by == "amount_fy2026_request" %}<span class="sort-icon">{{ "▲" if sort_dir == "asc" else "▼" }}</span>{% endif %}
             </a>
           </th>
+          <th class="col-fy26tot td-amount" style="display:none" data-tooltip="FY2026 total amount ($K) including reconciliation adjustments.">FY26 Total ($K)</th>
+          <th class="col-source" style="display:none" data-tooltip="Source file from which this budget line was extracted.">Source</th>
         </tr>
       </thead>
       <tbody>
@@ -139,7 +143,10 @@
           <td class="col-pe" style="font-size:.8rem;font-family:monospace">{{ item.pe_number or "—" }}</td>
           <td class="col-fy24 td-amount">{{ item.amount_fy2024_actual | fmt_amount if item.amount_fy2024_actual is not none else "—" }}</td>
           <td class="col-fy25 td-amount">{{ item.amount_fy2025_enacted | fmt_amount if item.amount_fy2025_enacted is not none else "—" }}</td>
+          <td class="col-fy25tot td-amount" style="display:none">{{ item.amount_fy2025_total | fmt_amount if item.amount_fy2025_total is not none else "—" }}</td>
           <td class="col-fy26 td-amount">{{ item.amount_fy2026_request | fmt_amount if item.amount_fy2026_request is not none else "—" }}</td>
+          <td class="col-fy26tot td-amount" style="display:none">{{ item.amount_fy2026_total | fmt_amount if item.amount_fy2026_total is not none else "—" }}</td>
+          <td class="col-source" style="display:none;font-size:.75rem;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ item.source_file or '' }}">{{ item.source_file or "—" }}</td>
         </tr>
         {% endfor %}
       </tbody>

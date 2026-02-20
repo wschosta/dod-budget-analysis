@@ -41,15 +41,14 @@
         </select>
       </div>
 
-      {# TODO FIX-002: Service dropdown contains duplicates like "AF" and "Air Force",
-         "ARMY" and "Army". Fix by using deduplicated values from budget_lines. #}
+      {# FIX-002: Service dropdown now uses deduplicated values from budget_lines #}
       <div class="filter-group">
         <label for="service" data-tooltip="Military service or defense agency submitting the budget justification. Includes Army, Navy, Air Force, Space Force, Marine Corps, and Defense-Wide agencies.">Service / Agency</label>
         <select id="service" name="service" multiple>
           {% for svc in services %}
           <option value="{{ svc.code }}"
                   {% if svc.code in filters.service %}selected{% endif %}>
-            {{ svc.code }}
+            {{ svc.full_name if svc.full_name != svc.code else svc.code }}
           </option>
           {% endfor %}
         </select>

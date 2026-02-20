@@ -25,14 +25,13 @@
                hx-include="#pe-filter-form">
       </div>
 
-      {# TODO FIX-008: Service dropdown shows duplicate entries from services_agencies
-         table. Same fix as FIX-002 — use deduplicated values from budget_lines. #}
+      {# FIX-008: Service dropdown now uses deduplicated values from budget_lines #}
       <div class="filter-group">
         <label for="pe-service">Service / Agency</label>
         <select id="pe-service" name="service">
           <option value="">All Services</option>
           {% for svc in services %}
-          <option value="{{ svc.code }}">{{ svc.code }}</option>
+          <option value="{{ svc.code }}">{{ svc.full_name if svc.full_name != svc.code else svc.code }}</option>
           {% endfor %}
         </select>
       </div>
