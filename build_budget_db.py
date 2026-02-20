@@ -521,6 +521,7 @@ def create_database(db_path: Path) -> sqlite3.Connection:
         );
         CREATE INDEX IF NOT EXISTS idx_pe_tags_pe  ON pe_tags(pe_number);
         CREATE INDEX IF NOT EXISTS idx_pe_tags_tag ON pe_tags(tag);
+        CREATE INDEX IF NOT EXISTS idx_pe_tags_pe_tag ON pe_tags(pe_number, tag);
 
         -- Detected cross-PE references (project movement / lineage)
         CREATE TABLE IF NOT EXISTS pe_lineage (
