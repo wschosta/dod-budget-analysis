@@ -272,52 +272,80 @@ def suggest(
 ) -> list[dict]:
     """Return search suggestions for typeahead UI.
 
-    Queries DISTINCT line_item_title, account_title, and pe_number for
-    values that start with (or contain) the given prefix.
+    Queries DISTINCT line_item_title, account_title, pe_number, and
+    pe_index display_title for values matching the given prefix.
+    Uses prefix match first; falls back to contains match if needed.
+    PE entries include display_title for richer autocomplete display.
     """
     prefix = q.strip()
     if not prefix:
         return []
 
-    like_param = f"{prefix}%"
+    prefix_param = f"{prefix}%"
+    contains_param = f"%{prefix}%"
     suggestions: list[dict] = []
+    seen: set[str] = set()
 
-    # Try line_item_title first
+    def _add(value: str, field: str, label: str | None = None) -> None:
+        key = f"{field}:{value}"
+        if key not in seen:
+            seen.add(key)
+            entry: dict = {"value": value, "field": field}
+            if label:
+                entry["label"] = label
+            suggestions.append(entry)
+
+    # PE numbers with their display titles (prefix match)
     try:
-        rows = conn.execute(
-            "SELECT DISTINCT line_item_title AS value, 'line_item_title' AS field "
-            "FROM budget_lines "
-            "WHERE line_item_title LIKE ? AND line_item_title IS NOT NULL "
+        for r in conn.execute(
+            "SELECT pe_number, display_title FROM pe_index "
+            "WHERE pe_number LIKE ? OR display_title LIKE ? "
             "LIMIT ?",
-            (like_param, limit),
-        ).fetchall()
-        suggestions.extend({"value": r["value"], "field": r["field"]} for r in rows)
+            (prefix_param, contains_param, limit),
+        ).fetchall():
+            _add(r["pe_number"], "pe_number", r["display_title"])
     except Exception:
         pass
 
+    # line_item_title (prefix match, then contains)
     if len(suggestions) < limit:
         try:
-            rows = conn.execute(
-                "SELECT DISTINCT account_title AS value, 'account_title' AS field "
+            for r in conn.execute(
+                "SELECT DISTINCT line_item_title AS value "
                 "FROM budget_lines "
-                "WHERE account_title LIKE ? AND account_title IS NOT NULL "
+                "WHERE line_item_title LIKE ? AND line_item_title IS NOT NULL "
                 "LIMIT ?",
-                (like_param, limit - len(suggestions)),
-            ).fetchall()
-            suggestions.extend({"value": r["value"], "field": r["field"]} for r in rows)
+                (prefix_param, limit - len(suggestions)),
+            ).fetchall():
+                _add(r["value"], "line_item_title")
         except Exception:
             pass
 
     if len(suggestions) < limit:
         try:
-            rows = conn.execute(
-                "SELECT DISTINCT pe_number AS value, 'pe_number' AS field "
+            for r in conn.execute(
+                "SELECT DISTINCT line_item_title AS value "
                 "FROM budget_lines "
-                "WHERE pe_number LIKE ? AND pe_number IS NOT NULL "
+                "WHERE line_item_title LIKE ? AND line_item_title NOT LIKE ? "
+                "AND line_item_title IS NOT NULL "
                 "LIMIT ?",
-                (like_param, limit - len(suggestions)),
-            ).fetchall()
-            suggestions.extend({"value": r["value"], "field": r["field"]} for r in rows)
+                (contains_param, prefix_param, limit - len(suggestions)),
+            ).fetchall():
+                _add(r["value"], "line_item_title")
+        except Exception:
+            pass
+
+    # account_title
+    if len(suggestions) < limit:
+        try:
+            for r in conn.execute(
+                "SELECT DISTINCT account_title AS value "
+                "FROM budget_lines "
+                "WHERE account_title LIKE ? AND account_title IS NOT NULL "
+                "LIMIT ?",
+                (contains_param, limit - len(suggestions)),
+            ).fetchall():
+                _add(r["value"], "account_title")
         except Exception:
             pass
 

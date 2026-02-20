@@ -161,3 +161,61 @@ class TestSearch:
         assert result.query == "Army"
         assert result.limit == 20
         assert result.offset == 0
+
+
+# ── Suggest/autocomplete tests ─────────────────────────────────────────────
+
+from api.routes.search import suggest
+
+
+@pytest.fixture()
+def suggest_db(db):
+    """Extend db fixture with pe_index for suggest testing."""
+    db.execute("""
+        CREATE TABLE IF NOT EXISTS pe_index (
+            pe_number TEXT PRIMARY KEY,
+            display_title TEXT,
+            organization_name TEXT,
+            budget_type TEXT,
+            fiscal_years TEXT,
+            exhibit_types TEXT
+        )
+    """)
+    db.execute(
+        "INSERT INTO pe_index VALUES (?, ?, ?, ?, ?, ?)",
+        ("0207449A", "Apache Helicopter", "Army", "Procurement", '["2026"]', '["p1"]'),
+    )
+    db.execute(
+        "INSERT INTO pe_index VALUES (?, ?, ?, ?, ?, ?)",
+        ("0204311N", "DDG-51 Destroyer", "Navy", "Procurement", '["2026"]', '["p1"]'),
+    )
+    db.commit()
+    return db
+
+
+class TestSuggest:
+    def test_prefix_match_pe_number(self, suggest_db):
+        result = suggest(q="020", limit=5, conn=suggest_db)
+        pe_values = [s["value"] for s in result if s["field"] == "pe_number"]
+        assert "0207449A" in pe_values
+
+    def test_pe_includes_label(self, suggest_db):
+        result = suggest(q="020", limit=5, conn=suggest_db)
+        pe_entries = [s for s in result if s["field"] == "pe_number"]
+        assert len(pe_entries) > 0
+        assert "label" in pe_entries[0]
+        assert pe_entries[0]["label"] is not None
+
+    def test_contains_match_line_item(self, suggest_db):
+        """Mid-word search finds line_item_title matches."""
+        result = suggest(q="Helicopter", limit=5, conn=suggest_db)
+        values = [s["value"] for s in result]
+        assert any("Helicopter" in v for v in values)
+
+    def test_empty_string_returns_empty(self, suggest_db):
+        result = suggest(q="   ", limit=5, conn=suggest_db)
+        assert result == []
+
+    def test_limit_respected(self, suggest_db):
+        result = suggest(q="A", limit=2, conn=suggest_db)
+        assert len(result) <= 2
