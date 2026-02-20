@@ -664,6 +664,7 @@ def list_pes(
     approp: str | None = Query(None, description="Filter by appropriation title (substring)"),
     account: str | None = Query(None, description="Filter by account title (substring)"),
     ba: str | None = Query(None, description="Filter by budget activity title (substring, e.g. '6.2')"),
+    exhibit: str | None = Query(None, description="Filter by exhibit type (e.g. 'r1', 'p1')"),
     fy: str | None = Query(None, description="Filter to PEs present in a fiscal year"),
     sort_by: str | None = Query(None, description="Sort field: pe_number (default), funding, name"),
     sort_dir: str | None = Query(None, description="Sort direction: asc (default) or desc"),
@@ -726,6 +727,11 @@ def list_pes(
             WHERE budget_activity_title LIKE ?
         )""")
         params.append(f"%{ba}%")
+
+    # Exhibit type filter (pe_index.exhibit_types is a JSON array)
+    if exhibit:
+        conditions.append("p.exhibit_types LIKE ?")
+        params.append(f'%"{exhibit}"%')
 
     # Fiscal year filter (pe_index.fiscal_years is a JSON array)
     if fy:
