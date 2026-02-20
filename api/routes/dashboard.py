@@ -39,12 +39,20 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
 
     fy26_col, fy25_col = _detect_fy_columns(conn)
 
-    # Grand totals
+    # FIX-006: Exclude summary exhibits (p1, r1, o1, m1, c1, rf1, p1r) to avoid
+    # double-counting with detail exhibits. Also exclude rows with invalid
+    # fiscal_year values (non-numeric like "Details").
+    summary_filter = (
+        "exhibit_type NOT IN ('p1','r1','o1','m1','c1','rf1','p1r') "
+        "AND (fiscal_year IS NULL OR fiscal_year GLOB '[0-9][0-9][0-9][0-9]' "
+        "     OR fiscal_year GLOB 'FY[0-9][0-9][0-9][0-9]')"
+    )
+
     totals_row = conn.execute(
         f"SELECT COUNT(*) as total_lines, "
         f"SUM({fy26_col}) as total_fy26_request, "
         f"SUM({fy25_col}) as total_fy25_enacted "
-        f"FROM budget_lines"
+        f"FROM budget_lines WHERE {summary_filter}"
     ).fetchone()
     totals = dict(totals_row)
 
@@ -55,33 +63,36 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
         f"SUM({fy25_col}) as prev_total, "
         f"COUNT(*) as line_count "
         f"FROM budget_lines WHERE organization_name IS NOT NULL "
+        f"AND {summary_filter} "
         f"GROUP BY organization_name "
         f"ORDER BY SUM(COALESCE({fy26_col}, 0)) DESC LIMIT 6"
     ).fetchall()
 
-    # Top 10 programs
+    # Top 10 programs — use detail exhibits only
     top_programs_rows = conn.execute(
         f"SELECT id, line_item_title, organization_name, pe_number, "
         f"{fy26_col} as fy26_request, {fy25_col} as fy25_enacted "
         f"FROM budget_lines "
-        f"WHERE {fy26_col} IS NOT NULL "
+        f"WHERE {fy26_col} IS NOT NULL AND {summary_filter} "
         f"ORDER BY {fy26_col} DESC LIMIT 10"
     ).fetchall()
 
-    # YoY by fiscal year
+    # YoY by fiscal year — exclude invalid FY values
     by_fy_rows = conn.execute(
         f"SELECT fiscal_year, "
         f"SUM({fy26_col}) as fy26_total, "
         f"SUM({fy25_col}) as fy25_total "
         f"FROM budget_lines WHERE fiscal_year IS NOT NULL "
+        f"AND {summary_filter} "
         f"GROUP BY fiscal_year ORDER BY fiscal_year"
     ).fetchall()
 
-    # By appropriation (top 6)
+    # By appropriation (top 6) — exclude summary exhibits
     by_approp_rows = conn.execute(
         f"SELECT appropriation_code, appropriation_title, "
         f"SUM({fy26_col}) as total "
         f"FROM budget_lines WHERE appropriation_code IS NOT NULL "
+        f"AND {summary_filter} "
         f"GROUP BY appropriation_code "
         f"ORDER BY SUM(COALESCE({fy26_col}, 0)) DESC LIMIT 6"
     ).fetchall()

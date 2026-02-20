@@ -214,8 +214,10 @@ a:hover { text-decoration: underline; }
   color: var(--clr-gray-700);
   margin-bottom: .25rem;
 }
+/* FIX-004: Added input[type="number"] for min/max amount range inputs */
 .filter-group select,
-.filter-group input[type="text"] {
+.filter-group input[type="text"],
+.filter-group input[type="number"] {
   width: 100%;
   padding: .4rem .6rem;
   border: 1px solid var(--clr-gray-200);
@@ -326,7 +328,8 @@ td {
   vertical-align: top;
 }
 tr:hover td { background: var(--clr-sky); cursor: pointer; }
-tr.selected td { background: #dbeafe; }
+/* FIX-013: Use CSS variable instead of hardcoded color for dark mode compat */
+tr.selected td { background: var(--clr-sky); }
 .td-amount { text-align: right; font-variant-numeric: tabular-nums; }
 .td-org { font-weight: 600; white-space: nowrap; }
 .badge {

@@ -107,6 +107,8 @@ def download(
     pe_number: list[str] | None = Query(None),
     # DL-002: keyword search filter
     q: str | None = Query(None, description="Keyword search filter (FTS5)"),
+    # FIX-017: Download a single item by ID (used by detail panel)
+    item_id: int | None = Query(None, description="Download a specific budget line by ID"),
     limit: int = Query(
         10_000, ge=1, le=100_000,
         description="Max rows to export (default 10,000)",
@@ -122,16 +124,23 @@ def download(
         else _DOWNLOAD_COLUMNS
     ) or _DOWNLOAD_COLUMNS
 
-    sql, params, total_count = _build_download_sql(
-        fiscal_year=fiscal_year,
-        service=service,
-        exhibit_type=exhibit_type,
-        pe_number=pe_number,
-        q=q,
-        conn=conn,
-        limit=limit,
-        export_cols=export_cols,
-    )
+    # FIX-017: If item_id is specified, download just that single row
+    if item_id is not None:
+        col_list = ", ".join(export_cols)
+        sql = f"SELECT {col_list} FROM budget_lines WHERE id = ?"
+        params = [item_id]
+        total_count = 1
+    else:
+        sql, params, total_count = _build_download_sql(
+            fiscal_year=fiscal_year,
+            service=service,
+            exhibit_type=exhibit_type,
+            pe_number=pe_number,
+            q=q,
+            conn=conn,
+            limit=limit,
+            export_cols=export_cols,
+        )
 
     # DL-003: X-Total-Count header
     extra_headers: dict[str, str] = {"X-Total-Count": str(total_count)}

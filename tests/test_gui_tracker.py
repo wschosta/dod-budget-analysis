@@ -36,6 +36,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# dod_budget_downloader requires bs4 (beautifulsoup4) which may not be installed
+pytest.importorskip("bs4", reason="bs4 (beautifulsoup4) not installed")
+
 
 # ---------------------------------------------------------------------------
 # Helpers

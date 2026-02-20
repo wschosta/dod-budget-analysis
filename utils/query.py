@@ -50,10 +50,12 @@ def build_where_clause(
         conditions.append(f"fiscal_year IN ({placeholders})")
         params.extend(fiscal_year)
 
+    # FIX-002b: Changed from LIKE %value% to exact IN() matching.
+    # LIKE was too broad — selecting "AF" would match "CAAF" and other orgs.
     if service:
-        sub = " OR ".join("organization_name LIKE ?" for _ in service)
-        conditions.append(f"({sub})")
-        params.extend(f"%{s}%" for s in service)
+        placeholders = ",".join("?" * len(service))
+        conditions.append(f"organization_name IN ({placeholders})")
+        params.extend(service)
 
     if exhibit_type:
         placeholders = ",".join("?" * len(exhibit_type))

@@ -137,71 +137,97 @@ class TestChartsRoute:
 # ── GET /partials/results — HTMX partial ──────────────────────────────────────
 
 class TestResultsPartialRoute:
+    # FIX-010: Results partial requires HX-Request header (non-HTMX requests redirect to /)
+    HX = {"HX-Request": "true"}
+
     def test_results_partial_returns_200(self, app_client):
-        resp = app_client.get("/partials/results")
+        resp = app_client.get("/partials/results", headers=self.HX)
         assert resp.status_code == 200
 
     def test_results_partial_with_query(self, app_client):
-        resp = app_client.get("/partials/results?q=apache")
+        resp = app_client.get("/partials/results?q=apache", headers=self.HX)
         assert resp.status_code == 200
 
     def test_results_partial_with_service_filter(self, app_client):
-        resp = app_client.get("/partials/results?service=Army")
+        resp = app_client.get("/partials/results?service=Army", headers=self.HX)
         assert resp.status_code == 200
 
     def test_results_partial_with_exhibit_filter(self, app_client):
-        resp = app_client.get("/partials/results?exhibit_type=p1")
+        resp = app_client.get("/partials/results?exhibit_type=p1", headers=self.HX)
         assert resp.status_code == 200
 
     def test_results_partial_with_combined_filters(self, app_client):
-        resp = app_client.get("/partials/results?service=Army&exhibit_type=p1")
+        resp = app_client.get("/partials/results?service=Army&exhibit_type=p1", headers=self.HX)
         assert resp.status_code == 200
 
     def test_results_partial_with_fiscal_year(self, app_client):
-        resp = app_client.get("/partials/results?fiscal_year=FY+2026")
+        resp = app_client.get("/partials/results?fiscal_year=FY+2026", headers=self.HX)
         assert resp.status_code == 200
 
     def test_results_partial_with_sort(self, app_client):
         resp = app_client.get(
-            "/partials/results?sort_by=amount_fy2026_request&sort_dir=desc"
+            "/partials/results?sort_by=amount_fy2026_request&sort_dir=desc",
+            headers=self.HX,
         )
         assert resp.status_code == 200
 
     def test_results_partial_with_pagination(self, app_client):
-        resp = app_client.get("/partials/results?page=1&per_page=10")
+        resp = app_client.get("/partials/results?page=1&per_page=10", headers=self.HX)
         assert resp.status_code == 200
 
     def test_results_partial_empty_query_returns_results(self, app_client):
-        resp = app_client.get("/partials/results")
+        resp = app_client.get("/partials/results", headers=self.HX)
         assert resp.status_code == 200
         # Should show at least something (our test data)
         assert resp.text
+
+    def test_results_partial_non_htmx_redirects_to_home(self, app_client):
+        """FIX-010: Non-HTMX requests to partials redirect to full page."""
+        resp = app_client.get("/partials/results?q=test", follow_redirects=False)
+        assert resp.status_code == 302
+        assert "/?q=test" in resp.headers.get("location", "")
+
+    def test_results_partial_pushes_root_url(self, app_client):
+        """FIX-010: HTMX response includes HX-Push-Url with / prefix."""
+        resp = app_client.get("/partials/results?service=Army", headers=self.HX)
+        push_url = resp.headers.get("hx-push-url", "")
+        assert push_url.startswith("/?")
+        assert "service=Army" in push_url
 
 
 # ── GET /partials/detail/{id} — HTMX detail panel ────────────────────────────
 
 class TestDetailPartialRoute:
+    # FIX-010: Detail partial requires HX-Request header (non-HTMX requests redirect to /)
+    HX = {"HX-Request": "true"}
+
     def test_detail_returns_200_for_valid_id(self, app_client):
-        resp = app_client.get("/partials/detail/1")
+        resp = app_client.get("/partials/detail/1", headers=self.HX)
         assert resp.status_code == 200
 
     def test_detail_returns_html(self, app_client):
-        resp = app_client.get("/partials/detail/1")
+        resp = app_client.get("/partials/detail/1", headers=self.HX)
         assert "text/html" in resp.headers.get("content-type", "")
 
     def test_detail_contains_row_data(self, app_client):
-        resp = app_client.get("/partials/detail/1")
+        resp = app_client.get("/partials/detail/1", headers=self.HX)
         # Should contain some data from our test row
         assert resp.text
 
     def test_detail_returns_404_for_nonexistent_id(self, app_client):
-        resp = app_client.get("/partials/detail/99999")
+        resp = app_client.get("/partials/detail/99999", headers=self.HX)
         assert resp.status_code == 404
 
     def test_detail_returns_404_for_id_zero(self, app_client):
-        resp = app_client.get("/partials/detail/0")
+        resp = app_client.get("/partials/detail/0", headers=self.HX)
         assert resp.status_code in (404, 422)
 
     def test_detail_second_row(self, app_client):
-        resp = app_client.get("/partials/detail/2")
+        resp = app_client.get("/partials/detail/2", headers=self.HX)
         assert resp.status_code == 200
+
+    def test_detail_non_htmx_redirects_to_home(self, app_client):
+        """FIX-010: Non-HTMX requests to partials redirect to full page."""
+        resp = app_client.get("/partials/detail/1", follow_redirects=False)
+        assert resp.status_code == 302
+        assert resp.headers.get("location") == "/"
