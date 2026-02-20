@@ -2650,6 +2650,14 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         CREATE INDEX IF NOT EXISTS idx_bl_sheet ON budget_lines(sheet_name);
         CREATE INDEX IF NOT EXISTS idx_bl_source ON budget_lines(source_file);
         CREATE INDEX IF NOT EXISTS idx_bl_pe ON budget_lines(pe_number);
+        CREATE INDEX IF NOT EXISTS idx_bl_approp ON budget_lines(appropriation_code);
+        -- Composite index for PE detail: pe_number + fiscal_year covers
+        -- the common WHERE pe_number=? ORDER BY fiscal_year pattern.
+        CREATE INDEX IF NOT EXISTS idx_bl_pe_fy
+            ON budget_lines(pe_number, fiscal_year);
+        -- Composite index for dashboard: organization + amount for top-N queries.
+        CREATE INDEX IF NOT EXISTS idx_bl_org_amount
+            ON budget_lines(organization_name, amount_fy2026_request);
         CREATE INDEX IF NOT EXISTS idx_pp_source ON pdf_pages(source_file);
         CREATE INDEX IF NOT EXISTS idx_pp_category ON pdf_pages(source_category);
         -- Composite indexes used by enrich_budget_db.py Phase 3 batch queries
