@@ -12,10 +12,7 @@ Usage:
 """
 
 import argparse
-import re
-import sqlite3
 import sys
-import tempfile
 import time
 import traceback
 from pathlib import Path
@@ -28,7 +25,6 @@ from utils import (
     format_bytes,
     elapsed,
     sanitize_filename,
-    get_connection,
     safe_float,
     normalize_whitespace,
     sanitize_fts5_query,
@@ -39,8 +35,6 @@ from utils.patterns import (
     FTS5_SPECIAL_CHARS,
     FISCAL_YEAR,
     ACCOUNT_CODE_TITLE,
-    WHITESPACE,
-    CURRENCY_SYMBOLS,
 )
 
 
@@ -253,8 +247,6 @@ def test_module_imports(runner):
     def test_main_modules():
         import dod_budget_downloader
         import search_budget
-        import validate_budget_db
-        import build_budget_db
 
         if not hasattr(dod_budget_downloader, "format_bytes"):
             raise AssertionError("dod_budget_downloader missing format_bytes")

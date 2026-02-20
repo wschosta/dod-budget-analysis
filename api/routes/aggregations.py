@@ -9,13 +9,11 @@ AGG-002: pct_of_total and yoy_change_pct added to each row.
 OPT-AGG-001: Server-side TTL cache (60 seconds) for aggregation queries.
 """
 
-import json
 import sqlite3
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi import Query as FQuery
-from fastapi.responses import JSONResponse
 
 from api.database import get_db
 from api.models import AggregationResponse, AggregationRow

@@ -7,7 +7,6 @@ min-length filtering, and the is_narrative_exhibit helper.
 import sys
 from pathlib import Path
 
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 

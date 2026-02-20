@@ -139,9 +139,9 @@ _SCHEMA_DESCRIPTION = (
     "schema_versions table, composite indexes"
 )
 
-import openpyxl
-import pdfplumber
-from exhibit_catalog import find_matching_columns as _catalog_find_matching_columns
+import openpyxl  # noqa: E402
+import pdfplumber  # noqa: E402
+from exhibit_catalog import find_matching_columns as _catalog_find_matching_columns  # noqa: E402
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 

@@ -50,7 +50,6 @@ LION-107: Add rebuild orchestration with timing and integrity checks.
 import argparse
 import json
 import shutil
-import sched
 import subprocess
 import sys
 import time

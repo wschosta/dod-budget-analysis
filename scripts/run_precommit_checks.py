@@ -325,11 +325,11 @@ def main():
         try:
             from build_budget_db import (
                 _create_session_id,
-                _save_checkpoint,
-                _mark_file_processed,
-                _get_last_checkpoint,
-                _get_processed_files,
-                _mark_session_complete,
+                _save_checkpoint,  # noqa: F401
+                _mark_file_processed,  # noqa: F401
+                _get_last_checkpoint,  # noqa: F401
+                _get_processed_files,  # noqa: F401
+                _mark_session_complete,  # noqa: F401
             )
 
             # Test session ID creation

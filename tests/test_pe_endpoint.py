@@ -7,7 +7,6 @@ following the same pattern as test_budget_lines_endpoint.py.
 from __future__ import annotations
 
 import io
-import json
 import sqlite3
 import sys
 import zipfile
@@ -920,7 +919,7 @@ class TestExportPeTable:
     def test_csv_has_data_rows(self, populated_db):
         resp = export_pe_table("0602120A", conn=populated_db)
         content = resp.body.decode("utf-8-sig")
-        lines = [l for l in content.strip().splitlines() if l]
+        lines = [line for line in content.strip().splitlines() if line]
         # header + 3 data rows
         assert len(lines) == 4
 

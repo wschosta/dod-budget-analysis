@@ -259,7 +259,7 @@ class TestNDJSONDownload:
 
     def test_ndjson_valid_json_per_line(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=json")
-        lines = [l for l in resp.text.strip().split("\n") if l]
+        lines = [line for line in resp.text.strip().split("\n") if line]
         assert len(lines) == 20
         for line in lines:
             obj = json.loads(line)
@@ -274,7 +274,7 @@ class TestNDJSONDownload:
 
     def test_ndjson_empty_result_no_content(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=json&service=NonExistentService")
-        lines = [l for l in resp.text.strip().split("\n") if l]
+        lines = [line for line in resp.text.strip().split("\n") if line]
         assert len(lines) == 0
 
 

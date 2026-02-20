@@ -49,7 +49,6 @@ from utils.database import get_slow_queries, get_query_stats
 from api.routes import aggregations, budget_lines, dashboard, download, feedback, pe, reference, search
 from api.routes import frontend as frontend_routes
 from utils.config import AppConfig
-from utils.formatting import format_amount
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 _cfg = AppConfig.from_env()

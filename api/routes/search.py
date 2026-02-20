@@ -10,20 +10,19 @@ SEARCH-003: HTML highlighting with <mark> tags in snippets.
 SEARCH-004: Search suggestions/autocomplete endpoint.
 """
 
-import html as _html
 import logging
 import sqlite3
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-logger = logging.getLogger(__name__)
-
 from api.database import get_db
 from api.models import SearchResponse, SearchResultItem
 from utils import sanitize_fts5_query
 from utils.formatting import extract_snippet_highlighted
 from utils.query import build_where_clause
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -243,7 +242,7 @@ def search(
             score = d.pop("score", None)
             # SEARCH-003: HTML-highlighted snippet
             snippet = extract_snippet_highlighted(
-                d.get("line_item_title") or d.get("account_title"),
+                str(d.get("line_item_title") or d.get("account_title") or ""),
                 q,
                 html=True,
             )
@@ -272,7 +271,7 @@ def search(
         for row in rows:
             d = dict(row)
             score = d.pop("score", None)
-            snippet = extract_snippet_highlighted(d.get("page_text"), q, html=True)
+            snippet = extract_snippet_highlighted(str(d.get("page_text") or ""), q, html=True)
             results.append(SearchResultItem(
                 result_type="pdf_page",
                 id=d["id"],

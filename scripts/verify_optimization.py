@@ -75,7 +75,7 @@ def test_pragma_disable_trigger():
         cursor.execute("SELECT COUNT(*) FROM pdf_pages_fts")
         fts_count = cursor.fetchone()[0]
 
-        print(f"\n3. Checking state after insert:")
+        print("\n3. Checking state after insert:")
         print(f"   - Pages table: {page_count} rows")
         print(f"   - FTS5 table: {fts_count} rows")
 
@@ -105,7 +105,7 @@ def test_pragma_disable_trigger():
         print(f"   - FTS5 now has: {fts_count_after} rows")
 
         if fts_count_after == page_count:
-            print(f"   - [OK] FTS5 rebuild successful (100% match)")
+            print("   - [OK] FTS5 rebuild successful (100% match)")
         else:
             print(f"   - [ERROR] FTS5 mismatch (expected {page_count}, got {fts_count_after})")
             return False

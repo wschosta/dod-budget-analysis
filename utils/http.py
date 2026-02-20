@@ -11,8 +11,8 @@ import json
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
-import requests
-from requests.adapters import HTTPAdapter
+import requests  # type: ignore[import-untyped]
+from requests.adapters import HTTPAdapter  # type: ignore[import-untyped]
 from urllib3.util.retry import Retry as URLRetry
 
 

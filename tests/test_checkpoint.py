@@ -10,7 +10,6 @@ Tests for build progress tracking and resume capability:
 Run with: pytest tests/test_checkpoint.py -v
 """
 
-import sqlite3
 import tempfile
 from pathlib import Path
 
@@ -275,7 +274,6 @@ class TestCheckpointIntegration:
                 pages_count=25 if ftype == "pdf" else 0
             )
 
-            pages = 50 if ftype == "pdf" else 0
             _save_checkpoint(
                 temp_db,
                 session_id,

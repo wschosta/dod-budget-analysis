@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.database import get_db
 from api.models import BudgetLineDetailOut, BudgetLineOut, PaginatedResponse
-from utils.query import build_where_clause, build_order_clause
+from utils.query import build_where_clause
 from utils.strings import sanitize_fts5_query
 
 router = APIRouter(prefix="/budget-lines", tags=["budget-lines"])

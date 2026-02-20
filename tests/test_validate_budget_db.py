@@ -18,8 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 for _mod in ("pdfplumber", "openpyxl", "pandas"):
     sys.modules.setdefault(_mod, types.ModuleType(_mod))
 
-from build_budget_db import create_database
-from validate_budget_db import (
+from build_budget_db import create_database  # noqa: E402
+from validate_budget_db import (  # noqa: E402
     check_missing_years,
     check_duplicates,
     check_zero_amounts,
@@ -353,7 +353,7 @@ def test_generate_report_verbose_shows_detail(conn, capsys):
 
 # ── Budget Type Values ────────────────────────────────────────────────────────
 
-from validate_budget_db import (
+from validate_budget_db import (  # noqa: E402
     check_budget_type_values,
     check_pdf_pages_fiscal_year,
     check_pdf_pe_numbers_populated,
@@ -691,7 +691,7 @@ def test_fy_null_rates_high_nulls(conn):
 
 # ── check_duplicate_budget_lines ─────────────────────────────────────────────
 
-from validate_budget_db import check_duplicate_budget_lines
+from validate_budget_db import check_duplicate_budget_lines  # noqa: E402
 
 
 def test_duplicate_budget_lines_none(conn):
@@ -722,7 +722,7 @@ def test_duplicate_budget_lines_detected(conn):
 
 # ── check_source_file_tracking ───────────────────────────────────────────────
 
-from validate_budget_db import check_source_file_tracking
+from validate_budget_db import check_source_file_tracking  # noqa: E402
 
 
 def test_source_file_tracking_all_tracked(conn):

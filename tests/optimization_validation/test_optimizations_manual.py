@@ -12,7 +12,7 @@ from pathlib import Path
 for _mod in ("pdfplumber", "openpyxl"):
     sys.modules.setdefault(_mod, types.ModuleType(_mod))
 
-from build_budget_db import (
+from build_budget_db import (  # noqa: E402
     _detect_exhibit_type,
     _safe_float,
     _extract_table_text,
@@ -66,7 +66,7 @@ def test_map_columns_single_pass():
     if success:
         print(f"\n  ✓ All {len(expected_fields)} expected fields found in single pass")
     else:
-        print(f"\n  ✗ Some fields were not found")
+        print("\n  ✗ Some fields were not found")
 
     assert success
 
@@ -172,7 +172,7 @@ def test_extract_table_text_optimization():
     print(f"  ✓ Header row: {lines[0]}")
 
     assert "D | F" in lines[2], f"Row with None: got '{lines[2]}'"
-    print(f"  ✓ Row with None: correctly filtered to 'D | F'")
+    print("  ✓ Row with None: correctly filtered to 'D | F'")
 
     # Test multiple tables
     tables = [

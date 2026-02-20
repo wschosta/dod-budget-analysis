@@ -24,9 +24,9 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response
 
-from api.database import get_db, get_db_path
+from api.database import get_db
 from utils.strings import sanitize_fts5_query
 
 router = APIRouter(prefix="/pe", tags=["pe"])
@@ -119,7 +119,7 @@ def get_top_changes(
         LIMIT ?
     """, params + [limit * 2]).fetchall()  # over-fetch for filtering
 
-    items = []
+    items: list[dict] = []
     for r in rows:
         if len(items) >= limit:
             break

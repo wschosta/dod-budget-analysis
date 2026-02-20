@@ -441,11 +441,11 @@ def main():
 
     conn = sqlite3.connect(str(args.db))
 
-    print(f"Running cross-service reconciliation (2.B2-a)...")
+    print("Running cross-service reconciliation (2.B2-a)...")
     cross_service = reconcile_cross_service(conn, args.tolerance)
     print(f"  {len(cross_service)} checks completed.")
 
-    print(f"Running cross-exhibit reconciliation (2.B2-b)...")
+    print("Running cross-exhibit reconciliation (2.B2-b)...")
     cross_exhibit = reconcile_cross_exhibit(conn, args.tolerance)
     print(f"  {len(cross_exhibit)} checks completed.")
 

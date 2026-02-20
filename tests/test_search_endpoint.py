@@ -191,7 +191,7 @@ class TestSearch:
 
 # ── Suggest/autocomplete tests ─────────────────────────────────────────────
 
-from api.routes.search import suggest
+from api.routes.search import suggest  # noqa: E402
 
 
 @pytest.fixture()

@@ -267,7 +267,7 @@ def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_pe_lineage_src ON pe_lineage(source_pe);
         CREATE INDEX IF NOT EXISTS idx_pe_lineage_ref ON pe_lineage(referenced_pe);
     """)
-    print(f"  Dropped enrichment tables.")
+    print("  Dropped enrichment tables.")
 
 
 # ── Phase 1: Build pe_index ───────────────────────────────────────────────────
@@ -721,7 +721,7 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
     # 3d: LLM tags (optional, in batches of 10)
     # LION-105: confidence=0.7 for LLM-generated tags
     if with_llm:
-        print(f"  Running LLM tagging in batches of 10...")
+        print("  Running LLM tagging in batches of 10...")
         batch_size = 10
         for i in range(0, len(to_tag), batch_size):
             batch_pes = to_tag[i:i + batch_size]
@@ -870,7 +870,7 @@ def run_phase4(conn: sqlite3.Connection) -> int:
                 continue
             insert_buf.append((
                 primary_pe, ref_pe, fy, src_file, None,
-                f"Co-occurrence in budget line extra_fields",
+                "Co-occurrence in budget line extra_fields",
                 "excel_co_occurrence", 0.85,
             ))
 

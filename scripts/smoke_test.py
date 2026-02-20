@@ -46,7 +46,7 @@ def check_endpoint(base_url: str, path: str, expected_status: int,
             return False, f"Expected {expected_status}, got {status}"
 
         if validate_fn and not validate_fn(body):
-            return False, f"Response validation failed"
+            return False, "Response validation failed"
 
         return True, f"{status} OK"
 

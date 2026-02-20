@@ -73,7 +73,7 @@ def run_test():
     total_size_mb = sum(p.stat().st_size for p in test_pdfs) / (1024**2)
     total_pages_estimate = len(test_pdfs) * 200  # Rough estimate
 
-    print(f"\nTest metrics:")
+    print("\nTest metrics:")
     print(f"  Total PDF size: {total_size_mb:.1f} MB")
     print(f"  Estimated pages: {total_pages_estimate:,} (rough)")
 
@@ -81,7 +81,7 @@ def run_test():
     if TEST_DB.exists():
         TEST_DB.unlink()
 
-    print(f"\nRunning build_budget_db.py on 25 PDFs...")
+    print("\nRunning build_budget_db.py on 25 PDFs...")
     print(f"Database: {TEST_DB}")
     print(f"{'='*70}")
 
@@ -105,7 +105,7 @@ def run_test():
             sys.exit(1)
 
     except subprocess.TimeoutExpired:
-        print(f"\nERROR: Test timed out after 1 hour")
+        print("\nERROR: Test timed out after 1 hour")
         sys.exit(1)
     except Exception as e:
         print(f"\nERROR: {e}")
@@ -123,7 +123,7 @@ def run_test():
     validate_database(TEST_DB, len(test_pdfs))
 
     # Calculate extrapolation
-    print(f"\nEXTRAPOLATION TO FULL 6233 PDFs:")
+    print("\nEXTRAPOLATION TO FULL 6233 PDFs:")
     print(f"  25 PDFs: {elapsed:.1f} seconds")
     full_seconds = (elapsed / 25) * 6233
     full_hours = full_seconds / 3600
@@ -134,13 +134,13 @@ def run_test():
         print(f"  Speedup: {16 / full_hours:.1f}x faster than original 16+ hours")
     else:
         print(f"\n⚠ WARNING: Extrapolated time ({full_hours:.1f}h) exceeds 5 hour threshold")
-        print(f"  May need additional optimization")
+        print("  May need additional optimization")
 
     return elapsed, full_hours
 
 def validate_database(db_path, expected_files):
     """Validate database integrity."""
-    print(f"\nVALIDATING DATABASE:")
+    print("\nVALIDATING DATABASE:")
 
     conn = sqlite3.connect(str(db_path))
     cursor = conn.cursor()
@@ -164,7 +164,7 @@ def validate_database(db_path, expected_files):
         if fts_count != page_count:
             print(f"  ⚠ WARNING: FTS5 count ({fts_count}) != page count ({page_count})")
         else:
-            print(f"  ✓ FTS5 index matches page count")
+            print("  ✓ FTS5 index matches page count")
     except Exception as e:
         print(f"  ⚠ FTS5 query failed: {e}")
 
@@ -174,9 +174,9 @@ def validate_database(db_path, expected_files):
         results = cursor.fetchone()[0]
         print(f"  FTS5 search test ('budget'): {results} results")
         if results > 0:
-            print(f"  ✓ FTS5 search working")
+            print("  ✓ FTS5 search working")
         else:
-            print(f"  ⚠ FTS5 search found no results (may be normal)")
+            print("  ⚠ FTS5 search found no results (may be normal)")
     except Exception as e:
         print(f"  ⚠ FTS5 search failed: {e}")
 
@@ -185,7 +185,7 @@ def validate_database(db_path, expected_files):
         cursor.execute("PRAGMA integrity_check")
         result = cursor.fetchone()[0]
         if result == "ok":
-            print(f"  ✓ Database integrity check: OK")
+            print("  ✓ Database integrity check: OK")
         else:
             print(f"  ✗ Database integrity check FAILED: {result}")
     except Exception as e:

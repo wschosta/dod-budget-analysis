@@ -32,7 +32,6 @@ router = APIRouter(tags=["frontend"])
 # LION-001: Custom HTML error handlers for 404/500 pages
 def register_error_handlers(app) -> None:
     """Register custom exception handlers that render branded error pages."""
-    from starlette.exceptions import HTTPException as StarletteHTTPException
 
     @app.exception_handler(404)
     async def not_found_handler(request: Request, exc):
