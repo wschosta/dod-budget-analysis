@@ -344,13 +344,33 @@ def test_generate_report_verbose_shows_detail(conn, capsys):
     assert "ERROR" in out or "WARNING" in out or "INFO" in out
 
 
-# ── LION-108-val: PDF Pages Fiscal Year ──────────────────────────────────────
+# ── Budget Type Values ────────────────────────────────────────────────────────
 
 from validate_budget_db import (
+    check_budget_type_values,
     check_pdf_pages_fiscal_year,
     check_pdf_pe_numbers_populated,
     check_pe_tags_source_files,
 )
+
+
+def test_budget_type_known_values(conn):
+    """Known budget_type values → no issues."""
+    _insert_line(conn, budget_type="RDT&E")
+    issues = check_budget_type_values(conn)
+    assert len(issues) == 0
+
+
+def test_budget_type_unknown_flagged(conn):
+    """Unknown budget_type → info-level issue."""
+    _insert_line(conn, budget_type="weird_type")
+    issues = check_budget_type_values(conn)
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "info"
+    assert issues[0]["budget_type"] == "weird_type"
+
+
+# ── LION-108-val: PDF Pages Fiscal Year ──────────────────────────────────────
 
 
 def test_pdf_pages_fy_all_populated(conn):

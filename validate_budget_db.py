@@ -765,6 +765,46 @@ def check_integrity(conn: sqlite3.Connection) -> list[dict]:
     return issues
 
 
+# ── Budget type validation ────────────────────────────────────────────────
+
+_KNOWN_BUDGET_TYPES = {
+    "MilPers", "O&M", "Procurement", "RDT&E", "Revolving", "Construction",
+    # Also accept lowercase/variants that appear in enrichment
+    "milpers", "om", "procurement", "rdte", "revolving", "construction",
+}
+
+
+def check_budget_type_values(conn: sqlite3.Connection) -> list[dict]:
+    """Check that budget_type values are from the known set.
+
+    Flags unknown values as info-level (may indicate new exhibit types
+    or data format changes).
+    """
+    issues = []
+    try:
+        rows = conn.execute("""
+            SELECT budget_type, COUNT(*) AS cnt
+            FROM budget_lines
+            WHERE budget_type IS NOT NULL
+            GROUP BY budget_type
+        """).fetchall()
+    except Exception:
+        return []
+
+    for row in rows:
+        bt = row[0]
+        if bt not in _KNOWN_BUDGET_TYPES:
+            issues.append({
+                "check": "budget_type_values",
+                "severity": "info",
+                "detail": f"Unknown budget_type '{bt}' ({row[1]} rows)",
+                "budget_type": bt,
+                "count": row[1],
+            })
+
+    return issues
+
+
 # ── LION-108-val: Validation checks for LION schema changes ──────────────
 
 def check_pdf_pages_fiscal_year(conn: sqlite3.Connection) -> list[dict]:
@@ -937,6 +977,7 @@ ALL_CHECKS = [
     ("Referential Integrity", check_referential_integrity),      # TIGER-004
     ("Expected FY Columns", check_expected_fy_columns),          # TIGER-005
     ("PDF Extraction Quality", check_pdf_extraction_quality),    # TIGER-006
+    ("Budget Type Values", check_budget_type_values),              # Budget type ref check
     ("PDF Pages Fiscal Year", check_pdf_pages_fiscal_year),      # LION-108-val(a)
     ("PDF PE Numbers Junction", check_pdf_pe_numbers_populated), # LION-108-val(b)
     ("PE Tags Source Files", check_pe_tags_source_files),        # LION-108-val(c)
