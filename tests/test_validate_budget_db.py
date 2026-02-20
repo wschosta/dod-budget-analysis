@@ -33,6 +33,7 @@ from validate_budget_db import (
     check_extreme_outliers,
     check_pe_org_consistency,
     check_budget_activity_consistency,
+    check_fy_column_null_rates,
     _get_amount_columns,
     generate_report,
 )
@@ -635,3 +636,40 @@ def test_budget_activity_consistency_too_many(conn):
     assert issues[0]["check"] == "budget_activity_consistency"
     assert issues[0]["severity"] == "info"
     assert issues[0]["pe_number"] == "0602120A"
+
+
+# ── FY column null rate tests ────────────────────────────────────────────────
+
+def test_fy_null_rates_key_columns_populated(conn):
+    """Key FY columns all populated → those specific columns not flagged."""
+    _insert_line(conn, amount_fy2024_actual=100, amount_fy2025_enacted=110,
+                 amount_fy2026_request=120)
+    _insert_line(conn, amount_fy2024_actual=200, amount_fy2025_enacted=210,
+                 amount_fy2026_request=220, line_item="line2")
+    conn.commit()
+    issues = check_fy_column_null_rates(conn)
+    # Key columns (actual, enacted, request) should NOT be flagged
+    flagged_cols = {i["column"] for i in issues}
+    assert "amount_fy2024_actual" not in flagged_cols
+    assert "amount_fy2025_enacted" not in flagged_cols
+    assert "amount_fy2026_request" not in flagged_cols
+
+
+def test_fy_null_rates_high_nulls(conn):
+    """Column with >50% NULLs triggers warning."""
+    # Insert 3 rows where amount_fy2024_actual is NULL
+    for i in range(3):
+        _insert_line(conn, amount_fy2024_actual=None,
+                     amount_fy2025_enacted=100, amount_fy2026_request=100,
+                     line_item=f"null_row_{i}")
+    # Insert 1 row with populated value
+    _insert_line(conn, amount_fy2024_actual=100,
+                 amount_fy2025_enacted=100, amount_fy2026_request=100,
+                 line_item="good_row")
+    conn.commit()
+    issues = check_fy_column_null_rates(conn)
+    # amount_fy2024_actual is 75% NULL → warning
+    fy24_issues = [i for i in issues if i["column"] == "amount_fy2024_actual"]
+    assert len(fy24_issues) == 1
+    assert fy24_issues[0]["severity"] == "warning"
+    assert fy24_issues[0]["null_pct"] == 75.0

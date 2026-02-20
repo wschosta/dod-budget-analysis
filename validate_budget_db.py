@@ -1189,6 +1189,56 @@ def check_enrichment_staleness(conn: sqlite3.Connection) -> list[dict]:
     return issues
 
 
+def check_fy_column_null_rates(conn: sqlite3.Connection) -> list[dict]:
+    """Flag FY amount columns where >50% of values are NULL.
+
+    High NULL rates in a specific column suggest incomplete data
+    extraction (e.g., a parser couldn't read that column from certain
+    exhibit types).
+
+    Severity: WARNING if >50%, INFO if >25%
+    """
+    issues = []
+    amount_cols = _get_amount_columns(conn)
+    if not amount_cols:
+        return issues
+
+    try:
+        total_rows = conn.execute(
+            "SELECT COUNT(*) AS c FROM budget_lines"
+        ).fetchone()["c"]
+    except Exception:
+        return []
+
+    if total_rows == 0:
+        return []
+
+    for col in amount_cols:
+        try:
+            null_count = conn.execute(
+                f"SELECT COUNT(*) AS c FROM budget_lines WHERE {col} IS NULL"
+            ).fetchone()["c"]
+        except Exception:
+            continue
+
+        pct = round(null_count / total_rows * 100, 1)
+        if pct > 25:
+            severity = "warning" if pct > 50 else "info"
+            issues.append({
+                "check": "fy_column_null_rates",
+                "severity": severity,
+                "detail": (
+                    f"{col}: {null_count:,}/{total_rows:,} rows ({pct}%) are NULL"
+                ),
+                "column": col,
+                "null_count": null_count,
+                "total_rows": total_rows,
+                "null_pct": pct,
+            })
+
+    return issues
+
+
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     r = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
@@ -1224,6 +1274,7 @@ ALL_CHECKS = [
     ("PE Org Consistency", check_pe_org_consistency),                # Multi-org PE detection
     ("Enrichment Orphans", check_enrichment_orphans),              # Orphan detection
     ("Enrichment Staleness", check_enrichment_staleness),          # Stale PE detection
+    ("FY Column Null Rates", check_fy_column_null_rates),          # NULL percentage check
 ]
 
 
