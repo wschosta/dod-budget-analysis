@@ -375,12 +375,14 @@ def detail_partial(
     item = dict(row)
 
     # FE-006: Related items — same program across fiscal years
+    # FIX-015: Include multiple amount columns so button labels show relevant amounts
     related_items: list[dict] = []
     pe_number = item.get("pe_number")
     if pe_number:
         related_rows = conn.execute(
             "SELECT id, fiscal_year, line_item_title, organization_name, "
-            "amount_fy2026_request FROM budget_lines "
+            "amount_fy2024_actual, amount_fy2025_enacted, amount_fy2026_request "
+            "FROM budget_lines "
             "WHERE pe_number = ? AND id != ? ORDER BY fiscal_year",
             (pe_number, item_id),
         ).fetchall()
@@ -393,7 +395,8 @@ def detail_partial(
         if org and title:
             related_rows = conn.execute(
                 "SELECT id, fiscal_year, line_item_title, organization_name, "
-                "amount_fy2026_request FROM budget_lines "
+                "amount_fy2024_actual, amount_fy2025_enacted, amount_fy2026_request "
+                "FROM budget_lines "
                 "WHERE organization_name = ? AND line_item_title = ? AND id != ? "
                 "ORDER BY fiscal_year",
                 (org, title, item_id),

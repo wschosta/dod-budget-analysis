@@ -100,16 +100,20 @@
     Related Fiscal Years
   </h4>
   <div style="display:flex;flex-wrap:wrap;gap:.4rem">
+    {# FIX-015: Show the most relevant amount for each related item's fiscal year #}
     {% for rel in related_items %}
+    {% set best_amt = rel.amount_fy2026_request if rel.amount_fy2026_request is not none
+                 else rel.amount_fy2025_enacted if rel.amount_fy2025_enacted is not none
+                 else rel.amount_fy2024_actual %}
     <button class="btn btn-secondary btn-sm"
             hx-get="/partials/detail/{{ rel.id }}"
             hx-target="#detail-container"
             hx-swap="innerHTML"
             title="{{ rel.line_item_title or rel.organization_name or 'Budget Line' }}">
       FY{{ rel.fiscal_year }}
-      {% if rel.amount_fy2026_request is not none %}
+      {% if best_amt is not none %}
         <span style="font-size:.75rem;color:var(--clr-gray-700)">
-          (${{ "{:,.0f}".format(rel.amount_fy2026_request) }}K)
+          (${{ "{:,.0f}".format(best_amt) }}K)
         </span>
       {% endif %}
     </button>
