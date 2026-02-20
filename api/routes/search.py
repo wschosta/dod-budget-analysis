@@ -249,9 +249,14 @@ def search(
                 data=d,
             ))
 
+    bl_count = sum(1 for r in results if r.result_type == "budget_line")
+    pdf_count = sum(1 for r in results if r.result_type == "pdf_page")
+
     return SearchResponse(
         query=q,
         total=len(results),
+        budget_line_count=bl_count,
+        pdf_page_count=pdf_count,
         limit=limit,
         offset=offset,
         results=results,

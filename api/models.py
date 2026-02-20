@@ -99,6 +99,8 @@ class SearchResponse(BaseModel):
     model_config = {"json_schema_extra": {"examples": [{"query": "hypersonic missile", "total": 42, "limit": 20, "offset": 0, "results": [{"result_type": "budget_line", "id": 1001, "source_file": "fy2026_navy_r2.xlsx", "snippet": "...advanced <mark>hypersonic</mark> <mark>missile</mark> defense...", "score": 12.5, "data": {"pe_number": "0603576N", "organization_name": "Navy"}}]}]}}
     query: str = Field(..., description="The original search query string", examples=["hypersonic missile"])
     total: int = Field(..., description="Total number of matching results returned", examples=[42])
+    budget_line_count: int = Field(0, description="Number of budget_line results in this page")
+    pdf_page_count: int = Field(0, description="Number of pdf_page results in this page")
     limit: int = Field(..., description="Maximum results per page", examples=[20])
     offset: int = Field(..., description="Pagination offset", examples=[0])
     results: list[SearchResultItem] = Field(..., description="List of search result items")

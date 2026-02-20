@@ -162,6 +162,19 @@ class TestSearch:
         assert result.limit == 20
         assert result.offset == 0
 
+    def test_result_type_counts(self, db):
+        """Search response includes budget_line_count and pdf_page_count."""
+        result = _search(db, "Apache")
+        assert hasattr(result, "budget_line_count")
+        assert hasattr(result, "pdf_page_count")
+        assert result.budget_line_count + result.pdf_page_count == result.total
+
+    def test_result_type_counts_excel_only(self, db):
+        """When type=excel, pdf_page_count should be 0."""
+        result = _search(db, "Apache", type="excel")
+        assert result.pdf_page_count == 0
+        assert result.budget_line_count == result.total
+
 
 # ── Suggest/autocomplete tests ─────────────────────────────────────────────
 
