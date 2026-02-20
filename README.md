@@ -185,7 +185,7 @@ All remaining items require external resources not available in development:
 | Documentation Verification | 8 | Depends on source coverage audit |
 | **Total** | **20** | |
 
-See [REMAINING_TODOS.md](REMAINING_TODOS.md) for detailed descriptions and [ROADMAP.md](ROADMAP.md) for the full task breakdown (57 steps).
+See [REMAINING_TODOS.md](docs/REMAINING_TODOS.md) for detailed descriptions and [ROADMAP.md](docs/ROADMAP.md) for the full task breakdown (57 steps).
 
 ## REST API
 

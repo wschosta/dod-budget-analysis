@@ -52,7 +52,16 @@ def dashboard_summary(
 
     fy26_col, fy25_col = _detect_fy_columns(conn)
 
-    conditions: list[str] = []
+    # FIX-006: Exclude summary exhibits (p1, r1, o1, m1, c1, rf1, p1r) to avoid
+    # double-counting with detail exhibits. Also exclude rows with invalid
+    # fiscal_year values (non-numeric like "Details").
+    summary_filter = (
+        "exhibit_type NOT IN ('p1','r1','o1','m1','c1','rf1','p1r') "
+        "AND (fiscal_year IS NULL OR fiscal_year GLOB '[0-9][0-9][0-9][0-9]' "
+        "     OR fiscal_year GLOB 'FY[0-9][0-9][0-9][0-9]')"
+    )
+
+    conditions: list[str] = [summary_filter]
     filter_params: list = []
     if fiscal_year:
         conditions.append("fiscal_year = ?")
@@ -66,7 +75,7 @@ def dashboard_summary(
     if appropriation_code:
         conditions.append("appropriation_code = ?")
         filter_params.append(appropriation_code)
-    fy_filter = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    fy_filter = "WHERE " + " AND ".join(conditions)
 
     # Batch the main budget_lines aggregations into a single CTE query.
     # This scans the table once instead of 4 separate passes.
@@ -147,7 +156,7 @@ def dashboard_summary(
     by_approp = sections.get("by_appropriation", [])
 
     # Top 10 programs — needs its own query since it returns individual rows
-    tp_conditions = [f"{fy26_col} IS NOT NULL"]
+    tp_conditions = [f"{fy26_col} IS NOT NULL", summary_filter]
     if fiscal_year:
         tp_conditions.append("fiscal_year = ?")
     if service:

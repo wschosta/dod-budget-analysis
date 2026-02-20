@@ -41,13 +41,14 @@
         </select>
       </div>
 
+      {# FIX-002: Service dropdown now uses deduplicated values from budget_lines #}
       <div class="filter-group">
         <label for="service" data-tooltip="Military service or defense agency submitting the budget justification. Includes Army, Navy, Air Force, Space Force, Marine Corps, and Defense-Wide agencies.">Service / Agency</label>
         <select id="service" name="service" multiple>
           {% for svc in services %}
           <option value="{{ svc.code }}"
                   {% if svc.code in filters.service %}selected{% endif %}>
-            {{ svc.code }}
+            {{ svc.full_name if svc.full_name != svc.code else svc.code }}
           </option>
           {% endfor %}
         </select>
@@ -170,7 +171,7 @@
      aria-labelledby="dl-modal-title">
   <div class="modal">
     <h3 id="dl-modal-title">Download Budget Lines</h3>
-    <p id="dl-modal-count" style="font-size:.85rem;color:#555;margin-bottom:.75rem">
+    <p id="dl-modal-count" style="font-size:.85rem;color:var(--text-secondary);margin-bottom:.75rem">
       Downloads apply the current filters (up to 50,000 rows).
     </p>
     <div style="display:flex;gap:.5rem;flex-direction:column">

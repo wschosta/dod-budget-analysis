@@ -24,6 +24,10 @@ from validate_budget_data import (
     check_unknown_exhibit_types,
     check_value_ranges,
     check_row_count_consistency,
+    check_fiscal_year_coverage,
+    check_column_types,
+    validate_all,
+    generate_quality_report,
 )
 
 
@@ -155,3 +159,98 @@ def test_row_count_consistency_mismatch(db):
     assert result["status"] == "warn"
     assert result["details"][0]["expected"] == 99
     assert result["details"][0]["actual"] == 1
+
+
+# ── Additional check functions (consolidated from test_config_coverage.py) ───
+
+@pytest.fixture()
+def populated_db_path(tmp_path):
+    """Create a file-backed database with budget_lines, pdf_pages, ingested_files."""
+    db_path = tmp_path / "test_validate.sqlite"
+    conn = sqlite3.connect(str(db_path))
+    conn.executescript("""
+        CREATE TABLE budget_lines (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_file TEXT NOT NULL, exhibit_type TEXT, sheet_name TEXT,
+            fiscal_year TEXT, account TEXT, account_title TEXT,
+            organization TEXT, organization_name TEXT,
+            budget_activity TEXT, budget_activity_title TEXT,
+            sub_activity TEXT, sub_activity_title TEXT,
+            line_item TEXT, line_item_title TEXT,
+            classification TEXT,
+            amount_fy2024_actual REAL, amount_fy2025_enacted REAL,
+            amount_fy2025_supplemental REAL, amount_fy2025_total REAL,
+            amount_fy2026_request REAL, amount_fy2026_reconciliation REAL,
+            amount_fy2026_total REAL
+        );
+        CREATE TABLE pdf_pages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_file TEXT NOT NULL, source_category TEXT,
+            page_number INTEGER, page_text TEXT,
+            has_tables INTEGER DEFAULT 0, table_data TEXT
+        );
+        CREATE TABLE ingested_files (
+            file_path TEXT PRIMARY KEY, file_type TEXT,
+            file_size INTEGER, file_modified REAL, ingested_at TEXT,
+            row_count INTEGER, status TEXT DEFAULT 'ok', source_url TEXT
+        );
+    """)
+    conn.execute("""
+        INSERT INTO budget_lines
+            (source_file, exhibit_type, organization_name, fiscal_year,
+             account, line_item, sheet_name,
+             amount_fy2024_actual, amount_fy2025_enacted, amount_fy2026_request)
+        VALUES ('army/p1.xlsx', 'p1', 'Army', '2026',
+                '2035', 'L001', 'Sheet1', 12345.0, 13456.0, 14000.0)
+    """)
+    conn.execute("""
+        INSERT INTO budget_lines
+            (source_file, exhibit_type, organization_name, fiscal_year,
+             account, line_item, sheet_name,
+             amount_fy2024_actual, amount_fy2025_enacted, amount_fy2026_request)
+        VALUES ('navy/r1.xlsx', 'r1', 'Navy', '2026',
+                '1300', 'L002', 'Sheet1', 45000.0, 47000.0, 48500.0)
+    """)
+    conn.execute("""
+        INSERT INTO ingested_files (file_path, file_type, row_count)
+        VALUES ('army/p1.xlsx', 'excel', 1)
+    """)
+    conn.execute("""
+        INSERT INTO ingested_files (file_path, file_type, row_count)
+        VALUES ('navy/r1.xlsx', 'excel', 1)
+    """)
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+def test_fiscal_year_coverage(populated_db_path):
+    conn = sqlite3.connect(str(populated_db_path))
+    result = check_fiscal_year_coverage(conn)
+    conn.close()
+    assert result["name"] == "fiscal_year_coverage"
+
+
+def test_column_types_valid(populated_db_path):
+    conn = sqlite3.connect(str(populated_db_path))
+    result = check_column_types(conn)
+    conn.close()
+    assert result["status"] == "pass"
+
+
+def test_validate_all_runs_all_checks(populated_db_path):
+    summary = validate_all(populated_db_path)
+    assert summary["total_checks"] == 8
+    assert "checks" in summary
+    assert "exit_code" in summary
+
+
+def test_generate_quality_report(populated_db_path):
+    output_path = populated_db_path.parent / "report.json"
+    report = generate_quality_report(
+        populated_db_path, output_path, print_console=False
+    )
+    assert "timestamp" in report
+    assert "total_budget_lines" in report
+    assert report["total_budget_lines"] == 2
+    assert output_path.exists()

@@ -8,7 +8,7 @@ You are a Claude agent assigned to the **BEAR** group for the DoD Budget Analysi
 
 This is a Python project with a SQLite database, FastAPI API, and comprehensive test suite (1,183+ tests across 63 files). CI runs via GitHub Actions. Docker containerization is complete. The project needs additional test coverage, deployment preparation, and automation.
 
-**Your files:** `tests/`, `.github/workflows/`, `Dockerfile`, `Dockerfile.multistage`, `docker-compose.yml`, `docker-compose.staging.yml`, `build_budget_db.py`, `refresh_data.py`, `scripts/`, `pyproject.toml`, `requirements*.txt`
+**Your files:** `tests/`, `.github/workflows/`, `Dockerfile`, `docker/Dockerfile.multistage`, `docker-compose.yml`, `docker/docker-compose.staging.yml`, `build_budget_db.py`, `refresh_data.py`, `scripts/`, `pyproject.toml`, `requirements*.txt`
 
 ---
 
@@ -234,4 +234,4 @@ Update the pre-commit hook to work from its new location:
 2. Run: `python scripts/profile_queries.py` to verify profiling works
 3. Run: `python scripts/smoke_test.py` against a test server if possible
 4. Mark all TODO items as DONE in-line where you added `[Group: BEAR]` annotations
-5. Update `REMAINING_TODOS.md` to reflect completed items
+5. Update `docs/REMAINING_TODOS.md` to reflect completed items

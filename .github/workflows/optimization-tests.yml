@@ -2,7 +2,7 @@ name: Optimization Tests
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, "claude/**" ]
   pull_request:
     branches: [ main, develop ]
 
@@ -15,10 +15,10 @@ jobs:
         python-version: ['3.11', '3.12']
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -30,10 +30,10 @@ jobs:
     - name: Install Python dependencies
       run: |
         python -m pip install --upgrade pip
+        pip install -r requirements.txt
         pip install pytest requests beautifulsoup4 openpyxl pdfplumber fpdf2
 
-    # ── Custom optimization test runner ────────────────────────────────────────
-
+    # ── Custom optimization test runner ────────────────────────────────────
     - name: Run optimization tests
       run: |
         python scripts/run_optimization_tests.py --verbose
@@ -42,94 +42,74 @@ jobs:
       run: |
         python scripts/run_optimization_tests.py --benchmark
 
-    # ── Pure unit tests (stdlib + pytest only, no heavy deps) ──────────────────
-    # These should always pass and catch regressions in utility modules,
-    # exhibit catalog, and code-quality invariants on every push.
+    # ── Unit tests: utilities (correctness) ───────────────────────────────
+    - name: "Unit tests: utils/common.py"
+      run: pytest tests/test_common_utils.py -v --tb=short
 
-    - name: Unit tests — utils/formatting.py
+    - name: "Unit tests: utils/strings.py edge cases"
+      run: pytest tests/test_strings_edge_cases.py -v --tb=short
+
+    - name: "Unit tests: utils/patterns.py"
+      run: pytest tests/test_patterns.py -v --tb=short
+
+    - name: "Unit tests: utils/formatting.py"
+      run: pytest tests/test_formatting.py -v --tb=short
+
+    # ── Unit tests: exhibit catalog and audit ─────────────────────────────
+    - name: "Unit tests: exhibit catalog"
+      run: pytest tests/test_exhibit_catalog.py -v --tb=short
+
+    - name: "Unit tests: exhibit audit"
+      run: pytest tests/test_exhibit_audit.py -v --tb=short
+
+    # ── Unit tests: query builders ────────────────────────────────────────
+    - name: "Unit tests: query builders"
+      run: pytest tests/test_query_builders.py -v --tb=short
+
+    # ── Pre-commit quality checks ─────────────────────────────────────────
+    - name: "Pre-commit quality checks"
+      run: pytest tests/test_precommit_checks.py -v --tb=short
+
+    # ── DB and parsing unit tests ─────────────────────────────────────────
+    - name: "Unit tests: parsing and column detection"
+      run: pytest tests/test_parsing.py -v --tb=short
+
+    - name: "Unit tests: search FTS5 sanitization"
+      run: pytest tests/test_search.py -v --tb=short
+
+    - name: "Unit tests: checkpoint / resume"
+      run: pytest tests/test_checkpoint.py -v --tb=short
+
+    - name: "Unit tests: validation checks"
       run: |
-        pytest tests/test_formatting.py -v --tb=short
+        pytest tests/test_validation.py tests/test_validate_budget_db.py -v --tb=short
 
-    - name: Unit tests — utils/ modules (strings, validation, patterns, progress, database, config)
-      run: |
-        pytest tests/test_utils.py -v --tb=short
+    # ── Build integration tests ───────────────────────────────────────────
+    - name: "Integration tests: build_database phases"
+      run: pytest tests/test_build_integration.py -v --tb=short
 
-    - name: Unit tests — exhibit catalog (column specs and header matching)
-      run: |
-        pytest tests/test_exhibit_catalog.py -v --tb=short
-
-    - name: Unit tests — exhibit audit helper functions
-      run: |
-        pytest tests/test_exhibit_audit.py -v --tb=short
-
-    - name: Pre-commit quality checks (AST syntax, no debug statements, no secrets, naming)
-      run: |
-        pytest tests/test_precommit_checks.py -v --tb=short
-
-    # ── DB and parsing unit tests (need openpyxl; stubs pdfplumber/pandas) ────
-    # These test the core ingestion and validation logic without needing real
-    # budget documents or a working pdfplumber install.
-
-    - name: Unit tests — build_budget_db parsing and column detection
-      run: |
-        pytest tests/test_parsing.py -v --tb=short
-
-    - name: Unit tests — search_budget.py FTS5 sanitization and snippet extraction
-      run: |
-        pytest tests/test_search.py -v --tb=short
-
-    - name: Unit tests — checkpoint / resume system
-      run: |
-        pytest tests/test_checkpoint.py -v --tb=short
-
-    - name: Unit tests — validate_budget_data.py check functions
-      run: |
-        pytest tests/test_validation.py -v --tb=short
-
-    - name: Unit tests — validate_budget_db.py check functions
-      run: |
-        pytest tests/test_validate_budget_db.py -v --tb=short
-
-    # ── Build integration tests (create real xlsx fixtures, run build_database) ─
-
-    - name: Integration tests — build_database phases (progress, checkpoint, resume, shutdown)
-      run: |
-        pytest tests/test_build_integration.py -v --tb=short
-
-    # ── Full pipeline integration tests (needs fpdf2 for PDF fixture generation) -
-    # Uses conftest.py to build a real in-memory database from synthetic Excel +
-    # PDF fixtures and tests end-to-end ingestion → FTS → search_budget queries.
-    # continue-on-error because fpdf2 PDF generation can fail in some envs
-    # (pyo3/cryptography ABI conflicts); the test suite itself skips gracefully.
-
-    - name: Integration tests — full ingest pipeline (Excel + PDF → SQLite → FTS → search)
+    # ── Full pipeline integration tests ───────────────────────────────────
+    - name: "Integration tests: full ingest pipeline"
       continue-on-error: true
-      run: |
-        pytest tests/test_pipeline.py -v --tb=short
+      run: pytest tests/test_pipeline.py -v --tb=short
 
-    # ── Optimization regression tests ──────────────────────────────────────────
+    # ── Optimization regression + performance benchmarks ──────────────────
+    - name: "Optimization regression + benchmarks"
+      run: pytest tests/test_optimizations.py -v --tb=short
 
-    - name: Optimization regression tests
-      continue-on-error: true
-      run: |
-        pytest tests/test_optimizations.py -v --tb=short
-
-    # ── GUI tracker tests (tkinter StringVar deallocator fix) ──────────────────
-    # Unit tests run without a display; the integration test uses Xvfb.
-
-    - name: GUI tracker tests — unit (no display required)
+    # ── GUI tracker tests (tkinter StringVar deallocator fix) ─────────────
+    - name: "GUI tracker tests: unit (no display)"
       run: |
         pytest tests/test_gui_tracker.py -v --tb=short \
           -k "not test_no_deallocator_error_on_close"
 
-    - name: GUI tracker test — integration (Xvfb headless display)
+    - name: "GUI tracker test: integration (Xvfb headless display)"
       run: |
         xvfb-run --auto-servernum \
           pytest tests/test_gui_tracker.py::test_no_deallocator_error_on_close \
             -v --tb=short
 
-    # ── Smoke test: verify all key modules import without error ────────────────
-
+    # ── Smoke test: verify all key modules import ─────────────────────────
     - name: Verify no broken imports
       run: |
         python -c "

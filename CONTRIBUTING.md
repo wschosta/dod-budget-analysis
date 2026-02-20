@@ -86,9 +86,11 @@ dod-budget-analysis/
 │   └── partials/           # HTMX partial responses
 ├── tests/                  # pytest test suite
 ├── utils/                  # Shared utilities
-├── docs/wiki/              # Extended documentation
+├── docker/                 # Staging/multistage Docker configs
+├── docs/                   # Documentation, roadmaps, agent instructions
+│   ├── instructions/       # Agent instruction files (LION, TIGER, BEAR, OH MY)
+│   └── wiki/               # Extended documentation
 ├── docker-compose.yml      # Development Docker config
-├── docker-compose.staging.yml  # Staging Docker config
 └── Dockerfile
 ```
 
@@ -249,7 +251,7 @@ Before submitting a PR, ensure:
 - [ ] `mypy api/ utils/ --ignore-missing-imports` passes
 - [ ] New public functions have type annotations
 - [ ] Any new endpoint has a corresponding test
-- [ ] `REMAINING_TODOS.md` updated if a TODO was completed
+- [ ] `docs/REMAINING_TODOS.md` updated if a TODO was completed
 - [ ] No secrets, credentials, or large binary files committed
 
 ---

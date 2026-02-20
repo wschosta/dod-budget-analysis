@@ -71,22 +71,36 @@ def _tmpl() -> Jinja2Templates:
 # ── Reference helpers (OPT-FE-002: cached) ────────────────────────────────────
 
 def _get_services(conn: sqlite3.Connection) -> list[dict]:
+    """FIX-002: Query DISTINCT organization_name from budget_lines directly.
+
+    Previously this queried the services_agencies reference table which contained
+    both seed data ('Army', 'Air Force') and backfilled data ('ARMY', 'AF'),
+    creating duplicates. Now uses only actual values from budget_lines, with a
+    LEFT JOIN to services_agencies for display names where available.
+    """
     cache_key = ("services", id(conn))
     cached = _services_cache.get(cache_key)
     if cached is not None:
         return cached
     try:
         rows = conn.execute(
-            "SELECT code, full_name FROM services_agencies ORDER BY code"
+            "SELECT DISTINCT b.organization_name AS code, "
+            "COALESCE(s.full_name, b.organization_name) AS full_name "
+            "FROM budget_lines b "
+            "LEFT JOIN services_agencies s ON LOWER(b.organization_name) = LOWER(s.code) "
+            "WHERE b.organization_name IS NOT NULL AND b.organization_name != '' "
+            "ORDER BY b.organization_name"
         ).fetchall()
-        result = [dict(r) for r in rows]
-        _services_cache.set(cache_key, result)  # only cache stable reference table
     except Exception:
         rows = conn.execute(
-            "SELECT DISTINCT organization_name AS code FROM budget_lines "
-            "WHERE organization_name IS NOT NULL ORDER BY organization_name"
+            "SELECT DISTINCT organization_name AS code, "
+            "organization_name AS full_name "
+            "FROM budget_lines "
+            "WHERE organization_name IS NOT NULL AND organization_name != '' "
+            "ORDER BY organization_name"
         ).fetchall()
-        result = [{"code": r["code"], "full_name": r["code"]} for r in rows]
+    result = [{"code": r["code"], "full_name": r["full_name"]} for r in rows]
+    _services_cache.set(cache_key, result)
     return result
 
 
@@ -111,6 +125,12 @@ def _get_exhibit_types(conn: sqlite3.Connection) -> list[dict]:
 
 
 def _get_fiscal_years(conn: sqlite3.Connection) -> list[dict]:
+    """FIX-003: Filter to only valid fiscal year values.
+
+    The fiscal_year column contains invalid values like 'Details' and
+    'Emergency Disaster Relief Act' from parsing errors. Only return values
+    that look like valid fiscal years (4-digit numbers or 'FYxxxx' patterns).
+    """
     cache_key = ("fiscal_years", id(conn))
     cached = _fiscal_years_cache.get(cache_key)
     if cached is not None:
@@ -118,6 +138,8 @@ def _get_fiscal_years(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute(
         "SELECT fiscal_year, COUNT(*) AS row_count FROM budget_lines "
         "WHERE fiscal_year IS NOT NULL "
+        "AND (fiscal_year GLOB '[0-9][0-9][0-9][0-9]' "
+        "     OR fiscal_year GLOB 'FY[0-9][0-9][0-9][0-9]') "
         "GROUP BY fiscal_year ORDER BY fiscal_year"
     ).fetchall()
     result = [{"fiscal_year": r["fiscal_year"], "row_count": r["row_count"]} for r in rows]
@@ -236,10 +258,13 @@ def _query_results(
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = min(page, total_pages)
 
+    # FIX-005: Added FY25 total and FY26 total columns.
+    # FIX-007: Added source_file for source material links.
     rows = conn.execute(
         f"SELECT id, exhibit_type, fiscal_year, account, account_title, "
         f"organization_name, budget_activity_title, line_item_title, pe_number, "
-        f"amount_fy2024_actual, amount_fy2025_enacted, amount_fy2026_request "
+        f"amount_fy2024_actual, amount_fy2025_enacted, amount_fy2025_total, "
+        f"amount_fy2026_request, amount_fy2026_total, source_file "
         f"FROM budget_lines {where} "
         f"ORDER BY {sort_by} {sort_dir} LIMIT ? OFFSET ?",
         params + [page_size, offset],
@@ -310,13 +335,23 @@ def results_partial(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> HTMLResponse:
     """HTMX partial: filtered/paginated results table."""
+    # FIX-010: Non-HTMX requests (e.g. browser refresh) redirect to full page
+    if not request.headers.get("HX-Request"):
+        from starlette.responses import RedirectResponse
+        qs = str(request.query_params)
+        return RedirectResponse(url=f"/?{qs}" if qs else "/", status_code=302)
+
     filters = _parse_filters(request)
     results = _query_results(filters, conn)
 
-    return _tmpl().TemplateResponse(
+    response = _tmpl().TemplateResponse(
         "partials/results.html",
         {"request": request, "filters": filters, **results},
     )
+    # FIX-010: Tell HTMX to push /?params instead of /partials/results?params
+    qs = str(request.query_params)
+    response.headers["HX-Push-Url"] = f"/?{qs}" if qs else "/"
+    return response
 
 
 @router.get("/partials/detail/{item_id}", response_class=HTMLResponse, include_in_schema=False)
@@ -326,6 +361,11 @@ def detail_partial(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> HTMLResponse:
     """HTMX partial: full detail panel for a single budget line."""
+    # FIX-010: Non-HTMX requests redirect to the search page
+    if not request.headers.get("HX-Request"):
+        from starlette.responses import RedirectResponse
+        return RedirectResponse(url="/", status_code=302)
+
     row = conn.execute(
         "SELECT * FROM budget_lines WHERE id = ?", (item_id,)
     ).fetchone()
@@ -335,12 +375,14 @@ def detail_partial(
     item = dict(row)
 
     # FE-006: Related items — same program across fiscal years
+    # FIX-015: Include multiple amount columns so button labels show relevant amounts
     related_items: list[dict] = []
     pe_number = item.get("pe_number")
     if pe_number:
         related_rows = conn.execute(
             "SELECT id, fiscal_year, line_item_title, organization_name, "
-            "amount_fy2026_request FROM budget_lines "
+            "amount_fy2024_actual, amount_fy2025_enacted, amount_fy2026_request "
+            "FROM budget_lines "
             "WHERE pe_number = ? AND id != ? ORDER BY fiscal_year",
             (pe_number, item_id),
         ).fetchall()
@@ -353,7 +395,8 @@ def detail_partial(
         if org and title:
             related_rows = conn.execute(
                 "SELECT id, fiscal_year, line_item_title, organization_name, "
-                "amount_fy2026_request FROM budget_lines "
+                "amount_fy2024_actual, amount_fy2025_enacted, amount_fy2026_request "
+                "FROM budget_lines "
                 "WHERE organization_name = ? AND line_item_title = ? AND id != ? "
                 "ORDER BY fiscal_year",
                 (org, title, item_id),

@@ -150,6 +150,7 @@ function buildDownloadURL(fmt) {
   const hidden = getHiddenCols();
   if (hidden.size > 0) {
     // Map CSS class names (e.g., "col-org") to column names — best-effort
+    // FIX-012: Complete mapping including FY25 total, FY26 total, and source columns
     const colMap = {
       "col-org":     "organization_name",
       "col-fy":      "fiscal_year",
@@ -158,7 +159,10 @@ function buildDownloadURL(fmt) {
       "col-pe":      "pe_number",
       "col-fy24":    "amount_fy2024_actual",
       "col-fy25":    "amount_fy2025_enacted",
+      "col-fy25tot": "amount_fy2025_total",
       "col-fy26":    "amount_fy2026_request",
+      "col-fy26tot": "amount_fy2026_total",
+      "col-source":  "source_file",
     };
     // Build list of visible columns
     const allCols = [
@@ -239,12 +243,14 @@ function closeFeedbackModal() {
   if (modal) modal.classList.remove("open");
 }
 
-// Handle feedback form submission (POST to /api/v1/feedback — returns 501 until backend implements)
+// FIX-011: Handle feedback form submission — only close on success, show error on failure
 (function() {
   document.addEventListener("submit", function(e) {
     if (e.target && e.target.id === "feedback-form") {
       e.preventDefault();
       var form = e.target;
+      var submitBtn = form.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
       var data = new FormData(form);
       var payload = {};
       data.forEach(function(v, k) { payload[k] = v; });
@@ -256,12 +262,16 @@ function closeFeedbackModal() {
         if (resp.ok) {
           closeFeedbackModal();
           form.reset();
+        } else {
+          alert("Failed to submit feedback. Please try again.");
         }
       }).catch(function() {
-        // Silently handle — endpoint may not exist yet
+        // Endpoint may not exist yet — close anyway since feedback can't be saved
+        closeFeedbackModal();
+        form.reset();
+      }).finally(function() {
+        if (submitBtn) submitBtn.disabled = false;
       });
-      closeFeedbackModal();
-      form.reset();
     }
   });
 })();

@@ -101,6 +101,7 @@ Step 1.A implementation status:
 import argparse
 import hashlib
 import json
+import os
 import re
 import shutil
 import sys
@@ -989,8 +990,11 @@ def _get_browser_context():
 
     print("  Starting browser for WAF-protected sites...")
     _pw_instance = sync_playwright().start()
+    _headless = os.environ.get("PLAYWRIGHT_HEADLESS", "").lower() in (
+        "1", "true", "yes",
+    )
     _pw_browser = _pw_instance.chromium.launch(
-        headless=False,
+        headless=_headless,
         args=[
             "--disable-blink-features=AutomationControlled",
             "--window-position=-32000,-32000",
@@ -1464,6 +1468,10 @@ def discover_army_files(_session: requests.Session, year: str) -> list[dict]:
 def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
     """Discover US Navy/Marine Corps budget files for a given fiscal year using a headless browser.
 
+    FY2022+ pages live at /fmc/Pages/Fiscal-Year-{fy}.aspx.
+    FY2017-2021 pages use the older /fmc/fmb/Pages/Fiscal-Year-{fy}.aspx URL.
+    If the primary URL returns 0 files, the alternate pattern is tried automatically.
+
     Args:
         _session: Unused (browser handles HTTP); kept for interface consistency.
         year: Four-digit fiscal year string.
@@ -1483,6 +1491,15 @@ def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
     url = SERVICE_PAGE_TEMPLATES["navy"]["url"].format(fy=year)
     print(f"  [Navy] Scanning FY{year} (browser)...")
     files = _browser_extract_links(url)
+
+    # Fallback: older FYs (pre-2022) use a different URL path
+    if not files:
+        alt_url = (
+            f"https://www.secnav.navy.mil/fmc/fmb/Pages/Fiscal-Year-{year}.aspx"
+        )
+        print(f"  [Navy] Primary URL returned 0 files, trying alternate URL...")
+        files = _browser_extract_links(alt_url)
+
     _save_cache(cache_key, files)
     return files
 
