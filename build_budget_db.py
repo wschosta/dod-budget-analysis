@@ -341,10 +341,14 @@ def create_database(db_path: Path) -> sqlite3.Connection:
         END;
 
         -- PDF document pages
+        -- LION-100: Added fiscal_year and exhibit_type columns for direct
+        -- filtering without path parsing during enrichment/API queries.
         CREATE TABLE IF NOT EXISTS pdf_pages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             source_file TEXT NOT NULL,
             source_category TEXT,
+            fiscal_year TEXT,
+            exhibit_type TEXT,
             page_number INTEGER,
             page_text TEXT,
             has_tables INTEGER DEFAULT 0,
@@ -369,6 +373,30 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             INSERT INTO pdf_pages_fts(pdf_pages_fts, rowid, page_text, source_file, table_data)
             VALUES ('delete', old.id, old.page_text, old.source_file, old.table_data);
         END;
+
+        -- LION-100: Indexes for new pdf_pages columns
+        CREATE INDEX IF NOT EXISTS idx_pdf_pages_fy
+            ON pdf_pages(fiscal_year);
+        CREATE INDEX IF NOT EXISTS idx_pdf_pages_exhibit
+            ON pdf_pages(exhibit_type);
+
+        -- LION-103: PE-to-PDF junction table — pre-computed during ingestion
+        -- Enables direct joins from PE numbers to their PDF pages without
+        -- the expensive text-scan enrichment step.
+        CREATE TABLE IF NOT EXISTS pdf_pe_numbers (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            pdf_page_id INTEGER REFERENCES pdf_pages(id),
+            pe_number   TEXT NOT NULL,
+            page_number INTEGER,
+            source_file TEXT NOT NULL,
+            fiscal_year TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_pdf_pe_pe
+            ON pdf_pe_numbers(pe_number);
+        CREATE INDEX IF NOT EXISTS idx_pdf_pe_src
+            ON pdf_pe_numbers(source_file);
+        CREATE INDEX IF NOT EXISTS idx_pdf_pe_page
+            ON pdf_pe_numbers(pdf_page_id);
 
         -- Metadata about ingested files (for incremental updates)
         CREATE TABLE IF NOT EXISTS ingested_files (
@@ -471,12 +499,14 @@ def create_database(db_path: Path) -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_pe_desc_src ON pe_descriptions(source_file);
 
         -- Tags per PE from multiple sources (structured fields, keywords, LLM)
+        -- LION-106: Added source_files column for data lineage tracking
         CREATE TABLE IF NOT EXISTS pe_tags (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            pe_number  TEXT NOT NULL,
-            tag        TEXT NOT NULL,
-            tag_source TEXT NOT NULL,   -- "structured" | "keyword" | "taxonomy" | "llm"
-            confidence REAL DEFAULT 1.0,
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            pe_number    TEXT NOT NULL,
+            tag          TEXT NOT NULL,
+            tag_source   TEXT NOT NULL,   -- "structured" | "keyword" | "taxonomy" | "llm"
+            confidence   REAL DEFAULT 1.0,
+            source_files TEXT,            -- LION-106: JSON array of source filenames
             UNIQUE(pe_number, tag, tag_source),
             FOREIGN KEY (pe_number) REFERENCES pe_index(pe_number)
         );
@@ -519,16 +549,35 @@ def _detect_exhibit_type(filename: str) -> str:
 
 
 def _extract_pe_number(text: str | None) -> str | None:
-    """Extract a Program Element (PE) number from a text field.
+    """Extract the primary Program Element (PE) number from a text field.
 
     PE numbers follow a pattern like '0602702E' or '0305116BB':
     seven digits followed by one or two uppercase letters.
+    Returns only the first match. See _extract_all_pe_numbers() for all matches.
     Implements TODO 1.B4-a.
     """
     if not text:
         return None
     m = _PE_PATTERN.search(str(text))
     return m.group() if m else None
+
+
+def _extract_all_pe_numbers(text: str | None) -> list[str]:
+    """Extract ALL Program Element (PE) numbers from a text field (LION-102).
+
+    Returns a deduplicated list of all PE numbers found, preserving order.
+    Used to capture secondary PE references that _extract_pe_number() misses.
+    """
+    if not text:
+        return []
+    seen: set[str] = set()
+    result: list[str] = []
+    for m in _PE_PATTERN.finditer(str(text)):
+        pe = m.group()
+        if pe not in seen:
+            seen.add(pe)
+            result.append(pe)
+    return result
 
 
 def _parse_appropriation(account_title: str | None) -> tuple[str | None, str | None]:
@@ -871,6 +920,15 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
 
         # Detect fiscal year from sheet name and normalise to "FY YYYY" (Step 1.B2-d)
         fiscal_year = _normalise_fiscal_year(sheet_name)
+        # LION-101: Validate/fallback FY from directory path when sheet name has no FY
+        dir_fy = _extract_fy_from_path(file_path)
+        if fiscal_year == sheet_name and dir_fy:
+            # Sheet name had no recognizable FY (returned unchanged) — use dir path
+            fiscal_year = dir_fy
+        elif dir_fy and fiscal_year != dir_fy and fiscal_year.startswith("FY "):
+            # Both present but disagree — log warning, prefer sheet-derived value
+            print(f"  LION-101 WARNING: FY mismatch in {file_path.name}: "
+                  f"sheet='{fiscal_year}' vs dir='{dir_fy}' — using sheet value")
 
         # Detect currency year for this sheet (TODO 1.B3-b)
         currency_year = _detect_currency_year(sheet_name, file_path.name)
@@ -934,6 +992,10 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
             line_item_val = get_str(row, "line_item")
             account_val = str(acct).strip()
             pe_number = _extract_pe_number(line_item_val) or _extract_pe_number(account_val)
+            # LION-102: Capture additional PE numbers for cross-referencing
+            all_pes = _extract_all_pe_numbers(
+                f"{line_item_val or ''} {account_val} {get_str(row, 'line_item_title') or ''}")
+            additional_pes = [p for p in all_pes if p != pe_number] if pe_number else all_pes[1:]
 
             # Split appropriation code and title from account_title (Step 1.B4-c implementation)
             acct_title_val = get_str(row, "account_title")
@@ -970,7 +1032,8 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
                 get_str(row, "line_item_title"),
                 get_str(row, "classification"),
                 *fy_values,    # dynamic FY columns (BUILD-002)
-                None,          # extra_fields
+                # LION-102: Store additional PE numbers in extra_fields JSON
+                json.dumps({"additional_pe_numbers": additional_pes}) if additional_pes else None,
                 pe_number,     # Step 1.B4-a: PE number from line_item or account
                 currency_year, # Step 1.B3-b: currency year context
                 approp_code,   # Step 1.B4-c: appropriation code from account title
@@ -1077,6 +1140,10 @@ def _extract_excel_rows(args: tuple) -> dict:
             continue
 
         fiscal_year = _normalise_fiscal_year(sheet_name)
+        # LION-101: Validate/fallback FY from directory path in parallel worker
+        dir_fy = _extract_fy_from_path(file_path)
+        if fiscal_year == sheet_name and dir_fy:
+            fiscal_year = dir_fy
         currency_year = _detect_currency_year(sheet_name, file_path.name)
         amount_unit = _detect_amount_unit(first_rows, header_idx)
         unit_multiplier = 1000.0 if amount_unit == "millions" else 1.0
@@ -1124,6 +1191,11 @@ def _extract_excel_rows(args: tuple) -> dict:
             line_item_val = _get_str(row, "line_item")
             account_val = str(acct).strip()
             pe_number = _extract_pe_number(line_item_val) or _extract_pe_number(account_val)
+            # LION-102: Capture additional PE numbers in parallel worker
+            line_item_title_val = _get_str(row, "line_item_title")
+            all_pes = _extract_all_pe_numbers(
+                f"{line_item_val or ''} {account_val} {line_item_title_val or ''}")
+            additional_pes = [p for p in all_pes if p != pe_number] if pe_number else all_pes[1:]
             acct_title_val = _get_str(row, "account_title")
             approp_code, approp_title = _parse_appropriation(acct_title_val)
 
@@ -1141,10 +1213,12 @@ def _extract_excel_rows(args: tuple) -> dict:
                 account_val, acct_title_val, org_code, org_name,
                 _get_str(row, "budget_activity"), _get_str(row, "budget_activity_title"),
                 _get_str(row, "sub_activity"), _get_str(row, "sub_activity_title"),
-                line_item_val, _get_str(row, "line_item_title"),
+                line_item_val, line_item_title_val,
                 _get_str(row, "classification"),
                 *fy_values,
-                None, pe_number, currency_year, approp_code, approp_title,
+                # LION-102: additional PEs in extra_fields
+                json.dumps({"additional_pe_numbers": additional_pes}) if additional_pes else None,
+                pe_number, currency_year, approp_code, approp_title,
                 amount_unit, budget_type, amount_type,
             ))
 
@@ -1173,6 +1247,32 @@ def _extract_table_text(tables: list) -> str:
                 parts.append(cells_str)
 
     return "\n".join(parts)
+
+
+def _extract_fy_from_path(file_path: Path) -> str | None:
+    """Extract fiscal year from file path directory structure (LION-100).
+
+    Looks for FY directory names like 'FY2026' or 'FY 2026' in the path.
+    Returns normalised "FY YYYY" string or None if not found.
+    """
+    for part in file_path.parts:
+        m = re.search(r"FY\s*(\d{4})", part, re.IGNORECASE)
+        if m:
+            return f"FY {m.group(1)}"
+    return None
+
+
+def _detect_pdf_exhibit_type(filename: str) -> str | None:
+    """Detect the exhibit type from a PDF filename (LION-100).
+
+    Reuses the same EXHIBIT_TYPES keys used for Excel files.
+    Returns lowercase exhibit code (e.g. 'r2', 'p1') or None.
+    """
+    name = filename.lower().replace("_display", "")
+    for key in sorted(EXHIBIT_TYPES.keys(), key=len, reverse=True):
+        if key in name:
+            return key
+    return None
 
 
 def _determine_category(file_path: Path) -> str:
@@ -1287,6 +1387,9 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
     _docs_dir = (docs_dir or DOCS_DIR).resolve()
     category = _determine_category(file_path)
     relative_path = str(file_path.relative_to(_docs_dir))
+    # LION-100: Extract FY and exhibit_type from file path for direct storage
+    pdf_fiscal_year = _extract_fy_from_path(file_path)
+    pdf_exhibit_type = _detect_pdf_exhibit_type(file_path.name)
     total_pages = 0
 
     try:
@@ -1333,6 +1436,8 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                 batch.append((
                     relative_path,
                     category,
+                    pdf_fiscal_year,     # LION-100
+                    pdf_exhibit_type,    # LION-100
                     i + 1,
                     text,
                     1 if tables else 0,
@@ -1347,8 +1452,9 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                 if len(batch) >= 1000:
                     conn.executemany("""
                         INSERT INTO pdf_pages (source_file, source_category,
+                            fiscal_year, exhibit_type,
                             page_number, page_text, has_tables, table_data)
-                        VALUES (?,?,?,?,?,?)
+                        VALUES (?,?,?,?,?,?,?,?)
                     """, batch)
                     total_pages += len(batch)
                     batch = []
@@ -1356,8 +1462,9 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
               if batch:
                 conn.executemany("""
                     INSERT INTO pdf_pages (source_file, source_category,
+                        fiscal_year, exhibit_type,
                         page_number, page_text, has_tables, table_data)
-                    VALUES (?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?)
                 """, batch)
                 total_pages += len(batch)
 
@@ -1368,6 +1475,27 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                     " (file_path, page_number, issue_type, issue_detail)"
                     " VALUES (?,?,?,?)",
                     issues_batch)
+
+              # LION-103: Populate pdf_pe_numbers junction table by scanning
+              # inserted pages for PE number mentions.
+              pe_junction_rows = []
+              for row in conn.execute(
+                  "SELECT id, page_number, page_text FROM pdf_pages "
+                  "WHERE source_file = ? AND page_text IS NOT NULL",
+                  (relative_path,)
+              ):
+                  page_id, page_num, page_text = row
+                  found_pes = _extract_all_pe_numbers(page_text)
+                  for pe in found_pes:
+                      pe_junction_rows.append((
+                          page_id, pe, page_num, relative_path, pdf_fiscal_year))
+              if pe_junction_rows:
+                  conn.executemany(
+                      "INSERT INTO pdf_pe_numbers "
+                      "(pdf_page_id, pe_number, page_number, source_file, fiscal_year) "
+                      "VALUES (?,?,?,?,?)",
+                      pe_junction_rows)
+
             finally:
                 table_executor.shutdown(wait=False)
 
@@ -1410,7 +1538,11 @@ def _extract_pdf_data(args):
 
     category = _determine_category(file_path)
     relative_path = str(file_path.relative_to(docs_dir))
+    # LION-100: Extract FY and exhibit_type from file path
+    pdf_fiscal_year = _extract_fy_from_path(file_path)
+    pdf_exhibit_type = _detect_pdf_exhibit_type(file_path.name)
     pages_data = []
+    pe_mentions = []  # LION-103: (pe_number, page_number) tuples
     issues = []
     num_pages = 0
 
@@ -1444,18 +1576,28 @@ def _extract_pdf_data(args):
                     if not text.strip() and not table_text.strip():
                         continue
 
+                    page_num = i + 1
                     pages_data.append((
-                        relative_path, category, i + 1, text,
+                        relative_path, category,
+                        pdf_fiscal_year,     # LION-100
+                        pdf_exhibit_type,    # LION-100
+                        page_num, text,
                         1 if tables else 0,
                         table_text if table_text else None,
                     ))
+                    # LION-103: Extract PE numbers for junction table
+                    found_pes = _extract_all_pe_numbers(text)
+                    for pe in found_pes:
+                        pe_mentions.append((pe, page_num))
             finally:
                 executor.shutdown(wait=False)
     except Exception as e:
         return {
             "relative_path": relative_path,
             "category": category,
+            "fiscal_year": pdf_fiscal_year,
             "pages_data": [],
+            "pe_mentions": [],
             "issues": issues,
             "error": str(e),
             "num_pages": num_pages,
@@ -1464,7 +1606,9 @@ def _extract_pdf_data(args):
     return {
         "relative_path": relative_path,
         "category": category,
+        "fiscal_year": pdf_fiscal_year,
         "pages_data": pages_data,
+        "pe_mentions": pe_mentions,
         "issues": issues,
         "error": None,
         "num_pages": num_pages,
@@ -1506,6 +1650,8 @@ def _remove_file_data(conn: sqlite3.Connection, rel_path: str, file_type: str):
         conn.execute("DELETE FROM budget_lines WHERE source_file = ?", (rel_path,))
     elif file_type == "pdf":
         conn.execute("DELETE FROM pdf_pages WHERE source_file = ?", (rel_path,))
+        # LION-103: Also remove junction table rows for this file
+        conn.execute("DELETE FROM pdf_pe_numbers WHERE source_file = ?", (rel_path,))
 
 
 def _recreate_pdf_fts_triggers(conn: sqlite3.Connection):
@@ -2261,8 +2407,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                     if pages_data:
                         conn.executemany("""
                             INSERT INTO pdf_pages (source_file, source_category,
+                                fiscal_year, exhibit_type,
                                 page_number, page_text, has_tables, table_data)
-                            VALUES (?,?,?,?,?,?)
+                            VALUES (?,?,?,?,?,?,?,?)
                         """, pages_data)
 
                     # Record extraction issues
@@ -2271,6 +2418,31 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                             "INSERT INTO extraction_issues"
                             " (file_path, page_number, issue_type, issue_detail)"
                             " VALUES (?,?,?,?)", issues)
+
+                    # LION-103: Insert PE-to-PDF junction rows from parallel worker
+                    pe_mentions = result.get("pe_mentions", [])
+                    pdf_fy = result.get("fiscal_year")
+                    if pe_mentions:
+                        # We need pdf_page_id but pages were just inserted;
+                        # look up by source_file + page_number
+                        page_id_map = {}
+                        for row in conn.execute(
+                            "SELECT id, page_number FROM pdf_pages "
+                            "WHERE source_file = ?", (rel_path,)
+                        ):
+                            page_id_map[row[1]] = row[0]
+                        junction_rows = []
+                        for pe, page_num in pe_mentions:
+                            pid = page_id_map.get(page_num)
+                            if pid is not None:
+                                junction_rows.append((
+                                    pid, pe, page_num, rel_path, pdf_fy))
+                        if junction_rows:
+                            conn.executemany(
+                                "INSERT INTO pdf_pe_numbers "
+                                "(pdf_page_id, pe_number, page_number, "
+                                "source_file, fiscal_year) "
+                                "VALUES (?,?,?,?,?)", junction_rows)
 
                     file_status = "ok_with_issues" if issues else "ok"
                     stat = pdf.stat()

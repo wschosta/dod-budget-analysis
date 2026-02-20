@@ -177,6 +177,57 @@ def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
     for table in ("pe_lineage", "pe_tags", "pe_descriptions", "pe_index"):
         conn.execute(f"DROP TABLE IF EXISTS {table}")
     conn.commit()
+    # Recreate the tables so enrichment phases can INSERT into them.
+    # Import create_database's DDL for enrichment tables.
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS pe_index (
+            pe_number         TEXT PRIMARY KEY,
+            display_title     TEXT,
+            organization_name TEXT,
+            budget_type       TEXT,
+            fiscal_years      TEXT,
+            exhibit_types     TEXT,
+            updated_at        TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS pe_descriptions (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            pe_number        TEXT NOT NULL,
+            fiscal_year      TEXT,
+            source_file      TEXT,
+            page_start       INTEGER,
+            page_end         INTEGER,
+            section_header   TEXT,
+            description_text TEXT,
+            FOREIGN KEY (pe_number) REFERENCES pe_index(pe_number)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pe_desc_pe ON pe_descriptions(pe_number);
+        CREATE INDEX IF NOT EXISTS idx_pe_desc_fy ON pe_descriptions(fiscal_year);
+        CREATE TABLE IF NOT EXISTS pe_tags (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            pe_number    TEXT NOT NULL,
+            tag          TEXT NOT NULL,
+            tag_source   TEXT NOT NULL,
+            confidence   REAL DEFAULT 1.0,
+            source_files TEXT,
+            UNIQUE(pe_number, tag, tag_source),
+            FOREIGN KEY (pe_number) REFERENCES pe_index(pe_number)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pe_tags_pe ON pe_tags(pe_number);
+        CREATE INDEX IF NOT EXISTS idx_pe_tags_tag ON pe_tags(tag);
+        CREATE TABLE IF NOT EXISTS pe_lineage (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_pe        TEXT NOT NULL,
+            referenced_pe    TEXT NOT NULL,
+            link_type        TEXT NOT NULL,
+            confidence       REAL DEFAULT 0.5,
+            fiscal_year      TEXT,
+            context_snippet  TEXT,
+            UNIQUE(source_pe, referenced_pe, link_type, fiscal_year),
+            FOREIGN KEY (source_pe) REFERENCES pe_index(pe_number)
+        );
+        CREATE INDEX IF NOT EXISTS idx_pe_lineage_src ON pe_lineage(source_pe);
+        CREATE INDEX IF NOT EXISTS idx_pe_lineage_ref ON pe_lineage(referenced_pe);
+    """)
     print(f"  Dropped enrichment tables.")
 
 
@@ -463,7 +514,12 @@ def _tags_from_llm(
 
 
 def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
-    """Generate tags for all PE numbers from multiple sources."""
+    """Generate tags for all PE numbers from multiple sources.
+
+    LION-104: Also uses budget_lines text fields for keyword matching.
+    LION-105: Differentiates confidence by tag source.
+    LION-106: Tracks source_files for each tag.
+    """
     print(f"\n  [Phase 3] Generating tags (LLM={'yes' if with_llm else 'no'})...")
 
     pe_numbers = [
@@ -487,9 +543,9 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
     print(f"  Tagging {len(to_tag)} PE(s)...")
 
     # --- Pre-load structured fields for all untagged PEs in one query ---
-    # Replaces N individual SELECT LIMIT 1 queries (one per PE) with a
-    # single GROUP BY aggregation pass.
+    # Also collect source_files for LION-106 provenance tracking.
     structured_fields: dict[str, tuple] = {}
+    structured_sources: dict[str, list[str]] = {}
     placeholders = ",".join("?" * len(to_tag))
     for row in conn.execute(f"""
         SELECT pe_number,
@@ -502,90 +558,148 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
     """, to_tag).fetchall():
         structured_fields[row[0]] = (row[1], row[2], row[3])
 
-    # --- Pre-load all description text for untagged PEs in one query ---
-    # Replaces N individual SELECT queries (one per PE) with a single pass.
-    desc_texts: dict[str, list[str]] = {}
+    # LION-106: Collect distinct source files per PE for provenance.
+    # Use a subquery since json_group_array doesn't support DISTINCT.
     for row in conn.execute(f"""
-        SELECT pe_number, description_text
+        SELECT pe_number, json_group_array(source_file) AS src_files
+        FROM (
+            SELECT DISTINCT pe_number, source_file
+            FROM budget_lines
+            WHERE pe_number IN ({placeholders})
+        )
+        GROUP BY pe_number
+    """, to_tag).fetchall():
+        try:
+            structured_sources[row[0]] = json.loads(row[1])
+        except (json.JSONDecodeError, TypeError):
+            structured_sources[row[0]] = []
+
+    # --- LION-104: Pre-load budget_lines text fields for keyword matching ---
+    # Concatenates line_item_title, budget_activity_title, and account_title
+    # so PEs without PDF coverage still get keyword tags.
+    bl_texts: dict[str, str] = {}
+    for row in conn.execute(f"""
+        SELECT pe_number, GROUP_CONCAT(line_item_title, ' ') AS titles
+        FROM (
+            SELECT DISTINCT pe_number, line_item_title
+            FROM budget_lines
+            WHERE pe_number IN ({placeholders})
+              AND line_item_title IS NOT NULL
+        )
+        GROUP BY pe_number
+    """, to_tag).fetchall():
+        bl_texts[row[0]] = row[1] or ""
+
+    # --- Pre-load all description text for untagged PEs ---
+    desc_texts: dict[str, list[str]] = {}
+    desc_sources: dict[str, list[str]] = {}
+    for row in conn.execute(f"""
+        SELECT pe_number, description_text, source_file
         FROM pe_descriptions
         WHERE pe_number IN ({placeholders})
           AND description_text IS NOT NULL
     """, to_tag).fetchall():
         desc_texts.setdefault(row[0], []).append(row[1])
+        desc_sources.setdefault(row[0], [])
+        if row[2] and row[2] not in desc_sources[row[0]]:
+            desc_sources[row[0]].append(row[2])
 
+    # insert_buf: (pe_number, tag, tag_source, confidence, source_files_json)
     insert_buf: list[tuple] = []
     total_tags = 0
 
     for pe in to_tag:
-        # 3a: structured field tags (from pre-loaded dict, no DB query)
+        # LION-106: Source files for this PE's structured tags
+        pe_src_json = json.dumps(structured_sources.get(pe, []))
+
+        # 3a: structured field tags — LION-105: confidence=1.0 (direct match)
         fields = structured_fields.get(pe)
         if fields:
             ba_title, approp_title, org_name = fields
             if ba_title:
                 for pattern, tag in _BUDGET_ACTIVITY_TAGS:
                     if pattern.search(ba_title):
-                        insert_buf.append((pe, tag, "structured", 1.0))
+                        insert_buf.append((pe, tag, "structured", 1.0, pe_src_json))
                         break
             if approp_title:
                 low = approp_title.lower()
                 for key, tag in _APPROP_TAGS.items():
                     if key in low:
-                        insert_buf.append((pe, tag, "structured", 1.0))
+                        insert_buf.append((pe, tag, "structured", 1.0, pe_src_json))
                         break
             if org_name:
                 low = org_name.lower()
                 for key, tag in _ORG_TAGS.items():
                     if key in low:
-                        insert_buf.append((pe, tag, "structured", 1.0))
+                        insert_buf.append((pe, tag, "structured", 1.0, pe_src_json))
                         break
 
-        # 3b: keyword/taxonomy tags from pre-loaded description text
-        combined_text = " ".join(desc_texts.get(pe, []))
-        if combined_text:
-            insert_buf.extend(_tags_from_keywords(pe, combined_text))
+        # 3b: keyword tags from budget_lines text fields
+        # LION-104: Use line_item_title etc. for PEs with or without PDF text
+        # LION-105: confidence=0.9 (field-level match, high signal)
+        bl_text = bl_texts.get(pe, "")
+        if bl_text:
+            for tag, patterns in _COMPILED_TAXONOMY:
+                for pat in patterns:
+                    if pat.search(bl_text):
+                        insert_buf.append((pe, tag, "keyword", 0.9, pe_src_json))
+                        break
+
+        # 3c: keyword tags from PDF narrative text
+        # LION-105: confidence=0.8 (narrative context, more noise)
+        combined_desc = " ".join(desc_texts.get(pe, []))
+        desc_src_json = json.dumps(desc_sources.get(pe, []))
+        if combined_desc:
+            for tag, patterns in _COMPILED_TAXONOMY:
+                for pat in patterns:
+                    if pat.search(combined_desc):
+                        insert_buf.append((pe, tag, "keyword", 0.8, desc_src_json))
+                        break
 
     # Flush structured + keyword tags
     if insert_buf:
         conn.executemany("""
-            INSERT OR IGNORE INTO pe_tags (pe_number, tag, tag_source, confidence)
-            VALUES (?, ?, ?, ?)
+            INSERT OR IGNORE INTO pe_tags
+                (pe_number, tag, tag_source, confidence, source_files)
+            VALUES (?, ?, ?, ?, ?)
         """, insert_buf)
         conn.commit()
         total_tags += len(insert_buf)
         insert_buf = []
 
-    # 3c: LLM tags (optional, in batches of 10)
+    # 3d: LLM tags (optional, in batches of 10)
+    # LION-105: confidence=0.7 for LLM-generated tags
     if with_llm:
         print(f"  Running LLM tagging in batches of 10...")
         batch_size = 10
         for i in range(0, len(to_tag), batch_size):
             batch_pes = to_tag[i:i + batch_size]
-            # Collect text from pre-loaded desc_texts — no DB queries
             pe_texts: dict[str, str] = {}
             for pe in batch_pes:
                 texts = desc_texts.get(pe, [])
                 if texts:
-                    pe_texts[pe] = texts[0]  # first description segment
+                    pe_texts[pe] = texts[0]
 
             if pe_texts:
                 llm_result = _tags_from_llm(pe_texts)
                 for pe_num, tags in llm_result.items():
+                    src_json = json.dumps(desc_sources.get(pe_num, []))
                     for tag in tags:
                         tag = tag.strip().lower().replace(" ", "-")
                         if tag:
-                            insert_buf.append((pe_num, tag, "llm", 0.8))
+                            insert_buf.append((pe_num, tag, "llm", 0.7, src_json))
 
             if insert_buf:
                 conn.executemany("""
                     INSERT OR IGNORE INTO pe_tags
-                        (pe_number, tag, tag_source, confidence)
-                    VALUES (?, ?, ?, ?)
+                        (pe_number, tag, tag_source, confidence, source_files)
+                    VALUES (?, ?, ?, ?, ?)
                 """, insert_buf)
                 conn.commit()
                 total_tags += len(insert_buf)
                 insert_buf = []
             print(f"  [{min(i + batch_size, len(to_tag))}/{len(to_tag)}] LLM batch done")
-            time.sleep(0.5)  # gentle rate limiting
+            time.sleep(0.5)
 
     print(f"  Done. {total_tags} tag rows inserted.")
     return total_tags

@@ -64,6 +64,8 @@ def _make_db() -> sqlite3.Connection:
             id INTEGER PRIMARY KEY,
             source_file TEXT,
             source_category TEXT,
+            fiscal_year TEXT,
+            exhibit_type TEXT,
             page_number INTEGER,
             page_text TEXT,
             has_tables INTEGER DEFAULT 0,
@@ -97,6 +99,7 @@ def _make_db() -> sqlite3.Connection:
             tag TEXT NOT NULL,
             tag_source TEXT NOT NULL,
             confidence REAL DEFAULT 1.0,
+            source_files TEXT,
             UNIQUE(pe_number, tag, tag_source)
         );
 

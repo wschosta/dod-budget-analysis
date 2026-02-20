@@ -252,6 +252,84 @@ class RefreshWorkflow:
             self.results["rollback"] = "completed" if rolled_back else "skipped"
             return False
 
+    def stage_2b_enrich(self) -> bool:
+        """Stage 2b: Run enrichment pipeline (LION-107).
+
+        Runs enrich_budget_db.enrich() with rebuild=True to populate
+        pe_index, pe_descriptions, pe_tags, and pe_lineage after a build.
+        Also performs post-enrichment integrity checks.
+        """
+        self.log("=" * 60)
+        self.log("STAGE 2b: ENRICH DATABASE")
+        self.log("=" * 60)
+        self._write_progress("stage_2b_enrich", "running", "Running enrichment pipeline")
+
+        if self.dry_run:
+            self.log("[DRY RUN] Would call enrich_budget_db.enrich()", "detail")
+            self.results["enrich"] = "completed"
+            self._write_progress("stage_2b_enrich", "completed")
+            return True
+
+        if not self.db_path.exists():
+            self.log("Database not found; skipping enrichment", "warn")
+            self.results["enrich"] = "skipped"
+            self._write_progress("stage_2b_enrich", "skipped", "DB not found")
+            return False
+
+        t0 = time.time()
+        try:
+            from enrich_budget_db import enrich  # noqa: PLC0415
+            enrich(self.db_path, phases={1, 2, 3, 4}, rebuild=True)
+            elapsed = time.time() - t0
+            self.log(f"Enrichment complete in {elapsed:.1f}s", "ok")
+
+            # LION-107: Post-enrichment integrity checks
+            import sqlite3
+            conn = sqlite3.connect(str(self.db_path))
+            conn.row_factory = sqlite3.Row
+
+            # (a) Every PE in budget_lines should have a pe_index entry
+            orphan_pes = conn.execute("""
+                SELECT COUNT(DISTINCT pe_number) FROM budget_lines
+                WHERE pe_number IS NOT NULL
+                  AND pe_number NOT IN (SELECT pe_number FROM pe_index)
+            """).fetchone()[0]
+            if orphan_pes > 0:
+                self.log(f"LION-107 WARNING: {orphan_pes} PE(s) in budget_lines "
+                         f"without pe_index entry", "warn")
+
+            # (b) pe_tags should be non-empty
+            tag_count = conn.execute(
+                "SELECT COUNT(*) FROM pe_tags"
+            ).fetchone()[0]
+            if tag_count == 0:
+                self.log("LION-107 WARNING: pe_tags is empty", "warn")
+            else:
+                self.log(f"pe_tags: {tag_count:,} tag rows", "detail")
+
+            # (c) pe_descriptions should cover expected PE/FY combinations
+            desc_coverage = conn.execute("""
+                SELECT COUNT(DISTINCT pe_number) FROM pe_descriptions
+            """).fetchone()[0]
+            pe_count = conn.execute(
+                "SELECT COUNT(*) FROM pe_index"
+            ).fetchone()[0]
+            coverage_pct = (desc_coverage / pe_count * 100) if pe_count else 0
+            self.log(f"pe_descriptions covers {desc_coverage}/{pe_count} PEs "
+                     f"({coverage_pct:.0f}%)", "detail")
+
+            conn.close()
+            self.results["enrich"] = "completed"
+            self._write_progress("stage_2b_enrich", "completed",
+                                 f"{elapsed:.1f}s, {tag_count} tags")
+            return True
+
+        except Exception as e:
+            self.log(f"Exception during enrichment: {e}", "error")
+            self.results["enrich"] = "failed"
+            self._write_progress("stage_2b_enrich", "failed", str(e))
+            return False
+
     def stage_3_validate(self) -> bool:
         """Stage 3: Run validation checks (REFRESH-001: direct import)."""
         self.log("=" * 60)
@@ -374,7 +452,12 @@ class RefreshWorkflow:
 
         success = self.stage_2_build() and success
         if not success:
-            self.log("Database build failed; proceeding with validation anyway...", "warn")
+            self.log("Database build failed; proceeding with enrichment anyway...", "warn")
+
+        # LION-107: Run enrichment after build, before validation
+        success = self.stage_2b_enrich() and success
+        if not success:
+            self.log("Enrichment failed; proceeding with validation anyway...", "warn")
 
         success = self.stage_3_validate() and success
         success = self.stage_4_report() and success
