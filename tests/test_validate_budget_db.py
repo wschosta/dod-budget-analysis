@@ -34,6 +34,7 @@ from validate_budget_db import (
     check_pe_org_consistency,
     check_budget_activity_consistency,
     check_fy_column_null_rates,
+    check_expected_indexes,
     _get_amount_columns,
     generate_report,
 )
@@ -744,3 +745,43 @@ def test_source_file_tracking_untracked(conn):
     assert len(issues) == 1
     assert issues[0]["severity"] == "info"
     assert "missing.xlsx" in issues[0]["samples"]
+
+
+# ── check_expected_indexes ───────────────────────────────────────────────
+
+
+def test_expected_indexes_all_present(conn):
+    """No issues when all expected indexes exist."""
+    # Create all expected indexes
+    for idx_name, cols in [
+        ("idx_bl_exhibit", "exhibit_type"),
+        ("idx_bl_org", "organization_name"),
+        ("idx_bl_fy", "fiscal_year"),
+        ("idx_bl_pe", "pe_number"),
+        ("idx_bl_approp", "appropriation_code"),
+        ("idx_bl_pe_fy", "pe_number, fiscal_year"),
+        ("idx_bl_org_amount", "organization_name, amount_fy2026_request"),
+        ("idx_bl_exhibit_fy", "exhibit_type, fiscal_year"),
+        ("idx_bl_approp_amount", "appropriation_code, amount_fy2026_request"),
+        ("idx_bl_org_approp_line", "organization_name, appropriation_code, line_item_title"),
+        ("idx_bl_budget_type", "budget_type"),
+        ("idx_bl_fy_org", "fiscal_year, organization_name"),
+        ("idx_bl_pe_amount", "pe_number, amount_fy2026_request"),
+        ("idx_bl_budget_type_amount", "budget_type, amount_fy2026_request"),
+    ]:
+        conn.execute(
+            f"CREATE INDEX IF NOT EXISTS {idx_name} ON budget_lines({cols})"
+        )
+    conn.commit()
+    issues = check_expected_indexes(conn)
+    assert len(issues) == 0
+
+
+def test_expected_indexes_missing(conn):
+    """Missing indexes are flagged as warnings."""
+    # Don't create any indexes — all expected ones should be missing
+    issues = check_expected_indexes(conn)
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "warning"
+    assert issues[0]["count"] > 0
+    assert len(issues[0]["missing_indexes"]) > 0

@@ -1317,6 +1317,47 @@ def check_source_file_tracking(conn: sqlite3.Connection) -> list[dict]:
     return issues
 
 
+def check_expected_indexes(conn: sqlite3.Connection) -> list[dict]:
+    """Verify that key performance indexes exist on budget_lines.
+
+    Missing indexes degrade query performance for dashboard, aggregation,
+    and PE detail endpoints.  This check warns about any expected indexes
+    that are absent so they can be recreated.
+    """
+    issues: list[dict] = []
+
+    expected_indexes = {
+        "idx_bl_exhibit", "idx_bl_org", "idx_bl_fy", "idx_bl_pe",
+        "idx_bl_approp", "idx_bl_pe_fy", "idx_bl_org_amount",
+        "idx_bl_exhibit_fy", "idx_bl_approp_amount",
+        "idx_bl_org_approp_line", "idx_bl_budget_type",
+        "idx_bl_fy_org", "idx_bl_pe_amount", "idx_bl_budget_type_amount",
+    }
+
+    try:
+        rows = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_bl_%'"
+        ).fetchall()
+        existing = {r[0] for r in rows}
+        missing = expected_indexes - existing
+
+        if missing:
+            issues.append({
+                "check": "expected_indexes",
+                "severity": "warning",
+                "detail": (
+                    f"{len(missing)} expected budget_lines index(es) missing: "
+                    f"{', '.join(sorted(missing))}"
+                ),
+                "count": len(missing),
+                "missing_indexes": sorted(missing),
+            })
+    except Exception:
+        pass
+
+    return issues
+
+
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     r = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
@@ -1355,6 +1396,7 @@ ALL_CHECKS = [
     ("FY Column Null Rates", check_fy_column_null_rates),          # NULL percentage check
     ("Duplicate Budget Lines", check_duplicate_budget_lines),      # Duplicate row detection
     ("Source File Tracking", check_source_file_tracking),          # Provenance tracking
+    ("Expected Indexes", check_expected_indexes),                    # Performance index check
 ]
 
 
