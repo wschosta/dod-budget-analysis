@@ -21,8 +21,8 @@ class TestBuildWhereClause:
 
     def test_service_filter(self):
         where, params = build_where_clause(service=["Army"])
-        assert "organization_name LIKE ?" in where
-        assert "%Army%" in params
+        assert "organization_name IN (?)" in where
+        assert "Army" in params
 
     def test_exhibit_type_filter(self):
         where, params = build_where_clause(exhibit_type=["p1"])
@@ -65,10 +65,10 @@ class TestBuildWhereClause:
             exhibit_type=["p1"],
         )
         assert "fiscal_year IN" in where
-        assert "organization_name LIKE" in where
+        assert "organization_name IN" in where
         assert "exhibit_type IN" in where
         assert "FY2026" in params
-        assert "%Army%" in params
+        assert "Army" in params
         assert "p1" in params
 
     def test_where_prefix(self):

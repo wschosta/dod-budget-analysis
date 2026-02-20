@@ -115,13 +115,13 @@ def app_client(tmp_path_factory):
              appropriation_code, appropriation_title,
              amount_fy2024_actual, amount_fy2025_enacted, amount_fy2026_request)
         VALUES
-            ('army_p1.xlsx', 'p1', '2026', 'Army',
+            ('army_p5.xlsx', 'p5', '2026', 'Army',
              'Aircraft Procurement', 'Apache AH-64', '0604131A',
              'PROC', 'Procurement', 120000.0, 140000.0, 150000.0),
-            ('navy_r1.xlsx', 'r1', '2026', 'Navy',
+            ('navy_r2.xlsx', 'r2', '2026', 'Navy',
              'RDT&E Budget', 'F-35 Development', '0603292N',
              'RDTE', 'RDT&E', 200000.0, 230000.0, 250000.0),
-            ('af_p1.xlsx', 'p1', '2025', 'Air Force',
+            ('af_p5.xlsx', 'p5', '2025', 'Air Force',
              'Aircraft Procurement', 'F-22A', '0604800F',
              'PROC', 'Procurement', 80000.0, 90000.0, 100000.0);
 

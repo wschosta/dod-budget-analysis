@@ -66,6 +66,7 @@ def db():
             appropriation_code TEXT,
             amount_fy2024_actual REAL,
             amount_fy2025_enacted REAL,
+            amount_fy2025_total REAL,
             amount_fy2026_request REAL,
             amount_fy2026_total REAL,
             amount_type TEXT
@@ -89,10 +90,10 @@ def db():
         INSERT INTO budget_lines (source_file, exhibit_type, fiscal_year,
             organization_name, amount_fy2026_request)
         VALUES
-            ('army_p1.xlsx', 'p1', 'FY 2026', 'Army', 100000),
-            ('army_r1.xlsx', 'r1', 'FY 2026', 'Army', 200000),
-            ('navy_p1.xlsx', 'p1', 'FY 2026', 'Navy', 150000),
-            ('navy_o1.xlsx', 'o1', 'FY 2025', 'Navy', 80000);
+            ('army_p1.xlsx', 'p1', '2026', 'Army', 100000),
+            ('army_r1.xlsx', 'r1', '2026', 'Army', 200000),
+            ('navy_p1.xlsx', 'p1', '2026', 'Navy', 150000),
+            ('navy_o1.xlsx', 'o1', '2025', 'Navy', 80000);
 
         INSERT INTO services_agencies (code, full_name, category)
         VALUES
@@ -175,12 +176,12 @@ class TestGetFiscalYears:
     def test_returns_grouped_years(self, db):
         years = _get_fiscal_years(db)
         fy_values = {y["fiscal_year"] for y in years}
-        assert "FY 2026" in fy_values
-        assert "FY 2025" in fy_values
+        assert "2026" in fy_values
+        assert "2025" in fy_values
 
     def test_includes_row_count(self, db):
         years = _get_fiscal_years(db)
-        fy2026 = next(y for y in years if y["fiscal_year"] == "FY 2026")
+        fy2026 = next(y for y in years if y["fiscal_year"] == "2026")
         assert fy2026["row_count"] == 3
 
 
@@ -219,9 +220,9 @@ class TestParseFilters:
         assert filters["page"] == 1
 
     def test_fiscal_year_list(self):
-        req = self._mock_request("fiscal_year=FY+2025&fiscal_year=FY+2026")
+        req = self._mock_request("fiscal_year=2025&fiscal_year=2026")
         filters = _parse_filters(req)
-        assert filters["fiscal_year"] == ["FY 2025", "FY 2026"]
+        assert filters["fiscal_year"] == ["2025", "2026"]
 
 
 # ── _query_results ────────────────────────────────────────────────────────────
@@ -248,7 +249,7 @@ class TestQueryResults:
 
     def test_filter_by_fiscal_year(self, db):
         filters = {
-            "q": "", "fiscal_year": ["FY 2025"], "service": [], "exhibit_type": [],
+            "q": "", "fiscal_year": ["2025"], "service": [], "exhibit_type": [],
             "pe_number": [], "sort_by": "id", "sort_dir": "asc", "page": 1,
         }
         result = _query_results(filters, db)

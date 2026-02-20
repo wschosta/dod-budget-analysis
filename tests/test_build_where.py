@@ -41,15 +41,15 @@ class TestBuildWhereFiscalYear:
 class TestBuildWhereService:
     def test_single_service(self):
         where, params = _build_where(None, ["Army"], None, None, None)
-        assert "organization_name LIKE ?" in where
-        assert params == ["%Army%"]
+        assert "organization_name IN (?)" in where
+        assert params == ["Army"]
 
     def test_multiple_services(self):
         where, params = _build_where(None, ["Army", "Navy"], None, None, None)
-        assert "organization_name LIKE ?" in where
+        assert "organization_name IN (?,?)" in where
         assert len(params) == 2
-        assert "%Army%" in params
-        assert "%Navy%" in params
+        assert "Army" in params
+        assert "Navy" in params
 
 
 class TestBuildWhereExhibitType:
