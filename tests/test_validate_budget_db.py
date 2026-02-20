@@ -32,6 +32,7 @@ from validate_budget_db import (
     check_enrichment_staleness,
     check_extreme_outliers,
     check_pe_org_consistency,
+    check_budget_activity_consistency,
     _get_amount_columns,
     generate_report,
 )
@@ -608,3 +609,29 @@ def test_pe_org_consistency_multi_org(conn):
     assert issues[0]["severity"] == "warning"
     assert "Army" in issues[0]["detail"]
     assert "Navy" in issues[0]["detail"]
+
+
+# ── Budget activity consistency tests ────────────────────────────────────────
+
+def test_budget_activity_consistency_ok(conn):
+    """Few budget_activity_title variants within a PE → no issues."""
+    _insert_line(conn, pe_number="0602120A", line_item="line1",
+                 budget_activity_title="Applied Research")
+    _insert_line(conn, pe_number="0602120A", line_item="line2",
+                 budget_activity_title="Applied Research")
+    conn.commit()
+    issues = check_budget_activity_consistency(conn)
+    assert len(issues) == 0
+
+
+def test_budget_activity_consistency_too_many(conn):
+    """PE with >8 distinct budget_activity_title values → info issue."""
+    for i in range(10):
+        _insert_line(conn, pe_number="0602120A", line_item=f"line{i}",
+                     budget_activity_title=f"Activity Title {i}")
+    conn.commit()
+    issues = check_budget_activity_consistency(conn)
+    assert len(issues) == 1
+    assert issues[0]["check"] == "budget_activity_consistency"
+    assert issues[0]["severity"] == "info"
+    assert issues[0]["pe_number"] == "0602120A"

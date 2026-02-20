@@ -951,6 +951,59 @@ def check_pe_tags_source_files(conn: sqlite3.Connection) -> list[dict]:
     return issues
 
 
+def check_budget_activity_consistency(conn: sqlite3.Connection) -> list[dict]:
+    """Detect suspiciously many budget_activity_title variants within a PE.
+
+    Within a single (pe_number, exhibit_type) group, the number of
+    distinct budget_activity_title values should be small (usually 1-5).
+    Groups with >8 distinct titles may indicate parsing artifacts where
+    line-item titles were misread as budget activity titles.
+
+    Severity: INFO
+    """
+    issues = []
+    try:
+        rows = conn.execute("""
+            SELECT pe_number, exhibit_type,
+                   COUNT(DISTINCT budget_activity_title) AS title_count
+            FROM budget_lines
+            WHERE pe_number IS NOT NULL
+              AND budget_activity_title IS NOT NULL
+              AND budget_activity_title != ''
+            GROUP BY pe_number, exhibit_type
+            HAVING title_count > 8
+            ORDER BY title_count DESC
+            LIMIT 30
+        """).fetchall()
+    except Exception:
+        return []
+
+    for r in rows:
+        titles = conn.execute(
+            "SELECT DISTINCT budget_activity_title FROM budget_lines "
+            "WHERE pe_number = ? AND exhibit_type = ? "
+            "AND budget_activity_title IS NOT NULL AND budget_activity_title != '' "
+            "LIMIT 5",
+            (r["pe_number"], r["exhibit_type"]),
+        ).fetchall()
+        title_list = [t[0] for t in titles]
+        issues.append({
+            "check": "budget_activity_consistency",
+            "severity": "info",
+            "detail": (
+                f"PE {r['pe_number']} ({r['exhibit_type']}) "
+                f"has {r['title_count']} distinct budget_activity_title values — "
+                f"e.g., {'; '.join(title_list[:3])}"
+            ),
+            "pe_number": r["pe_number"],
+            "exhibit_type": r["exhibit_type"],
+            "title_count": r["title_count"],
+            "titles": title_list,
+        })
+
+    return issues
+
+
 def check_extreme_outliers(conn: sqlite3.Connection) -> list[dict]:
     """Flag amount values that are implausibly large (> $1 trillion).
 
@@ -1158,6 +1211,7 @@ ALL_CHECKS = [
     ("Database Integrity", check_integrity),                      # SCHEMA-003
     ("YoY Budget Anomalies", check_yoy_budget_anomalies),        # TIGER-001
     ("Appropriation Title Consistency", check_appropriation_title_consistency),  # TIGER-002
+    ("Budget Activity Consistency", check_budget_activity_consistency),  # BA title consistency
     ("Line Item Rollups", check_line_item_rollups),              # TIGER-003
     ("Referential Integrity", check_referential_integrity),      # TIGER-004
     ("Expected FY Columns", check_expected_fy_columns),          # TIGER-005
