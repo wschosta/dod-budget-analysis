@@ -43,7 +43,6 @@ def _cache_key(
     fiscal_year: list[str] | None,
     service: list[str] | None,
     exhibit_type: list[str] | None,
-    conn_id: int = 0,
     appropriation_code: list[str] | None = None,
 ) -> tuple:
     return (
@@ -52,7 +51,6 @@ def _cache_key(
         tuple(sorted(service or [])),
         tuple(sorted(exhibit_type or [])),
         tuple(sorted(appropriation_code or [])),
-        conn_id,
     )
 
 
@@ -93,7 +91,7 @@ def aggregate(
         )
 
     # OPT-AGG-001: Check cache before querying
-    key = _cache_key(group_by, fiscal_year, service, exhibit_type, id(conn),
+    key = _cache_key(group_by, fiscal_year, service, exhibit_type,
                      appropriation_code=appropriation_code)
     cached = _agg_cache.get(key)
     if cached is not None:
@@ -193,13 +191,20 @@ def hierarchy(
     Returns items with service, appropriation, program title, PE number, and amount.
     Results are cached for 300 seconds per unique filter combination.
     """
-    cache_key = ("hierarchy", fiscal_year, service, exhibit_type, id(conn))
+    cache_key = ("hierarchy", fiscal_year, service, exhibit_type)
     cached = _hierarchy_cache.get(cache_key)
     if cached is not None:
         return cached
 
+    # Use dynamic FY column detection (consistent with main aggregation endpoint)
+    amount_cols = get_amount_columns(conn)
+    fy26_col = next((c for c in amount_cols if "fy2026_request" in c),
+                    "amount_fy2026_request")
+    fy25_col = next((c for c in amount_cols if "fy2025_enacted" in c),
+                    "amount_fy2025_enacted")
+
     conditions: list[str] = [
-        "amount_fy2026_request IS NOT NULL",
+        f"{fy26_col} IS NOT NULL",
         "organization_name IS NOT NULL",
     ]
     params: list[Any] = []
@@ -222,13 +227,13 @@ def hierarchy(
         f"appropriation_title AS approp_title, "
         f"line_item_title AS program, "
         f"pe_number, "
-        f"SUM(amount_fy2026_request) AS amount, "
-        f"SUM(COALESCE(amount_fy2025_enacted, 0)) AS prev_amount "
+        f"SUM({fy26_col}) AS amount, "
+        f"SUM(COALESCE({fy25_col}, 0)) AS prev_amount "
         f"FROM budget_lines "
         f"{where} "
         f"GROUP BY organization_name, appropriation_code, line_item_title "
-        f"HAVING SUM(amount_fy2026_request) > 0 "
-        f"ORDER BY SUM(amount_fy2026_request) DESC",
+        f"HAVING SUM({fy26_col}) > 0 "
+        f"ORDER BY SUM({fy26_col}) DESC",
         params,
     ).fetchall()
 

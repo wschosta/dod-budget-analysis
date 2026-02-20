@@ -103,8 +103,8 @@ def _list(db, **kwargs):
     """Call list_budget_lines with all required defaults."""
     defaults = dict(
         fiscal_year=None, service=None, exhibit_type=None,
-        pe_number=None, appropriation_code=None, q=None,
-        min_amount=None, max_amount=None,
+        pe_number=None, appropriation_code=None, budget_type=None,
+        q=None, min_amount=None, max_amount=None,
         sort_by="id", sort_dir="asc", limit=25, offset=0, conn=db,
     )
     defaults.update(kwargs)

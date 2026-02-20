@@ -11,7 +11,7 @@ from utils.database import get_amount_columns
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
-_summary_cache: TTLCache = TTLCache(maxsize=4, ttl_seconds=300)
+_summary_cache: TTLCache = TTLCache(maxsize=32, ttl_seconds=300)
 
 
 def _detect_fy_columns(conn: sqlite3.Connection) -> tuple[str, str]:
@@ -26,6 +26,8 @@ def _detect_fy_columns(conn: sqlite3.Connection) -> tuple[str, str]:
 def dashboard_summary(
     fiscal_year: str | None = Query(None, description="Filter by fiscal year (e.g. '2026')"),
     service: str | None = Query(None, description="Filter by service/organization name"),
+    exhibit_type: str | None = Query(None, description="Filter by exhibit type (e.g. 'R-2')"),
+    appropriation_code: str | None = Query(None, description="Filter by appropriation code"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
     """Return aggregated statistics for the dashboard overview page.
@@ -39,9 +41,11 @@ def dashboard_summary(
     - Budget type distribution (RDT&E, Procurement, O&M, etc.)
     - Enrichment coverage metrics
 
-    Pass fiscal_year and/or service to restrict all aggregations.
+    Pass fiscal_year, service, exhibit_type, and/or appropriation_code
+    to restrict all aggregations.
     """
-    cache_key = ("dashboard_summary", id(conn), fiscal_year, service)
+    cache_key = ("dashboard_summary", fiscal_year, service,
+                 exhibit_type, appropriation_code)
     cached = _summary_cache.get(cache_key)
     if cached is not None:
         return cached
@@ -49,13 +53,19 @@ def dashboard_summary(
     fy26_col, fy25_col = _detect_fy_columns(conn)
 
     conditions: list[str] = []
-    fy_params: list = []
+    filter_params: list = []
     if fiscal_year:
         conditions.append("fiscal_year = ?")
-        fy_params.append(fiscal_year)
+        filter_params.append(fiscal_year)
     if service:
         conditions.append("organization_name = ?")
-        fy_params.append(service)
+        filter_params.append(service)
+    if exhibit_type:
+        conditions.append("exhibit_type = ?")
+        filter_params.append(exhibit_type)
+    if appropriation_code:
+        conditions.append("appropriation_code = ?")
+        filter_params.append(appropriation_code)
     fy_filter = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     # Batch the main budget_lines aggregations into a single CTE query.
@@ -127,7 +137,7 @@ def dashboard_summary(
                         'appropriation_title', a.appropriation_title,
                         'total', a.total)
         ) FROM by_approp a
-    """, fy_params).fetchall()
+    """, filter_params).fetchall()
 
     # Parse the batch result
     sections = {row[0]: json.loads(row[1]) for row in batch_result}
@@ -142,6 +152,10 @@ def dashboard_summary(
         tp_conditions.append("fiscal_year = ?")
     if service:
         tp_conditions.append("organization_name = ?")
+    if exhibit_type:
+        tp_conditions.append("exhibit_type = ?")
+    if appropriation_code:
+        tp_conditions.append("appropriation_code = ?")
     tp_where = "WHERE " + " AND ".join(tp_conditions)
     top_programs_rows = conn.execute(
         f"SELECT id, line_item_title, organization_name, pe_number, "
@@ -149,7 +163,7 @@ def dashboard_summary(
         f"FROM budget_lines "
         f"{tp_where} "
         f"ORDER BY {fy26_col} DESC LIMIT 10",
-        fy_params,
+        filter_params,
     ).fetchall()
 
     # Enrichment coverage — how much of the database is enriched
@@ -194,7 +208,7 @@ def dashboard_summary(
             {fy_filter}
             GROUP BY COALESCE(budget_type, 'Unknown')
             ORDER BY SUM(COALESCE({fy26_col}, 0)) DESC
-        """, fy_params).fetchall()
+        """, filter_params).fetchall()
         by_budget_type = [dict(r) for r in bt_rows]
     except Exception:
         pass  # budget_type column may not exist
@@ -210,7 +224,7 @@ def dashboard_summary(
             {fy_filter}
             GROUP BY COALESCE(exhibit_type, 'Unknown')
             ORDER BY SUM(COALESCE({fy26_col}, 0)) DESC
-        """, fy_params).fetchall()
+        """, filter_params).fetchall()
         by_exhibit_type = [dict(r) for r in et_rows]
     except Exception:
         pass

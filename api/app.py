@@ -254,6 +254,14 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 ),
             },
             {
+                "name": "dashboard",
+                "description": "Dashboard summary statistics with service, FY, and budget type breakdowns.",
+            },
+            {
+                "name": "feedback",
+                "description": "User feedback submission for bug reports, feature requests, and data issues.",
+            },
+            {
                 "name": "meta",
                 "description": "Health check and API metadata.",
             },
