@@ -8,15 +8,17 @@ These tasks **cannot be completed by an autonomous agent**. They require network
 
 ## Priority Order
 
-1. **HIGH (Unblocks deployment):** OH-MY-007 → OH-MY-008 → OH-MY-009 → OH-MY-010
-2. **MEDIUM (Data quality):** OH-MY-001 → OH-MY-002 → OH-MY-003 → OH-MY-004 → OH-MY-005 → OH-MY-006
-3. **LOW (Post-launch):** OH-MY-011 → OH-MY-012
+1. **ACTIVE (Data quality):** OH-MY-001 → OH-MY-002 → OH-MY-003 → OH-MY-004 → OH-MY-005 → OH-MY-006
+2. **ACTIVE (Accessibility):** OH-MY-010
+3. **DEFERRED (Deployment):** OH-MY-007, OH-MY-008, OH-MY-009
+4. **DEFERRED (Launch):** OH-MY-011, OH-MY-012
 
 ---
 
 ## Task List
 
-### OH-MY-001: Audit downloader source coverage
+### OH-MY-001: Audit downloader source coverage — DONE
+**Status:** COMPLETE (2026-02-19)
 **Roadmap:** 1.A1-a | **File:** `dod_budget_downloader.py` | **Complexity:** LOW | **Tokens:** ~1,500
 **Requires:** Network access to DoD websites
 **Dependencies:** None
@@ -31,7 +33,8 @@ Run the downloader with `--list --no-gui` and compare discovered files against e
 
 ---
 
-### OH-MY-002: Identify missing DoD component sources
+### OH-MY-002: Identify missing DoD component sources — DONE
+**Status:** COMPLETE (2026-02-19)
 **Roadmap:** 1.A1-b | **File:** `dod_budget_downloader.py` | **Complexity:** MEDIUM | **Tokens:** ~2,500
 **Requires:** Web browsing of DoD agency sites
 **Dependencies:** OH-MY-001
@@ -46,7 +49,8 @@ Browse DoD component websites to find additional budget exhibit sources:
 
 ---
 
-### OH-MY-003: Verify defense-wide J-Books discovery
+### OH-MY-003: Verify defense-wide J-Books discovery — DONE
+**Status:** COMPLETE (2026-02-19). 117/117 files match between discoverer and website.
 **Roadmap:** 1.A1-c | **File:** `dod_budget_downloader.py` | **Complexity:** LOW | **Tokens:** ~1,000
 **Requires:** Network access
 **Dependencies:** OH-MY-001
@@ -60,7 +64,8 @@ Verify Comptroller defense-wide justification books are fully discovered:
 
 ---
 
-### OH-MY-004: Test historical fiscal year reach (FY2017+)
+### OH-MY-004: Test historical fiscal year reach (FY2017+) — DONE
+**Status:** COMPLETE (2026-02-19). See coverage matrix in DATA_SOURCES.md.
 **Roadmap:** 1.A2-a | **File:** `dod_budget_downloader.py` | **Complexity:** LOW | **Tokens:** ~1,000
 **Requires:** Network access
 **Dependencies:** None
@@ -75,7 +80,8 @@ Test whether the downloader can discover and retrieve documents back to FY2017:
 
 ---
 
-### OH-MY-005: Handle alternate URL patterns for older FYs
+### OH-MY-005: Handle alternate URL patterns for older FYs — DONE
+**Status:** COMPLETE (2026-02-19). Navy fallback URL added; FY2017-2021 now return 37-49 files.
 **Roadmap:** 1.A2-b | **File:** `dod_budget_downloader.py` | **Complexity:** MEDIUM | **Tokens:** ~2,000
 **Requires:** Network access + development
 **Dependencies:** OH-MY-004
@@ -89,7 +95,8 @@ Based on findings from OH-MY-004, implement URL pattern fixes:
 
 ---
 
-### OH-MY-006: Cross-validate exhibit inventory against real corpus
+### OH-MY-006: Cross-validate exhibit inventory against real corpus — DONE
+**Status:** COMPLETE (2026-02-19). All 7 comptroller exhibits cross-validated; catalog updated.
 **Roadmap:** 1.B1-a | **File:** `exhibit_catalog.py` | **Complexity:** LOW | **Tokens:** ~1,500
 **Requires:** Downloaded document corpus
 **Dependencies:** OH-MY-001 (need downloaded files)
@@ -103,9 +110,17 @@ Run the exhibit audit tool against real downloaded files:
 
 **Verification:** All exhibit types in downloaded corpus are cataloged.
 
+**Results:** Downloaded 7 FY2026 comptroller Excel files (p1, r1, o1, m1, p1r, rf1, c1).
+Cross-validated actual header rows against `EXHIBIT_CATALOG` column specs. Found major
+discrepancies — real files use FY-specific dollar column headers and different structural
+columns than originally documented. Updated all 7 summary exhibit entries with correct
+header_patterns. Fixed `find_matching_columns()` to use longest-match-first strategy.
+P-5, R-2, R-3, R-4 (J-Book formats) marked as unverified pending J-Book corpus.
+
 ---
 
-### OH-MY-007: Choose hosting platform (CRITICAL — unblocks deployment)
+### OH-MY-007: Choose hosting platform ~~(CRITICAL — unblocks deployment)~~ DEFERRED
+**Status:** DEFERRED — deployment decisions postponed
 **Roadmap:** 4.A1 | **File:** `docs/design/deployment_design.py` | **Complexity:** MEDIUM | **Tokens:** ~2,000
 **Requires:** Cloud account setup
 **Dependencies:** None
@@ -121,7 +136,8 @@ Evaluate and select a hosting platform:
 
 ---
 
-### OH-MY-008: Configure CD deployment workflow
+### OH-MY-008: Configure CD deployment workflow — DEFERRED
+**Status:** DEFERRED — deployment decisions postponed
 **Roadmap:** 4.A3-a | **File:** `.github/workflows/deploy.yml` | **Complexity:** MEDIUM | **Tokens:** ~2,000
 **Requires:** Cloud account + secrets
 **Dependencies:** OH-MY-007
@@ -137,7 +153,8 @@ Fill in the deploy workflow template (created by BEAR-007):
 
 ---
 
-### OH-MY-009: Register domain and configure TLS
+### OH-MY-009: Register domain and configure TLS — DEFERRED
+**Status:** DEFERRED — deployment decisions postponed
 **Roadmap:** 4.A4 / 4.C1-a | **Complexity:** LOW | **Tokens:** ~1,000
 **Requires:** Domain registration
 **Dependencies:** OH-MY-007
@@ -169,7 +186,8 @@ Run accessibility audit on the deployed or locally running UI:
 
 ---
 
-### OH-MY-011: Soft launch and collect feedback
+### OH-MY-011: Soft launch and collect feedback — DEFERRED
+**Status:** DEFERRED — deployment decisions postponed
 **Roadmap:** 4.B1 + 4.B2-a | **Complexity:** LOW | **Tokens:** ~1,500
 **Requires:** Deployed application + secrets
 **Dependencies:** OH-MY-008
@@ -185,7 +203,8 @@ Share with initial users and set up feedback collection:
 
 ---
 
-### OH-MY-012: Public launch
+### OH-MY-012: Public launch — DEFERRED
+**Status:** DEFERRED — deployment decisions postponed
 **Roadmap:** 4.B3 + 4.B4 + 4.C6-a | **Complexity:** LOW | **Tokens:** ~1,500
 **Requires:** Deployed application + community channels
 **Dependencies:** OH-MY-011

@@ -40,8 +40,7 @@ and returns a `{year: page_url}` dict.  `discover_comptroller_files()` then
 crawls each year's page for downloadable links.
 
 **File types:** PDF, Excel (`.xlsx`, `.xls`), ZIP
-**FY range:** Dynamically discovered from the index page (typically FY 2017–current)
-<!-- TODO: verify actual earliest year after running 1.A1 audit -->
+**FY range:** FY2017–FY2026 verified (dynamically discovered from index page)
 
 ---
 
@@ -59,7 +58,7 @@ https://comptroller.war.gov/Budget-Materials/FY{fy}BudgetJustification/
 ```
 
 **File types:** PDF (primary), Excel
-**FY range:** FY 2017–current  <!-- TODO: verify after audit -->
+**FY range:** FY2017–FY2026 verified (117–162 files per year)
 
 ---
 
@@ -78,7 +77,7 @@ https://www.asafm.army.mil/Budget-Materials/
 
 **File types:** Excel (exhibits: `p1_display.xlsx`, `r1.xlsx`, `o1_display.xlsx`, etc.),
 PDF (justification books)
-**FY range:** FY 2018–current  <!-- TODO: verify after audit -->
+**FY range:** FY2019–FY2026 verified via browser (39 files for FY2026; WAF blocks headless)
 
 ---
 
@@ -97,7 +96,7 @@ https://www.secnav.navy.mil/fmc/Pages/Fiscal-Year-{fy}.aspx
 
 **File types:** PDF (justification books — Navy + Marine Corps separately),
 Excel (exhibits)
-**FY range:** FY 2019–current  <!-- TODO: verify after audit -->
+**FY range:** FY2017–FY2026 verified (36–49 files per year). FY2017–FY2021 use alternate URL (auto-fallback added in OH-MY-005).
 
 ---
 
@@ -117,7 +116,7 @@ https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx
 Used to retrieve older fiscal years not available on the main FY index page.
 
 **File types:** PDF, Excel
-**FY range:** FY 2017–2018 (older fiscal years)  <!-- TODO: verify after audit -->
+**FY range:** FY1997–FY2025 per archive page (575+ files); discoverer returns 0 in headless mode (needs fix)
 
 ---
 
@@ -137,7 +136,7 @@ https://www.saffm.hq.af.mil/FM-Resources/Budget/Air-Force-Presidents-Budget-FY{f
 (`fy2` = two-digit fiscal year, e.g. `26` for FY 2026)
 
 **File types:** PDF (Air Force + Space Force justification books), Excel (exhibits)
-**FY range:** FY 2019–current  <!-- TODO: verify; Space Force separated FY 2021+ -->
+**FY range:** FY1997–FY2026 per site sidebar; FY2026 verified (25 files); WAF blocks headless. Space Force separated FY2021+.
 
 ---
 
@@ -153,6 +152,30 @@ SOURCE_DISCOVERERS = {
 }
 # comptroller uses discover_comptroller_files() called via discover_fiscal_years()
 ```
+
+---
+
+## Agencies NOT Currently in Downloader (OH-MY-002 Audit)
+
+<!-- Verified 2026-02-19 — see OH-MY-002 -->
+
+These DoD component agencies were evaluated for separate budget materials
+not already available on `comptroller.war.gov`:
+
+| Agency | Own Budget Page? | Unique Materials? | Recommendation |
+|--------|-----------------|-------------------|----------------|
+| DLA (dla.mil) | No | AFRs only | Skip — J-Books on comptroller |
+| MDA (mda.mil) | **Yes** | Budget Booklets/Overviews | **Consider adding** — unique summary docs |
+| SOCOM (socom.mil) | Partial | Financial Statements only | Skip — J-Books on comptroller |
+| DHA (health.mil) | Partial | AFRs + Budget Execution Reports | Low priority — execution reports are supplementary |
+| DISA (disa.mil) | Yes | AFRs + overview info | Skip — J-Books on comptroller |
+| NGB (nationalguard.mil) | **Yes** | PB Request Summaries, Appropriations Analyses | **Consider adding** — unique NGB-LL summaries |
+
+**Key findings:**
+- All six agencies' J-Books are already captured via the `defense-wide` source
+- **MDA** publishes unique "Budget Booklet" summary PDFs at `mda.mil/news/budget_information.html`
+- **NGB** publishes unique Legislative Liaison summaries at `nationalguard.mil/.../Important-Documents/`
+- The other four agencies only publish AFRs or financial statements (different document type)
 
 ---
 
@@ -197,21 +220,43 @@ deleted and retried.
 
 ## Coverage Matrix
 
-<!-- TODO [Step 1.A5-c]: Fill in after running audit (Step 1.A1) -->
-<!-- Values marked with ~ are unverified estimates                  -->
+<!-- Verified via OH-MY-001 audit on 2026-02-19 -->
 
 | Source | FY2017 | FY2018 | FY2019 | FY2020 | FY2021 | FY2022 | FY2023 | FY2024 | FY2025 | FY2026 |
 |--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|--------|
-| comptroller  | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
-| defense-wide | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
-| army         |   | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
-| navy         |   |   | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
-| navy-archive | ~ | ~ |   |   |   |   |   |   |   |   |
-| airforce     |   |   | ~ | ~ | ~ | ~ | ~ | ~ | ~ | ~ |
+| comptroller  | 71 | 61 | 35 | 35 | 36 | 55 | 33 | 52 | 43 | 25 |
+| defense-wide | 162 | 151 | 149 | 151 | 148 | 153 | 157 | 152 | 115 | 117 |
+| army         | ? | ? | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 39 |
+| navy         | 49 | 41 | 42 | 38 | 37 | 37 | 37 | 36 | 36 | 36 |
+| navy-archive | 49‡ | 41‡ | 43‡ | 39‡ | 37‡ | 37‡ | 37‡ | 36‡ | 36‡ | —‡ |
+| airforce     | ? | ? | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | 25 |
 
-Legend: ~ = expected available but unverified, blank = not expected
+Legend:
+- **Number** = verified file count from `--list` output
+- **✓** = site has FY tab/page (confirmed via browser), file count not enumerated
+- **?** = site has historical years listed but not individually verified
+- Navy FY2017-2021 use alternate URL `/fmc/fmb/Pages/` (fixed in OH-MY-005).
+- **‡** = file counts from Navy archive page (secnav.navy.mil/fmc/fmb/Pages/archive.aspx).
+  The `discover_navy_archive_files()` function currently returns 0 in headless mode
+  (SharePoint WAF blocks headless Playwright). Archive page has FY1997–FY2025.
+
+### Notes from audit
+
+1. **Comptroller & defense-wide** work perfectly via direct HTTP (no browser needed).
+   Full coverage FY2017–FY2026 confirmed.
+2. **Army & Air Force** require non-headless Playwright (`headless=False`) due to WAF.
+   `PLAYWRIGHT_HEADLESS=1` returns 0 files. Sites are active with budget materials
+   confirmed for FY2019–FY2026 (Army) and FY1997–FY2026 (Air Force).
+3. **Navy main page** works in headless mode for FY2022–FY2026 (36–37 files each).
+   FY2017–FY2021 use a different URL pattern (`/fmc/fmb/Pages/` vs `/fmc/Pages/`).
+   OH-MY-005 added automatic fallback to the alternate URL when primary returns 0.
+4. **Navy archive** is a SharePoint list at `/fmc/fmb/Pages/archive.aspx` with files
+   for FY1997–FY2025 (575+ total files). The discoverer returns 0 because headless
+   Playwright cannot render the SharePoint page. Needs investigation.
+5. **`PLAYWRIGHT_HEADLESS` env var** was added to `dod_budget_downloader.py` during
+   this audit to allow headless mode for testing. Default remains `headless=False`.
 
 ---
 
-**Last Updated:** 2026-02-18 (from source code — Step 1.A5-a)
+**Last Updated:** 2026-02-19 (OH-MY-001 audit)
 **See also:** [docs/wiki/Data-Sources.md](docs/wiki/Data-Sources.md)
