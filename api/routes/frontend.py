@@ -487,7 +487,7 @@ def program_descriptions_partial(
     if _table_exists(conn, "pe_descriptions"):
         try:
             from api.routes.pe import get_pe_descriptions
-            result = get_pe_descriptions(pe_number, fy=None, limit=10, offset=0, conn=conn)
+            result = get_pe_descriptions(pe_number, fy=None, section=None, limit=10, offset=0, conn=conn)
             descriptions = result.get("descriptions", [])
             total = result.get("total", 0)
         except Exception:

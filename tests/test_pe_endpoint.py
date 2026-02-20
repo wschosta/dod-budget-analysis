@@ -315,32 +315,63 @@ class TestGetPeSubelements:
 
 class TestGetPeDescriptions:
     def test_returns_descriptions(self, populated_db):
-        result = get_pe_descriptions("0602120A", fy=None, limit=20, offset=0,
-                                     conn=populated_db)
+        result = get_pe_descriptions("0602120A", fy=None, section=None,
+                                     limit=20, offset=0, conn=populated_db)
         assert result["total"] == 2
         assert len(result["descriptions"]) == 2
 
     def test_filter_by_fy(self, populated_db):
-        result = get_pe_descriptions("0602120A", fy="2026", limit=20, offset=0,
-                                     conn=populated_db)
+        result = get_pe_descriptions("0602120A", fy="2026", section=None,
+                                     limit=20, offset=0, conn=populated_db)
         assert result["total"] == 1
         assert result["descriptions"][0]["fiscal_year"] == "2026"
 
     def test_pagination(self, populated_db):
-        result = get_pe_descriptions("0602120A", fy=None, limit=1, offset=0,
-                                     conn=populated_db)
+        result = get_pe_descriptions("0602120A", fy=None, section=None,
+                                     limit=1, offset=0, conn=populated_db)
         assert result["total"] == 2
         assert len(result["descriptions"]) == 1
 
     def test_offset(self, populated_db):
-        result = get_pe_descriptions("0602120A", fy=None, limit=1, offset=1,
-                                     conn=populated_db)
+        result = get_pe_descriptions("0602120A", fy=None, section=None,
+                                     limit=1, offset=1, conn=populated_db)
         assert len(result["descriptions"]) == 1
 
     def test_unknown_pe_returns_empty(self, db):
-        result = get_pe_descriptions("9999999X", fy=None, limit=20, offset=0,
-                                     conn=db)
+        result = get_pe_descriptions("9999999X", fy=None, section=None,
+                                     limit=20, offset=0, conn=db)
         assert result["total"] == 0
+
+    def test_section_filter(self, populated_db):
+        """Section header substring filter returns only matching rows."""
+        # Insert a row with section_header
+        populated_db.execute("""
+            INSERT INTO pe_descriptions
+                (pe_number, fiscal_year, source_file, page_start, page_end,
+                 section_header, description_text)
+            VALUES ('0602120A', '2026', 'army/r2.pdf', 10, 11,
+                    'Accomplishments', 'Prototype testing completed.')
+        """)
+        populated_db.commit()
+        result = get_pe_descriptions("0602120A", fy=None, section="Accomplishment",
+                                     limit=20, offset=0, conn=populated_db)
+        assert result["total"] == 1
+        assert result["descriptions"][0]["section_header"] == "Accomplishments"
+
+    def test_available_sections(self, populated_db):
+        """Response includes distinct section headers for UI filtering."""
+        populated_db.execute("""
+            INSERT INTO pe_descriptions
+                (pe_number, fiscal_year, source_file, page_start, page_end,
+                 section_header, description_text)
+            VALUES ('0602120A', '2026', 'army/r2.pdf', 10, 11,
+                    'Acquisition Strategy', 'Strategy details.')
+        """)
+        populated_db.commit()
+        result = get_pe_descriptions("0602120A", fy=None, section=None,
+                                     limit=20, offset=0, conn=populated_db)
+        assert "available_sections" in result
+        assert "Acquisition Strategy" in result["available_sections"]
 
 
 # ── get_pe_related tests ──────────────────────────────────────────────────────

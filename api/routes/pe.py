@@ -201,19 +201,29 @@ def get_pe_subelements(
 def get_pe_descriptions(
     pe_number: str,
     fy: str | None = Query(None, description="Filter by fiscal year"),
+    section: str | None = Query(None, description="Filter by section header (substring match)"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
-    """Return narrative sections extracted from PDF pages for this PE."""
+    """Return narrative sections extracted from PDF pages for this PE.
+
+    Supports filtering by fiscal year and section header name to drill into
+    specific narrative blocks (e.g., 'Accomplishments', 'Acquisition Strategy').
+    """
     params: list[Any] = [pe_number]
-    fy_clause = ""
+    clauses: list[str] = []
     if fy:
-        fy_clause = "AND fiscal_year = ?"
+        clauses.append("AND fiscal_year = ?")
         params.append(fy)
+    if section:
+        clauses.append("AND section_header LIKE ?")
+        params.append(f"%{section}%")
+
+    extra_where = " ".join(clauses)
 
     total = conn.execute(
-        f"SELECT COUNT(*) FROM pe_descriptions WHERE pe_number = ? {fy_clause}",
+        f"SELECT COUNT(*) FROM pe_descriptions WHERE pe_number = ? {extra_where}",
         params,
     ).fetchone()[0]
 
@@ -221,17 +231,27 @@ def get_pe_descriptions(
         SELECT id, fiscal_year, source_file, page_start, page_end,
                section_header, description_text
         FROM pe_descriptions
-        WHERE pe_number = ? {fy_clause}
+        WHERE pe_number = ? {extra_where}
         ORDER BY fiscal_year, page_start
         LIMIT ? OFFSET ?
     """, params + [limit, offset]).fetchall()
 
+    # Also return the distinct section headers for this PE (for UI filtering)
+    headers = conn.execute(
+        "SELECT DISTINCT section_header FROM pe_descriptions "
+        "WHERE pe_number = ? AND section_header IS NOT NULL "
+        "ORDER BY section_header",
+        (pe_number,),
+    ).fetchall()
+
     return {
         "pe_number": pe_number,
         "fiscal_year": fy,
+        "section_filter": section,
         "total": total,
         "limit": limit,
         "offset": offset,
+        "available_sections": [r[0] for r in headers],
         "descriptions": [_row_dict(r) for r in rows],
     }
 
