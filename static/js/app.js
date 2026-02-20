@@ -262,8 +262,9 @@ function closeFeedbackModal() {
         if (resp.ok) {
           closeFeedbackModal();
           form.reset();
+          if (typeof showToast === "function") showToast("Feedback submitted. Thank you!", "success");
         } else {
-          alert("Failed to submit feedback. Please try again.");
+          if (typeof showToast === "function") showToast("Failed to submit feedback. Please try again.", "error");
         }
       }).catch(function() {
         // Endpoint may not exist yet — close anyway since feedback can't be saved
@@ -307,12 +308,13 @@ function copyShareURL() {
     document.execCommand("copy");
     document.body.removeChild(ta);
   }
-  // Show "Copied!" tooltip
+  // Show "Copied!" tooltip and toast
   var btn = document.getElementById("share-btn");
   if (btn) {
     btn.classList.add("copied");
     setTimeout(function() { btn.classList.remove("copied"); }, 1500);
   }
+  if (typeof showToast === "function") showToast("URL copied to clipboard", "success");
 }
 
 // ── FE-010: Page-size selector ────────────────────────────────────────────────
@@ -420,6 +422,64 @@ document.addEventListener("htmx:afterSwap", function (evt) {
     evt.detail.target.setAttribute("aria-busy", "false");
   }
 });
+
+// ── FALCON-10: Toast notifications ───────────────────────────────────────────
+
+var TOAST_ICONS = {
+  success: "\u2713",
+  info: "\u2139",
+  warning: "\u26A0",
+  error: "\u2717"
+};
+
+/**
+ * Show a toast notification.
+ * @param {string} message - The message to display
+ * @param {string} type - One of: success, info, warning, error
+ * @param {number} duration - Auto-dismiss after ms (default 4000, 0 to disable)
+ */
+function showToast(message, type, duration) {
+  type = type || "info";
+  if (duration === undefined) duration = 4000;
+
+  var container = document.getElementById("toast-container");
+  if (!container) return;
+
+  var toast = document.createElement("div");
+  toast.className = "toast toast-" + type;
+  toast.setAttribute("role", "alert");
+
+  var icon = document.createElement("span");
+  icon.className = "toast-icon";
+  icon.textContent = TOAST_ICONS[type] || TOAST_ICONS.info;
+  icon.setAttribute("aria-hidden", "true");
+
+  var msg = document.createElement("span");
+  msg.textContent = message;
+
+  var dismiss = document.createElement("button");
+  dismiss.className = "toast-dismiss";
+  dismiss.textContent = "\u00D7";
+  dismiss.setAttribute("aria-label", "Dismiss");
+  dismiss.addEventListener("click", function() { removeToast(toast); });
+
+  toast.appendChild(icon);
+  toast.appendChild(msg);
+  toast.appendChild(dismiss);
+  container.appendChild(toast);
+
+  if (duration > 0) {
+    setTimeout(function() { removeToast(toast); }, duration);
+  }
+}
+
+function removeToast(toast) {
+  if (!toast || !toast.parentNode) return;
+  toast.classList.add("removing");
+  setTimeout(function() {
+    if (toast.parentNode) toast.parentNode.removeChild(toast);
+  }, 200);
+}
 
 // ── Initialise ─────────────────────────────────────────────────────────────────
 
@@ -573,6 +633,7 @@ function saveCurrentSearch(name) {
   if (searches.length > 20) searches = searches.slice(-20);
   localStorage.setItem(SAVED_SEARCHES_KEY, JSON.stringify(searches));
   renderSavedSearches();
+  if (typeof showToast === "function") showToast('Search "' + name + '" saved', "success");
 }
 
 function deleteSavedSearch(index) {
