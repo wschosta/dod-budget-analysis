@@ -171,6 +171,27 @@ class TestListBudgetLines:
         for item in result.items:
             assert 1000 <= item.amount_fy2026_request <= 3000
 
+    def test_pagination_metadata_first_page(self, db):
+        """First page has correct page, page_count, has_next."""
+        result = _list(db, limit=2, offset=0)
+        assert result.page == 0
+        assert result.page_count == 2  # 4 items / 2 per page
+        assert result.has_next is True
+
+    def test_pagination_metadata_last_page(self, db):
+        """Last page has has_next=False."""
+        result = _list(db, limit=2, offset=2)
+        assert result.page == 1
+        assert result.page_count == 2
+        assert result.has_next is False
+
+    def test_pagination_metadata_single_page(self, db):
+        """When all items fit, page_count=1 and has_next=False."""
+        result = _list(db, limit=25, offset=0)
+        assert result.page == 0
+        assert result.page_count == 1
+        assert result.has_next is False
+
 
 class TestGetBudgetLine:
     def test_existing_item(self, db):

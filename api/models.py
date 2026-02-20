@@ -136,6 +136,9 @@ class PaginatedResponse(BaseModel):
     total: int = Field(..., description="Total matching rows (before pagination)", examples=[3842])
     limit: int = Field(..., description="Page size used", examples=[25])
     offset: int = Field(..., description="Offset of this page", examples=[0])
+    page: int = Field(..., description="Current page number (0-indexed)", examples=[0])
+    page_count: int = Field(..., description="Total number of pages", examples=[154])
+    has_next: bool = Field(..., description="Whether there is a next page")
     items: list[BudgetLineOut] = Field(..., description="Budget line items for this page")
 
 

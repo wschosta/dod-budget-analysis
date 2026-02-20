@@ -105,7 +105,15 @@ def list_budget_lines(
     rows = conn.execute(data_sql, params + [limit, offset]).fetchall()
     items = [BudgetLineOut(**dict(row)) for row in rows]
 
-    return PaginatedResponse(total=total, limit=limit, offset=offset, items=items)
+    page = offset // limit if limit > 0 else 0
+    page_count = max(1, (total + limit - 1) // limit) if limit > 0 else 1
+    has_next = offset + limit < total
+
+    return PaginatedResponse(
+        total=total, limit=limit, offset=offset,
+        page=page, page_count=page_count, has_next=has_next,
+        items=items,
+    )
 
 
 @router.get(
