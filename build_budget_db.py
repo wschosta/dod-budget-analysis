@@ -130,6 +130,15 @@ from utils.patterns import PE_NUMBER
 # For backward compatibility, use the shared pattern
 _PE_PATTERN = PE_NUMBER
 
+# ── Schema versioning ────────────────────────────────────────────────────────
+# Increment _SCHEMA_VERSION when CREATE TABLE statements change.
+_SCHEMA_VERSION = 2
+_SCHEMA_DESCRIPTION = (
+    "LION: pdf_pages.fiscal_year/exhibit_type, pdf_pe_numbers junction, "
+    "pe_tags.source_files, pe_lineage UNIQUE constraint, pe_descriptions_fts, "
+    "schema_versions table, composite indexes"
+)
+
 import openpyxl
 import pdfplumber
 from exhibit_catalog import find_matching_columns as _catalog_find_matching_columns
@@ -528,7 +537,27 @@ def create_database(db_path: Path) -> sqlite3.Connection:
         );
         CREATE INDEX IF NOT EXISTS idx_lineage_source ON pe_lineage(source_pe);
         CREATE INDEX IF NOT EXISTS idx_lineage_ref    ON pe_lineage(referenced_pe);
+
+        -- Schema version tracking — records which migrations have been applied.
+        -- Enables forward/backward compatibility checks when opening databases
+        -- built by different versions of the pipeline.
+        CREATE TABLE IF NOT EXISTS schema_versions (
+            version      INTEGER PRIMARY KEY,
+            description  TEXT,
+            applied_at   TEXT DEFAULT (datetime('now'))
+        );
     """)
+
+    # Record schema version if not already present
+    current_version = conn.execute(
+        "SELECT MAX(version) FROM schema_versions"
+    ).fetchone()[0]
+    if current_version is None or current_version < _SCHEMA_VERSION:
+        conn.execute(
+            "INSERT OR REPLACE INTO schema_versions (version, description) "
+            "VALUES (?, ?)",
+            (_SCHEMA_VERSION, _SCHEMA_DESCRIPTION),
+        )
 
     conn.commit()
     return conn
