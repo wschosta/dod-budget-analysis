@@ -56,6 +56,7 @@ import time
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 # REFRESH-004: Path for the progress file polled by external monitors
 _PROGRESS_FILE = Path("refresh_progress.json")
@@ -80,6 +81,12 @@ class RefreshWorkflow:
         self.verbose = verbose
         self.dry_run = dry_run
         self.workers = workers
+        if notify_url is not None:
+            parsed = urlparse(notify_url)
+            if parsed.scheme not in ("http", "https"):
+                raise ValueError(
+                    f"notify_url must use http or https scheme, got: {parsed.scheme!r}"
+                )
         self.notify_url = notify_url
         self.db_path = Path(db_path) if db_path else Path("dod_budget.sqlite")
         self.no_rollback = no_rollback

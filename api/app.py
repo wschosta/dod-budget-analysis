@@ -639,7 +639,7 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "api.app:app",
-        host="0.0.0.0",
+        host=_cfg.api_host,
         port=_cfg.api_port,
         reload=True,
         log_level="info",

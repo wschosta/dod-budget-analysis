@@ -19,6 +19,7 @@ import sys
 import time
 import urllib.request
 import urllib.error
+from urllib.parse import urlparse
 
 
 def check_endpoint(base_url: str, path: str, expected_status: int,
@@ -36,9 +37,12 @@ def check_endpoint(base_url: str, path: str, expected_status: int,
         (passed, message) tuple.
     """
     url = f"{base_url.rstrip('/')}{path}"
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False, f"Unsupported URL scheme: {parsed.scheme!r}"
     try:
         req = urllib.request.Request(url)
-        response = urllib.request.urlopen(req, timeout=timeout)
+        response = urllib.request.urlopen(req, timeout=timeout)  # noqa: S310
         status = response.status
         body = response.read().decode("utf-8", errors="replace")
 
