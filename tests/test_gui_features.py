@@ -303,6 +303,19 @@ class TestHierarchyEndpoint:
         data = resp.json()
         assert "items" in data
 
+    def test_hierarchy_with_service_filter(self, app_client):
+        resp = app_client.get("/api/v1/aggregations/hierarchy?service=Army")
+        assert resp.status_code == 200
+        data = resp.json()
+        for item in data["items"]:
+            assert item["service"] == "Army"
+
+    def test_hierarchy_with_exhibit_type_filter(self, app_client):
+        resp = app_client.get("/api/v1/aggregations/hierarchy?exhibit_type=p1")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "items" in data
+
 
 # ── Navigation ────────────────────────────────────────────────────────────────
 

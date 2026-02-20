@@ -178,14 +178,16 @@ _hierarchy_cache: TTLCache = TTLCache(maxsize=16, ttl_seconds=300)
 @router.get("/hierarchy", summary="Hierarchical budget breakdown for treemap")
 def hierarchy(
     fiscal_year: str | None = FQuery(None, description="Filter by fiscal year"),
+    service: str | None = FQuery(None, description="Filter by service/organization name"),
+    exhibit_type: str | None = FQuery(None, description="Filter by exhibit type"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
     """Return Service > Appropriation > Program hierarchy for treemap visualization.
 
     Returns items with service, appropriation, program title, PE number, and amount.
-    Results are cached for 300 seconds per (fiscal_year, conn) combination.
+    Results are cached for 300 seconds per unique filter combination.
     """
-    cache_key = ("hierarchy", fiscal_year, id(conn))
+    cache_key = ("hierarchy", fiscal_year, service, exhibit_type, id(conn))
     cached = _hierarchy_cache.get(cache_key)
     if cached is not None:
         return cached
@@ -199,6 +201,12 @@ def hierarchy(
     if fiscal_year:
         conditions.append("fiscal_year = ?")
         params.append(fiscal_year)
+    if service:
+        conditions.append("organization_name = ?")
+        params.append(service)
+    if exhibit_type:
+        conditions.append("exhibit_type = ?")
+        params.append(exhibit_type)
 
     where = "WHERE " + " AND ".join(conditions)
 
