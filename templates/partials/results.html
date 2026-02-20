@@ -103,7 +103,16 @@
               {% if sort_by == "amount_fy2024_actual" %}<span class="sort-icon">{{ "▲" if sort_dir == "asc" else "▼" }}</span>{% endif %}
             </a>
           </th>
-          <th class="col-fy25 td-amount" data-tooltip="FY2025 enacted amount in thousands of dollars ($K). Enacted = signed into law by Congress.">FY25 Enacted ($K)</th>
+          <th class="col-fy25 td-amount" {% if sort_by == "amount_fy2025_enacted" %}aria-sort="{{ 'ascending' if sort_dir == 'asc' else 'descending' }}"{% endif %}
+              data-tooltip="FY2025 enacted amount in thousands of dollars ($K). Enacted = signed into law by Congress.">
+            <a hx-get="/partials/results" hx-target="#results-container"
+               hx-push-url="true"
+               hx-vals='{"sort_by":"amount_fy2025_enacted","sort_dir":"{% if sort_by == "amount_fy2025_enacted" and sort_dir == "desc" %}asc{% else %}desc{% endif %}","page":"1"}'
+               hx-include="#filter-form">
+              FY25 Enacted ($K)
+              {% if sort_by == "amount_fy2025_enacted" %}<span class="sort-icon">{{ "▲" if sort_dir == "asc" else "▼" }}</span>{% endif %}
+            </a>
+          </th>
           <th class="col-fy25tot td-amount" style="display:none" data-tooltip="FY2025 total amount ($K) including supplementals.">FY25 Total ($K)</th>
           <th class="col-fy26 td-amount" data-tooltip="FY2026 budget request in thousands of dollars ($K). Request = President's budget submission to Congress.">
             <a hx-get="/partials/results" hx-target="#results-container"
