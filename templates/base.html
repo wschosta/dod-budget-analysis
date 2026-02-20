@@ -5,16 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}DoD Budget Explorer{% endblock %}</title>
 
-  <!-- DONE [Group: LION] LION-010: Dark mode toggle with CSS custom properties -->
-  <script>
-    // LION-010: Apply saved theme before first paint to avoid flash
-    (function() {
-      var saved = localStorage.getItem('dod_theme');
-      if (saved) {
-        document.documentElement.setAttribute('data-theme', saved);
-      }
-    })();
-  </script>
+  <!-- FALCON-11: Dark mode init extracted to external file -->
+  <script src="/static/js/dark-mode.js"></script>
 
   <!-- FE-009: Meta description and Open Graph tags -->
   <meta name="description" content="Search and explore U.S. Department of Defense budget justification data across fiscal years, services, and appropriation accounts.">
