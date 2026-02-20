@@ -174,6 +174,8 @@ def _context_window(text: str, pos: int, window: int = 200) -> str:
 
 
 def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
+    # Drop FTS5 table first (depends on pe_descriptions content table)
+    conn.execute("DROP TABLE IF EXISTS pe_descriptions_fts")
     for table in ("pe_lineage", "pe_tags", "pe_descriptions", "pe_index"):
         conn.execute(f"DROP TABLE IF EXISTS {table}")
     conn.commit()
@@ -202,6 +204,26 @@ def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_pe_desc_pe ON pe_descriptions(pe_number);
         CREATE INDEX IF NOT EXISTS idx_pe_desc_fy ON pe_descriptions(fiscal_year);
+
+        -- FTS5 for pe_descriptions enables fast topic search across
+        -- PE narrative text without expensive LIKE scans.
+        CREATE VIRTUAL TABLE IF NOT EXISTS pe_descriptions_fts USING fts5(
+            pe_number,
+            section_header,
+            description_text,
+            content='pe_descriptions',
+            content_rowid='id'
+        );
+        -- Sync triggers
+        CREATE TRIGGER IF NOT EXISTS pe_desc_fts_ai AFTER INSERT ON pe_descriptions BEGIN
+            INSERT INTO pe_descriptions_fts(rowid, pe_number, section_header, description_text)
+            VALUES (new.id, new.pe_number, new.section_header, new.description_text);
+        END;
+        CREATE TRIGGER IF NOT EXISTS pe_desc_fts_ad AFTER DELETE ON pe_descriptions BEGIN
+            INSERT INTO pe_descriptions_fts(pe_descriptions_fts, rowid, pe_number, section_header, description_text)
+            VALUES ('delete', old.id, old.pe_number, old.section_header, old.description_text);
+        END;
+
         CREATE TABLE IF NOT EXISTS pe_tags (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             pe_number    TEXT NOT NULL,

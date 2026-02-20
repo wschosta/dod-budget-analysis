@@ -406,15 +406,25 @@ def list_pes(
         conditions.append("p.fiscal_years LIKE ?")
         params.append(f'%"{fy}"%')
 
-    # FTS5 topic search — restrict to PEs that have matching description text
+    # FTS5 topic search — restrict to PEs that have matching description text.
+    # Uses pe_descriptions_fts (FTS5) when available; falls back to LIKE scan.
     if q:
         safe_q = sanitize_fts5_query(q)
         if safe_q:
-            conditions.append("""p.pe_number IN (
-                SELECT DISTINCT pe_number FROM pe_descriptions
-                WHERE description_text LIKE ?
-            )""")
-            params.append(f"%{q}%")
+            # Try FTS5 first, fall back to LIKE if table doesn't exist
+            try:
+                conn.execute("SELECT 1 FROM pe_descriptions_fts LIMIT 0")
+                conditions.append("""p.pe_number IN (
+                    SELECT pe_number FROM pe_descriptions_fts
+                    WHERE pe_descriptions_fts MATCH ?
+                )""")
+                params.append(safe_q)
+            except Exception:
+                conditions.append("""p.pe_number IN (
+                    SELECT DISTINCT pe_number FROM pe_descriptions
+                    WHERE description_text LIKE ?
+                )""")
+                params.append(f"%{q}%")
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
