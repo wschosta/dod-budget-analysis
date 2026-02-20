@@ -1,6 +1,6 @@
 # DoD Budget Explorer: GUI Decisions & Open Questions
 
-This document catalogs unresolved design decisions and open questions for the DoD Budget Explorer web interface. Each item is grounded in observations from the current codebase and is intended to guide stakeholder discussions, prioritize the backlog, and ensure the interface meets the needs of its target audience. Items are organized by domain and tagged with a priority level (**High**, **Medium**, or **Low**) reflecting their likely impact on usability, correctness, or adoption.
+This document catalogs design decisions (resolved and open) for the DoD Budget Explorer web interface. Each item is grounded in observations from the current codebase and is intended to guide development, prioritize the backlog, and ensure the interface meets the needs of its target audience. Items are organized by domain and tagged with a priority level (**High**, **Medium**, or **Low**) and a status (**RESOLVED** or **OPEN**).
 
 ---
 
@@ -8,13 +8,61 @@ This document catalogs unresolved design decisions and open questions for the Do
 
 Understanding who uses this tool and how they use it determines nearly every downstream design choice.
 
-| # | Question / Decision | Priority | Context |
-|---|---------------------|----------|---------|
-| 1.1 | **Who are the primary user personas?** Defense budget analysts, investigative journalists, academic researchers, congressional staff, or general public? Each group implies different defaults for complexity, export formats, and terminology. | **High** | The current UI exposes raw column names like `amount_fy2026_request` and exhibit type codes (`R-2`, `P-5`, `O-1`) without inline definitions beyond tooltips. Analysts may be comfortable with this; journalists may not. |
-| 1.2 | **What are the top 5 tasks users want to accomplish?** Candidates include: (a) find a specific program's funding history, (b) compare service budgets year-over-year, (c) export a filtered dataset for offline analysis, (d) browse the largest budget items, (e) share a filtered view with a colleague. Are these correct, and what is their rank order? | **High** | Current navigation order (Dashboard, Search, Charts, Programs, About) implies browsing-first, but the root URL (`/`) serves the Search page, suggesting search is actually the primary entry point. |
-| 1.3 | **Should the tool support side-by-side comparison of budget items across years?** | **Medium** | The Charts page has a "Budget Comparison" widget (`VIZ-005`) that compares two services across fiscal years, but there is no way to select two arbitrary budget line items from the search results and compare them side by side. |
-| 1.4 | **Should the Search page or the Dashboard be the landing page?** | **High** | Currently `/` renders `index.html` (Search) while `/dashboard` is a separate nav link. The dashboard loads summary stats and charts via client-side API calls. If most users arrive wanting an overview, the dashboard may be a better default. |
-| 1.5 | **How important is export (CSV/JSON/XLSX) vs. in-app analysis?** | **Medium** | The download modal supports CSV, NDJSON, and Excel with up to 50,000 rows. If users primarily export and work in Excel/Python, investment should shift toward richer export options (e.g., pivot-ready formats). If users stay in the browser, investment should go toward in-app filtering and charting. |
+| # | Question / Decision | Priority | Status | Context |
+|---|---------------------|----------|--------|---------|
+| 1.1 | **Who are the primary user personas?** | **High** | **RESOLVED** | See decision below. |
+| 1.2 | **What are the top use cases (ranked)?** | **High** | **RESOLVED** | See decision below. |
+| 1.3 | **How should "across" and "down" analysis work?** | **Medium** | **RESOLVED** | See decision below. |
+| 1.4 | **Should the Search page or the Dashboard be the landing page?** | **High** | **RESOLVED** | See decision below. |
+| 1.5 | **How should views be shared?** | **Medium** | **RESOLVED** | See decision below. |
+| 1.6 | **Should a news/context layer be part of MVP?** | **Medium** | **RESOLVED** | Deferred to post-MVP. |
+
+### 1.1 -- User Personas (RESOLVED)
+
+Three persona tiers, each implying different UI defaults:
+
+| Persona | Knowledge Level | Primary Goal | Implications |
+|---|---|---|---|
+| **Analyst** | Expert -- knows PE lines, wants Spruill charts, knows specific outputs needed | Targeted report generation on specific PE lines or topic areas | Needs raw data access, PE-level search, Spruill chart output, export to formatted tables |
+| **Industry / Journalist** | Moderate -- knows program names, not budget structure nuance | Trend analysis in a given area, understanding budget trajectories | Needs search by program name or topic, trend charts, ability to see budget docs for nuance |
+| **General Public** | Low -- topic-driven, curiosity-driven | Browse and understand where tax dollars go, general research | Needs intuitive visuals (river/Sankey charts), clickable summary views, program background info |
+
+**Design implication:** The GUI must serve both **precision workflows** (analyst building a specific query) and **exploration workflows** (journalist or citizen browsing). This tension must be resolved through progressive disclosure -- simple by default, powerful on demand.
+
+### 1.2 -- Top Use Cases (RESOLVED, ranked)
+
+1. **Targeted reporting** -- Search by tags, PE lines, or free-text to identify a topic area (e.g., "hypersonics" defined by a tag or a list of PE lines). Produce an expenditure report showing the department's total spend in that area. Export both raw data and formatted tables. User must be able to see the data sources and recreate/share the view.
+
+2. **Trend analysis** -- Two dimensions:
+   - **"Across"**: All available fiscal years for a given PE line (how has this program's funding changed over time?)
+   - **"Down"**: Comparing multiple PE lines within the same fiscal year (how do programs compare in a given year?)
+   - Includes RDT&E vs. procurement breakdowns, biggest program outlays. Users need the ability to pull up underlying budget documents to understand nuances.
+
+3. **Browsing / discovery** -- User has a topic interest (e.g., "hypersonics") but no specific product in mind. Involves:
+   - Graphical presentation of budget data (river/Sankey charts showing how pieces build up to the total defense budget)
+   - Program background information
+   - *Future (post-MVP):* Linked news articles explaining year-over-year changes in specific programs
+
+### 1.3 -- Query Model: Search-Then-Filter (RESOLVED)
+
+The interaction model is **search-then-filter**, not a pivot table:
+- User starts by picking a PE line, tag, or free-text search
+- Results display all available fiscal years for matching items
+- User then filters down (by year, service, appropriation type, etc.)
+
+This replaces the original question about "side-by-side comparison across years." The comparison is implicit in showing all fiscal years for a result set.
+
+### 1.4 -- Landing Page (RESOLVED)
+
+**Hybrid landing page:** A prominent search bar over summary visuals (charts, top-level budget breakdowns). The summary visuals must be **clickable** -- clicking a visual element (e.g., a service's bar in a summary chart) navigates the user to the search results as if they had searched for that item. This serves all three personas: analysts can search immediately, browsers can click into visuals.
+
+### 1.5 -- Shareability: URL-Based State (RESOLVED)
+
+Views will be shareable via **URL query parameters** (e.g., `?pe=0603285E,0604856E&fy=2024,2025&view=table`). This makes views bookmarkable, shareable via copy-paste, and reproducible. React Router (or equivalent) will sync UI state to the URL. This is straightforward to implement and avoids the need for server-side saved report infrastructure in MVP.
+
+### 1.6 -- News/Context Layer (RESOLVED -- Deferred)
+
+Linking external news articles and program context descriptions to budget line items is a **post-MVP feature**. It requires a data pipeline (news ingestion, matching to PE lines) that is out of scope for the initial release.
 
 ---
 
@@ -109,16 +157,29 @@ Understanding who uses this tool and how they use it determines nearly every dow
 
 ---
 
-## Summary of High-Priority Items
+## Summary
 
-The following decisions should be resolved first, as they have the broadest impact on usability and correctness:
+### Resolved Decisions
+- **1.1** -- Three user personas defined: Analyst (expert), Industry/Journalist (moderate), General Public (low knowledge)
+- **1.2** -- Three use case tiers ranked: (1) Targeted reporting, (2) Trend analysis ("across" and "down"), (3) Browsing/discovery
+- **1.3** -- Query model is search-then-filter (not pivot table)
+- **1.4** -- Hybrid landing page: search bar over clickable summary visuals
+- **1.5** -- URL-based state for shareable/bookmarkable views
+- **1.6** -- News/context layer deferred to post-MVP
 
-1. **1.1** -- Define primary user personas to anchor all subsequent design decisions.
-2. **1.2** -- Identify and rank the top 5 user tasks.
-3. **1.4** -- Decide whether Search or Dashboard should be the landing page.
-4. **2.1** -- Fix the Amount Range filter to operate on the correct column context.
-5. **5.1** -- Confirm WCAG 2.1 AA as the target accessibility standard.
-6. **5.2** -- Audit and fix color contrast failures (particularly `#555` and `#888` on light/dark backgrounds).
+### Remaining High-Priority Open Items
+1. **2.1** -- Fix the Amount Range filter to operate on the correct column context.
+2. **5.1** -- Confirm WCAG 2.1 AA as the target accessibility standard.
+3. **5.2** -- Audit and fix color contrast failures (particularly `#555` and `#888` on light/dark backgrounds).
+
+### Open Questions Still Under Discussion
+- **Section 2** -- Data & Display (chart types, data granularity, dollar normalization, export format)
+- **Section 3** -- Navigation & Information Architecture
+- **Section 4** -- Visual Design & Style Preferences
+- **Section 5** -- Accessibility
+- **Section 6** -- Performance & Responsiveness
+- **Section 7** -- Feature Gaps & Enhancements
+- **Section 8** -- Technical Debt & Architecture
 
 ---
 
