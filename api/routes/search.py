@@ -11,10 +11,13 @@ SEARCH-004: Search suggestions/autocomplete endpoint.
 """
 
 import html as _html
+import logging
 import sqlite3
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+
+logger = logging.getLogger(__name__)
 
 from api.database import get_db
 from api.models import SearchResponse, SearchResultItem
@@ -49,6 +52,8 @@ def _budget_select(
     exhibit_type: list[str] | None,
     limit: int,
     offset: int,
+    pe_number: list[str] | None = None,
+    appropriation_code: list[str] | None = None,
 ) -> tuple[str, list[Any]]:
     """Build the budget lines search query with BM25 scoring."""
     # SEARCH-002: Build structured WHERE clause
@@ -56,6 +61,8 @@ def _budget_select(
         fiscal_year=fiscal_year,
         service=service,
         exhibit_type=exhibit_type,
+        pe_number=pe_number,
+        appropriation_code=appropriation_code,
     )
 
     # Combine FTS MATCH with structured filters via subquery
@@ -109,6 +116,7 @@ def _pdf_select(
     exhibit_type: list[str] | None,
     limit: int,
     offset: int,
+    service: list[str] | None = None,
 ) -> tuple[str, list[Any]]:
     """Build the PDF pages search query with BM25 scoring via subquery JOIN.
 
@@ -126,6 +134,10 @@ def _pdf_select(
         placeholders = ",".join("?" * len(exhibit_type))
         conditions.append(f"p.exhibit_type IN ({placeholders})")
         params.extend(exhibit_type)
+    if service:
+        sub = " OR ".join("p.source_category LIKE ?" for _ in service)
+        conditions.append(f"({sub})")
+        params.extend(f"%{s}%" for s in service)
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
@@ -173,6 +185,8 @@ def search(
     fiscal_year: list[str] | None = Query(None, description="Filter by fiscal year(s)"),
     service: list[str] | None = Query(None, description="Filter by service/org name"),
     exhibit_type: list[str] | None = Query(None, description="Filter by exhibit type(s)"),
+    pe_number: list[str] | None = Query(None, description="Filter by PE number(s)"),
+    appropriation_code: list[str] | None = Query(None, description="Filter by appropriation code(s)"),
     limit: int = Query(20, ge=1, le=100, description="Max results per type"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     conn: sqlite3.Connection = Depends(get_db),
@@ -189,6 +203,10 @@ def search(
         service = None
     if not isinstance(exhibit_type, list):
         exhibit_type = None
+    if not isinstance(pe_number, list):
+        pe_number = None
+    if not isinstance(appropriation_code, list):
+        appropriation_code = None
 
     fts_query = sanitize_fts5_query(q)
     if not fts_query:
@@ -210,9 +228,12 @@ def search(
                 exhibit_type=exhibit_type,
                 limit=fetch_limit,
                 offset=offset,
+                pe_number=pe_number,
+                appropriation_code=appropriation_code,
             )
             rows = conn.execute(sql, params).fetchall()
         except Exception:
+            logger.warning("Budget lines FTS query failed for q=%r", q, exc_info=True)
             rows = []
         if len(rows) > limit:
             bl_has_more = True
@@ -238,10 +259,12 @@ def search(
     if type in ("both", "pdf"):
         try:
             sql, params = _pdf_select(
-                fts_query, fiscal_year, exhibit_type, fetch_limit, offset
+                fts_query, fiscal_year, exhibit_type, fetch_limit, offset,
+                service=service,
             )
             rows = conn.execute(sql, params).fetchall()
         except Exception:
+            logger.warning("PDF pages FTS query failed for q=%r", q, exc_info=True)
             rows = []
         if len(rows) > limit:
             pdf_has_more = True
