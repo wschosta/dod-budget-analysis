@@ -2747,6 +2747,26 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         -- covers GET /pe/{pe}/descriptions?section= queries.
         CREATE INDEX IF NOT EXISTS idx_pe_desc_section
             ON pe_descriptions(pe_number, section_header);
+
+        -- Single-column: budget_type used by aggregation GROUP BY
+        -- and dashboard budget-type breakdown queries.
+        CREATE INDEX IF NOT EXISTS idx_bl_budget_type
+            ON budget_lines(budget_type);
+
+        -- Composite: fiscal_year + organization_name covers dashboard
+        -- and aggregation queries filtered on both columns.
+        CREATE INDEX IF NOT EXISTS idx_bl_fy_org
+            ON budget_lines(fiscal_year, organization_name);
+
+        -- Composite: pe_number + amount covers PE list queries that
+        -- ORDER BY amount_fy2026_request for a given PE.
+        CREATE INDEX IF NOT EXISTS idx_bl_pe_amount
+            ON budget_lines(pe_number, amount_fy2026_request);
+
+        -- Composite: budget_type + amount covers dashboard budget-type
+        -- breakdown with ORDER BY amount_fy2026_request DESC.
+        CREATE INDEX IF NOT EXISTS idx_bl_budget_type_amount
+            ON budget_lines(budget_type, amount_fy2026_request);
     """)
     conn.commit()
     _progress("index", 1, 1, "Indexes created")
