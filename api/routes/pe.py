@@ -499,10 +499,10 @@ def list_pes(
                  "confidence": t["confidence"]}
             )
 
-    # Batch-fetch enrichment status for all PEs in this page.
-    # Uses COUNT > 0 checks so the UI can show coverage indicators.
+    # Batch-fetch enrichment status and funding totals for all PEs in this page.
     desc_pes: set[str] = set()
     related_pes: set[str] = set()
+    funding_by_pe: dict[str, float] = {}
     if pe_numbers:
         ph = ",".join("?" * len(pe_numbers))
         for r2 in conn.execute(
@@ -518,6 +518,14 @@ def list_pes(
                 related_pes.add(r2[0])
         except Exception:
             pass
+        # Latest-year funding total for sorting/display
+        for r2 in conn.execute(
+            f"SELECT pe_number, "
+            f"  SUM(COALESCE(amount_fy2026_request, 0)) AS total_fy2026 "
+            f"FROM budget_lines WHERE pe_number IN ({ph}) "
+            f"GROUP BY pe_number", pe_numbers,
+        ).fetchall():
+            funding_by_pe[r2[0]] = r2[1] or 0.0
 
     items = []
     for r in rows:
@@ -527,6 +535,7 @@ def list_pes(
         d["tags"] = tags_by_pe.get(r["pe_number"], [])
         d["has_descriptions"] = r["pe_number"] in desc_pes
         d["has_related"] = r["pe_number"] in related_pes
+        d["total_fy2026_request"] = funding_by_pe.get(r["pe_number"], 0.0)
         items.append(d)
 
     return {"total": total, "limit": limit, "offset": offset, "items": items}

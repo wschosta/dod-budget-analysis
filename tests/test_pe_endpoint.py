@@ -482,6 +482,15 @@ class TestListPes:
         assert pe_items["0603000A"]["has_descriptions"] is False
         assert pe_items["0603000A"]["has_related"] is False
 
+    def test_funding_total_included(self, populated_db):
+        result = list_pes(tag=None, q=None, service=None, budget_type=None,
+                          fy=None, limit=25, offset=0, conn=populated_db)
+        pe_items = {i["pe_number"]: i for i in result["items"]}
+        # 0602120A has 1400 + 1400 + 700 = 3500 in fy2026_request
+        assert pe_items["0602120A"]["total_fy2026_request"] == 3500.0
+        # 0603000A has 9000
+        assert pe_items["0603000A"]["total_fy2026_request"] == 9000.0
+
 
 # ── list_tags tests ───────────────────────────────────────────────────────────
 
