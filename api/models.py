@@ -112,6 +112,7 @@ class AggregationRow(BaseModel):
     """One row of a GROUP BY aggregation result."""
     group_value: str | None = Field(None, description="The grouped field value", examples=["Army"])
     row_count: int = Field(..., description="Number of budget lines in this group", examples=[4200])
+    rows_with_amount: int | None = Field(None, description="Rows with non-NULL latest FY amount")
     total_fy2026_request: float | None = Field(None, description="Sum of FY2026 request amounts in $K")
     total_fy2025_enacted: float | None = Field(None, description="Sum of FY2025 enacted amounts in $K")
     total_fy2024_actual: float | None = Field(None, description="Sum of FY2024 actual amounts in $K")

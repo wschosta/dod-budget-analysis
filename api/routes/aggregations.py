@@ -110,10 +110,12 @@ def aggregate(
         f"SUM({c}) AS {c}" for c in amount_cols
     )
 
+    latest_count_expr = f"COUNT({amount_cols[-1]}) AS rows_with_amount"
     sql = f"""
         SELECT
             {col} AS group_value,
             COUNT(*) AS row_count,
+            {latest_count_expr},
             {sum_exprs}
         FROM budget_lines
         {where}
@@ -156,6 +158,7 @@ def aggregate(
         enriched.append(AggregationRow(
             group_value=r.get("group_value"),
             row_count=r.get("row_count", 0),
+            rows_with_amount=r.get("rows_with_amount"),
             total_fy2026_request=r.get(fy26_col) if fy26_col else latest_val,
             total_fy2025_enacted=r.get(fy25_col),
             total_fy2024_actual=r.get(fy24_col),

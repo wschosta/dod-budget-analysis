@@ -251,3 +251,29 @@ class TestAggregate:
             exhibit_type=None, conn=db_with_ref_tables,
         )
         assert len(result.rows) == 0
+
+    def test_rows_with_amount_present(self, db_with_ref_tables):
+        """Each aggregation row includes rows_with_amount count."""
+        result = aggregate(
+            group_by="service", fiscal_year=None, service=None,
+            exhibit_type=None, conn=db_with_ref_tables,
+        )
+        for row in result.rows:
+            assert row.rows_with_amount is not None
+            assert row.rows_with_amount <= row.row_count
+
+    def test_rows_with_amount_excludes_nulls(self, db_with_ref_tables):
+        """rows_with_amount excludes rows with NULL latest-FY amount."""
+        # Add a row with NULL amount_fy2026_request
+        db_with_ref_tables.execute(
+            "INSERT INTO budget_lines VALUES (99, 'FY 2026', 'Army', 'p1',"
+            " 100, 200, NULL, '3010', 'Test')"
+        )
+        result = aggregate(
+            group_by="service", fiscal_year=None, service=None,
+            exhibit_type=None, conn=db_with_ref_tables,
+        )
+        army_row = next(r for r in result.rows if r.group_value == "Army")
+        # Army now has 4 rows (3 original + 1 NULL) but only 3 with amount
+        assert army_row.row_count == 4
+        assert army_row.rows_with_amount == 3

@@ -147,12 +147,16 @@ class TestAggregationResponse:
 
 class TestPaginatedResponse:
     def test_empty(self):
-        resp = PaginatedResponse(total=0, limit=25, offset=0, items=[])
+        resp = PaginatedResponse(total=0, limit=25, offset=0,
+                                  page=0, page_count=1, has_next=False,
+                                  items=[])
         assert resp.total == 0
 
     def test_with_items(self):
         item = BudgetLineOut(id=1, source_file="test.xlsx")
-        resp = PaginatedResponse(total=1, limit=25, offset=0, items=[item])
+        resp = PaginatedResponse(total=1, limit=25, offset=0,
+                                  page=0, page_count=1, has_next=False,
+                                  items=[item])
         assert len(resp.items) == 1
 
 
