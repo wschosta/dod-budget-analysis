@@ -1239,6 +1239,47 @@ def check_fy_column_null_rates(conn: sqlite3.Connection) -> list[dict]:
     return issues
 
 
+def check_duplicate_budget_lines(conn: sqlite3.Connection) -> list[dict]:
+    """Flag budget lines that appear to be exact duplicates.
+
+    Detects rows sharing the same (source_file, exhibit_type, fiscal_year,
+    pe_number, line_item_title, organization_name) — these typically indicate
+    a row was ingested multiple times from the same source.
+    """
+    issues: list[dict] = []
+    try:
+        rows = conn.execute("""
+            SELECT source_file, exhibit_type, fiscal_year,
+                   pe_number, line_item_title, organization_name,
+                   COUNT(*) AS cnt
+            FROM budget_lines
+            WHERE pe_number IS NOT NULL AND line_item_title IS NOT NULL
+            GROUP BY source_file, exhibit_type, fiscal_year,
+                     pe_number, line_item_title, organization_name
+            HAVING COUNT(*) > 1
+            ORDER BY COUNT(*) DESC
+            LIMIT 20
+        """).fetchall()
+
+        for r in rows:
+            issues.append({
+                "check": "duplicate_budget_lines",
+                "severity": "warning",
+                "detail": (
+                    f"PE {r['pe_number']} / {r['line_item_title']} in "
+                    f"{r['source_file']} ({r['exhibit_type']}, FY{r['fiscal_year']}): "
+                    f"{r['cnt']} copies"
+                ),
+                "pe_number": r["pe_number"],
+                "source_file": r["source_file"],
+                "duplicate_count": r["cnt"],
+            })
+    except Exception:
+        pass
+
+    return issues
+
+
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     r = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
@@ -1275,6 +1316,7 @@ ALL_CHECKS = [
     ("Enrichment Orphans", check_enrichment_orphans),              # Orphan detection
     ("Enrichment Staleness", check_enrichment_staleness),          # Stale PE detection
     ("FY Column Null Rates", check_fy_column_null_rates),          # NULL percentage check
+    ("Duplicate Budget Lines", check_duplicate_budget_lines),      # Duplicate row detection
 ]
 
 

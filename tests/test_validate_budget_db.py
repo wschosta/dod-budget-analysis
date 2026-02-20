@@ -673,3 +673,34 @@ def test_fy_null_rates_high_nulls(conn):
     assert len(fy24_issues) == 1
     assert fy24_issues[0]["severity"] == "warning"
     assert fy24_issues[0]["null_pct"] == 75.0
+
+
+# ── check_duplicate_budget_lines ─────────────────────────────────────────────
+
+from validate_budget_db import check_duplicate_budget_lines
+
+
+def test_duplicate_budget_lines_none(conn):
+    """No duplicates → no issues."""
+    _insert_line(conn, pe_number="0601101A", source_file="a.xlsx",
+                 exhibit_type="r1", fiscal_year="2026",
+                 line_item_title="Research", organization_name="Army")
+    _insert_line(conn, pe_number="0601102A", source_file="a.xlsx",
+                 exhibit_type="r1", fiscal_year="2026",
+                 line_item_title="Applied", organization_name="Army")
+    conn.commit()
+    issues = check_duplicate_budget_lines(conn)
+    assert len(issues) == 0
+
+
+def test_duplicate_budget_lines_detected(conn):
+    """Same PE + source + exhibit + FY + title → flagged as duplicate."""
+    for _ in range(3):
+        _insert_line(conn, pe_number="0601101A", source_file="a.xlsx",
+                     exhibit_type="r1", fiscal_year="2026",
+                     line_item_title="Research", organization_name="Army")
+    conn.commit()
+    issues = check_duplicate_budget_lines(conn)
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "warning"
+    assert issues[0]["duplicate_count"] == 3
