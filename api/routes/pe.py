@@ -585,6 +585,8 @@ def get_pe_related(
     pe_number: str,
     min_confidence: float = Query(0.0, ge=0.0, le=1.0,
                                   description="Minimum confidence threshold"),
+    limit: int = Query(50, ge=1, le=200, description="Max results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
     """Return PE numbers related to this one, with link type and confidence.
@@ -593,6 +595,15 @@ def get_pe_related(
     - explicit_pe_ref  (confidence ~0.95): PE number explicitly mentioned in text
     - name_match       (confidence ~0.60): Program name matched across PE lines
     """
+    total = conn.execute("""
+        SELECT COUNT(*) FROM (
+            SELECT l.referenced_pe, l.link_type
+            FROM pe_lineage l
+            WHERE l.source_pe = ? AND l.confidence >= ?
+            GROUP BY l.referenced_pe, l.link_type
+        )
+    """, (pe_number, min_confidence)).fetchone()[0]
+
     rows = conn.execute("""
         SELECT
             l.referenced_pe,
@@ -608,10 +619,14 @@ def get_pe_related(
         WHERE l.source_pe = ? AND l.confidence >= ?
         GROUP BY l.referenced_pe, l.link_type
         ORDER BY MAX(l.confidence) DESC, COUNT(*) DESC
-    """, (pe_number, min_confidence)).fetchall()
+        LIMIT ? OFFSET ?
+    """, (pe_number, min_confidence, limit, offset)).fetchall()
 
     return {
         "pe_number": pe_number,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
         "related_count": len(rows),
         "related": [_row_dict(r) for r in rows],
     }

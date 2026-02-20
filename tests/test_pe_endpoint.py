@@ -521,27 +521,48 @@ class TestGetPeDescriptions:
 
 class TestGetPeRelated:
     def test_returns_related(self, populated_db):
-        result = get_pe_related("0602120A", min_confidence=0.0, conn=populated_db)
+        result = get_pe_related("0602120A", min_confidence=0.0,
+                                limit=50, offset=0, conn=populated_db)
         assert result["related_count"] == 1
         assert result["related"][0]["referenced_pe"] == "0603000A"
 
     def test_link_type_present(self, populated_db):
-        result = get_pe_related("0602120A", min_confidence=0.0, conn=populated_db)
+        result = get_pe_related("0602120A", min_confidence=0.0,
+                                limit=50, offset=0, conn=populated_db)
         assert result["related"][0]["link_type"] == "explicit_pe_ref"
 
     def test_confidence_filter(self, populated_db):
         # 0.95 confidence row should pass
-        result = get_pe_related("0602120A", min_confidence=0.9, conn=populated_db)
+        result = get_pe_related("0602120A", min_confidence=0.9,
+                                limit=50, offset=0, conn=populated_db)
         assert result["related_count"] == 1
 
     def test_confidence_filter_excludes(self, populated_db):
         # Nothing above 1.0
-        result = get_pe_related("0602120A", min_confidence=1.0, conn=populated_db)
+        result = get_pe_related("0602120A", min_confidence=1.0,
+                                limit=50, offset=0, conn=populated_db)
         assert result["related_count"] == 0
 
     def test_no_related_returns_empty(self, populated_db):
-        result = get_pe_related("0603000A", min_confidence=0.0, conn=populated_db)
+        result = get_pe_related("0603000A", min_confidence=0.0,
+                                limit=50, offset=0, conn=populated_db)
         assert result["related_count"] == 0
+
+    def test_pagination_total_and_limit(self, populated_db):
+        """Related endpoint includes total, limit, offset fields."""
+        result = get_pe_related("0602120A", min_confidence=0.0,
+                                limit=10, offset=0, conn=populated_db)
+        assert "total" in result
+        assert result["total"] == 1
+        assert result["limit"] == 10
+        assert result["offset"] == 0
+
+    def test_pagination_offset_skips(self, populated_db):
+        """Offset=1 skips the only result."""
+        result = get_pe_related("0602120A", min_confidence=0.0,
+                                limit=50, offset=1, conn=populated_db)
+        assert result["related_count"] == 0
+        assert result["total"] == 1
 
 
 # ── list_pes tests ────────────────────────────────────────────────────────────
