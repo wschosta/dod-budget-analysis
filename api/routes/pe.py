@@ -662,6 +662,7 @@ def list_pes(
     service: str | None = Query(None, description="Filter by service/org name"),
     budget_type: str | None = Query(None, description="Filter by budget type"),
     approp: str | None = Query(None, description="Filter by appropriation title (substring)"),
+    account: str | None = Query(None, description="Filter by account title (substring)"),
     ba: str | None = Query(None, description="Filter by budget activity title (substring, e.g. '6.2')"),
     fy: str | None = Query(None, description="Filter to PEs present in a fiscal year"),
     sort_by: str | None = Query(None, description="Sort field: pe_number (default), funding, name"),
@@ -709,6 +710,14 @@ def list_pes(
             WHERE appropriation_title LIKE ?
         )""")
         params.append(f"%{approp}%")
+
+    # Account title filter (matches PEs with budget_lines having matching account_title)
+    if account:
+        conditions.append("""p.pe_number IN (
+            SELECT DISTINCT pe_number FROM budget_lines
+            WHERE account_title LIKE ?
+        )""")
+        params.append(f"%{account}%")
 
     # Budget activity filter (e.g. "6.2" matches "6.2 Applied Research")
     if ba:
