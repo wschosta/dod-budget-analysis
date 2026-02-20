@@ -269,7 +269,7 @@ EXHIBIT_CATALOG = {
              "description": "Current year unit cost in thousands"},
             {"field": "estimate_unit_cost", "header_patterns": ["Estimate Unit Cost"], "dtype": "currency_thousands",
              "description": "Budget estimate unit cost in thousands"},
-            {"field": "unit", "header_patterns": ["Unit of Measure", "UOM"], "dtype": "text",
+            {"field": "unit", "header_patterns": ["Unit of Measure", "Unit", "UOM"], "dtype": "text",
              "description": "Unit of measure (e.g., 'Each', 'Lot', 'Program')"},
             {"field": "prior_year_qty", "header_patterns": ["Prior Year Quantity", "PY Qty"], "dtype": "integer",
              "description": "Prior year quantity"},
