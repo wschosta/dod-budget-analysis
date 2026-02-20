@@ -171,7 +171,7 @@
     <button class="page-btn"
             hx-get="/partials/results" hx-target="#results-container"
             hx-push-url="true"
-            hx-vals='{"page":"{{ page - 1 }}","page_size":"{{ page_size }}"}'
+            hx-vals='{"page":"{{ page - 1 }}","page_size":"{{ page_size }}","sort_by":"{{ sort_by }}","sort_dir":"{{ sort_dir }}"}'
             hx-include="#filter-form">‹ Prev</button>
     {% endif %}
 
@@ -179,7 +179,7 @@
     <button class="page-btn {{ 'active' if p == page }}"
             hx-get="/partials/results" hx-target="#results-container"
             hx-push-url="true"
-            hx-vals='{"page":"{{ p }}","page_size":"{{ page_size }}"}'
+            hx-vals='{"page":"{{ p }}","page_size":"{{ page_size }}","sort_by":"{{ sort_by }}","sort_dir":"{{ sort_dir }}"}'
             hx-include="#filter-form">{{ p }}</button>
     {% endfor %}
 
@@ -187,7 +187,7 @@
     <button class="page-btn"
             hx-get="/partials/results" hx-target="#results-container"
             hx-push-url="true"
-            hx-vals='{"page":"{{ page + 1 }}","page_size":"{{ page_size }}"}'
+            hx-vals='{"page":"{{ page + 1 }}","page_size":"{{ page_size }}","sort_by":"{{ sort_by }}","sort_dir":"{{ sort_dir }}"}'
             hx-include="#filter-form">Next ›</button>
     {% endif %}
     {% endif %}
