@@ -30,53 +30,77 @@ The minimum viable product focuses on **Use Case 1 (Targeted Reporting)** and th
 - [ ] Results table showing all available fiscal years for matching items
 - [ ] Sortable, filterable columns
 - [ ] Filter sidebar: service, appropriation type, exhibit type, fiscal year, amount range
-- [ ] Amount range filter operates on the correct column context (fix current bug where it's hardcoded to FY2026)
+- [ ] Amount range filter dynamically operates on whichever FY column(s) the user has visible (not hardcoded to any single FY)
 - [ ] Row click expands detail panel showing budget justification text, related items
+- [ ] Related items determined by tag-based matching (context analysis of accomplishments, programs, PE text)
+- [ ] Display multiple PE lines simultaneously for natural comparison
+- [ ] Pagination: 25 results/page (default), with options for 50, 100, 200. Page size stored in localStorage.
 
-### 1.3 URL-Based State
-- [ ] All search parameters, filters, sort order, and pagination encoded in URL query params
+### 1.3 Advanced Search (bounded MVP scope)
+- [ ] Field-specific search: `service:Army`, `exhibit:R-2`, `pe:0603285E`
+- [ ] Amount operators: `amount>50000`, `amount<1000000`
+- [ ] Boolean operators: `AND`, `OR` for combining field queries
+- [ ] Free-text remains the default (no field prefix = FTS5 search)
+- **Deferred:** Nested boolean expressions, regex support, saved search templates, proximity operators
+
+### 1.4 URL-Based State
+- [ ] All search parameters, filters, sort order, page number, and page size encoded in URL query params
 - [ ] Browser back/forward navigates through search history
 - [ ] Copy URL = share exact view
+- [ ] Saved views use localStorage + URL sharing (no server-side persistence needed for MVP)
 
-### 1.4 Export
+### 1.5 Export
 - [ ] CSV export of current filtered results (with source metadata)
 - [ ] Styled Excel export (.xlsx) with headers, column widths, number formatting, totals row, and source attribution
 - [ ] PDF export of formatted table
 - [ ] Image export of formatted table (for presentations)
 - [ ] All exports include data source attribution (exhibit type, fiscal year, budget submission)
 
-### 1.5 Navigation (RESOLVED)
+### 1.6 Navigation
 - [ ] Nav order: Home → Search/Results → Charts → Programs → About → API Docs
 - [ ] Programs remains a top-level nav item (contingent on program data availability)
+- [ ] API Docs opens in new tab (`target="_blank"`)
+- [ ] Footer: version info, last data refresh date, data coverage statistics (e.g., "Covering FY2020-FY2026 | 12,345 budget line items | 6 services")
 
-### 1.6 Visual Foundations
+### 1.7 Visual Foundations
+- [ ] **Color palette:** Project-specific WCAG 2.1 AA palette defined as CSS custom properties with documented contrast ratios
+- [ ] **Typography:** Space Grotesk (headings), Inter (body), Space Mono (monospace) via Google Fonts with `font-display: swap`
 - [ ] Global amount formatting toggle ($K / $M / $B) -- all values on screen use the same unit simultaneously
 - [ ] Colorblind-friendly default chart palette; user-selectable alternative palettes (deuteranopia, protanopia, tritanopia, high-contrast)
 - [ ] Dark mode fully polished -- migrate all hardcoded inline colors to CSS custom properties
+- [ ] Data density options: compact / comfortable (default) / spacious -- stored in localStorage
 
-### 1.7 Accessibility (MVP Requirement)
+### 1.8 Accessibility (MVP Requirement)
 - [ ] WCAG 2.1 AA compliance audit and remediation
 - [ ] Fix all color contrast failures (4.5:1 ratio minimum for all text/background combinations)
 - [ ] Darken `#888` text (currently 3.5:1 -- fails AA)
 - [ ] Verify `#555` text at small font sizes (`.78rem`, `.75rem`)
 - [ ] Verify all colors against dark mode backgrounds
-- [ ] Full keyboard navigation for table rows (`tabindex`, arrow keys, Enter to expand)
+- [ ] Full keyboard navigation for table rows (`tabindex`, arrow keys Up/Down to move, Enter to expand detail)
+- [ ] Respect `prefers-reduced-motion: reduce` (suppress skeleton animations, chart transitions)
 
-### 1.8 Responsive Layout
+### 1.9 Responsive Layout
 - [ ] Collapsible filter drawer on small screens (replaces stacking above results)
+- [ ] Add tablet breakpoint at ~600px (between existing 480px mobile and 768px desktop)
 - [ ] Note: Full mobile-optimized layout is NOT MVP scope
 
-### 1.9 UX Polish
+### 1.10 UX Polish
 - [ ] Toast notifications for user actions (URL copied, download started, feedback submitted, search saved)
 - [ ] Data dictionary / glossary page (surface existing `docs/data_dictionary.md` in the UI)
 
-### 1.10 Technical Foundations
+### 1.11 Programs Page
+- [ ] Requires PE enrichment data (not just `budget_lines`)
+- [ ] PE enrichment step called after budget docs are compiled in the data pipeline
+- [ ] Show informative message when enrichment data is unavailable (replace silent empty page)
+
+### 1.12 Technical Foundations
 - [ ] Extract inline chart JS (620+ lines in `charts.html`) to separate `.js` file
 - [ ] Extract dark mode initialization script from `base.html` to external file
 - [ ] Migrate CSP from `'unsafe-inline'` to nonce-based
 - [ ] Replace silent error catching with user-visible error states (inline messages + toast notifications)
+- [ ] Lazy-load charts via IntersectionObserver (render when scrolled into view)
 
-### 1.11 Data Display Decisions (RESOLVED)
+### 1.13 Data Display Decisions (RESOLVED)
 - **Chart types (MVP):** Bar charts, stacked bar/area charts, sortable tables, Spruill charts
 - **Chart types (deferred):** Sankey/river charts → Phase 3
 - **Data granularity:** Project-level detail (not just PE-level). Tags applied at project level where available. Accomplishment text viewable year-over-year.
@@ -122,7 +146,7 @@ Focuses on **Use Case 3 (Browsing)** and the **General Public** persona.
 - [ ] Enriched program pages with descriptions, history, and context
 - [ ] Linked from search results and charts
 
-### 3.3 Data Dictionary / Glossary
+### 3.3 Data Dictionary / Glossary (expanded)
 - [ ] In-app reference page explaining exhibit types, amount columns, appropriation codes, PE number formats
 - [ ] Contextual help tooltips throughout the interface
 
@@ -136,38 +160,37 @@ Focuses on **Use Case 3 (Browsing)** and the **General Public** persona.
 
 ### 4.2 Accessibility Hardening (continued from Phase 1)
 - [ ] Screen reader testing (NVDA, JAWS, VoiceOver) -- verify HTMX partial swaps announce correctly
-- [ ] Reduced motion mode (`@media (prefers-reduced-motion: reduce)`)
+- [ ] Automated accessibility compliance test suite for ongoing assessment
 
-### 4.3 Performance
-- [ ] Lazy-load charts (IntersectionObserver)
+### 4.3 Performance & Infrastructure
 - [ ] Self-host CDN dependencies for reliability (revisit post-initial release)
 - [ ] Full mobile-optimized layout (beyond the Phase 1 collapsible drawer)
 
-### 4.4 Advanced Features
-- [ ] Saved views / named reports (if URL-based sharing proves insufficient)
+### 4.4 Print & Export Enhancements
+- [ ] Print styles: summary totals, page count, source URL footer
+- [ ] Enhanced print layout optimized for data tables
+
+### 4.5 Advanced Features (if needed)
+- [ ] Saved views / named reports with server-side persistence (if localStorage + URL proves insufficient)
 - [ ] Embed mode for iframes
-- [ ] Bulk row selection and comparison
-- [ ] Advanced search with field-specific operators
+- [ ] Advanced search extensions: nested boolean, regex, saved search templates, proximity operators
+- [ ] URL shortener / permalink service for shared views
 
 ---
 
-## Open Questions Blocking Roadmap Items
+## Open Questions (Not Blocking Any Phase)
 
-These questions (from GUI_DECISIONS_AND_QUESTIONS.md) need resolution before their associated roadmap items can be fully specified:
+These items are low-priority and do not block any roadmap phase:
 
-| Question | Blocks | Section | Status |
-|----------|--------|---------|--------|
-| ~~2.1 -- Must-have chart types for MVP?~~ | ~~Phase 1.5, Phase 2~~ | ~~Data & Display~~ | **RESOLVED** |
-| ~~2.2 -- Data granularity (PE-level vs. project-level)?~~ | ~~Phase 1.2, Phase 1.5~~ | ~~Data & Display~~ | **RESOLVED** |
-| ~~2.3 -- Inflation-adjusted dollars?~~ | ~~Phase 1.5, Phase 2.1~~ | ~~Data & Display~~ | **RESOLVED** |
-| ~~2.4 -- "Formatted table" export definition?~~ | ~~Phase 1.4~~ | ~~Data & Display~~ | **RESOLVED** |
-| ~~4.3 -- Dark mode polished?~~ | ~~Phase 4~~ | ~~Visual Design~~ | **RESOLVED** |
-| ~~4.4 -- Colorblind-friendly palette?~~ | ~~Phase 1, Phase 2~~ | ~~Visual Design~~ | **RESOLVED** |
-| ~~4.5 -- Amount formatting toggle ($K / $M / $B)?~~ | ~~Phase 1.2~~ | ~~Visual Design~~ | **RESOLVED** |
-| ~~5.1 -- WCAG 2.1 AA target?~~ | ~~Phase 1 (MVP)~~ | ~~Accessibility~~ | **RESOLVED** |
-| ~~5.2 -- Color contrast fixes?~~ | ~~Phase 1 (MVP)~~ | ~~Accessibility~~ | **RESOLVED** |
-| ~~6.1 -- Collapsible filter drawer?~~ | ~~Phase 1 (MVP)~~ | ~~Responsiveness~~ | **RESOLVED** |
-| ~~6.5 -- CDN self-hosting?~~ | ~~Post-release~~ | ~~Performance~~ | **RESOLVED (deferred)** |
+| Question | Section | Notes |
+|----------|---------|-------|
+| 7.5 -- URL shortener / permalink service | Feature Gaps | Post-release consideration |
+| 7.6 -- Embed mode for iframes | Feature Gaps | Post-release consideration |
+| 7.7 -- "Back to top" button | Feature Gaps | Post-release consideration |
+| 8.3 -- Rate limiting defaults (60 search/min, 10 download/min) | Tech Debt | May need adjustment for rapid HTMX filter toggling |
+| 8.4 -- Caching strategy (5-min TTL configurable at runtime?) | Tech Debt | Currently hardcoded |
+| 8.6 -- Inline styles migration to CSS classes | Tech Debt | Partially addressed by dark mode polish (4.3) |
+| 8.7 -- Dashboard SSR vs. client-side rendering consistency | Tech Debt | Low priority |
 
 ---
 

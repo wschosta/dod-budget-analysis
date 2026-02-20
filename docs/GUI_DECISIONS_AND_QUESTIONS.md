@@ -74,13 +74,13 @@ Linking external news articles and program context descriptions to budget line i
 | 2.2 | **Data granularity -- PE-level vs. project-level?** | **High** | **RESOLVED** | See decision below. |
 | 2.3 | **Dollar normalization -- inflation-adjusted vs. nominal?** | **High** | **RESOLVED** | See decision below. |
 | 2.4 | **What does "formatted table" export mean?** | **Medium** | **RESOLVED** | See decision below. |
-| 2.5 | **Amount Range filter hardcoded to FY2026 column.** Should it dynamically filter on whichever FY column(s) the user has visible? | **High** | **OPEN** | In `frontend.py` lines 207-222, the WHERE clause explicitly references `amount_fy2026_request`. If a user hides FY26 columns and only shows FY24 Actual, the amount filter still operates on FY26. |
-| 2.6 | **Should users be able to filter by multiple amount columns simultaneously?** | **Low** | **OPEN** | No current UI or backend support. Would require a more advanced filter builder. |
-| 2.7 | **How should "related items" in the detail panel be determined?** | **Medium** | **OPEN** | `frontend.py` lines 362-386 first match on `pe_number`, then fall back to matching `organization_name + line_item_title`. The fallback may surface false positives. |
-| 2.8 | **Should the Programs page require PE enrichment data, or work with just `budget_lines`?** | **Medium** | **OPEN** | `frontend.py` line 412 checks `_table_exists(conn, "pe_index")` and silently returns an empty list if absent. |
-| 2.9 | **Should there be a "compare" feature on the Search page?** | **Medium** | **OPEN** | `checkbox-select.js` is loaded but no multi-row selection checkboxes appear in the results table. |
-| 2.10 | **Is the autocomplete keyword search sufficient, or should there be advanced search with field-specific operators?** | **Low** | **OPEN** | Current search uses FTS5 across all indexed text. Power users may want structured queries. |
-| 2.11 | **Should there be saved views/dashboards with server-side persistence?** | **Low** | **OPEN** | Saved searches currently use `localStorage` only. |
+| 2.5 | **Amount Range filter hardcoded to FY2026 column.** Should it dynamically filter on whichever FY column(s) the user has visible? | **High** | **RESOLVED** | Dynamic filtering based on visible columns. See decision below. |
+| 2.6 | **Should users be able to filter by multiple amount columns simultaneously?** | **Low** | **RESOLVED -- Not needed** | No use case identified. Dropped from consideration. |
+| 2.7 | **How should "related items" in the detail panel be determined?** | **Medium** | **RESOLVED** | Tag-based matching from context analysis. See decision below. |
+| 2.8 | **Should the Programs page require PE enrichment data, or work with just `budget_lines`?** | **Medium** | **RESOLVED** | Requires PE enrichment data. See decision below. |
+| 2.9 | **Should there be a "compare" feature on the Search page?** | **Medium** | **RESOLVED** | Display multiple PE lines simultaneously. See decision below. |
+| 2.10 | **Is the autocomplete keyword search sufficient, or should there be advanced search with field-specific operators?** | **Medium** | **RESOLVED -- MVP** | Advanced search included in MVP (bounded scope). See decision below. |
+| 2.11 | **Should there be saved views/dashboards with server-side persistence?** | **Low** | **RESOLVED -- Not MVP** | localStorage + URL sharing is sufficient for MVP. |
 
 ### 2.1 -- Chart Types for MVP (RESOLVED)
 
@@ -124,6 +124,43 @@ Export formats supported:
 - **PDF** -- for sharing/printing
 - **Image** -- for embedding in presentations or reports
 
+### 2.5 -- Dynamic Amount Range Filter (RESOLVED)
+
+The Amount Range filter must **dynamically operate on whichever FY column(s) the user currently has visible/selected**, not a hardcoded FY2026 column. If the user is viewing FY2024 Actual data, the amount filter should apply to FY2024 Actual values. This requires refactoring `frontend.py` lines 207-222 to reference the active fiscal year context rather than hardcoding `amount_fy2026_request`.
+
+### 2.6 -- Multi-Column Amount Filter (RESOLVED -- Not Needed)
+
+No use case identified for filtering by multiple amount columns simultaneously (e.g., "FY24 > $10M AND FY26 > $15M"). **Dropped from consideration entirely** -- not even on a future backlog.
+
+### 2.7 -- Related Items: Tag-Based Matching (RESOLVED)
+
+Related items in the detail panel should be determined by **tags derived from context analysis** of the text associated with accomplishments, programs, and PE line descriptions. The current fallback approach (matching on `organization_name + line_item_title`) produces false positives (e.g., two different "Program Management" entries at the same organization). Tag-based matching provides semantic relevance rather than string-matching coincidence.
+
+**Implementation:** Requires a tagging pipeline that analyzes accomplishment text, program descriptions, and PE line context to produce tags, then matches related items by shared tags.
+
+### 2.8 -- Programs Page Requires PE Enrichment Data (RESOLVED)
+
+The Programs page **requires PE enrichment data** and should not attempt to work with just `budget_lines`. The PE enrichment step should be called **after budget docs are compiled** as part of the standard data pipeline. The current behavior of silently showing an empty page when enrichment hasn't been run should be replaced with an informative message explaining the dependency.
+
+### 2.9 -- Compare Feature: Multiple PE Lines Displayed Simultaneously (RESOLVED)
+
+The ability to **display multiple PE lines simultaneously** is the natural comparison mechanism. Users can select and view multiple PE lines side-by-side in the results table. No additional dedicated "compare mode" UI is needed beyond this -- the multi-row display IS the comparison feature.
+
+### 2.10 -- Advanced Search: MVP (Bounded Scope) (RESOLVED)
+
+Advanced search with field-specific operators is included in the **MVP**, bounded to a reasonable first release. Initial operators:
+
+- Field-specific search: `service:Army`, `exhibit:R-2`, `pe:0603285E`
+- Amount operators: `amount>50000`, `amount<1000000`
+- Boolean operators: `AND`, `OR` for combining field queries
+- Free-text remains the default (no field prefix = FTS5 search)
+
+**Deferred to later:** Nested boolean expressions, regex support, saved search templates, proximity operators.
+
+### 2.11 -- Saved Views: localStorage + URL Sharing (RESOLVED -- Not MVP)
+
+Server-side persistence for saved views is **not required for the MVP**. The combination of `localStorage` for personal bookmarks and URL query parameters for shareable views is sufficient. Server-side persistence can be revisited if user feedback indicates the need.
+
 ---
 
 ## 3. Navigation & Information Architecture
@@ -132,8 +169,8 @@ Export formats supported:
 |---|---------------------|----------|--------|---------|
 | 3.1 | **Nav order: Home, Search/Results, Charts, Programs, About, API Docs** | **Medium** | **RESOLVED** | Confirmed. Home is the hybrid landing page. Search is the primary workflow entry point. |
 | 3.2 | **Programs as a top-level nav item** | **Medium** | **RESOLVED** | Confirmed as top-level, contingent on identifying program information from the data. |
-| 3.3 | **Should the API Docs link open in a new tab (current behavior) or be an in-app page?** | **Low** | **OPEN** | `base.html` line 57 uses `target="_blank"`. Opening in a new tab is standard for developer docs but may surprise non-technical users. |
-| 3.4 | **Is the footer adequate?** Should it include version info, last data refresh date, or data coverage statistics? | **Low** | **OPEN** | The footer currently shows only the data source link, a disclaimer, an API link, and a Feedback button. |
+| 3.3 | **Should the API Docs link open in a new tab (current behavior) or be an in-app page?** | **Low** | **RESOLVED** | New tab (current behavior confirmed). |
+| 3.4 | **Is the footer adequate?** Should it include version info, last data refresh date, or data coverage statistics? | **Low** | **RESOLVED** | Yes, add version, last refresh date, and data coverage stats. See decision below. |
 
 ### 3.1 -- Nav Order (RESOLVED)
 
@@ -143,19 +180,32 @@ Export formats supported:
 
 Programs stays as a **top-level nav item**, provided the app can identify and surface program information from the budget data. If program-level data is available, a dedicated page is warranted rather than burying it as a tab within Search.
 
+### 3.3 -- API Docs Link: New Tab (RESOLVED)
+
+**Confirmed:** API Docs opens in a new tab (`target="_blank"`). This is standard for developer documentation and keeps the main app context intact.
+
+### 3.4 -- Footer Content: Version, Refresh Date, Coverage Stats (RESOLVED)
+
+The footer should be enhanced to include:
+- **Application version** (e.g., "v1.0.0")
+- **Last data refresh date** (when the database was last rebuilt/updated)
+- **Data coverage statistics** (e.g., "Covering FY2020-FY2026 | 12,345 budget line items | 6 services")
+
+These provide transparency about what the user is looking at and when it was last updated.
+
 ---
 
 ## 4. Visual Design & Style Preferences
 
 | # | Question / Decision | Priority | Status | Context |
 |---|---------------------|----------|--------|---------|
-| 4.1 | **Color palette: Should the current navy/blue/gray theme reference official DoD branding?** | **Low** | **OPEN** | CSS custom properties in `main.css` lines 7-17 define `--clr-navy: #1a3a5c`, `--clr-blue: #2563eb`, etc. These are functional but generic. |
-| 4.2 | **Typography: Should the app use a specific typeface instead of `system-ui`?** | **Low** | **OPEN** | System fonts load instantly but vary across platforms. A defined typeface would ensure visual consistency. |
+| 4.1 | **Color palette: Should the current navy/blue/gray theme reference official DoD branding?** | **Medium** | **RESOLVED** | Project-specific WCAG 2.1 AA palette. See decision below. |
+| 4.2 | **Typography: Should the app use a specific typeface instead of `system-ui`?** | **Medium** | **RESOLVED** | Hadrian.co-inspired typeface. See decision below. |
 | 4.3 | **Dark mode: fully polished** | **Medium** | **RESOLVED** | See decision below. |
 | 4.4 | **Chart colors: colorblind-friendly default with user-selectable palettes** | **Medium** | **RESOLVED** | See decision below. |
 | 4.5 | **Amount formatting: global toggle ($K / $M / $B)** | **Medium** | **RESOLVED** | See decision below. |
-| 4.6 | **Should there be data density options (compact / comfortable / spacious) for table rows?** | **Low** | **OPEN** | The results table uses fixed padding. Analysts viewing many rows may prefer compact density; casual users may prefer spacious. |
-| 4.7 | **Print styles: Is the current print format the desired one?** | **Low** | **OPEN** | Print styles exist but may need summary totals, page count, or source URL footer. |
+| 4.6 | **Should there be data density options (compact / comfortable / spacious) for table rows?** | **Low** | **RESOLVED** | Yes, three options. Default: comfortable. See decision below. |
+| 4.7 | **Print styles: Is the current print format the desired one?** | **Low** | **RESOLVED -- Post-MVP** | Yes, enhance with totals/page count/source URL. Deferred to post-MVP. |
 
 ### 4.3 -- Dark Mode: Fully Polished (RESOLVED)
 
@@ -179,6 +229,52 @@ Dark mode should be **fully polished**, not just a toggle that half-works. This 
 - The toggle applies to tables, charts, exports, and any displayed amounts
 - Default unit can be auto-selected based on the data range, but user override takes precedence
 
+### 4.1 -- Project-Specific Color Palette: WCAG 2.1 AA (RESOLVED)
+
+Create a **project-specific color palette** that meets WCAG 2.1 AA contrast requirements as the default for the site. The palette should:
+- Be defined as **CSS custom properties** (variables) for easy site-wide updates
+- Meet **4.5:1 contrast ratio** for all text/background combinations in both light and dark mode
+- Replace the current generic navy/blue/gray values with intentionally designed, tested colors
+- Be documented with their contrast ratios against expected backgrounds
+- Variables should be named semantically (e.g., `--clr-primary`, `--clr-accent`) so they can be updated later without renaming references throughout the codebase
+
+### 4.2 -- Typography: Hadrian.co-Inspired (RESOLVED)
+
+Typography inspired by [hadrian.co](https://www.hadrian.co/) -- a clean, geometric, modern sans-serif aesthetic with generous letter-spacing for headings and excellent data readability for body text.
+
+**Font stack (all available via Google Fonts):**
+- **Headings:** `Space Grotesk` -- geometric, wide, technical feel. Uppercase with letter-spacing for major headings (matching the Hadrian hero style)
+- **Body text:** `Inter` -- excellent readability at small sizes, clean proportions for data-heavy tables
+- **Monospace (PE numbers, amounts, code):** `Space Mono` -- pairs with Space Grotesk, technical character
+
+**CSS variables:**
+```css
+--font-heading: 'Space Grotesk', system-ui, sans-serif;
+--font-body: 'Inter', system-ui, sans-serif;
+--font-mono: 'Space Mono', 'Courier New', monospace;
+```
+
+**Loading strategy:** Google Fonts via `<link>` with `font-display: swap` for progressive loading. Consistent with the CDN approach (decision 6.5).
+
+### 4.6 -- Data Density Options (RESOLVED)
+
+Three density options for table rows, controlled by a toggle in the UI:
+- **Compact** -- minimal padding, smaller font size. For analysts scanning many rows.
+- **Comfortable** (default) -- balanced padding and readability
+- **Spacious** -- generous padding, larger touch targets. For casual browsing.
+
+Implemented via a CSS class on the table container (`density-compact`, `density-comfortable`, `density-spacious`) with the preference stored in `localStorage`.
+
+### 4.7 -- Print Styles: Enhanced (RESOLVED -- Post-MVP)
+
+Print output should include:
+- Summary totals for visible columns
+- Page count (e.g., "Page 1 of 3")
+- Source URL in the footer (so printed pages can be traced back to the app)
+- Data source attribution and date of export
+
+**Deferred to post-MVP** -- current print styles are functional. Enhancement is not blocking.
+
 ---
 
 ## 5. Accessibility
@@ -187,9 +283,9 @@ Dark mode should be **fully polished**, not just a toggle that half-works. This 
 |---|---------------------|----------|--------|---------|
 | 5.1 | **WCAG 2.1 AA is the target compliance level** | **High** | **RESOLVED** | MVP requirement. See decision below. |
 | 5.2 | **Color contrast must meet 4.5:1 ratio** | **High** | **RESOLVED** | MVP requirement. See decision below. |
-| 5.3 | **Screen reader experience: Is the HTMX partial swap approach providing adequate announcements?** | **Medium** | **OPEN** | The `#results-container` div has `aria-live="polite"` and `aria-atomic="false"`. Partial swaps of large HTML tables may produce noisy or incomplete announcements. Needs testing with NVDA, JAWS, or VoiceOver. |
-| 5.4 | **Should there be a "reduce motion" mode that suppresses skeleton loading animations and chart transitions?** | **Low** | **OPEN** | A `@media (prefers-reduced-motion: reduce)` rule could disable animations. |
-| 5.5 | **Table rows are clickable but lack explicit `role="button"` or `tabindex="0"`.** Should table row selection be fully keyboard-accessible via arrow keys? | **Medium** | **OPEN** | `<tr>` elements have `hx-get` and `onclick` but no `tabindex` or ARIA role. |
+| 5.3 | **Screen reader experience: Is the HTMX partial swap approach providing adequate announcements?** | **Medium** | **RESOLVED -- Post-MVP** | Deferred. Ideally write compliance tests to assess/score/correct throughout build. Formal screen reader testing not required for MVP. |
+| 5.4 | **Should there be a "reduce motion" mode that suppresses skeleton loading animations and chart transitions?** | **Low** | **RESOLVED** | Yes, respect `prefers-reduced-motion`. See decision below. |
+| 5.5 | **Table rows are clickable but lack explicit `role="button"` or `tabindex="0"`.** Should table row selection be fully keyboard-accessible via arrow keys? | **Medium** | **RESOLVED -- MVP** | Arrow keys + Enter. See decision below. |
 
 ### 5.1 -- WCAG 2.1 AA: MVP Requirement (RESOLVED)
 
@@ -203,6 +299,32 @@ All text/background combinations must meet the **4.5:1 contrast ratio** required
 - All hardcoded colors must also be verified against dark mode backgrounds
 - This work is a prerequisite for the dark mode polish (decision 4.3)
 
+### 5.3 -- Screen Reader Testing (RESOLVED -- Post-MVP)
+
+Formal screen reader testing (NVDA, JAWS, VoiceOver) for HTMX partial swap announcements is **deferred to post-MVP**. However, the ideal approach is to:
+- Write **automated accessibility compliance tests** that can assess and score the application throughout the build process
+- Use these tests to catch regressions and guide corrections incrementally
+- Formal manual screen reader testing is not required for MVP, but automated checks provide a safety net
+
+### 5.4 -- Reduce Motion Mode (RESOLVED)
+
+The application should respect the **`prefers-reduced-motion: reduce`** media query. When the user's OS-level setting requests reduced motion, the app should:
+- Suppress skeleton loading animations
+- Disable chart transitions and animated data updates
+- Remove any CSS transitions/animations that aren't essential to understanding the interface
+- This is a CSS-only implementation using `@media (prefers-reduced-motion: reduce)` to override animation properties
+
+**Context:** `prefers-reduced-motion` is an OS-level accessibility setting (macOS: System Preferences → Accessibility → Display → Reduce motion; Windows: Settings → Ease of Access → Display → Show animations). When enabled, the browser reports `prefers-reduced-motion: reduce`, allowing CSS to respond.
+
+### 5.5 -- Keyboard Navigation for Table Rows: MVP (RESOLVED)
+
+Table rows must be fully keyboard-accessible in the MVP:
+- **Arrow keys (Up/Down):** Move selection between rows
+- **Enter:** Expand the detail panel for the selected row
+- **Tab:** Moves focus to the next interactive element (standard browser behavior)
+- Implementation: Add `tabindex="0"` to table rows, appropriate ARIA roles, and JavaScript key event handlers for arrow key navigation
+- Visual focus indicator must be visible (already covered by existing `focus-visible` styles)
+
 ---
 
 ## 6. Performance & Responsiveness
@@ -210,9 +332,9 @@ All text/background combinations must meet the **4.5:1 contrast ratio** required
 | # | Question / Decision | Priority | Status | Context |
 |---|---------------------|----------|--------|---------|
 | 6.1 | **Filter sidebar becomes a collapsible drawer on small screens** | **Medium** | **RESOLVED** | See decision below. |
-| 6.2 | **Tablet experience: There is no breakpoint between 480px and 768px.** Should one be added? | **Low** | **OPEN** | Tablets in portrait mode (~600px) fall into the mobile layout. |
-| 6.3 | **Should charts be lazy-loaded (only render when scrolled into view)?** | **Low** | **OPEN** | Charts page loads all 7 charts simultaneously. |
-| 6.4 | **Should search results support infinite scroll instead of pagination?** | **Low** | **OPEN** | Infinite scroll complicates URL state and "share this view" workflows. |
+| 6.2 | **Tablet experience: There is no breakpoint between 480px and 768px.** Should one be added? | **Low** | **RESOLVED** | Yes, add ~600px tablet breakpoint. |
+| 6.3 | **Should charts be lazy-loaded (only render when scrolled into view)?** | **Low** | **RESOLVED** | Yes, use IntersectionObserver. No strong preference on timing. |
+| 6.4 | **Should search results support infinite scroll instead of pagination?** | **Low** | **RESOLVED** | Pagination with configurable page size. See decision below. |
 | 6.5 | **CDN dependencies: Keep external for now, revisit post-release** | **Medium** | **RESOLVED** | See decision below. |
 
 ### 6.1 -- Collapsible Filter Drawer on Small Screens (RESOLVED)
@@ -221,6 +343,27 @@ The filter sidebar should become a **collapsible drawer** (slide-in or accordion
 - Prevents users from scrolling past all filters before seeing any data
 - Establishes a familiar UX pattern for an eventual mobile rollout
 - **Note: Full mobile-optimized layout is NOT part of MVP scope.** The collapsible drawer is a responsive improvement for the desktop app on narrow viewports.
+
+### 6.2 -- Tablet Breakpoint at ~600px (RESOLVED)
+
+Add a **tablet breakpoint at ~600px** between the existing 480px (mobile) and 768px (desktop) breakpoints. This ensures tablets in portrait mode get a layout optimized for their viewport rather than falling into the mobile layout.
+
+### 6.3 -- Lazy-Load Charts (RESOLVED)
+
+Charts should be **lazy-loaded using IntersectionObserver** -- only rendered when scrolled into view. This prevents the charts page from loading all charts simultaneously, improving initial page load performance. Standard IntersectionObserver pattern with a reasonable root margin (e.g., `200px`) to start loading slightly before the chart enters the viewport.
+
+### 6.4 -- Pagination with Configurable Page Size (RESOLVED)
+
+**Pagination** (not infinite scroll) with user-configurable page size:
+- **Default:** 25 results per page
+- **Options:** 25, 50, 100, 200
+- Page size preference stored in `localStorage`
+- Current page encoded in URL query parameters (supports shareability -- decision 1.5)
+
+Infinite scroll was rejected because:
+- The dataset is large enough that unbounded scroll would be problematic
+- Pagination preserves URL-based state and "share this view" workflows
+- Standard preset page sizes keep the implementation simple
 
 ### 6.5 -- CDN Dependencies: Keep for Now (RESOLVED)
 
@@ -233,8 +376,8 @@ External CDN loading of HTMX, Chart.js, and treemap plugin is **acceptable for i
 | # | Feature Idea | Priority | Status | Notes |
 |---|--------------|----------|--------|-------|
 | 7.1 | **Toast notifications** for user actions (download started, feedback submitted, URL copied, search saved). | **Medium** | **RESOLVED -- MVP** | See decision below. |
-| 7.2 | **Keyboard navigation through table rows** using arrow keys (Up/Down to move selection, Enter to expand detail). | **Medium** | **OPEN** | Covered by accessibility (5.5). |
-| 7.3 | **Bulk actions**: Select multiple rows via checkboxes, then export selected or compare selected. | **Low** | **OPEN** | `checkbox-select.js` is loaded but not integrated. |
+| 7.2 | **Keyboard navigation through table rows** using arrow keys (Up/Down to move selection, Enter to expand detail). | **Medium** | **RESOLVED -- MVP** | Covered by accessibility decision 5.5. Arrow keys + Enter confirmed. |
+| 7.3 | **Bulk actions**: Select multiple rows via checkboxes, then export selected or compare selected. | **Low** | **RESOLVED** | Multi-PE-line display covers comparison (2.9). Bulk export covered by filtered CSV/Excel export (2.4). No separate "bulk actions" UI needed. |
 | 7.4 | **Data dictionary / glossary page** explaining exhibit types, amount columns, appropriation codes, and PE number formats. | **Medium** | **RESOLVED -- MVP** | See decision below. |
 | 7.5 | **URL shortener or permalink service** for shared filtered views. | **Low** | **OPEN** | Post-release consideration. |
 | 7.6 | **Embed mode** for iframes. | **Low** | **OPEN** | Post-release consideration. |
@@ -293,42 +436,71 @@ Silent error catching (empty `catch(e) {}` blocks, silently returning empty resu
 
 ## Summary
 
-### Resolved Decisions
+### Resolved Decisions (All Sections)
+
+**Section 1 -- Use Cases & Workflows:**
 - **1.1** -- Three user personas defined: Analyst (expert), Industry/Journalist (moderate), General Public (low knowledge)
 - **1.2** -- Three use case tiers ranked: (1) Targeted reporting, (2) Trend analysis ("across" and "down"), (3) Browsing/discovery
 - **1.3** -- Query model is search-then-filter (not pivot table)
 - **1.4** -- Hybrid landing page: search bar over clickable summary visuals
 - **1.5** -- URL-based state for shareable/bookmarkable views
 - **1.6** -- News/context layer deferred to post-MVP
+
+**Section 2 -- Data & Functionality:**
 - **2.1** -- MVP charts: bar, stacked bar, tables, Spruill. Sankey/river deferred to Phase 3
 - **2.2** -- Project-level detail with tagging at project level. Accomplishment text viewable year-over-year
 - **2.3** -- Source fidelity: display exactly what budget docs report, never adjust numbers. Toggle if both nominal and constant-year exist in source
 - **2.4** -- Formatted table = styled Excel (.xlsx), with PDF and image export options
+- **2.5** -- Amount range filter dynamically operates on visible FY columns (not hardcoded to FY2026)
+- **2.6** -- Multi-column amount filter: not needed, dropped entirely
+- **2.7** -- Related items determined by tag-based matching from context analysis of accomplishments/programs/PE text
+- **2.8** -- Programs page requires PE enrichment data; enrichment runs after budget doc compilation
+- **2.9** -- Compare = displaying multiple PE lines simultaneously (no separate compare mode needed)
+- **2.10** -- Advanced search with field-specific operators included in MVP (bounded scope: field prefixes, amount operators, AND/OR)
+- **2.11** -- Saved views: localStorage + URL sharing sufficient for MVP; no server-side persistence needed
+
+**Section 3 -- Navigation:**
 - **3.1** -- Nav order: Home → Search/Results → Charts → Programs → About → API Docs
 - **3.2** -- Programs is a top-level nav item (contingent on program data availability)
+- **3.3** -- API Docs opens in new tab (current behavior confirmed)
+- **3.4** -- Footer enhanced with version, last data refresh date, and data coverage stats
+
+**Section 4 -- Visual Design:**
+- **4.1** -- Project-specific WCAG 2.1 AA color palette stored as CSS custom properties
+- **4.2** -- Typography: Space Grotesk (headings) + Inter (body) + Space Mono (monospace) -- inspired by hadrian.co
 - **4.3** -- Dark mode fully polished (migrate hardcoded colors to CSS custom properties)
 - **4.4** -- Colorblind-friendly default palette; user-selectable alternative palettes
 - **4.5** -- Global amount toggle ($K / $M / $B) -- all values on screen use the same unit simultaneously
+- **4.6** -- Data density options: compact / comfortable (default) / spacious
+- **4.7** -- Print styles: enhance with totals, page count, source URL (post-MVP)
+
+**Section 5 -- Accessibility:**
 - **5.1** -- WCAG 2.1 AA is the target -- MVP requirement, not deferred
 - **5.2** -- Color contrast fixes are MVP requirement (4.5:1 ratio for all text/background combinations)
+- **5.3** -- Screen reader testing: post-MVP (write automated compliance tests for ongoing assessment)
+- **5.4** -- Reduce motion: respect `prefers-reduced-motion` media query
+- **5.5** -- Keyboard navigation for table rows: arrow keys + Enter (MVP)
+
+**Section 6 -- Performance & Responsiveness:**
 - **6.1** -- Collapsible filter drawer on small screens (full mobile rollout is NOT MVP)
+- **6.2** -- Add tablet breakpoint at ~600px
+- **6.3** -- Lazy-load charts via IntersectionObserver
+- **6.4** -- Pagination with configurable page size: 25 (default), 50, 100, 200
 - **6.5** -- CDN dependencies acceptable for initial release; revisit self-hosting post-release
+
+**Section 7 -- Feature Gaps:**
 - **7.1** -- Toast notifications for user actions -- MVP
+- **7.2** -- Keyboard navigation -- MVP (covered by 5.5)
+- **7.3** -- Bulk actions: covered by multi-PE-line display (2.9) and filtered export (2.4)
 - **7.4** -- Data dictionary / glossary page -- MVP (surface existing `docs/data_dictionary.md`)
+
+**Section 8 -- Technical Debt:**
 - **8.1/8.2** -- Extract inline JS to separate files, migrate to nonce-based CSP -- MVP
 - **8.5** -- Replace silent error catching with user-visible error feedback -- MVP
 
-### Remaining High-Priority Open Items
-1. **2.5** -- Fix the Amount Range filter to operate on the correct column context.
-
-### Open Questions (Lower Priority, Not Blocking MVP)
-- **Section 2** -- (2.6-2.11): multi-column amount filter, related items logic, programs page data source, compare feature, advanced search, saved views
-- **Section 3** -- (3.3-3.4): API docs behavior, footer content
-- **Section 4** -- (4.1-4.2, 4.6-4.7): color palette, typography, data density, print styles
-- **Section 5** -- (5.3-5.5): screen reader testing, reduce motion, keyboard nav for table rows
-- **Section 6** -- (6.2-6.4): tablet breakpoint, lazy-load charts, infinite scroll
-- **Section 7** -- (7.2-7.3, 7.5-7.7): bulk actions, permalink service, embed mode, back-to-top
-- **Section 8** -- (8.3-8.4, 8.6-8.7): rate limiting, caching TTL, inline styles, dashboard SSR
+### Remaining Open Items (Lower Priority, Not Blocking MVP)
+- **Section 7** -- (7.5-7.7): permalink service, embed mode, back-to-top button
+- **Section 8** -- (8.3-8.4, 8.6-8.7): rate limiting defaults, caching TTL, inline styles migration, dashboard SSR consistency
 
 ---
 
