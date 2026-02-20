@@ -14,9 +14,10 @@ import csv
 import io
 import json
 import sqlite3
+from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
 from api.database import get_db
@@ -114,6 +115,7 @@ def _build_download_sql(
 
 @router.get("", summary="Download search results as CSV, JSON, or Excel")
 def download(
+    request: Request,
     fmt: str = Query("csv", pattern="^(csv|json|xlsx)$", description="Output format"),
     fiscal_year: list[str] | None = Query(None),
     service: list[str] | None = Query(None),
@@ -171,9 +173,44 @@ def download(
     # DL-003: X-Total-Count header
     extra_headers: dict[str, str] = {"X-Total-Count": str(total_count)}
 
+    # EAGLE-6: Source attribution metadata
+    export_date = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    export_url = str(request.url)
+    # Build a human-readable filter summary
+    active_filters: list[str] = []
+    if fiscal_year:
+        active_filters.append(f"fiscal_year={','.join(fiscal_year)}")
+    if service:
+        active_filters.append(f"service={','.join(service)}")
+    if exhibit_type:
+        active_filters.append(f"exhibit_type={','.join(exhibit_type)}")
+    if pe_number:
+        active_filters.append(f"pe_number={','.join(pe_number)}")
+    if appropriation_code:
+        active_filters.append(f"appropriation_code={','.join(appropriation_code)}")
+    if budget_type:
+        active_filters.append(f"budget_type={','.join(budget_type)}")
+    if q:
+        active_filters.append(f"q={q}")
+    if min_amount is not None:
+        active_filters.append(f"min_amount={min_amount}")
+    if max_amount is not None:
+        active_filters.append(f"max_amount={max_amount}")
+    filter_summary = "; ".join(active_filters) if active_filters else "none"
+
     if fmt == "csv":
         def csv_stream():
             buf = io.StringIO()
+            # EAGLE-6: Source attribution header rows
+            writer_raw = csv.writer(buf)
+            writer_raw.writerow([f"# Source: DoD Budget Explorer"])
+            writer_raw.writerow([f"# Export Date: {export_date}"])
+            writer_raw.writerow([f"# Filters: {filter_summary}"])
+            writer_raw.writerow([f"# URL: {export_url}"])
+            writer_raw.writerow([f"# Total Records: {total_count}"])
+            yield buf.getvalue()
+            buf.seek(0)
+            buf.truncate()
             writer = csv.DictWriter(buf, fieldnames=export_cols)
             writer.writeheader()
             yield buf.getvalue()
@@ -198,6 +235,14 @@ def download(
 
         def xlsx_bytes() -> bytes:
             wb = openpyxl.Workbook(write_only=True)
+            # EAGLE-6: Metadata sheet with source attribution
+            meta_ws = wb.create_sheet("Metadata")
+            meta_ws.append(["Source", "DoD Budget Explorer"])
+            meta_ws.append(["Export Date", export_date])
+            meta_ws.append(["Filters", filter_summary])
+            meta_ws.append(["URL", export_url])
+            meta_ws.append(["Total Records", total_count])
+            # Data sheet
             ws = wb.create_sheet("Budget Lines")
             ws.append(export_cols)  # header row (FE-011: respects column subset)
             for row in _iter_rows(conn, sql, params):
@@ -218,7 +263,18 @@ def download(
         )
 
     # JSON newline-delimited (NDJSON)
+    # EAGLE-6: First line is metadata object
     def json_stream():
+        metadata = {
+            "_metadata": {
+                "source": "DoD Budget Explorer",
+                "export_date": export_date,
+                "filters": filter_summary,
+                "url": export_url,
+                "total_records": total_count,
+            }
+        }
+        yield json.dumps(metadata, default=str) + "\n"
         for row in _iter_rows(conn, sql, params):
             d = dict(zip(export_cols, row))
             yield json.dumps(d, default=str) + "\n"
