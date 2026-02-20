@@ -2721,6 +2721,31 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         CREATE INDEX IF NOT EXISTS idx_pe_desc_pe_text
             ON pe_descriptions(pe_number)
             WHERE description_text IS NOT NULL;
+
+        -- Composite: exhibit_type + fiscal_year covers dashboard CTE and
+        -- aggregation GROUP BY queries filtering on both columns.
+        CREATE INDEX IF NOT EXISTS idx_bl_exhibit_fy
+            ON budget_lines(exhibit_type, fiscal_year);
+
+        -- Composite: appropriation_code + amount covers dashboard
+        -- by-appropriation top-N ORDER BY queries.
+        CREATE INDEX IF NOT EXISTS idx_bl_approp_amount
+            ON budget_lines(appropriation_code, amount_fy2026_request);
+
+        -- Composite: pdf_pages fiscal_year + exhibit_type covers
+        -- PDF filtering queries that filter on both columns.
+        CREATE INDEX IF NOT EXISTS idx_pp_fy_exhibit
+            ON pdf_pages(fiscal_year, exhibit_type);
+
+        -- Composite: hierarchy endpoint GROUP BY (org, approp, line_item).
+        CREATE INDEX IF NOT EXISTS idx_bl_org_approp_line
+            ON budget_lines(organization_name, appropriation_code,
+                            line_item_title);
+
+        -- Composite: pe_descriptions section header filter
+        -- covers GET /pe/{pe}/descriptions?section= queries.
+        CREATE INDEX IF NOT EXISTS idx_pe_desc_section
+            ON pe_descriptions(pe_number, section_header);
     """)
     conn.commit()
     _progress("index", 1, 1, "Indexes created")
