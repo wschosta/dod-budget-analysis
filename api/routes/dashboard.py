@@ -1,5 +1,6 @@
 """Dashboard summary endpoint for the overview page."""
 
+import json
 import sqlite3
 
 from fastapi import APIRouter, Depends
@@ -31,6 +32,7 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
     - Top 10 programs with PE numbers
     - Year-over-year by fiscal year
     - Top 6 appropriation categories
+    - Enrichment coverage metrics
     """
     cache_key = ("dashboard_summary", id(conn))
     cached = _summary_cache.get(cache_key)
@@ -39,27 +41,78 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
 
     fy26_col, fy25_col = _detect_fy_columns(conn)
 
-    # Grand totals
-    totals_row = conn.execute(
-        f"SELECT COUNT(*) as total_lines, "
-        f"SUM({fy26_col}) as total_fy26_request, "
-        f"SUM({fy25_col}) as total_fy25_enacted "
-        f"FROM budget_lines"
-    ).fetchone()
-    totals = dict(totals_row)
+    # Batch the main budget_lines aggregations into a single CTE query.
+    # This scans the table once instead of 4 separate passes.
+    batch_result = conn.execute(f"""
+        WITH base AS (
+            SELECT organization_name, fiscal_year,
+                   appropriation_code, appropriation_title,
+                   id, line_item_title, pe_number,
+                   {fy26_col} AS fy26, {fy25_col} AS fy25
+            FROM budget_lines
+        ),
+        totals AS (
+            SELECT COUNT(*) AS total_lines,
+                   SUM(fy26) AS total_fy26_request,
+                   SUM(fy25) AS total_fy25_enacted
+            FROM base
+        ),
+        by_service AS (
+            SELECT organization_name AS service,
+                   SUM(fy26) AS total,
+                   SUM(fy25) AS prev_total,
+                   COUNT(*) AS line_count
+            FROM base WHERE organization_name IS NOT NULL
+            GROUP BY organization_name
+            ORDER BY SUM(COALESCE(fy26, 0)) DESC LIMIT 6
+        ),
+        by_fy AS (
+            SELECT fiscal_year,
+                   SUM(fy26) AS fy26_total,
+                   SUM(fy25) AS fy25_total
+            FROM base WHERE fiscal_year IS NOT NULL
+            GROUP BY fiscal_year ORDER BY fiscal_year
+        ),
+        by_approp AS (
+            SELECT appropriation_code, appropriation_title,
+                   SUM(fy26) AS total
+            FROM base WHERE appropriation_code IS NOT NULL
+            GROUP BY appropriation_code
+            ORDER BY SUM(COALESCE(fy26, 0)) DESC LIMIT 6
+        )
+        SELECT
+            'totals' AS section, json_object(
+                'total_lines', t.total_lines,
+                'total_fy26_request', t.total_fy26_request,
+                'total_fy25_enacted', t.total_fy25_enacted
+            ) AS data
+        FROM totals t
+        UNION ALL
+        SELECT 'by_service', json_group_array(
+            json_object('service', s.service, 'total', s.total,
+                        'prev_total', s.prev_total, 'line_count', s.line_count)
+        ) FROM by_service s
+        UNION ALL
+        SELECT 'by_fiscal_year', json_group_array(
+            json_object('fiscal_year', f.fiscal_year,
+                        'fy26_total', f.fy26_total, 'fy25_total', f.fy25_total)
+        ) FROM by_fy f
+        UNION ALL
+        SELECT 'by_appropriation', json_group_array(
+            json_object('appropriation_code', a.appropriation_code,
+                        'appropriation_title', a.appropriation_title,
+                        'total', a.total)
+        ) FROM by_approp a
+    """).fetchall()
 
-    # By service (top 6)
-    by_service_rows = conn.execute(
-        f"SELECT organization_name as service, "
-        f"SUM({fy26_col}) as total, "
-        f"SUM({fy25_col}) as prev_total, "
-        f"COUNT(*) as line_count "
-        f"FROM budget_lines WHERE organization_name IS NOT NULL "
-        f"GROUP BY organization_name "
-        f"ORDER BY SUM(COALESCE({fy26_col}, 0)) DESC LIMIT 6"
-    ).fetchall()
+    # Parse the batch result
+    sections = {row[0]: json.loads(row[1]) for row in batch_result}
+    totals = sections.get("totals", {})
+    by_service = sections.get("by_service", [])
+    by_fy = sections.get("by_fiscal_year", [])
+    by_approp = sections.get("by_appropriation", [])
 
-    # Top 10 programs
+    # Top 10 programs — needs its own query since it returns individual rows
     top_programs_rows = conn.execute(
         f"SELECT id, line_item_title, organization_name, pe_number, "
         f"{fy26_col} as fy26_request, {fy25_col} as fy25_enacted "
@@ -68,54 +121,30 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
         f"ORDER BY {fy26_col} DESC LIMIT 10"
     ).fetchall()
 
-    # YoY by fiscal year
-    by_fy_rows = conn.execute(
-        f"SELECT fiscal_year, "
-        f"SUM({fy26_col}) as fy26_total, "
-        f"SUM({fy25_col}) as fy25_total "
-        f"FROM budget_lines WHERE fiscal_year IS NOT NULL "
-        f"GROUP BY fiscal_year ORDER BY fiscal_year"
-    ).fetchall()
-
-    # By appropriation (top 6)
-    by_approp_rows = conn.execute(
-        f"SELECT appropriation_code, appropriation_title, "
-        f"SUM({fy26_col}) as total "
-        f"FROM budget_lines WHERE appropriation_code IS NOT NULL "
-        f"GROUP BY appropriation_code "
-        f"ORDER BY SUM(COALESCE({fy26_col}, 0)) DESC LIMIT 6"
-    ).fetchall()
-
     # Enrichment coverage — how much of the database is enriched
     enrichment = {}
     try:
-        distinct_pes = conn.execute(
-            "SELECT COUNT(DISTINCT pe_number) AS c FROM budget_lines "
-            "WHERE pe_number IS NOT NULL"
-        ).fetchone()["c"]
-        pe_index_count = conn.execute(
-            "SELECT COUNT(*) AS c FROM pe_index"
-        ).fetchone()["c"]
-        pe_with_tags = conn.execute(
-            "SELECT COUNT(DISTINCT pe_number) AS c FROM pe_tags"
-        ).fetchone()["c"]
-        pe_with_desc = conn.execute(
-            "SELECT COUNT(DISTINCT pe_number) AS c FROM pe_descriptions"
-        ).fetchone()["c"]
-        total_tags = conn.execute(
-            "SELECT COUNT(*) AS c FROM pe_tags"
-        ).fetchone()["c"]
+        enrich_row = conn.execute("""
+            SELECT
+                (SELECT COUNT(DISTINCT pe_number) FROM budget_lines
+                 WHERE pe_number IS NOT NULL) AS distinct_pes,
+                (SELECT COUNT(*) FROM pe_index) AS pe_index_count,
+                (SELECT COUNT(DISTINCT pe_number) FROM pe_tags) AS pe_with_tags,
+                (SELECT COUNT(DISTINCT pe_number) FROM pe_descriptions) AS pe_with_desc,
+                (SELECT COUNT(*) FROM pe_tags) AS total_tags
+        """).fetchone()
+        distinct_pes = enrich_row[0]
         enrichment = {
             "total_pes": distinct_pes,
-            "pe_index_coverage": pe_index_count,
-            "pe_with_tags": pe_with_tags,
-            "pe_with_descriptions": pe_with_desc,
-            "total_tags": total_tags,
-            "pct_indexed": round(pe_index_count / distinct_pes * 100, 1)
+            "pe_index_coverage": enrich_row[1],
+            "pe_with_tags": enrich_row[2],
+            "pe_with_descriptions": enrich_row[3],
+            "total_tags": enrich_row[4],
+            "pct_indexed": round(enrich_row[1] / distinct_pes * 100, 1)
             if distinct_pes > 0 else 0,
-            "pct_tagged": round(pe_with_tags / distinct_pes * 100, 1)
+            "pct_tagged": round(enrich_row[2] / distinct_pes * 100, 1)
             if distinct_pes > 0 else 0,
-            "pct_described": round(pe_with_desc / distinct_pes * 100, 1)
+            "pct_described": round(enrich_row[3] / distinct_pes * 100, 1)
             if distinct_pes > 0 else 0,
         }
     except Exception:
@@ -123,10 +152,10 @@ def dashboard_summary(conn: sqlite3.Connection = Depends(get_db)) -> dict:
 
     result = {
         "totals": totals,
-        "by_service": [dict(r) for r in by_service_rows],
+        "by_service": by_service,
         "top_programs": [dict(r) for r in top_programs_rows],
-        "by_fiscal_year": [dict(r) for r in by_fy_rows],
-        "by_appropriation": [dict(r) for r in by_approp_rows],
+        "by_fiscal_year": by_fy,
+        "by_appropriation": by_approp,
         "enrichment": enrichment,
     }
 
