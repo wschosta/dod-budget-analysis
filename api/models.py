@@ -90,7 +90,7 @@ class SearchResultItem(BaseModel):
     id: int = Field(..., description="Row ID in the source table", examples=[1001])
     source_file: str = Field(..., description="Source XLSX or PDF filename")
     snippet: str | None = Field(None, description="Context snippet around the matching text")
-    score: float | None = Field(None, description="BM25 relevance score (higher = more relevant)")
+    score: float | None = Field(None, description="BM25 relevance score (lower/more negative = more relevant)")
     data: dict[str, Any] = Field(..., description="Full row fields as key-value pairs")
 
 
@@ -166,6 +166,6 @@ class FeedbackType(str, Enum):
 class FeedbackSubmission(BaseModel):
     """User feedback submission payload."""
     type: FeedbackType = Field(..., description="Feedback category", examples=["bug"])
-    description: str = Field(..., min_length=10, description="Feedback details (min 10 chars)", examples=["The search results for 'F-35' are missing FY2025 data rows."])
+    description: str = Field(..., min_length=10, max_length=5000, description="Feedback details (10-5000 chars)", examples=["The search results for 'F-35' are missing FY2025 data rows."])
     email: str | None = Field(None, description="Optional contact email", examples=["user@example.com"])
     page_url: str | None = Field(None, description="Page where the issue was observed", examples=["/search?q=F-35"])
