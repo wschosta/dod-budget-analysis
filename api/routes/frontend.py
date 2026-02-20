@@ -23,7 +23,13 @@ from fastapi.templating import Jinja2Templates
 from api.database import get_db
 from api.routes.budget_lines import _ALLOWED_SORT
 from utils.cache import TTLCache
-from utils.query import build_where_clause
+from utils.query import (
+    build_where_clause,
+    validate_amount_column,
+    FISCAL_YEAR_COLUMN_LABELS,
+    VALID_AMOUNT_COLUMNS,
+    DEFAULT_AMOUNT_COLUMN,
+)
 from utils import sanitize_fts5_query
 
 router = APIRouter(tags=["frontend"])
@@ -163,6 +169,12 @@ def _parse_filters(request: Request) -> dict[str, Any]:
     # FE-001: parse min/max amount
     min_amt = params.get("min_amount", "")
     max_amt = params.get("max_amount", "")
+    # EAGLE-1: dynamic amount column (validated against whitelist)
+    raw_amount_col = params.get("amount_column", "")
+    try:
+        amount_column = validate_amount_column(raw_amount_col or None)
+    except ValueError:
+        amount_column = DEFAULT_AMOUNT_COLUMN
     return {
         "q":                 params.get("q", ""),
         "fiscal_year":       params.getlist("fiscal_year"),
@@ -172,6 +184,7 @@ def _parse_filters(request: Request) -> dict[str, Any]:
         "appropriation_code": params.getlist("appropriation_code"),
         "min_amount":        min_amt,
         "max_amount":        max_amt,
+        "amount_column":     amount_column,
         "sort_by":           params.get("sort_by", "id"),
         "sort_dir":          params.get("sort_dir", "asc"),
         "page":              max(1, int(params.get("page", 1))),
@@ -191,34 +204,34 @@ def _query_results(
     page_size = page_size or filters.get("page_size", 25)
     offset    = (page - 1) * page_size
 
+    # EAGLE-1: Parse amount filter values with dynamic column support
+    min_amt_val = None
+    max_amt_val = None
+    min_amt = filters.get("min_amount", "")
+    max_amt = filters.get("max_amount", "")
+    if min_amt:
+        try:
+            min_amt_val = float(min_amt)
+        except ValueError:
+            pass
+    if max_amt:
+        try:
+            max_amt_val = float(max_amt)
+        except ValueError:
+            pass
+
     # OPT-FE-001: Use shared WHERE builder from utils/query.py
+    # EAGLE-1: Pass amount_column for dynamic FY filtering
     where, params = build_where_clause(
         fiscal_year=filters["fiscal_year"] or None,
         service=filters["service"] or None,
         exhibit_type=filters["exhibit_type"] or None,
         pe_number=filters["pe_number"] or None,
         appropriation_code=filters.get("appropriation_code") or None,
+        min_amount=min_amt_val,
+        max_amount=max_amt_val,
+        amount_column=filters.get("amount_column"),
     )
-
-    # FE-001: amount range filter
-    min_amt = filters.get("min_amount", "")
-    max_amt = filters.get("max_amount", "")
-    if min_amt:
-        try:
-            val = float(min_amt)
-            connector = "AND" if where else "WHERE"
-            where = f"{where} {connector} amount_fy2026_request >= ?"
-            params = list(params) + [val]
-        except ValueError:
-            pass
-    if max_amt:
-        try:
-            val = float(max_amt)
-            connector = "AND" if where else "WHERE"
-            where = f"{where} {connector} amount_fy2026_request <= ?"
-            params = list(params) + [val]
-        except ValueError:
-            pass
 
     # Apply keyword filter against FTS if provided
     q = filters["q"].strip()
@@ -301,6 +314,9 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLR
             "services":       services,
             "exhibit_types":  exhibit_types,
             "appropriations": appropriations,
+            # EAGLE-1: Dynamic amount column context for FY selector
+            "amount_column":        filters.get("amount_column", DEFAULT_AMOUNT_COLUMN),
+            "fiscal_year_columns":  FISCAL_YEAR_COLUMN_LABELS,
             **results,
         },
     )
@@ -345,7 +361,14 @@ def results_partial(
 
     response = _tmpl().TemplateResponse(
         "partials/results.html",
-        {"request": request, "filters": filters, **results},
+        {
+            "request": request,
+            "filters": filters,
+            # EAGLE-1: Dynamic amount column context
+            "amount_column": filters.get("amount_column", DEFAULT_AMOUNT_COLUMN),
+            "fiscal_year_columns": FISCAL_YEAR_COLUMN_LABELS,
+            **results,
+        },
     )
     # FIX-010: Tell HTMX to push /?params instead of /partials/results?params
     qs = str(request.query_params)
