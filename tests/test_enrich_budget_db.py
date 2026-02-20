@@ -57,13 +57,16 @@ def _make_db() -> sqlite3.Connection:
             amount_fy2026_total REAL,
             quantity_fy2024 REAL,
             quantity_fy2025 REAL,
-            quantity_fy2026_request REAL
+            quantity_fy2026_request REAL,
+            extra_fields TEXT
         );
 
         CREATE TABLE pdf_pages (
             id INTEGER PRIMARY KEY,
             source_file TEXT,
             source_category TEXT,
+            fiscal_year TEXT,
+            exhibit_type TEXT,
             page_number INTEGER,
             page_text TEXT,
             has_tables INTEGER DEFAULT 0,
@@ -97,6 +100,7 @@ def _make_db() -> sqlite3.Connection:
             tag TEXT NOT NULL,
             tag_source TEXT NOT NULL,
             confidence REAL DEFAULT 1.0,
+            source_files TEXT,
             UNIQUE(pe_number, tag, tag_source)
         );
 
@@ -108,8 +112,9 @@ def _make_db() -> sqlite3.Connection:
             source_file TEXT,
             page_number INTEGER,
             context_snippet TEXT,
-            link_type TEXT,
-            confidence REAL DEFAULT 1.0
+            link_type TEXT NOT NULL,
+            confidence REAL DEFAULT 0.5,
+            UNIQUE(source_pe, referenced_pe, link_type, fiscal_year)
         );
     """)
     return conn
@@ -365,6 +370,27 @@ class TestPhase4:
         count = run_phase4(conn)
         assert count == 0
 
+    def test_excel_co_occurrence(self, conn):
+        """PE cross-references in extra_fields generate lineage rows."""
+        self._setup(conn)
+        import json
+        # Add extra_fields with additional PE references
+        conn.execute("""
+            UPDATE budget_lines SET extra_fields = ?
+            WHERE pe_number = '0602120A'
+        """, (json.dumps({"additional_pe_numbers": ["0603000A"]}),))
+        conn.commit()
+        count = run_phase4(conn)
+        assert count > 0
+        row = conn.execute("""
+            SELECT * FROM pe_lineage
+            WHERE source_pe = '0602120A'
+              AND referenced_pe = '0603000A'
+              AND link_type = 'excel_co_occurrence'
+        """).fetchone()
+        assert row is not None
+        assert row["confidence"] >= 0.8
+
 
 # ── Utility function tests ────────────────────────────────────────────────────
 
@@ -398,3 +424,23 @@ class TestHelpers:
         tag_names = [t[1] for t in tags]
         assert "cyber" in tag_names
         assert "space" in tag_names
+
+    def test_tags_from_keywords_quantum(self):
+        tags = _tags_from_keywords("0602120A", "quantum computing research for cryptography")
+        tag_names = [t[1] for t in tags]
+        assert "quantum" in tag_names
+
+    def test_tags_from_keywords_microelectronics(self):
+        tags = _tags_from_keywords("0602120A", "microelectronics fabrication and ASIC design")
+        tag_names = [t[1] for t in tags]
+        assert "microelectronics" in tag_names
+
+    def test_tags_from_keywords_5g(self):
+        tags = _tags_from_keywords("0602120A", "5G tactical network implementation")
+        tag_names = [t[1] for t in tags]
+        assert "5g-comms" in tag_names
+
+    def test_tags_from_keywords_submarine(self):
+        tags = _tags_from_keywords("0602120A", "submarine warfare and undersea systems")
+        tag_names = [t[1] for t in tags]
+        assert "submarine" in tag_names

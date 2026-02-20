@@ -6,13 +6,12 @@ Tests the streaming row logic and PDF table detection heuristic logic.
 
 import sys
 import types
-from pathlib import Path
 
 # Stub heavy dependencies
 for _mod in ("openpyxl", "pdfplumber"):
     sys.modules.setdefault(_mod, types.ModuleType(_mod))
 
-from build_budget_db import _likely_has_tables
+from build_budget_db import _likely_has_tables  # noqa: E402
 
 
 class MockPageWithTables:

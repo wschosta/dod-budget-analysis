@@ -15,8 +15,6 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from io import StringIO
-import traceback
 
 def test_edge_case(name: str, test_func):
     """Decorator for test cases."""
@@ -218,27 +216,27 @@ def test_likely_has_tables_heuristic():
 
     # Test 1: Page with many rects (likely table)
     page_with_rects = MockPage(20, 0)
-    assert _likely_has_tables(page_with_rects) == True, "Should detect table with many rects"
+    assert _likely_has_tables(page_with_rects), "Should detect table with many rects"
 
     # Test 2: Page with many curves (likely table)
     page_with_curves = MockPage(0, 20)
-    assert _likely_has_tables(page_with_curves) == True, "Should detect table with many curves"
+    assert _likely_has_tables(page_with_curves), "Should detect table with many curves"
 
     # Test 3: Page with few rects/curves (likely text only)
     page_text_only = MockPage(0, 0)
-    assert _likely_has_tables(page_text_only) == False, "Should not detect table in text-only page"
+    assert not _likely_has_tables(page_text_only), "Should not detect table in text-only page"
 
     # Test 4: Page with moderate structure
     page_moderate = MockPage(5, 5)
-    assert _likely_has_tables(page_moderate) == False, "Should be conservative with moderate structure"
+    assert not _likely_has_tables(page_moderate), "Should be conservative with moderate structure"
 
     # Test 5: Edge case at threshold (exactly 10 - below threshold)
     page_at_threshold = MockPage(10, 0)
-    assert _likely_has_tables(page_at_threshold) == False, "Should reject at exactly 10 (threshold is >10)"
+    assert not _likely_has_tables(page_at_threshold), "Should reject at exactly 10 (threshold is >10)"
 
     # Test 6: Edge case above threshold (11)
     page_above_threshold = MockPage(11, 0)
-    assert _likely_has_tables(page_above_threshold) == True, "Should accept at 11 (>10)"
+    assert _likely_has_tables(page_above_threshold), "Should accept at 11 (>10)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # OPTIMIZATION 4: extract_text(layout=False)

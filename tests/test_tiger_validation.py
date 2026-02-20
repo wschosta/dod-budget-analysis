@@ -16,8 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 for _mod in ("pdfplumber", "openpyxl", "pandas"):
     sys.modules.setdefault(_mod, types.ModuleType(_mod))
 
-from build_budget_db import create_database
-from validate_budget_db import (
+from build_budget_db import create_database  # noqa: E402
+from validate_budget_db import (  # noqa: E402
     check_yoy_budget_anomalies,
     check_appropriation_title_consistency,
     check_line_item_rollups,
@@ -27,7 +27,6 @@ from validate_budget_db import (
     generate_json_report,
     generate_html_report,
     _exceeds_threshold,
-    EXPECTED_FY_COLUMNS,
 )
 
 

@@ -49,7 +49,6 @@ from utils.database import get_slow_queries, get_query_stats
 from api.routes import aggregations, budget_lines, dashboard, download, feedback, pe, reference, search
 from api.routes import frontend as frontend_routes
 from utils.config import AppConfig
-from utils.formatting import format_amount
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 _cfg = AppConfig.from_env()
@@ -252,6 +251,14 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                     "PE-centric views: funding by year, sub-elements, narrative descriptions, "
                     "related PE lineage, tag browsing, and Spruill-style CSV/ZIP export."
                 ),
+            },
+            {
+                "name": "dashboard",
+                "description": "Dashboard summary statistics with service, FY, and budget type breakdowns.",
+            },
+            {
+                "name": "feedback",
+                "description": "User feedback submission for bug reports, feature requests, and data issues.",
             },
             {
                 "name": "meta",
@@ -632,7 +639,7 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "api.app:app",
-        host="0.0.0.0",
+        host=_cfg.api_host,
         port=_cfg.api_port,
         reload=True,
         log_level="info",

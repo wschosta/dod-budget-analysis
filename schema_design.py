@@ -87,6 +87,22 @@ DONE 2.B4-a  refresh_data.py implements 4-stage workflow: download, build, valid
 Remaining TODOs for this file
 ──────────────────────────────────────────────────────────────────────────────
 
+LION-100: Add fiscal_year TEXT and exhibit_type TEXT columns to pdf_pages DDL.
+    See build_budget_db.py LION-100 for full rationale. The schema here in
+    _DDL_001_CORE (and in create_database() in build_budget_db.py) must be
+    updated to include these columns for new databases. Existing databases
+    get the columns via ALTER TABLE migration.
+
+LION-103: Add pdf_pe_numbers junction table DDL.
+    New table: pdf_pe_numbers(id, pdf_page_id INTEGER REFERENCES pdf_pages(id),
+    pe_number TEXT NOT NULL, page_number INTEGER, source_file TEXT,
+    fiscal_year TEXT). Indexed on pe_number and source_file. Populated during
+    PDF ingestion by scanning each page for PE number regex matches.
+
+LION-106: Add source_files TEXT column to pe_tags DDL.
+    JSON array tracking which source files contributed to each tag assignment.
+    Enables data lineage auditing and selective invalidation.
+
 """
 
 # DONE [Group: LION] LION-005: Add script to auto-generate data dictionary from schema (~3,000 tokens)

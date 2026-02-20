@@ -1,6 +1,5 @@
 """Tests for utils/cache.py — lightweight TTL cache."""
 import time
-import pytest
 from utils.cache import TTLCache
 
 

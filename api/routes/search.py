@@ -10,7 +10,7 @@ SEARCH-003: HTML highlighting with <mark> tags in snippets.
 SEARCH-004: Search suggestions/autocomplete endpoint.
 """
 
-import html as _html
+import logging
 import sqlite3
 from typing import Any
 
@@ -21,6 +21,8 @@ from api.models import SearchResponse, SearchResultItem
 from utils import sanitize_fts5_query
 from utils.formatting import extract_snippet_highlighted
 from utils.query import build_where_clause
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/search", tags=["search"])
 
@@ -49,6 +51,8 @@ def _budget_select(
     exhibit_type: list[str] | None,
     limit: int,
     offset: int,
+    pe_number: list[str] | None = None,
+    appropriation_code: list[str] | None = None,
 ) -> tuple[str, list[Any]]:
     """Build the budget lines search query with BM25 scoring."""
     # SEARCH-002: Build structured WHERE clause
@@ -56,6 +60,8 @@ def _budget_select(
         fiscal_year=fiscal_year,
         service=service,
         exhibit_type=exhibit_type,
+        pe_number=pe_number,
+        appropriation_code=appropriation_code,
     )
 
     # Combine FTS MATCH with structured filters via subquery
@@ -103,21 +109,53 @@ def _budget_select(
     return sql, [fts_query] + params + [limit, offset]
 
 
-def _pdf_select(fts_query: str, limit: int, offset: int) -> tuple[str, list[Any]]:
-    """Build the PDF pages search query with BM25 scoring via subquery JOIN."""
-    sql = """
+def _pdf_select(
+    fts_query: str,
+    fiscal_year: list[str] | None,
+    exhibit_type: list[str] | None,
+    limit: int,
+    offset: int,
+    service: list[str] | None = None,
+) -> tuple[str, list[Any]]:
+    """Build the PDF pages search query with BM25 scoring via subquery JOIN.
+
+    LION-100: Supports fiscal_year and exhibit_type filtering on pdf_pages
+    columns added during LION-100 schema update.
+    """
+    conditions: list[str] = []
+    params: list[Any] = [fts_query]
+
+    if fiscal_year:
+        placeholders = ",".join("?" * len(fiscal_year))
+        conditions.append(f"p.fiscal_year IN ({placeholders})")
+        params.extend(fiscal_year)
+    if exhibit_type:
+        placeholders = ",".join("?" * len(exhibit_type))
+        conditions.append(f"p.exhibit_type IN ({placeholders})")
+        params.extend(exhibit_type)
+    if service:
+        sub = " OR ".join("p.source_category LIKE ?" for _ in service)
+        conditions.append(f"({sub})")
+        params.extend(f"%{s}%" for s in service)
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    sql = f"""
         SELECT p.id, p.source_file, p.source_category, p.page_number,
-               p.page_text, p.has_tables, fts.score
+               p.page_text, p.has_tables, p.fiscal_year, p.exhibit_type,
+               fts.score
         FROM pdf_pages p
         JOIN (
             SELECT rowid, bm25(pdf_pages_fts) AS score
             FROM pdf_pages_fts
             WHERE pdf_pages_fts MATCH ?
         ) fts ON p.id = fts.rowid
+        {where}
         ORDER BY fts.score ASC
         LIMIT ? OFFSET ?
     """
-    return sql, [fts_query, limit, offset]
+    params.extend([limit, offset])
+    return sql, params
 
 
 @router.get(
@@ -146,6 +184,8 @@ def search(
     fiscal_year: list[str] | None = Query(None, description="Filter by fiscal year(s)"),
     service: list[str] | None = Query(None, description="Filter by service/org name"),
     exhibit_type: list[str] | None = Query(None, description="Filter by exhibit type(s)"),
+    pe_number: list[str] | None = Query(None, description="Filter by PE number(s)"),
+    appropriation_code: list[str] | None = Query(None, description="Filter by appropriation code(s)"),
     limit: int = Query(20, ge=1, le=100, description="Max results per type"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     conn: sqlite3.Connection = Depends(get_db),
@@ -162,12 +202,20 @@ def search(
         service = None
     if not isinstance(exhibit_type, list):
         exhibit_type = None
+    if not isinstance(pe_number, list):
+        pe_number = None
+    if not isinstance(appropriation_code, list):
+        appropriation_code = None
 
     fts_query = sanitize_fts5_query(q)
     if not fts_query:
         raise HTTPException(status_code=400, detail="Query contains no searchable terms")
 
     results: list[SearchResultItem] = []
+    # Fetch limit+1 rows per type to detect if more results exist
+    fetch_limit = limit + 1
+    bl_has_more = False
+    pdf_has_more = False
 
     if type in ("both", "excel"):
         try:
@@ -177,18 +225,24 @@ def search(
                 fiscal_year=fiscal_year,
                 service=service,
                 exhibit_type=exhibit_type,
-                limit=limit,
+                limit=fetch_limit,
                 offset=offset,
+                pe_number=pe_number,
+                appropriation_code=appropriation_code,
             )
             rows = conn.execute(sql, params).fetchall()
         except Exception:
+            logger.warning("Budget lines FTS query failed for q=%r", q, exc_info=True)
             rows = []
+        if len(rows) > limit:
+            bl_has_more = True
+            rows = rows[:limit]
         for row in rows:
             d = dict(row)
             score = d.pop("score", None)
             # SEARCH-003: HTML-highlighted snippet
             snippet = extract_snippet_highlighted(
-                d.get("line_item_title") or d.get("account_title"),
+                str(d.get("line_item_title") or d.get("account_title") or ""),
                 q,
                 html=True,
             )
@@ -203,14 +257,21 @@ def search(
 
     if type in ("both", "pdf"):
         try:
-            sql, params = _pdf_select(fts_query, limit, offset)
+            sql, params = _pdf_select(
+                fts_query, fiscal_year, exhibit_type, fetch_limit, offset,
+                service=service,
+            )
             rows = conn.execute(sql, params).fetchall()
         except Exception:
+            logger.warning("PDF pages FTS query failed for q=%r", q, exc_info=True)
             rows = []
+        if len(rows) > limit:
+            pdf_has_more = True
+            rows = rows[:limit]
         for row in rows:
             d = dict(row)
             score = d.pop("score", None)
-            snippet = extract_snippet_highlighted(d.get("page_text"), q, html=True)
+            snippet = extract_snippet_highlighted(str(d.get("page_text") or ""), q, html=True)
             results.append(SearchResultItem(
                 result_type="pdf_page",
                 id=d["id"],
@@ -220,11 +281,17 @@ def search(
                 data=d,
             ))
 
+    bl_count = sum(1 for r in results if r.result_type == "budget_line")
+    pdf_count = sum(1 for r in results if r.result_type == "pdf_page")
+
     return SearchResponse(
         query=q,
         total=len(results),
+        budget_line_count=bl_count,
+        pdf_page_count=pdf_count,
         limit=limit,
         offset=offset,
+        has_more=bl_has_more or pdf_has_more,
         results=results,
     )
 
@@ -243,52 +310,94 @@ def suggest(
 ) -> list[dict]:
     """Return search suggestions for typeahead UI.
 
-    Queries DISTINCT line_item_title, account_title, and pe_number for
-    values that start with (or contain) the given prefix.
+    Queries DISTINCT line_item_title, account_title, pe_number, and
+    pe_index display_title for values matching the given prefix.
+    Uses prefix match first; falls back to contains match if needed.
+    PE entries include display_title for richer autocomplete display.
     """
     prefix = q.strip()
     if not prefix:
         return []
 
-    like_param = f"{prefix}%"
+    prefix_param = f"{prefix}%"
+    contains_param = f"%{prefix}%"
     suggestions: list[dict] = []
+    seen: set[str] = set()
 
-    # Try line_item_title first
+    def _add(value: str, field: str, label: str | None = None) -> None:
+        key = f"{field}:{value}"
+        if key not in seen:
+            seen.add(key)
+            entry: dict = {"value": value, "field": field}
+            if label:
+                entry["label"] = label
+            suggestions.append(entry)
+
+    # PE numbers with their display titles (prefix match)
     try:
-        rows = conn.execute(
-            "SELECT DISTINCT line_item_title AS value, 'line_item_title' AS field "
-            "FROM budget_lines "
-            "WHERE line_item_title LIKE ? AND line_item_title IS NOT NULL "
+        for r in conn.execute(
+            "SELECT pe_number, display_title FROM pe_index "
+            "WHERE pe_number LIKE ? OR display_title LIKE ? "
             "LIMIT ?",
-            (like_param, limit),
-        ).fetchall()
-        suggestions.extend({"value": r["value"], "field": r["field"]} for r in rows)
+            (prefix_param, contains_param, limit),
+        ).fetchall():
+            _add(r["pe_number"], "pe_number", r["display_title"])
     except Exception:
         pass
 
+    # line_item_title (prefix match, then contains)
     if len(suggestions) < limit:
         try:
-            rows = conn.execute(
-                "SELECT DISTINCT account_title AS value, 'account_title' AS field "
+            for r in conn.execute(
+                "SELECT DISTINCT line_item_title AS value "
                 "FROM budget_lines "
-                "WHERE account_title LIKE ? AND account_title IS NOT NULL "
+                "WHERE line_item_title LIKE ? AND line_item_title IS NOT NULL "
                 "LIMIT ?",
-                (like_param, limit - len(suggestions)),
-            ).fetchall()
-            suggestions.extend({"value": r["value"], "field": r["field"]} for r in rows)
+                (prefix_param, limit - len(suggestions)),
+            ).fetchall():
+                _add(r["value"], "line_item_title")
         except Exception:
             pass
 
     if len(suggestions) < limit:
         try:
-            rows = conn.execute(
-                "SELECT DISTINCT pe_number AS value, 'pe_number' AS field "
+            for r in conn.execute(
+                "SELECT DISTINCT line_item_title AS value "
                 "FROM budget_lines "
-                "WHERE pe_number LIKE ? AND pe_number IS NOT NULL "
+                "WHERE line_item_title LIKE ? AND line_item_title NOT LIKE ? "
+                "AND line_item_title IS NOT NULL "
                 "LIMIT ?",
-                (like_param, limit - len(suggestions)),
-            ).fetchall()
-            suggestions.extend({"value": r["value"], "field": r["field"]} for r in rows)
+                (contains_param, prefix_param, limit - len(suggestions)),
+            ).fetchall():
+                _add(r["value"], "line_item_title")
+        except Exception:
+            pass
+
+    # account_title
+    if len(suggestions) < limit:
+        try:
+            for r in conn.execute(
+                "SELECT DISTINCT account_title AS value "
+                "FROM budget_lines "
+                "WHERE account_title LIKE ? AND account_title IS NOT NULL "
+                "LIMIT ?",
+                (contains_param, limit - len(suggestions)),
+            ).fetchall():
+                _add(r["value"], "account_title")
+        except Exception:
+            pass
+
+    # organization_name
+    if len(suggestions) < limit:
+        try:
+            for r in conn.execute(
+                "SELECT DISTINCT organization_name AS value "
+                "FROM budget_lines "
+                "WHERE organization_name LIKE ? AND organization_name IS NOT NULL "
+                "LIMIT ?",
+                (contains_param, limit - len(suggestions)),
+            ).fetchall():
+                _add(r["value"], "organization_name")
         except Exception:
             pass
 

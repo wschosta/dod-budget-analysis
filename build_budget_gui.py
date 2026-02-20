@@ -10,7 +10,6 @@ Usage:
 """
 
 import queue
-import sys
 import threading
 import time
 import tkinter as tk

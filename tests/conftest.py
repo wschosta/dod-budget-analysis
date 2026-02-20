@@ -68,6 +68,23 @@ DONE TEST-004: tests/test_rate_limiter.py created with behavior tests.
 # DONE [Group: BEAR] BEAR-003: Validation integration tests — tests/test_bear_validation_integration.py (9 tests)
 # DONE [Group: BEAR] BEAR-004: Load testing for 100K-row datasets — tests/test_bear_load.py (5 tests)
 
+# ──────────────────────────────────────────────────────────────────────────────
+# LION TODOs — Test Cases for Database Import Integrity
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# LION-108: Write comprehensive test suite for PE alignment and data integrity.
+#     New test file: tests/test_lion_db_integrity.py covering:
+#     (a) PE alignment: every PE in budget_lines R-2 detail also appears in R-1
+#         summary for the same organization/FY
+#     (b) FY validation: fiscal_year column always matches "FY YYYY" format;
+#         directory-derived FY matches sheet-derived FY
+#     (c) PDF FY/exhibit_type: pdf_pages.fiscal_year and exhibit_type are populated
+#     (d) pdf_pe_numbers junction: PE mentions in PDFs match expected PE set
+#     (e) Tag completeness: every PE in pe_index has at least one structured tag
+#     (f) Tag confidence: structured tags have confidence=1.0, keyword tags < 1.0
+#     (g) Source tracking: pe_tags.source_files is non-null for all rows
+#     (h) Enrichment coverage: pe_descriptions covers expected PE/FY/source combos
+
 import sys
 import types
 from pathlib import Path
@@ -415,6 +432,22 @@ def bad_excel(tmp_path_factory) -> Path:
 
     wb.save(str(path))
     return path
+
+
+# ── Cache clearing ────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def _clear_api_caches():
+    """Clear server-side caches before each test to prevent cross-test contamination."""
+    try:
+        from api.routes.aggregations import _agg_cache, _hierarchy_cache
+        from api.routes.dashboard import _summary_cache
+        _agg_cache.clear()
+        _hierarchy_cache.clear()
+        _summary_cache.clear()
+    except ImportError:
+        pass
+    yield
 
 
 # ── Function-scoped helpers ───────────────────────────────────────────────────

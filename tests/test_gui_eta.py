@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
 
 # Mock tkinter entirely so we can import _fmt_eta without a display
 _tk_mock = MagicMock()
@@ -19,7 +18,7 @@ sys.modules.setdefault("tkinter.messagebox", _tk_mock)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from build_budget_gui import _fmt_eta
+from build_budget_gui import _fmt_eta  # noqa: E402
 
 
 class TestFmtEta:

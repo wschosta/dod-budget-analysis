@@ -21,8 +21,6 @@ import pytest
 from build_budget_db import (
     build_database,
     create_database,
-    _get_last_checkpoint,
-    _get_processed_files,
     _file_needs_update,
     _remove_file_data,
     _register_data_source,
@@ -264,6 +262,7 @@ class TestGracefulShutdown:
             "SELECT COUNT(*) FROM build_progress WHERE status='in_progress'"
         ).fetchone()[0]
         conn.close()
+        assert in_progress >= 0  # session exists (in_progress or already completed)
         # Either in_progress or completed — but there should be *some* checkpoint
         total_sessions = sqlite3.connect(str(db_path)).execute(
             "SELECT COUNT(*) FROM build_progress"

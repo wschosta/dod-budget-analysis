@@ -15,7 +15,6 @@ import argparse
 import os
 import sqlite3
 import sys
-import textwrap
 from pathlib import Path
 
 # ── Field descriptions ────────────────────────────────────────────────────────
@@ -245,7 +244,7 @@ def main():
             sys.exit(0)
         else:
             print(f"FAIL: {output_path} is out of date. Re-run:", file=sys.stderr)
-            print(f"  python scripts/generate_data_dictionary.py", file=sys.stderr)
+            print("  python scripts/generate_data_dictionary.py", file=sys.stderr)
             sys.exit(1)
     else:
         print(generated)

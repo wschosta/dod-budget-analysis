@@ -3,7 +3,6 @@ Tests for query performance logging (TIGER-011).
 """
 import sqlite3
 import sys
-import time
 import types
 from pathlib import Path
 
@@ -15,14 +14,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 for _mod in ("pdfplumber", "openpyxl", "pandas"):
     sys.modules.setdefault(_mod, types.ModuleType(_mod))
 
-from utils.database import (
+from utils.database import (  # noqa: E402
     timed_execute,
     get_slow_queries,
     get_query_stats,
     _query_stats,
     _slow_queries,
     _query_stats_lock,
-    _SLOW_QUERY_THRESHOLD_MS,
 )
 
 

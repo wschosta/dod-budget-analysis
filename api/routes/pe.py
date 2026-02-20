@@ -5,6 +5,11 @@ Supports the three core GUI use cases:
   1. PE lookup by number — funding table by year, sub-elements, related PEs, descriptions
   2. Topic/tag search — find PE lines matching a tag or free-text topic
   3. Export — Spruill-style funding table (CSV) or ZIP of PDF pages for a PE set
+
+LION integration:
+  DONE LION-100: pdf_pages now has fiscal_year/exhibit_type — used in pdf-pages endpoint.
+  DONE LION-103: pdf_pe_numbers junction — get_pe_pdf_pages uses direct JOIN.
+  DONE LION-106: pe_tags.source_files + confidence included in tag responses.
 """
 
 from __future__ import annotations
@@ -12,18 +17,31 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 import sqlite3
 import zipfile
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import Response
 
-from api.database import get_db, get_db_path
+from api.database import get_db
 from utils.strings import sanitize_fts5_query
 
 router = APIRouter(prefix="/pe", tags=["pe"])
+
+_PE_FORMAT = re.compile(r"^[0-9]{7}[A-Z]{1,2}$")
+
+
+def _validate_pe_number(pe_number: str) -> None:
+    """Raise 400 if pe_number is obviously malformed."""
+    if not _PE_FORMAT.match(pe_number):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid PE number format: '{pe_number}'. "
+                   f"Expected 7 digits + 1-2 uppercase letters (e.g., 0602702E).",
+        )
 
 
 # ── Helper: row → dict ────────────────────────────────────────────────────────
@@ -42,6 +60,165 @@ def _json_list(val: str | None) -> list[str]:
         return []
 
 
+# ── GET /api/v1/pe/top-changes ────────────────────────────────────────────────
+
+@router.get(
+    "/top-changes",
+    summary="PEs with largest year-over-year funding changes",
+)
+def get_top_changes(
+    direction: str | None = Query(
+        None, description="Filter: 'increase', 'decrease', or None for both"),
+    service: str | None = Query(None, description="Filter by service/org"),
+    min_delta: float | None = Query(
+        None, description="Minimum absolute delta to include (in thousands)"),
+    sort_by: str | None = Query(
+        None, description="Sort: delta (default, abs value), pct_change, fy2026_request"),
+    limit: int = Query(20, ge=1, le=100),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> dict:
+    """Return PEs ranked by absolute FY2025→FY2026 funding delta.
+
+    Useful for identifying programs gaining or losing significant funding.
+    Results include PE title, organization, and percentage change.
+    """
+    conditions = ["b.pe_number IS NOT NULL"]
+    params: list[Any] = []
+
+    if service:
+        conditions.append("b.organization_name LIKE ?")
+        params.append(f"%{service}%")
+
+    where = " AND ".join(conditions)
+
+    # Determine sort expression
+    _SORT_MAP = {
+        "delta": "ABS(delta) DESC",
+        "pct_change": (
+            "CASE WHEN SUM(COALESCE(b.amount_fy2025_total, 0)) = 0 "
+            "THEN 0 ELSE ABS(delta) / ABS(SUM(COALESCE(b.amount_fy2025_total, 0))) END DESC"
+        ),
+        "fy2026_request": "fy2026_request DESC",
+    }
+    order_expr = _SORT_MAP.get(sort_by, "ABS(delta) DESC") if sort_by else "ABS(delta) DESC"
+
+    rows = conn.execute(f"""
+        SELECT
+            b.pe_number,
+            MAX(b.organization_name) AS organization_name,
+            MAX(b.line_item_title)   AS display_title,
+            SUM(COALESCE(b.amount_fy2025_total, 0))  AS fy2025_total,
+            SUM(COALESCE(b.amount_fy2026_request, 0)) AS fy2026_request,
+            SUM(COALESCE(b.amount_fy2026_request, 0))
+                - SUM(COALESCE(b.amount_fy2025_total, 0)) AS delta
+        FROM budget_lines b
+        WHERE {where}
+        GROUP BY b.pe_number
+        HAVING fy2025_total != 0 OR fy2026_request != 0
+        ORDER BY {order_expr}
+        LIMIT ?
+    """, params + [limit * 2]).fetchall()  # over-fetch for filtering
+
+    items: list[dict] = []
+    for r in rows:
+        if len(items) >= limit:
+            break
+        d = _row_dict(r)
+        fy25 = d["fy2025_total"] or 0
+        fy26 = d["fy2026_request"] or 0
+        delta = d["delta"] or 0
+
+        if direction == "increase" and delta <= 0:
+            continue
+        if direction == "decrease" and delta >= 0:
+            continue
+        if min_delta is not None and abs(delta) < min_delta:
+            continue
+
+        d["pct_change"] = (
+            round(((fy26 - fy25) / abs(fy25)) * 100, 1) if fy25 != 0 else None
+        )
+        d["change_type"] = (
+            "new" if fy25 == 0 and fy26 > 0
+            else "terminated" if fy25 > 0 and fy26 == 0
+            else "increase" if delta > 0
+            else "decrease" if delta < 0
+            else "flat"
+        )
+        items.append(d)
+
+    # Summary breakdown by change type
+    type_counts: dict[str, int] = {}
+    for item in items:
+        ct = item.get("change_type", "unknown")
+        type_counts[ct] = type_counts.get(ct, 0) + 1
+
+    return {"count": len(items), "by_change_type": type_counts, "items": items}
+
+
+# ── GET /api/v1/pe/compare ───────────────────────────────────────────────────
+
+@router.get(
+    "/compare",
+    summary="Side-by-side funding comparison of two or more PEs",
+)
+def compare_pes(
+    pe: list[str] = Query(..., description="PE numbers to compare (2-10)"),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> dict:
+    """Return funding data for multiple PEs side by side.
+
+    Each PE entry includes its title, organization, and funding amounts
+    for FY2024-FY2026. Useful for the comparison chart view.
+    """
+    if len(pe) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 PE numbers required")
+    if len(pe) > 10:
+        raise HTTPException(status_code=400, detail="Maximum 10 PE numbers for comparison")
+
+    ph = ",".join("?" * len(pe))
+
+    # Get index info
+    index_rows = conn.execute(
+        f"SELECT pe_number, display_title, organization_name, budget_type "
+        f"FROM pe_index WHERE pe_number IN ({ph})", pe,
+    ).fetchall()
+    index_map = {r["pe_number"]: _row_dict(r) for r in index_rows}
+
+    # Get funding aggregates per PE
+    funding_rows = conn.execute(f"""
+        SELECT
+            pe_number,
+            SUM(COALESCE(amount_fy2024_actual, 0))  AS fy2024_actual,
+            SUM(COALESCE(amount_fy2025_enacted, 0)) AS fy2025_enacted,
+            SUM(COALESCE(amount_fy2025_total, 0))   AS fy2025_total,
+            SUM(COALESCE(amount_fy2026_request, 0)) AS fy2026_request,
+            SUM(COALESCE(amount_fy2026_total, 0))   AS fy2026_total
+        FROM budget_lines
+        WHERE pe_number IN ({ph})
+        GROUP BY pe_number
+    """, pe).fetchall()
+    funding_map = {r["pe_number"]: _row_dict(r) for r in funding_rows}
+
+    items = []
+    for p in pe:
+        funding = funding_map.get(p, {})
+        fy25 = funding.get("fy2025_enacted", 0) or 0
+        fy26 = funding.get("fy2026_request", 0) or 0
+        yoy_pct = round((fy26 - fy25) / abs(fy25) * 100, 2) if fy25 else None
+        entry = {
+            "pe_number": p,
+            "display_title": index_map.get(p, {}).get("display_title"),
+            "organization_name": index_map.get(p, {}).get("organization_name"),
+            "budget_type": index_map.get(p, {}).get("budget_type"),
+            "funding": funding,
+            "yoy_change_pct": yoy_pct,
+        }
+        items.append(entry)
+
+    return {"count": len(items), "items": items}
+
+
 # ── GET /api/v1/pe/{pe_number} ────────────────────────────────────────────────
 
 @router.get(
@@ -58,6 +235,7 @@ def get_pe(
     - Tags from all sources
     - Related PE numbers (definite + suggested)
     """
+    _validate_pe_number(pe_number)
     row = conn.execute(
         "SELECT * FROM pe_index WHERE pe_number = ?", (pe_number,)
     ).fetchone()
@@ -81,9 +259,9 @@ def get_pe(
         ORDER BY fiscal_year, exhibit_type
     """, (pe_number,)).fetchall()
 
-    # Tags
+    # Tags (LION-106: include source_files for provenance display)
     tag_rows = conn.execute("""
-        SELECT tag, tag_source, confidence FROM pe_tags
+        SELECT tag, tag_source, confidence, source_files FROM pe_tags
         WHERE pe_number = ?
         ORDER BY confidence DESC, tag
     """, (pe_number,)).fetchall()
@@ -97,12 +275,53 @@ def get_pe(
         LIMIT 50
     """, (pe_number,)).fetchall()
 
+    # Summary stats — quick counts for UI badges/indicators
+    desc_count = conn.execute(
+        "SELECT COUNT(*) FROM pe_descriptions WHERE pe_number = ?",
+        (pe_number,),
+    ).fetchone()[0]
+
+    pdf_page_count = 0
+    try:
+        pdf_page_count = conn.execute(
+            "SELECT COUNT(*) FROM pdf_pe_numbers WHERE pe_number = ?",
+            (pe_number,),
+        ).fetchone()[0]
+    except Exception:
+        pass
+
+    # Exhibit type breakdown — which exhibits have data for this PE
+    exhibit_rows = conn.execute("""
+        SELECT exhibit_type,
+               COUNT(*) AS line_count,
+               SUM(COALESCE(amount_fy2026_request, 0)) AS fy2026_total
+        FROM budget_lines
+        WHERE pe_number = ? AND exhibit_type IS NOT NULL
+        GROUP BY exhibit_type
+        ORDER BY fy2026_total DESC
+    """, (pe_number,)).fetchall()
+
     return {
         "pe_number": pe_number,
         "index": index,
         "funding": [_row_dict(r) for r in funding_rows],
         "tags": [_row_dict(r) for r in tag_rows],
         "related": [_row_dict(r) for r in related_rows],
+        "exhibits": [_row_dict(r) for r in exhibit_rows],
+        "summary": {
+            "funding_rows": len(funding_rows),
+            "tag_count": len(tag_rows),
+            "description_count": desc_count,
+            "related_count": len(related_rows),
+            "pdf_page_count": pdf_page_count,
+            "exhibit_count": len(exhibit_rows),
+            "total_fy2026_request": sum(
+                r["amount_fy2026_request"] or 0 for r in funding_rows
+            ),
+            "total_fy2025_enacted": sum(
+                r["amount_fy2025_enacted"] or 0 for r in funding_rows
+            ),
+        },
     }
 
 
@@ -117,6 +336,7 @@ def get_pe_years(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
     """Return a year × amount matrix for a PE — the primary funding table."""
+    _validate_pe_number(pe_number)
     rows = conn.execute("""
         SELECT
             fiscal_year,
@@ -140,6 +360,70 @@ def get_pe_years(
     return {"pe_number": pe_number, "years": [_row_dict(r) for r in rows]}
 
 
+# ── GET /api/v1/pe/{pe_number}/changes ────────────────────────────────────
+
+@router.get(
+    "/{pe_number}/changes",
+    summary="Year-over-year funding changes for a PE",
+)
+def get_pe_changes(
+    pe_number: str,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> dict:
+    """Return year-over-year funding deltas for a PE.
+
+    Compares FY2025 enacted/total vs FY2026 request to surface budget
+    increases, decreases, and new/terminated line items. Useful for
+    identifying programs gaining or losing funding.
+    """
+    _validate_pe_number(pe_number)
+    rows = conn.execute("""
+        SELECT
+            line_item_title,
+            exhibit_type,
+            SUM(COALESCE(amount_fy2025_total, 0))     AS fy2025_total,
+            SUM(COALESCE(amount_fy2026_request, 0))    AS fy2026_request,
+            SUM(COALESCE(amount_fy2026_request, 0))
+                - SUM(COALESCE(amount_fy2025_total, 0)) AS delta,
+            CASE
+                WHEN SUM(COALESCE(amount_fy2025_total, 0)) = 0
+                     AND SUM(COALESCE(amount_fy2026_request, 0)) > 0
+                    THEN 'new'
+                WHEN SUM(COALESCE(amount_fy2025_total, 0)) > 0
+                     AND SUM(COALESCE(amount_fy2026_request, 0)) = 0
+                    THEN 'terminated'
+                WHEN SUM(COALESCE(amount_fy2026_request, 0))
+                     > SUM(COALESCE(amount_fy2025_total, 0))
+                    THEN 'increase'
+                WHEN SUM(COALESCE(amount_fy2026_request, 0))
+                     < SUM(COALESCE(amount_fy2025_total, 0))
+                    THEN 'decrease'
+                ELSE 'flat'
+            END AS change_type
+        FROM budget_lines
+        WHERE pe_number = ?
+        GROUP BY line_item_title, exhibit_type
+        HAVING fy2025_total != 0 OR fy2026_request != 0
+        ORDER BY ABS(delta) DESC
+    """, (pe_number,)).fetchall()
+
+    # Compute PE-level totals
+    total_fy25 = sum(r["fy2025_total"] or 0 for r in rows)
+    total_fy26 = sum(r["fy2026_request"] or 0 for r in rows)
+    pct_change = None
+    if total_fy25 and total_fy25 != 0:
+        pct_change = round(((total_fy26 - total_fy25) / abs(total_fy25)) * 100, 1)
+
+    return {
+        "pe_number": pe_number,
+        "total_fy2025": total_fy25,
+        "total_fy2026_request": total_fy26,
+        "total_delta": total_fy26 - total_fy25,
+        "pct_change": pct_change,
+        "line_items": [_row_dict(r) for r in rows],
+    }
+
+
 # ── GET /api/v1/pe/{pe_number}/subelements ────────────────────────────────────
 
 @router.get(
@@ -158,6 +442,7 @@ def get_pe_subelements(
     - P-5 procurement line items (exhibit_type = p5)
     - Budget activity breakdowns within R-1/P-1 summary rows
     """
+    _validate_pe_number(pe_number)
     params: list[Any] = [pe_number]
     fy_clause = ""
     if fy:
@@ -196,19 +481,29 @@ def get_pe_subelements(
 def get_pe_descriptions(
     pe_number: str,
     fy: str | None = Query(None, description="Filter by fiscal year"),
+    section: str | None = Query(None, description="Filter by section header (substring match)"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
-    """Return narrative sections extracted from PDF pages for this PE."""
+    """Return narrative sections extracted from PDF pages for this PE.
+
+    Supports filtering by fiscal year and section header name to drill into
+    specific narrative blocks (e.g., 'Accomplishments', 'Acquisition Strategy').
+    """
     params: list[Any] = [pe_number]
-    fy_clause = ""
+    clauses: list[str] = []
     if fy:
-        fy_clause = "AND fiscal_year = ?"
+        clauses.append("AND fiscal_year = ?")
         params.append(fy)
+    if section:
+        clauses.append("AND section_header LIKE ?")
+        params.append(f"%{section}%")
+
+    extra_where = " ".join(clauses)
 
     total = conn.execute(
-        f"SELECT COUNT(*) FROM pe_descriptions WHERE pe_number = ? {fy_clause}",
+        f"SELECT COUNT(*) FROM pe_descriptions WHERE pe_number = ? {extra_where}",
         params,
     ).fetchone()[0]
 
@@ -216,10 +511,98 @@ def get_pe_descriptions(
         SELECT id, fiscal_year, source_file, page_start, page_end,
                section_header, description_text
         FROM pe_descriptions
-        WHERE pe_number = ? {fy_clause}
+        WHERE pe_number = ? {extra_where}
         ORDER BY fiscal_year, page_start
         LIMIT ? OFFSET ?
     """, params + [limit, offset]).fetchall()
+
+    # Also return the distinct section headers for this PE (for UI filtering)
+    headers = conn.execute(
+        "SELECT DISTINCT section_header FROM pe_descriptions "
+        "WHERE pe_number = ? AND section_header IS NOT NULL "
+        "ORDER BY section_header",
+        (pe_number,),
+    ).fetchall()
+
+    return {
+        "pe_number": pe_number,
+        "fiscal_year": fy,
+        "section_filter": section,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "available_sections": [r[0] for r in headers],
+        "descriptions": [_row_dict(r) for r in rows],
+    }
+
+
+# ── GET /api/v1/pe/{pe_number}/pdf-pages ─────────────────────────────────────
+
+@router.get(
+    "/{pe_number}/pdf-pages",
+    summary="PDF pages mentioning this PE (via junction table)",
+)
+def get_pe_pdf_pages(
+    pe_number: str,
+    fy: str | None = Query(None, description="Filter by fiscal year"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> dict:
+    """Return PDF pages that mention this PE number.
+
+    LION-103: Uses the pdf_pe_numbers junction table for fast lookups
+    instead of scanning pdf_pages text. Falls back to text search if the
+    junction table is empty or missing.
+    """
+    params: list[Any] = [pe_number]
+    fy_clause = ""
+    if fy:
+        fy_clause = "AND j.fiscal_year = ?"
+        params.append(fy)
+
+    # Try junction table first (LION-103)
+    try:
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM pdf_pe_numbers j "
+            f"WHERE j.pe_number = ? {fy_clause}",
+            params,
+        ).fetchone()[0]
+    except Exception:
+        total = 0
+
+    if total > 0:
+        rows = conn.execute(f"""
+            SELECT j.pe_number, j.page_number, j.source_file, j.fiscal_year,
+                   pp.page_text, pp.has_tables, pp.exhibit_type
+            FROM pdf_pe_numbers j
+            JOIN pdf_pages pp ON pp.id = j.pdf_page_id
+            WHERE j.pe_number = ? {fy_clause}
+            ORDER BY j.source_file, j.page_number
+            LIMIT ? OFFSET ?
+        """, params + [limit, offset]).fetchall()
+    else:
+        # Fallback: text search on pdf_pages (pre-LION-103 databases)
+        fb_params: list[Any] = [f"%{pe_number}%"]
+        fb_fy = ""
+        if fy:
+            fb_fy = "AND fiscal_year = ?"
+            fb_params.append(fy)
+
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM pdf_pages "
+            f"WHERE page_text LIKE ? {fb_fy}",
+            fb_params,
+        ).fetchone()[0]
+
+        rows = conn.execute(f"""
+            SELECT NULL AS pe_number, page_number, source_file, fiscal_year,
+                   page_text, has_tables, exhibit_type
+            FROM pdf_pages
+            WHERE page_text LIKE ? {fb_fy}
+            ORDER BY source_file, page_number
+            LIMIT ? OFFSET ?
+        """, fb_params + [limit, offset]).fetchall()
 
     return {
         "pe_number": pe_number,
@@ -227,7 +610,7 @@ def get_pe_descriptions(
         "total": total,
         "limit": limit,
         "offset": offset,
-        "descriptions": [_row_dict(r) for r in rows],
+        "pages": [_row_dict(r) for r in rows],
     }
 
 
@@ -241,6 +624,8 @@ def get_pe_related(
     pe_number: str,
     min_confidence: float = Query(0.0, ge=0.0, le=1.0,
                                   description="Minimum confidence threshold"),
+    limit: int = Query(50, ge=1, le=200, description="Max results"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
     """Return PE numbers related to this one, with link type and confidence.
@@ -249,6 +634,15 @@ def get_pe_related(
     - explicit_pe_ref  (confidence ~0.95): PE number explicitly mentioned in text
     - name_match       (confidence ~0.60): Program name matched across PE lines
     """
+    total = conn.execute("""
+        SELECT COUNT(*) FROM (
+            SELECT l.referenced_pe, l.link_type
+            FROM pe_lineage l
+            WHERE l.source_pe = ? AND l.confidence >= ?
+            GROUP BY l.referenced_pe, l.link_type
+        )
+    """, (pe_number, min_confidence)).fetchone()[0]
+
     rows = conn.execute("""
         SELECT
             l.referenced_pe,
@@ -264,10 +658,14 @@ def get_pe_related(
         WHERE l.source_pe = ? AND l.confidence >= ?
         GROUP BY l.referenced_pe, l.link_type
         ORDER BY MAX(l.confidence) DESC, COUNT(*) DESC
-    """, (pe_number, min_confidence)).fetchall()
+        LIMIT ? OFFSET ?
+    """, (pe_number, min_confidence, limit, offset)).fetchall()
 
     return {
         "pe_number": pe_number,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
         "related_count": len(rows),
         "related": [_row_dict(r) for r in rows],
     }
@@ -284,7 +682,14 @@ def list_pes(
     q: str | None = Query(None, description="Free-text topic search via FTS5"),
     service: str | None = Query(None, description="Filter by service/org name"),
     budget_type: str | None = Query(None, description="Filter by budget type"),
+    approp: str | None = Query(None, description="Filter by appropriation title (substring)"),
+    account: str | None = Query(None, description="Filter by account title (substring)"),
+    ba: str | None = Query(None, description="Filter by budget activity title (substring, e.g. '6.2')"),
+    exhibit: str | None = Query(None, description="Filter by exhibit type (e.g. 'r1', 'p1')"),
     fy: str | None = Query(None, description="Filter to PEs present in a fiscal year"),
+    sort_by: str | None = Query(None, description="Sort field: pe_number (default), funding, name"),
+    sort_dir: str | None = Query(None, description="Sort direction: asc (default) or desc"),
+    count_only: bool = Query(False, description="Return only total count, skip item fetch"),
     limit: int = Query(25, ge=1, le=200),
     offset: int = Query(0, ge=0),
     conn: sqlite3.Connection = Depends(get_db),
@@ -293,6 +698,7 @@ def list_pes(
 
     Tag filtering uses AND logic — all specified tags must be present.
     Free-text search uses FTS5 against description text.
+    Set count_only=true to get just the total without fetching items.
     """
     conditions: list[str] = []
     params: list[Any] = []
@@ -318,46 +724,194 @@ def list_pes(
         conditions.append("p.budget_type = ?")
         params.append(budget_type)
 
+    # Appropriation filter (matches PE numbers that appear in budget_lines
+    # with a matching appropriation_title)
+    if approp:
+        conditions.append("""p.pe_number IN (
+            SELECT DISTINCT pe_number FROM budget_lines
+            WHERE appropriation_title LIKE ?
+        )""")
+        params.append(f"%{approp}%")
+
+    # Account title filter (matches PEs with budget_lines having matching account_title)
+    if account:
+        conditions.append("""p.pe_number IN (
+            SELECT DISTINCT pe_number FROM budget_lines
+            WHERE account_title LIKE ?
+        )""")
+        params.append(f"%{account}%")
+
+    # Budget activity filter (e.g. "6.2" matches "6.2 Applied Research")
+    if ba:
+        conditions.append("""p.pe_number IN (
+            SELECT DISTINCT pe_number FROM budget_lines
+            WHERE budget_activity_title LIKE ?
+        )""")
+        params.append(f"%{ba}%")
+
+    # Exhibit type filter (pe_index.exhibit_types is a JSON array)
+    if exhibit:
+        conditions.append("p.exhibit_types LIKE ?")
+        params.append(f'%"{exhibit}"%')
+
     # Fiscal year filter (pe_index.fiscal_years is a JSON array)
     if fy:
         conditions.append("p.fiscal_years LIKE ?")
         params.append(f'%"{fy}"%')
 
-    # FTS5 topic search — restrict to PEs that have matching description text
+    # FTS5 topic search — restrict to PEs that have matching description text.
+    # Uses pe_descriptions_fts (FTS5) when available; falls back to LIKE scan.
     if q:
         safe_q = sanitize_fts5_query(q)
         if safe_q:
-            conditions.append("""p.pe_number IN (
-                SELECT DISTINCT pe_number FROM pe_descriptions
-                WHERE description_text LIKE ?
-            )""")
-            params.append(f"%{q}%")
+            # Try FTS5 first, fall back to LIKE if table doesn't exist
+            try:
+                conn.execute("SELECT 1 FROM pe_descriptions_fts LIMIT 0")
+                conditions.append("""p.pe_number IN (
+                    SELECT pe_number FROM pe_descriptions_fts
+                    WHERE pe_descriptions_fts MATCH ?
+                )""")
+                params.append(safe_q)
+            except Exception:
+                conditions.append("""p.pe_number IN (
+                    SELECT DISTINCT pe_number FROM pe_descriptions
+                    WHERE description_text LIKE ?
+                )""")
+                params.append(f"%{q}%")
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     count_sql = f"SELECT COUNT(DISTINCT p.pe_number) FROM {base_from} {where}"
     total = conn.execute(count_sql, params).fetchone()[0]
 
-    data_sql = f"""
-        SELECT DISTINCT p.pe_number, p.display_title, p.organization_name,
-               p.budget_type, p.fiscal_years, p.exhibit_types
-        FROM {base_from} {where}
-        ORDER BY p.pe_number
-        LIMIT ? OFFSET ?
-    """
+    if count_only:
+        return {"total": total, "limit": limit, "offset": offset, "items": []}
+
+    # Determine sort column and direction
+    _SORT_ALLOWED = {"pe_number", "funding", "name"}
+    effective_sort = sort_by if sort_by in _SORT_ALLOWED else "pe_number"
+    direction = "DESC" if sort_dir == "desc" else "ASC"
+
+    if effective_sort == "funding":
+        # Join budget_lines SUM so ORDER BY can reference it
+        data_sql = f"""
+            SELECT DISTINCT p.pe_number, p.display_title, p.organization_name,
+                   p.budget_type, p.fiscal_years, p.exhibit_types,
+                   COALESCE(bl_sum.total, 0) AS _sort_funding
+            FROM {base_from}
+            LEFT JOIN (
+                SELECT pe_number, SUM(COALESCE(amount_fy2026_request, 0)) AS total
+                FROM budget_lines GROUP BY pe_number
+            ) bl_sum ON bl_sum.pe_number = p.pe_number
+            {where}
+            ORDER BY _sort_funding {direction}, p.pe_number
+            LIMIT ? OFFSET ?
+        """
+    elif effective_sort == "name":
+        data_sql = f"""
+            SELECT DISTINCT p.pe_number, p.display_title, p.organization_name,
+                   p.budget_type, p.fiscal_years, p.exhibit_types
+            FROM {base_from} {where}
+            ORDER BY p.display_title {direction}, p.pe_number
+            LIMIT ? OFFSET ?
+        """
+    else:
+        data_sql = f"""
+            SELECT DISTINCT p.pe_number, p.display_title, p.organization_name,
+                   p.budget_type, p.fiscal_years, p.exhibit_types
+            FROM {base_from} {where}
+            ORDER BY p.pe_number {direction}
+            LIMIT ? OFFSET ?
+        """
     rows = conn.execute(data_sql, params + [limit, offset]).fetchall()
+
+    # Batch-fetch tags for all PEs in this page to avoid N+1 query pattern.
+    # Single query instead of one per PE.
+    pe_numbers = [r["pe_number"] for r in rows]
+    tags_by_pe: dict[str, list[dict]] = {}
+    if pe_numbers:
+        ph = ",".join("?" * len(pe_numbers))
+        all_tags = conn.execute(
+            f"SELECT pe_number, tag, tag_source, confidence, source_files "
+            f"FROM pe_tags "
+            f"WHERE pe_number IN ({ph}) ORDER BY confidence DESC, tag",
+            pe_numbers,
+        ).fetchall()
+        for t in all_tags:
+            tags_by_pe.setdefault(t["pe_number"], []).append(
+                {"tag": t["tag"], "tag_source": t["tag_source"],
+                 "confidence": t["confidence"],
+                 "source_files": _json_list(t["source_files"])}
+            )
+
+    # Batch-fetch enrichment status and funding totals for all PEs in this page.
+    desc_pes: set[str] = set()
+    related_pes: set[str] = set()
+    funding_by_pe: dict[str, float] = {}
+    funding_prev_by_pe: dict[str, float] = {}
+    if pe_numbers:
+        ph = ",".join("?" * len(pe_numbers))
+        for r2 in conn.execute(
+            f"SELECT DISTINCT pe_number FROM pe_descriptions "
+            f"WHERE pe_number IN ({ph})", pe_numbers,
+        ).fetchall():
+            desc_pes.add(r2[0])
+        try:
+            for r2 in conn.execute(
+                f"SELECT DISTINCT source_pe FROM pe_lineage "
+                f"WHERE source_pe IN ({ph})", pe_numbers,
+            ).fetchall():
+                related_pes.add(r2[0])
+        except Exception:
+            pass
+        # Latest-year and prior-year funding totals for sorting/display
+        for r2 in conn.execute(
+            f"SELECT pe_number, "
+            f"  SUM(COALESCE(amount_fy2026_request, 0)) AS total_fy2026, "
+            f"  SUM(COALESCE(amount_fy2025_enacted, 0)) AS total_fy2025 "
+            f"FROM budget_lines WHERE pe_number IN ({ph}) "
+            f"GROUP BY pe_number", pe_numbers,
+        ).fetchall():
+            funding_by_pe[r2[0]] = r2[1] or 0.0
+            funding_prev_by_pe[r2[0]] = r2[2] or 0.0
+
+    # Batch-fetch PDF page counts from pdf_pe_numbers junction table
+    pdf_pages_by_pe: dict[str, int] = {}
+    if pe_numbers:
+        try:
+            ph = ",".join("?" * len(pe_numbers))
+            for r2 in conn.execute(
+                f"SELECT pe_number, COUNT(*) AS page_count "
+                f"FROM pdf_pe_numbers WHERE pe_number IN ({ph}) "
+                f"GROUP BY pe_number", pe_numbers,
+            ).fetchall():
+                pdf_pages_by_pe[r2[0]] = r2[1]
+        except Exception:
+            pass  # Table may not exist
 
     items = []
     for r in rows:
         d = _row_dict(r)
         d["fiscal_years"] = _json_list(d.get("fiscal_years"))
         d["exhibit_types"] = _json_list(d.get("exhibit_types"))
-        # Attach tags for each result
-        tags = conn.execute(
-            "SELECT tag, tag_source FROM pe_tags WHERE pe_number = ? ORDER BY tag",
-            (r["pe_number"],),
-        ).fetchall()
-        d["tags"] = [_row_dict(t) for t in tags]
+        d["tags"] = tags_by_pe.get(r["pe_number"], [])
+        d["has_descriptions"] = r["pe_number"] in desc_pes
+        d["has_related"] = r["pe_number"] in related_pes
+        fy26 = funding_by_pe.get(r["pe_number"], 0.0)
+        fy25 = funding_prev_by_pe.get(r["pe_number"], 0.0)
+        d["total_fy2026_request"] = fy26
+        d["total_fy2025_enacted"] = fy25
+        d["yoy_change_pct"] = (
+            round((fy26 - fy25) / abs(fy25) * 100, 2) if fy25 else None
+        )
+        d["pdf_page_count"] = pdf_pages_by_pe.get(r["pe_number"], 0)
+        # Enrichment score: count of enrichment dimensions present (0-4)
+        d["enrichment_score"] = sum([
+            bool(d["tags"]),
+            d["has_descriptions"],
+            d["has_related"],
+            d["pdf_page_count"] > 0,
+        ])
         items.append(d)
 
     return {"total": total, "limit": limit, "offset": offset, "items": items}
@@ -409,6 +963,7 @@ def export_pe_table(
              FY2025 Total, FY2026 Request, FY2026 Total, % Change (25→26),
              Qty FY2024, Qty FY2025, Qty FY2026 Request
     """
+    _validate_pe_number(pe_number)
     rows = conn.execute("""
         SELECT
             pe_number, line_item_title, organization_name,

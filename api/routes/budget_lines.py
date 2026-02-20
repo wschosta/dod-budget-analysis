@@ -13,7 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.database import get_db
 from api.models import BudgetLineDetailOut, BudgetLineOut, PaginatedResponse
-from utils.query import build_where_clause, build_order_clause
+from utils.query import build_where_clause
+from utils.strings import sanitize_fts5_query
 
 router = APIRouter(prefix="/budget-lines", tags=["budget-lines"])
 
@@ -69,6 +70,10 @@ def list_budget_lines(
     exhibit_type: list[str] | None = Query(None, description="Filter by exhibit type(s)"),
     pe_number: list[str] | None = Query(None, description="Filter by PE number(s)"),
     appropriation_code: list[str] | None = Query(None, description="Filter by appropriation"),
+    budget_type: list[str] | None = Query(None, description="Filter by budget type (RDT&E, Procurement, etc.)"),
+    q: str | None = Query(None, description="Free-text search across account/line-item titles"),
+    min_amount: float | None = Query(None, description="Min FY2026 request amount (thousands)"),
+    max_amount: float | None = Query(None, description="Max FY2026 request amount (thousands)"),
     sort_by: str = Query("id", description="Column to sort by"),
     sort_dir: str = Query("asc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(25, ge=1, le=500, description="Max items per page"),
@@ -82,12 +87,30 @@ def list_budget_lines(
             detail=f"sort_by must be one of: {sorted(_ALLOWED_SORT)}",
         )
 
+    # FTS5 free-text search: resolve matching row IDs first
+    fts_ids: list[int] | None = None
+    if q:
+        safe_q = sanitize_fts5_query(q)
+        if safe_q:
+            try:
+                fts_rows = conn.execute(
+                    "SELECT rowid FROM budget_lines_fts WHERE budget_lines_fts MATCH ?",
+                    (safe_q,),
+                ).fetchall()
+                fts_ids = [r[0] for r in fts_rows]
+            except Exception:
+                fts_ids = []  # FTS table missing → no matches
+
     where, params = build_where_clause(
         fiscal_year=fiscal_year,
         service=service,
         exhibit_type=exhibit_type,
         pe_number=pe_number,
         appropriation_code=appropriation_code,
+        budget_type=budget_type,
+        min_amount=min_amount,
+        max_amount=max_amount,
+        fts_ids=fts_ids,
     )
     direction = "DESC" if sort_dir == "desc" else "ASC"
 
@@ -101,7 +124,15 @@ def list_budget_lines(
     rows = conn.execute(data_sql, params + [limit, offset]).fetchall()
     items = [BudgetLineOut(**dict(row)) for row in rows]
 
-    return PaginatedResponse(total=total, limit=limit, offset=offset, items=items)
+    page = offset // limit if limit > 0 else 0
+    page_count = max(1, (total + limit - 1) // limit) if limit > 0 else 1
+    has_next = offset + limit < total
+
+    return PaginatedResponse(
+        total=total, limit=limit, offset=offset,
+        page=page, page_count=page_count, has_next=has_next,
+        items=items,
+    )
 
 
 @router.get(

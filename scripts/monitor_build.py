@@ -53,7 +53,7 @@ def monitor_progress():
         print("="*70)
 
         pdf_total = pdf_ok + pdf_issues
-        print(f"\n  PDF Files:")
+        print("\n  PDF Files:")
         print(f"    Processed: {pdf_total:,} / 6,233 ({100*pdf_total/6233:.1f}%)")
         print(f"    - Successfully: {pdf_ok:,}")
         print(f"    - With timeout/issues: {pdf_issues:,}")
@@ -64,7 +64,7 @@ def monitor_progress():
         for issue_type, count in sorted(issue_types.items()):
             print(f"    - {issue_type}: {count:,}")
 
-        print(f"\n  Timing:")
+        print("\n  Timing:")
         print(f"    Elapsed: {elapsed/60:.1f} minutes")
 
         if pdf_total > 0:

@@ -177,8 +177,8 @@ class Manifest:
     def summary(self) -> Dict[str, Any]:
         """Generate summary statistics."""
         total = len(self.entries)
-        by_status = {}
-        by_source = {}
+        by_status: dict[str, int] = {}
+        by_source: dict[str, int] = {}
 
         for entry in self.entries:
             by_status[entry.status] = by_status.get(entry.status, 0) + 1

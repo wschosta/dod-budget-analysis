@@ -400,7 +400,7 @@ def test_downloadable_extensions_pattern():
 
 # ── ProgressTracker (utils/progress.py) ──────────────────────────────────────
 
-from utils.progress import (
+from utils.progress import (  # noqa: E402
     SilentProgressTracker,
     TerminalProgressTracker,
     FileProgressTracker,
@@ -503,7 +503,7 @@ def test_file_tracker_format_bytes_gb():
 
 # ── database utilities (utils/database.py) ───────────────────────────────────
 
-from utils.database import (
+from utils.database import (  # noqa: E402
     init_pragmas,
     batch_insert,
     get_table_count,
@@ -627,7 +627,7 @@ def test_vacuum_database(tmp_path):
 
 # ── config utilities (utils/config.py) ───────────────────────────────────────
 
-from utils.config import Config, KnownValues, ColumnMapping, FilePatterns
+from utils.config import Config, KnownValues, ColumnMapping, FilePatterns  # noqa: E402
 
 
 def test_config_to_dict():
@@ -722,7 +722,7 @@ def test_file_patterns_get_fiscal_year():
 
 # ── PDF narrative section parser tests (1.B5-c) ───────────────────────────────
 
-from utils.pdf_sections import (
+from utils.pdf_sections import (  # noqa: E402
     parse_narrative_sections,
     extract_sections_for_page,
     is_narrative_exhibit,

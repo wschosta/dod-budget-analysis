@@ -8,7 +8,6 @@ import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 _project_root = str(Path(__file__).resolve().parent.parent)
 sys.path.insert(0, _project_root)

@@ -7,14 +7,11 @@ and FileProgressTracker.add_bytes().
 """
 import sys
 from pathlib import Path
-from io import StringIO
 
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.progress import (
-    ProgressTracker,
     TerminalProgressTracker,
     SilentProgressTracker,
     FileProgressTracker,

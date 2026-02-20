@@ -78,6 +78,22 @@ def db():
         + ")",
         rows,
     )
+
+    # FTS5 virtual table for text search
+    conn.execute("""
+        CREATE VIRTUAL TABLE budget_lines_fts USING fts5(
+            account_title, line_item_title, budget_activity_title,
+            content='budget_lines', content_rowid='id',
+            tokenize='unicode61'
+        )
+    """)
+    conn.execute("""
+        INSERT INTO budget_lines_fts(rowid, account_title, line_item_title,
+            budget_activity_title)
+        SELECT id, account_title, line_item_title, budget_activity_title
+        FROM budget_lines
+    """)
+
     conn.commit()
     yield conn
     conn.close()
@@ -87,7 +103,8 @@ def _list(db, **kwargs):
     """Call list_budget_lines with all required defaults."""
     defaults = dict(
         fiscal_year=None, service=None, exhibit_type=None,
-        pe_number=None, appropriation_code=None,
+        pe_number=None, appropriation_code=None, budget_type=None,
+        q=None, min_amount=None, max_amount=None,
         sort_by="id", sort_dir="asc", limit=25, offset=0, conn=db,
     )
     defaults.update(kwargs)
@@ -150,6 +167,63 @@ class TestListBudgetLines:
         )
         assert result.total == 1
         assert result.items[0].line_item_title == "Apache Helicopter"
+
+    def test_min_amount_filter(self, db):
+        # Only rows with fy2026_request >= 2200 (RDT&E=2200, DDG=5500)
+        result = _list(db, min_amount=2200.0)
+        assert result.total == 2
+        amounts = {item.amount_fy2026_request for item in result.items}
+        assert all(a >= 2200 for a in amounts)
+
+    def test_max_amount_filter(self, db):
+        # Only rows with fy2026_request <= 1100 (Apache=1100, Black Hawk=0)
+        result = _list(db, max_amount=1100.0)
+        assert result.total == 2
+
+    def test_min_max_range_filter(self, db):
+        # Between 1000 and 3000 → Apache(1100) and RDT&E(2200)
+        result = _list(db, min_amount=1000.0, max_amount=3000.0)
+        assert result.total == 2
+        for item in result.items:
+            assert 1000 <= item.amount_fy2026_request <= 3000
+
+    def test_pagination_metadata_first_page(self, db):
+        """First page has correct page, page_count, has_next."""
+        result = _list(db, limit=2, offset=0)
+        assert result.page == 0
+        assert result.page_count == 2  # 4 items / 2 per page
+        assert result.has_next is True
+
+    def test_pagination_metadata_last_page(self, db):
+        """Last page has has_next=False."""
+        result = _list(db, limit=2, offset=2)
+        assert result.page == 1
+        assert result.page_count == 2
+        assert result.has_next is False
+
+    def test_pagination_metadata_single_page(self, db):
+        """When all items fit, page_count=1 and has_next=False."""
+        result = _list(db, limit=25, offset=0)
+        assert result.page == 0
+        assert result.page_count == 1
+        assert result.has_next is False
+
+    def test_text_search(self, db):
+        """q parameter searches FTS5 index for matching terms."""
+        result = _list(db, q="Apache")
+        assert result.total >= 1
+        titles = [item.line_item_title for item in result.items]
+        assert "Apache Helicopter" in titles
+
+    def test_text_search_no_match(self, db):
+        """Non-matching text search returns zero results."""
+        result = _list(db, q="nonexistentterm")
+        assert result.total == 0
+
+    def test_text_search_combined_with_filter(self, db):
+        """q works alongside other filters."""
+        result = _list(db, q="Aircraft", fiscal_year=["FY 2026"])
+        assert result.total >= 1
 
 
 class TestGetBudgetLine:
