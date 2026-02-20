@@ -196,6 +196,7 @@ def compare_pes(
             "pe_number": p,
             "display_title": index_map.get(p, {}).get("display_title"),
             "organization_name": index_map.get(p, {}).get("organization_name"),
+            "budget_type": index_map.get(p, {}).get("budget_type"),
             "funding": funding_map.get(p, {}),
         }
         items.append(entry)

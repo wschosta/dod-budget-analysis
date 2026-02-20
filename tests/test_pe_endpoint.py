@@ -434,6 +434,11 @@ class TestComparePes:
             assert "display_title" in item
             assert "organization_name" in item
 
+    def test_items_have_budget_type(self, populated_db):
+        result = compare_pes(pe=["0602120A", "0603000A"], conn=populated_db)
+        for item in result["items"]:
+            assert "budget_type" in item
+
     def test_too_few_pes_raises_400(self, populated_db):
         with pytest.raises(HTTPException) as exc_info:
             compare_pes(pe=["0602120A"], conn=populated_db)
