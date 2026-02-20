@@ -440,18 +440,29 @@ def list_pes(
     """
     rows = conn.execute(data_sql, params + [limit, offset]).fetchall()
 
+    # Batch-fetch tags for all PEs in this page to avoid N+1 query pattern.
+    # Single query instead of one per PE.
+    pe_numbers = [r["pe_number"] for r in rows]
+    tags_by_pe: dict[str, list[dict]] = {}
+    if pe_numbers:
+        ph = ",".join("?" * len(pe_numbers))
+        all_tags = conn.execute(
+            f"SELECT pe_number, tag, tag_source, confidence FROM pe_tags "
+            f"WHERE pe_number IN ({ph}) ORDER BY confidence DESC, tag",
+            pe_numbers,
+        ).fetchall()
+        for t in all_tags:
+            tags_by_pe.setdefault(t["pe_number"], []).append(
+                {"tag": t["tag"], "tag_source": t["tag_source"],
+                 "confidence": t["confidence"]}
+            )
+
     items = []
     for r in rows:
         d = _row_dict(r)
         d["fiscal_years"] = _json_list(d.get("fiscal_years"))
         d["exhibit_types"] = _json_list(d.get("exhibit_types"))
-        # Attach tags for each result (LION-106: include confidence)
-        tags = conn.execute(
-            "SELECT tag, tag_source, confidence FROM pe_tags "
-            "WHERE pe_number = ? ORDER BY confidence DESC, tag",
-            (r["pe_number"],),
-        ).fetchall()
-        d["tags"] = [_row_dict(t) for t in tags]
+        d["tags"] = tags_by_pe.get(r["pe_number"], [])
         items.append(d)
 
     return {"total": total, "limit": limit, "offset": offset, "items": items}
