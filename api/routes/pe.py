@@ -202,12 +202,17 @@ def compare_pes(
 
     items = []
     for p in pe:
+        funding = funding_map.get(p, {})
+        fy25 = funding.get("fy2025_enacted", 0) or 0
+        fy26 = funding.get("fy2026_request", 0) or 0
+        yoy_pct = round((fy26 - fy25) / abs(fy25) * 100, 2) if fy25 else None
         entry = {
             "pe_number": p,
             "display_title": index_map.get(p, {}).get("display_title"),
             "organization_name": index_map.get(p, {}).get("organization_name"),
             "budget_type": index_map.get(p, {}).get("budget_type"),
-            "funding": funding_map.get(p, {}),
+            "funding": funding,
+            "yoy_change_pct": yoy_pct,
         }
         items.append(entry)
 

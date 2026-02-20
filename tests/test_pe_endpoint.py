@@ -467,6 +467,15 @@ class TestComparePes:
         for item in result["items"]:
             assert "budget_type" in item
 
+    def test_items_have_yoy_change_pct(self, populated_db):
+        result = compare_pes(pe=["0602120A", "0603000A"], conn=populated_db)
+        by_pe = {i["pe_number"]: i for i in result["items"]}
+        # 0602120A has both fy25 and fy26 → yoy computed
+        assert by_pe["0602120A"]["yoy_change_pct"] is not None
+        assert isinstance(by_pe["0602120A"]["yoy_change_pct"], float)
+        # 0603000A has no fy25 funding → yoy is None
+        assert by_pe["0603000A"]["yoy_change_pct"] is None
+
     def test_too_few_pes_raises_400(self, populated_db):
         with pytest.raises(HTTPException) as exc_info:
             compare_pes(pe=["0602120A"], conn=populated_db)
