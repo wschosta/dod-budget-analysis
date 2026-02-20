@@ -150,6 +150,7 @@ function buildDownloadURL(fmt) {
   const hidden = getHiddenCols();
   if (hidden.size > 0) {
     // Map CSS class names (e.g., "col-org") to column names — best-effort
+    // FIX-012: Complete mapping including FY25 total, FY26 total, and source columns
     const colMap = {
       "col-org":     "organization_name",
       "col-fy":      "fiscal_year",
@@ -158,7 +159,10 @@ function buildDownloadURL(fmt) {
       "col-pe":      "pe_number",
       "col-fy24":    "amount_fy2024_actual",
       "col-fy25":    "amount_fy2025_enacted",
+      "col-fy25tot": "amount_fy2025_total",
       "col-fy26":    "amount_fy2026_request",
+      "col-fy26tot": "amount_fy2026_total",
+      "col-source":  "source_file",
     };
     // Build list of visible columns
     const allCols = [
