@@ -837,6 +837,7 @@ def list_pes(
     desc_pes: set[str] = set()
     related_pes: set[str] = set()
     funding_by_pe: dict[str, float] = {}
+    funding_prev_by_pe: dict[str, float] = {}
     if pe_numbers:
         ph = ",".join("?" * len(pe_numbers))
         for r2 in conn.execute(
@@ -852,14 +853,16 @@ def list_pes(
                 related_pes.add(r2[0])
         except Exception:
             pass
-        # Latest-year funding total for sorting/display
+        # Latest-year and prior-year funding totals for sorting/display
         for r2 in conn.execute(
             f"SELECT pe_number, "
-            f"  SUM(COALESCE(amount_fy2026_request, 0)) AS total_fy2026 "
+            f"  SUM(COALESCE(amount_fy2026_request, 0)) AS total_fy2026, "
+            f"  SUM(COALESCE(amount_fy2025_enacted, 0)) AS total_fy2025 "
             f"FROM budget_lines WHERE pe_number IN ({ph}) "
             f"GROUP BY pe_number", pe_numbers,
         ).fetchall():
             funding_by_pe[r2[0]] = r2[1] or 0.0
+            funding_prev_by_pe[r2[0]] = r2[2] or 0.0
 
     # Batch-fetch PDF page counts from pdf_pe_numbers junction table
     pdf_pages_by_pe: dict[str, int] = {}
@@ -884,6 +887,7 @@ def list_pes(
         d["has_descriptions"] = r["pe_number"] in desc_pes
         d["has_related"] = r["pe_number"] in related_pes
         d["total_fy2026_request"] = funding_by_pe.get(r["pe_number"], 0.0)
+        d["total_fy2025_enacted"] = funding_prev_by_pe.get(r["pe_number"], 0.0)
         d["pdf_page_count"] = pdf_pages_by_pe.get(r["pe_number"], 0)
         # Enrichment score: count of enrichment dimensions present (0-4)
         d["enrichment_score"] = sum([

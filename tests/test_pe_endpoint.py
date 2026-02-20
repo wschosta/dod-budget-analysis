@@ -689,6 +689,16 @@ class TestListPes:
         # 0603000A has 9000
         assert pe_items["0603000A"]["total_fy2026_request"] == 9000.0
 
+    def test_prior_year_funding_included(self, populated_db):
+        """PE list items include total_fy2025_enacted for YoY comparison."""
+        result = list_pes(tag=None, q=None, service=None, budget_type=None,
+                          approp=None, account=None, ba=None, exhibit=None,
+                          fy=None, sort_by=None, sort_dir=None, count_only=False,
+                          limit=25, offset=0, conn=populated_db)
+        pe_items = {i["pe_number"]: i for i in result["items"]}
+        # 0602120A has 1200 + 1200 + 600 = 3000 in fy2025_enacted
+        assert pe_items["0602120A"]["total_fy2025_enacted"] == 3000.0
+
     def test_pdf_page_count_included(self, populated_db):
         """Each PE item includes a pdf_page_count field."""
         result = list_pes(tag=None, q=None, service=None, budget_type=None,
