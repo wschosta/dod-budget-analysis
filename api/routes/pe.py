@@ -102,12 +102,34 @@ def get_pe(
         LIMIT 50
     """, (pe_number,)).fetchall()
 
+    # Summary stats — quick counts for UI badges/indicators
+    desc_count = conn.execute(
+        "SELECT COUNT(*) FROM pe_descriptions WHERE pe_number = ?",
+        (pe_number,),
+    ).fetchone()[0]
+
+    pdf_page_count = 0
+    try:
+        pdf_page_count = conn.execute(
+            "SELECT COUNT(*) FROM pdf_pe_numbers WHERE pe_number = ?",
+            (pe_number,),
+        ).fetchone()[0]
+    except Exception:
+        pass
+
     return {
         "pe_number": pe_number,
         "index": index,
         "funding": [_row_dict(r) for r in funding_rows],
         "tags": [_row_dict(r) for r in tag_rows],
         "related": [_row_dict(r) for r in related_rows],
+        "summary": {
+            "funding_rows": len(funding_rows),
+            "tag_count": len(tag_rows),
+            "description_count": desc_count,
+            "related_count": len(related_rows),
+            "pdf_page_count": pdf_page_count,
+        },
     }
 
 

@@ -263,6 +263,14 @@ class TestGetPe:
         refs = [r["referenced_pe"] for r in result["related"]]
         assert "0603000A" in refs
 
+    def test_summary_stats(self, populated_db):
+        result = get_pe("0602120A", conn=populated_db)
+        s = result["summary"]
+        assert s["funding_rows"] == 3
+        assert s["tag_count"] == 3  # army, rdte, radar
+        assert s["description_count"] == 2
+        assert s["related_count"] == 1
+
     def test_not_found_raises_404(self, db):
         with pytest.raises(HTTPException) as exc_info:
             get_pe("9999999X", conn=db)
