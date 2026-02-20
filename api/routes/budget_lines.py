@@ -69,6 +69,8 @@ def list_budget_lines(
     exhibit_type: list[str] | None = Query(None, description="Filter by exhibit type(s)"),
     pe_number: list[str] | None = Query(None, description="Filter by PE number(s)"),
     appropriation_code: list[str] | None = Query(None, description="Filter by appropriation"),
+    min_amount: float | None = Query(None, description="Min FY2026 request amount (thousands)"),
+    max_amount: float | None = Query(None, description="Max FY2026 request amount (thousands)"),
     sort_by: str = Query("id", description="Column to sort by"),
     sort_dir: str = Query("asc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(25, ge=1, le=500, description="Max items per page"),
@@ -88,6 +90,8 @@ def list_budget_lines(
         exhibit_type=exhibit_type,
         pe_number=pe_number,
         appropriation_code=appropriation_code,
+        min_amount=min_amount,
+        max_amount=max_amount,
     )
     direction = "DESC" if sort_dir == "desc" else "ASC"
 

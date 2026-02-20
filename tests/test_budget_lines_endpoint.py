@@ -88,6 +88,7 @@ def _list(db, **kwargs):
     defaults = dict(
         fiscal_year=None, service=None, exhibit_type=None,
         pe_number=None, appropriation_code=None,
+        min_amount=None, max_amount=None,
         sort_by="id", sort_dir="asc", limit=25, offset=0, conn=db,
     )
     defaults.update(kwargs)
@@ -150,6 +151,25 @@ class TestListBudgetLines:
         )
         assert result.total == 1
         assert result.items[0].line_item_title == "Apache Helicopter"
+
+    def test_min_amount_filter(self, db):
+        # Only rows with fy2026_request >= 2200 (RDT&E=2200, DDG=5500)
+        result = _list(db, min_amount=2200.0)
+        assert result.total == 2
+        amounts = {item.amount_fy2026_request for item in result.items}
+        assert all(a >= 2200 for a in amounts)
+
+    def test_max_amount_filter(self, db):
+        # Only rows with fy2026_request <= 1100 (Apache=1100, Black Hawk=0)
+        result = _list(db, max_amount=1100.0)
+        assert result.total == 2
+
+    def test_min_max_range_filter(self, db):
+        # Between 1000 and 3000 → Apache(1100) and RDT&E(2200)
+        result = _list(db, min_amount=1000.0, max_amount=3000.0)
+        assert result.total == 2
+        for item in result.items:
+            assert 1000 <= item.amount_fy2026_request <= 3000
 
 
 class TestGetBudgetLine:
