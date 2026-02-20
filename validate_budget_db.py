@@ -16,12 +16,10 @@ Usage:
 TODOs for this file
 ---
 
-LION-108-val: Add validation checks for LION schema changes.
-    After LION-100/103/106 are implemented, add checks for:
-    (a) pdf_pages.fiscal_year is non-null (warn if >5% null)
-    (b) pdf_pe_numbers table has rows for PDFs containing PE-like text
-    (c) pe_tags.source_files is non-null for all rows
-    These are integrated into validate_all() as new check functions.
+DONE LION-108-val: Validation checks for LION schema changes.
+    (a) check_pdf_pages_fiscal_year — warns if >5% of pdf_pages have NULL fiscal_year
+    (b) check_pdf_pe_numbers_populated — warns if junction table is empty/missing
+    (c) check_pe_tags_source_files — warns if pe_tags.source_files has NULLs
 
 """
 
@@ -767,6 +765,160 @@ def check_integrity(conn: sqlite3.Connection) -> list[dict]:
     return issues
 
 
+# ── LION-108-val: Validation checks for LION schema changes ──────────────
+
+def check_pdf_pages_fiscal_year(conn: sqlite3.Connection) -> list[dict]:
+    """LION-108-val(a): Check that pdf_pages.fiscal_year is populated.
+
+    After LION-100, every pdf_pages row should have a fiscal_year derived
+    from the directory path.  Warns if >5% of rows are NULL.
+    """
+    issues = []
+    try:
+        total = conn.execute(
+            "SELECT COUNT(*) AS c FROM pdf_pages"
+        ).fetchone()["c"]
+    except Exception:
+        return []
+
+    if total == 0:
+        return []
+
+    try:
+        null_fy = conn.execute(
+            "SELECT COUNT(*) AS c FROM pdf_pages WHERE fiscal_year IS NULL"
+        ).fetchone()["c"]
+    except Exception:
+        # Column may not exist in older databases
+        return [{
+            "check": "pdf_pages_fiscal_year",
+            "severity": "warning",
+            "detail": "pdf_pages table missing fiscal_year column (LION-100 not applied)",
+        }]
+
+    if null_fy > 0:
+        pct = null_fy / total * 100
+        severity = "warning" if pct > 5 else "info"
+        issues.append({
+            "check": "pdf_pages_fiscal_year",
+            "severity": severity,
+            "detail": (
+                f"{null_fy}/{total} pdf_pages rows ({pct:.1f}%) have NULL fiscal_year"
+            ),
+            "null_count": null_fy,
+            "total": total,
+            "null_pct": round(pct, 2),
+        })
+
+    return issues
+
+
+def check_pdf_pe_numbers_populated(conn: sqlite3.Connection) -> list[dict]:
+    """LION-108-val(b): Check that pdf_pe_numbers has rows for PE-containing PDFs.
+
+    After LION-103, the pdf_pe_numbers junction table should be populated
+    during ingestion.  Warns if the table exists but is empty while pdf_pages
+    has text mentioning PE-like patterns.
+    """
+    issues = []
+
+    if not _table_exists(conn, "pdf_pe_numbers"):
+        return [{
+            "check": "pdf_pe_numbers_populated",
+            "severity": "warning",
+            "detail": "pdf_pe_numbers table does not exist (LION-103 not applied)",
+        }]
+
+    junction_count = conn.execute(
+        "SELECT COUNT(*) AS c FROM pdf_pe_numbers"
+    ).fetchone()["c"]
+
+    if junction_count == 0:
+        # Check if there are any pdf_pages that might contain PE numbers
+        try:
+            pe_pages = conn.execute("""
+                SELECT COUNT(*) AS c FROM pdf_pages
+                WHERE page_text LIKE '%0_0_____%'
+            """).fetchone()["c"]
+        except Exception:
+            pe_pages = 0
+
+        if pe_pages > 0:
+            issues.append({
+                "check": "pdf_pe_numbers_populated",
+                "severity": "warning",
+                "detail": (
+                    f"pdf_pe_numbers is empty but {pe_pages} pdf_pages "
+                    "may contain PE numbers — re-run ingestion with LION-103"
+                ),
+                "pe_page_estimate": pe_pages,
+            })
+    else:
+        issues.append({
+            "check": "pdf_pe_numbers_populated",
+            "severity": "info",
+            "detail": f"pdf_pe_numbers has {junction_count:,} PE-page links",
+            "junction_count": junction_count,
+        })
+
+    return issues
+
+
+def check_pe_tags_source_files(conn: sqlite3.Connection) -> list[dict]:
+    """LION-108-val(c): Check that pe_tags.source_files is populated.
+
+    After LION-106, every pe_tags row should have a non-null source_files
+    JSON array for provenance tracking.
+    """
+    issues = []
+
+    if not _table_exists(conn, "pe_tags"):
+        return []
+
+    try:
+        total = conn.execute(
+            "SELECT COUNT(*) AS c FROM pe_tags"
+        ).fetchone()["c"]
+    except Exception:
+        return []
+
+    if total == 0:
+        return []
+
+    try:
+        null_src = conn.execute(
+            "SELECT COUNT(*) AS c FROM pe_tags WHERE source_files IS NULL"
+        ).fetchone()["c"]
+    except Exception:
+        return [{
+            "check": "pe_tags_source_files",
+            "severity": "warning",
+            "detail": "pe_tags table missing source_files column (LION-106 not applied)",
+        }]
+
+    if null_src > 0:
+        issues.append({
+            "check": "pe_tags_source_files",
+            "severity": "warning",
+            "detail": (
+                f"{null_src}/{total} pe_tags rows have NULL source_files — "
+                "re-run enrichment Phase 3 with LION-106"
+            ),
+            "null_count": null_src,
+            "total": total,
+        })
+
+    return issues
+
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    r = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        (name,)
+    ).fetchone()
+    return r is not None
+
+
 ALL_CHECKS = [
     ("Missing Fiscal Years", check_missing_years),
     ("Duplicate Rows", check_duplicates),
@@ -785,6 +937,9 @@ ALL_CHECKS = [
     ("Referential Integrity", check_referential_integrity),      # TIGER-004
     ("Expected FY Columns", check_expected_fy_columns),          # TIGER-005
     ("PDF Extraction Quality", check_pdf_extraction_quality),    # TIGER-006
+    ("PDF Pages Fiscal Year", check_pdf_pages_fiscal_year),      # LION-108-val(a)
+    ("PDF PE Numbers Junction", check_pdf_pe_numbers_populated), # LION-108-val(b)
+    ("PE Tags Source Files", check_pe_tags_source_files),        # LION-108-val(c)
 ]
 
 

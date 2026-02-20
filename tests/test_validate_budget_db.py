@@ -342,3 +342,128 @@ def test_generate_report_verbose_shows_detail(conn, capsys):
     out = capsys.readouterr().out
     # Verbose mode should show at least one issue detail
     assert "ERROR" in out or "WARNING" in out or "INFO" in out
+
+
+# ── LION-108-val: PDF Pages Fiscal Year ──────────────────────────────────────
+
+from validate_budget_db import (
+    check_pdf_pages_fiscal_year,
+    check_pdf_pe_numbers_populated,
+    check_pe_tags_source_files,
+)
+
+
+def test_pdf_pages_fy_all_populated(conn):
+    """All pdf_pages have fiscal_year → no issues."""
+    conn.execute(
+        "INSERT INTO pdf_pages (source_file, source_category, fiscal_year, "
+        "page_number, page_text) VALUES (?, ?, ?, ?, ?)",
+        ("r2.pdf", "Army", "FY 2026", 1, "test text"),
+    )
+    conn.commit()
+    issues = check_pdf_pages_fiscal_year(conn)
+    assert len(issues) == 0
+
+
+def test_pdf_pages_fy_null_warning(conn):
+    """pdf_pages with NULL fiscal_year → warning when >5%."""
+    for i in range(20):
+        fy = None if i < 5 else "FY 2026"  # 25% null
+        conn.execute(
+            "INSERT INTO pdf_pages (source_file, source_category, fiscal_year, "
+            "page_number, page_text) VALUES (?, ?, ?, ?, ?)",
+            ("r2.pdf", "Army", fy, i, "text"),
+        )
+    conn.commit()
+    issues = check_pdf_pages_fiscal_year(conn)
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "warning"
+    assert issues[0]["null_count"] == 5
+
+
+def test_pdf_pages_fy_null_info_when_low(conn):
+    """pdf_pages with low NULL fiscal_year rate → info."""
+    for i in range(100):
+        fy = None if i == 0 else "FY 2026"  # 1% null
+        conn.execute(
+            "INSERT INTO pdf_pages (source_file, source_category, fiscal_year, "
+            "page_number, page_text) VALUES (?, ?, ?, ?, ?)",
+            ("r2.pdf", "Army", fy, i, "text"),
+        )
+    conn.commit()
+    issues = check_pdf_pages_fiscal_year(conn)
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "info"
+
+
+def test_pdf_pages_fy_empty_table(conn):
+    """Empty pdf_pages → no issues."""
+    issues = check_pdf_pages_fiscal_year(conn)
+    assert len(issues) == 0
+
+
+# ── LION-108-val: PDF PE Numbers Junction ────────────────────────────────────
+
+def test_pdf_pe_numbers_populated(conn):
+    """pdf_pe_numbers with data → info-level report."""
+    conn.execute(
+        "INSERT INTO pdf_pe_numbers (pdf_page_id, pe_number, page_number, "
+        "source_file, fiscal_year) VALUES (?, ?, ?, ?, ?)",
+        (1, "0602120A", 1, "r2.pdf", "FY 2026"),
+    )
+    conn.commit()
+    issues = check_pdf_pe_numbers_populated(conn)
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "info"
+    assert issues[0]["junction_count"] == 1
+
+
+def test_pdf_pe_numbers_empty_with_pe_pages(conn):
+    """pdf_pe_numbers empty but pdf_pages has PE text → warning."""
+    conn.execute(
+        "INSERT INTO pdf_pages (source_file, source_category, page_number, page_text) "
+        "VALUES (?, ?, ?, ?)",
+        ("r2.pdf", "Army", 1, "PE 0602120A radar program"),
+    )
+    conn.commit()
+    issues = check_pdf_pe_numbers_populated(conn)
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "warning"
+
+
+# ── LION-108-val: PE Tags Source Files ───────────────────────────────────────
+
+def test_pe_tags_source_files_populated(conn):
+    """pe_tags with source_files → no issues."""
+    conn.execute("""
+        INSERT INTO pe_index (pe_number, display_title) VALUES ('0602120A', 'Radar')
+    """)
+    conn.execute("""
+        INSERT INTO pe_tags (pe_number, tag, tag_source, confidence, source_files)
+        VALUES ('0602120A', 'army', 'structured', 1.0, '["r1.xlsx"]')
+    """)
+    conn.commit()
+    issues = check_pe_tags_source_files(conn)
+    assert len(issues) == 0
+
+
+def test_pe_tags_source_files_null_warning(conn):
+    """pe_tags with NULL source_files → warning."""
+    conn.execute("""
+        INSERT INTO pe_index (pe_number, display_title) VALUES ('0602120A', 'Radar')
+    """)
+    conn.execute("""
+        INSERT INTO pe_tags (pe_number, tag, tag_source, confidence, source_files)
+        VALUES ('0602120A', 'army', 'structured', 1.0, NULL)
+    """)
+    conn.commit()
+    issues = check_pe_tags_source_files(conn)
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "warning"
+    assert issues[0]["null_count"] == 1
+
+
+def test_pe_tags_source_files_empty_table(conn):
+    """Empty pe_tags → no issues."""
+    issues = check_pe_tags_source_files(conn)
+    assert len(issues) == 0
