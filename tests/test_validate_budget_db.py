@@ -704,3 +704,30 @@ def test_duplicate_budget_lines_detected(conn):
     assert len(issues) == 1
     assert issues[0]["severity"] == "warning"
     assert issues[0]["duplicate_count"] == 3
+
+
+# ── check_source_file_tracking ───────────────────────────────────────────────
+
+from validate_budget_db import check_source_file_tracking
+
+
+def test_source_file_tracking_all_tracked(conn):
+    """All source files tracked in ingested_files → no issues."""
+    _insert_line(conn, source_file="a.xlsx")
+    conn.execute(
+        "INSERT INTO ingested_files (file_path, file_type, row_count, status) "
+        "VALUES ('a.xlsx', 'xlsx', 1, 'ok')"
+    )
+    conn.commit()
+    issues = check_source_file_tracking(conn)
+    assert len(issues) == 0
+
+
+def test_source_file_tracking_untracked(conn):
+    """Source file in budget_lines but not in ingested_files → flagged."""
+    _insert_line(conn, source_file="missing.xlsx")
+    conn.commit()
+    issues = check_source_file_tracking(conn)
+    assert len(issues) == 1
+    assert issues[0]["severity"] == "info"
+    assert "missing.xlsx" in issues[0]["samples"]

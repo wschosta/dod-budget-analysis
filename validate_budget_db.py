@@ -1280,6 +1280,42 @@ def check_duplicate_budget_lines(conn: sqlite3.Connection) -> list[dict]:
     return issues
 
 
+def check_source_file_tracking(conn: sqlite3.Connection) -> list[dict]:
+    """Flag source files in budget_lines that are not tracked in ingested_files.
+
+    Ensures all data provenance is recorded — every source file that contributed
+    budget lines should have a corresponding entry in ingested_files.
+    """
+    issues: list[dict] = []
+    try:
+        rows = conn.execute("""
+            SELECT DISTINCT bl.source_file
+            FROM budget_lines bl
+            WHERE bl.source_file IS NOT NULL
+              AND bl.source_file NOT IN (
+                  SELECT file_path FROM ingested_files
+              )
+            LIMIT 20
+        """).fetchall()
+
+        if rows:
+            untracked = [r[0] for r in rows]
+            issues.append({
+                "check": "source_file_tracking",
+                "severity": "info",
+                "detail": (
+                    f"{len(untracked)} source file(s) in budget_lines not tracked "
+                    f"in ingested_files"
+                ),
+                "count": len(untracked),
+                "samples": untracked[:10],
+            })
+    except Exception:
+        pass  # ingested_files may not exist
+
+    return issues
+
+
 def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     r = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
@@ -1317,6 +1353,7 @@ ALL_CHECKS = [
     ("Enrichment Staleness", check_enrichment_staleness),          # Stale PE detection
     ("FY Column Null Rates", check_fy_column_null_rates),          # NULL percentage check
     ("Duplicate Budget Lines", check_duplicate_budget_lines),      # Duplicate row detection
+    ("Source File Tracking", check_source_file_tracking),          # Provenance tracking
 ]
 
 
