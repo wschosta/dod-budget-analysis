@@ -396,11 +396,50 @@ def detail_partial(
 
     item = dict(row)
 
-    # FE-006: Related items — same program across fiscal years
-    # FIX-015: Include multiple amount columns so button labels show relevant amounts
+    # EAGLE-2: Tag-based related items — find budget lines sharing tags
     related_items: list[dict] = []
     pe_number = item.get("pe_number")
-    if pe_number:
+
+    if pe_number and _table_exists(conn, "pe_tags"):
+        try:
+            # Get tags for this item's PE
+            item_tags = conn.execute(
+                "SELECT DISTINCT tag FROM pe_tags WHERE pe_number = ?",
+                (pe_number,),
+            ).fetchall()
+            tag_list = [t[0] for t in item_tags]
+
+            if tag_list:
+                # Find other PEs sharing these tags, ranked by shared tag count
+                tag_placeholders = ",".join("?" * len(tag_list))
+                tag_related_rows = conn.execute(
+                    f"SELECT b.id, b.pe_number, b.fiscal_year, b.line_item_title, "
+                    f"b.organization_name, "
+                    f"b.amount_fy2024_actual, b.amount_fy2025_enacted, "
+                    f"b.amount_fy2026_request, "
+                    f"COUNT(DISTINCT pt.tag) AS shared_tag_count, "
+                    f"GROUP_CONCAT(DISTINCT pt.tag) AS shared_tags "
+                    f"FROM pe_tags pt "
+                    f"JOIN budget_lines b ON b.pe_number = pt.pe_number "
+                    f"WHERE pt.tag IN ({tag_placeholders}) "
+                    f"AND b.id != ? "
+                    f"GROUP BY b.id "
+                    f"ORDER BY shared_tag_count DESC, b.pe_number "
+                    f"LIMIT 10",
+                    tag_list + [item_id],
+                ).fetchall()
+                related_items = [
+                    {
+                        **dict(r),
+                        "shared_tags": (r["shared_tags"] or "").split(","),
+                    }
+                    for r in tag_related_rows
+                ]
+        except Exception:
+            pass
+
+    # Fallback: PE number match (original behavior)
+    if not related_items and pe_number:
         related_rows = conn.execute(
             "SELECT id, fiscal_year, line_item_title, organization_name, "
             "amount_fy2024_actual, amount_fy2025_enacted, amount_fy2026_request "
