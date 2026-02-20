@@ -130,10 +130,14 @@
       </thead>
       <tbody>
         {% for item in items %}
+        {# FIX-020: tabindex + keyboard handler for accessibility #}
         <tr hx-get="/partials/detail/{{ item.id }}"
             hx-target="#detail-container"
             hx-swap="innerHTML"
-            onclick="selectRow(this)">
+            tabindex="0"
+            onclick="selectRow(this)"
+            onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectRow(this);htmx.trigger(this,'click')}"
+            role="row">
           <td>
             <div style="font-weight:600;font-size:.88rem">
               {{ item.line_item_title or item.account_title or "—" }}
