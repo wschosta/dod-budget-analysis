@@ -11,7 +11,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from api.routes.reference import list_services, list_exhibit_types, list_fiscal_years
+from api.routes.reference import (
+    list_services, list_exhibit_types, list_fiscal_years,
+    list_appropriations, list_budget_types,
+)
 from api.routes.aggregations import aggregate, _ALLOWED_GROUPS
 
 
@@ -57,13 +60,14 @@ def db_with_ref_tables():
             amount_fy2025_enacted REAL,
             amount_fy2026_request REAL,
             appropriation_code TEXT,
+            appropriation_title TEXT,
             budget_activity_title TEXT,
             budget_type TEXT
         );
-        INSERT INTO budget_lines VALUES (1, 'FY 2026', 'Army', 'p1', 800, 900, 1000, '3010', 'Aircraft', 'Procurement');
-        INSERT INTO budget_lines VALUES (2, 'FY 2026', 'Army', 'r1', 1600, 1800, 2000, '3600', 'Missiles', 'RDT&E');
-        INSERT INTO budget_lines VALUES (3, 'FY 2026', 'Navy', 'p1', 300, 400, 500, '3010', 'Ships', 'Procurement');
-        INSERT INTO budget_lines VALUES (4, 'FY 2025', 'Army', 'p1', 1300, 1400, 1500, '3010', 'Aircraft', 'Procurement');
+        INSERT INTO budget_lines VALUES (1, 'FY 2026', 'Army', 'p1', 800, 900, 1000, '3010', 'Aircraft Procurement', 'Aircraft', 'Procurement');
+        INSERT INTO budget_lines VALUES (2, 'FY 2026', 'Army', 'r1', 1600, 1800, 2000, '3600', 'RDT&E', 'Missiles', 'RDT&E');
+        INSERT INTO budget_lines VALUES (3, 'FY 2026', 'Navy', 'p1', 300, 400, 500, '3010', 'Aircraft Procurement', 'Ships', 'Procurement');
+        INSERT INTO budget_lines VALUES (4, 'FY 2025', 'Army', 'p1', 1300, 1400, 1500, '3010', 'Aircraft Procurement', 'Aircraft', 'Procurement');
     """)
     yield conn
     conn.close()
@@ -171,6 +175,32 @@ class TestListFiscalYears:
         conn.close()
 
 
+class TestListAppropriations:
+    def test_returns_codes_with_counts(self, db_with_ref_tables):
+        import json
+        resp = list_appropriations(db_with_ref_tables)
+        items = json.loads(resp.body)
+        assert len(items) >= 1
+        assert all("code" in item for item in items)
+        assert all("row_count" in item for item in items)
+
+    def test_has_title(self, db_with_ref_tables):
+        import json
+        resp = list_appropriations(db_with_ref_tables)
+        items = json.loads(resp.body)
+        assert any(item.get("title") is not None for item in items)
+
+
+class TestListBudgetTypes:
+    def test_returns_types_with_counts(self, db_with_ref_tables):
+        import json
+        resp = list_budget_types(db_with_ref_tables)
+        items = json.loads(resp.body)
+        assert len(items) >= 1
+        types = {item["budget_type"] for item in items}
+        assert "Procurement" in types
+
+
 class TestAllowedGroups:
     def test_has_expected_keys(self):
         assert "service" in _ALLOWED_GROUPS
@@ -268,7 +298,7 @@ class TestAggregate:
         # Add a row with NULL amount_fy2026_request
         db_with_ref_tables.execute(
             "INSERT INTO budget_lines VALUES (99, 'FY 2026', 'Army', 'p1',"
-            " 100, 200, NULL, '3010', 'Test', 'Procurement')"
+            " 100, 200, NULL, '3010', 'Test Approp', 'Test', 'Procurement')"
         )
         result = aggregate(
             group_by="service", fiscal_year=None, service=None,

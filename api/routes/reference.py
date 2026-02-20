@@ -81,3 +81,44 @@ def list_fiscal_years(conn: sqlite3.Connection = Depends(get_db)) -> JSONRespons
     data = [{"fiscal_year": r["fiscal_year"], "row_count": r["row_count"]}
             for r in rows]
     return JSONResponse(content=data, headers=_CACHE_HEADER)
+
+
+@router.get(
+    "/appropriations",
+    summary="List distinct appropriation codes with row counts",
+)
+def list_appropriations(conn: sqlite3.Connection = Depends(get_db)) -> JSONResponse:
+    """Return all distinct appropriation codes from budget_lines."""
+    rows = conn.execute(
+        "SELECT appropriation_code, appropriation_title, COUNT(*) AS row_count "
+        "FROM budget_lines "
+        "WHERE appropriation_code IS NOT NULL "
+        "GROUP BY appropriation_code "
+        "ORDER BY row_count DESC"
+    ).fetchall()
+    data = [{"code": r["appropriation_code"],
+             "title": r["appropriation_title"],
+             "row_count": r["row_count"]}
+            for r in rows]
+    return JSONResponse(content=data, headers=_CACHE_HEADER)
+
+
+@router.get(
+    "/budget-types",
+    summary="List distinct budget types with row counts",
+)
+def list_budget_types(conn: sqlite3.Connection = Depends(get_db)) -> JSONResponse:
+    """Return all distinct budget_type values from budget_lines."""
+    try:
+        rows = conn.execute(
+            "SELECT COALESCE(budget_type, 'Unknown') AS budget_type, "
+            "COUNT(*) AS row_count "
+            "FROM budget_lines "
+            "GROUP BY COALESCE(budget_type, 'Unknown') "
+            "ORDER BY row_count DESC"
+        ).fetchall()
+        data = [{"budget_type": r["budget_type"], "row_count": r["row_count"]}
+                for r in rows]
+    except Exception:
+        data = []
+    return JSONResponse(content=data, headers=_CACHE_HEADER)
