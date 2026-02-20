@@ -6,10 +6,10 @@ Supports the three core GUI use cases:
   2. Topic/tag search — find PE lines matching a tag or free-text topic
   3. Export — Spruill-style funding table (CSV) or ZIP of PDF pages for a PE set
 
-Note: The following LION TODOs affect this file's queries:
-  LION-100: pdf_pages now has fiscal_year/exhibit_type — update PDF-related queries.
-  LION-103: pdf_pe_numbers junction table — can use direct JOIN instead of text scan.
-  LION-106: pe_tags.source_files — include in tag response for provenance display.
+LION integration:
+  DONE LION-100: pdf_pages now has fiscal_year/exhibit_type — used in pdf-pages endpoint.
+  DONE LION-103: pdf_pe_numbers junction — get_pe_pdf_pages uses direct JOIN.
+  DONE LION-106: pe_tags.source_files + confidence included in tag responses.
 """
 
 from __future__ import annotations
@@ -86,9 +86,9 @@ def get_pe(
         ORDER BY fiscal_year, exhibit_type
     """, (pe_number,)).fetchall()
 
-    # Tags
+    # Tags (LION-106: include source_files for provenance display)
     tag_rows = conn.execute("""
-        SELECT tag, tag_source, confidence FROM pe_tags
+        SELECT tag, tag_source, confidence, source_files FROM pe_tags
         WHERE pe_number = ?
         ORDER BY confidence DESC, tag
     """, (pe_number,)).fetchall()
@@ -236,6 +236,84 @@ def get_pe_descriptions(
     }
 
 
+# ── GET /api/v1/pe/{pe_number}/pdf-pages ─────────────────────────────────────
+
+@router.get(
+    "/{pe_number}/pdf-pages",
+    summary="PDF pages mentioning this PE (via junction table)",
+)
+def get_pe_pdf_pages(
+    pe_number: str,
+    fy: str | None = Query(None, description="Filter by fiscal year"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> dict:
+    """Return PDF pages that mention this PE number.
+
+    LION-103: Uses the pdf_pe_numbers junction table for fast lookups
+    instead of scanning pdf_pages text. Falls back to text search if the
+    junction table is empty or missing.
+    """
+    params: list[Any] = [pe_number]
+    fy_clause = ""
+    if fy:
+        fy_clause = "AND j.fiscal_year = ?"
+        params.append(fy)
+
+    # Try junction table first (LION-103)
+    try:
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM pdf_pe_numbers j "
+            f"WHERE j.pe_number = ? {fy_clause}",
+            params,
+        ).fetchone()[0]
+    except Exception:
+        total = 0
+
+    if total > 0:
+        rows = conn.execute(f"""
+            SELECT j.pe_number, j.page_number, j.source_file, j.fiscal_year,
+                   pp.page_text, pp.has_tables, pp.exhibit_type
+            FROM pdf_pe_numbers j
+            JOIN pdf_pages pp ON pp.id = j.pdf_page_id
+            WHERE j.pe_number = ? {fy_clause}
+            ORDER BY j.source_file, j.page_number
+            LIMIT ? OFFSET ?
+        """, params + [limit, offset]).fetchall()
+    else:
+        # Fallback: text search on pdf_pages (pre-LION-103 databases)
+        fb_params: list[Any] = [f"%{pe_number}%"]
+        fb_fy = ""
+        if fy:
+            fb_fy = "AND fiscal_year = ?"
+            fb_params.append(fy)
+
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM pdf_pages "
+            f"WHERE page_text LIKE ? {fb_fy}",
+            fb_params,
+        ).fetchone()[0]
+
+        rows = conn.execute(f"""
+            SELECT NULL AS pe_number, page_number, source_file, fiscal_year,
+                   page_text, has_tables, exhibit_type
+            FROM pdf_pages
+            WHERE page_text LIKE ? {fb_fy}
+            ORDER BY source_file, page_number
+            LIMIT ? OFFSET ?
+        """, fb_params + [limit, offset]).fetchall()
+
+    return {
+        "pe_number": pe_number,
+        "fiscal_year": fy,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "pages": [_row_dict(r) for r in rows],
+    }
+
+
 # ── GET /api/v1/pe/{pe_number}/related ───────────────────────────────────────
 
 @router.get(
@@ -357,9 +435,10 @@ def list_pes(
         d = _row_dict(r)
         d["fiscal_years"] = _json_list(d.get("fiscal_years"))
         d["exhibit_types"] = _json_list(d.get("exhibit_types"))
-        # Attach tags for each result
+        # Attach tags for each result (LION-106: include confidence)
         tags = conn.execute(
-            "SELECT tag, tag_source FROM pe_tags WHERE pe_number = ? ORDER BY tag",
+            "SELECT tag, tag_source, confidence FROM pe_tags "
+            "WHERE pe_number = ? ORDER BY confidence DESC, tag",
             (r["pe_number"],),
         ).fetchall()
         d["tags"] = [_row_dict(t) for t in tags]

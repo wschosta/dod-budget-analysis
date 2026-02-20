@@ -71,8 +71,21 @@ def _make_db() -> sqlite3.Connection:
             id INTEGER PRIMARY KEY,
             source_file TEXT,
             source_category TEXT,
+            fiscal_year TEXT,
+            exhibit_type TEXT,
             page_number INTEGER,
-            page_text TEXT
+            page_text TEXT,
+            has_tables INTEGER DEFAULT 0,
+            table_data TEXT
+        );
+
+        CREATE TABLE pdf_pe_numbers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pdf_page_id INTEGER REFERENCES pdf_pages(id),
+            pe_number TEXT NOT NULL,
+            page_number INTEGER,
+            source_file TEXT NOT NULL,
+            fiscal_year TEXT
         );
 
         CREATE TABLE pe_index (
@@ -102,6 +115,7 @@ def _make_db() -> sqlite3.Connection:
             tag TEXT NOT NULL,
             tag_source TEXT NOT NULL,
             confidence REAL DEFAULT 1.0,
+            source_files TEXT,
             UNIQUE(pe_number, tag, tag_source)
         );
 
