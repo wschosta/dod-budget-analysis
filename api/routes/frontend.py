@@ -282,6 +282,18 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLR
     )
 
 
+@router.get("/about", response_class=HTMLResponse, include_in_schema=False)
+def about(request: Request) -> HTMLResponse:
+    """About page."""
+    return _tmpl().TemplateResponse("about.html", {"request": request})
+
+
+@router.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
+def dashboard(request: Request) -> HTMLResponse:
+    """Dashboard overview page with summary statistics."""
+    return _tmpl().TemplateResponse("dashboard.html", {"request": request})
+
+
 @router.get("/charts", response_class=HTMLResponse, include_in_schema=False)
 def charts(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
     """Chart.js visualisations page."""
@@ -352,3 +364,137 @@ def detail_partial(
         "partials/detail.html",
         {"request": request, "item": item, "related_items": related_items},
     )
+
+
+# ── Program Explorer routes ──────────────────────────────────────────────────
+
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    """Check if a table exists in the database."""
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone()
+    return row is not None
+
+
+@router.get("/programs", response_class=HTMLResponse, include_in_schema=False)
+def programs(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
+    """Program Explorer landing page."""
+    services = _get_services(conn)
+    tags: list[dict] = []
+    items: list[dict] = []
+    total = 0
+
+    if _table_exists(conn, "pe_index"):
+        try:
+            from api.routes.pe import list_pes, list_tags
+            tag_result = list_tags(tag_source=None, conn=conn)
+            tags = tag_result.get("tags", [])[:30]
+
+            pe_result = list_pes(tag=None, q=None, service=None,
+                                budget_type=None, fy=None,
+                                limit=25, offset=0, conn=conn)
+            items = pe_result.get("items", [])
+            total = pe_result.get("total", 0)
+        except Exception:
+            pass
+
+    return _tmpl().TemplateResponse("programs.html", {
+        "request": request,
+        "services": services,
+        "tags": tags,
+        "items": items,
+        "total": total,
+    })
+
+
+@router.get("/programs/{pe_number}", response_class=HTMLResponse, include_in_schema=False)
+def program_detail(
+    pe_number: str,
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> HTMLResponse:
+    """Program Element detail page."""
+    if not _table_exists(conn, "pe_index"):
+        raise HTTPException(status_code=404, detail="Program enrichment data not available. "
+                            "Run enrich_budget_db.py to populate PE data.")
+    try:
+        from api.routes.pe import get_pe
+        pe_data = get_pe(pe_number, conn=conn)
+    except HTTPException:
+        raise HTTPException(status_code=404, detail=f"Program {pe_number} not found")
+
+    # Also fetch related PE titles for display
+    related = pe_data.get("related", [])
+    for rel in related:
+        if not rel.get("referenced_title"):
+            title_row = conn.execute(
+                "SELECT display_title FROM pe_index WHERE pe_number = ?",
+                (rel.get("referenced_pe"),),
+            ).fetchone()
+            if title_row:
+                rel["referenced_title"] = title_row["display_title"]
+
+    return _tmpl().TemplateResponse("program-detail.html", {
+        "request": request,
+        "pe_data": pe_data,
+    })
+
+
+@router.get("/partials/program-list", response_class=HTMLResponse, include_in_schema=False)
+def program_list_partial(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> HTMLResponse:
+    """HTMX partial: filtered PE card grid."""
+    items: list[dict] = []
+    total = 0
+
+    if _table_exists(conn, "pe_index"):
+        try:
+            from api.routes.pe import list_pes
+            params = request.query_params
+            tag_values = params.getlist("tag") or None
+            result = list_pes(
+                tag=tag_values,
+                q=params.get("q") or None,
+                service=params.get("service") or None,
+                budget_type=None, fy=None,
+                limit=25, offset=0, conn=conn,
+            )
+            items = result.get("items", [])
+            total = result.get("total", 0)
+        except Exception:
+            pass
+
+    return _tmpl().TemplateResponse("partials/program-list.html", {
+        "request": request,
+        "items": items,
+        "total": total,
+    })
+
+
+@router.get("/partials/program-descriptions/{pe_number}",
+            response_class=HTMLResponse, include_in_schema=False)
+def program_descriptions_partial(
+    pe_number: str,
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> HTMLResponse:
+    """HTMX partial: PE narrative descriptions."""
+    descriptions: list[dict] = []
+    total = 0
+
+    if _table_exists(conn, "pe_descriptions"):
+        try:
+            from api.routes.pe import get_pe_descriptions
+            result = get_pe_descriptions(pe_number, fy=None, limit=10, offset=0, conn=conn)
+            descriptions = result.get("descriptions", [])
+            total = result.get("total", 0)
+        except Exception:
+            pass
+
+    return _tmpl().TemplateResponse("partials/program-descriptions.html", {
+        "request": request,
+        "descriptions": descriptions,
+        "total": total,
+    })

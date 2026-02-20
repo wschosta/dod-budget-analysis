@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}About — DoD Budget Explorer{% endblock %}
+
+{% block content %}
+<div class="about-page">
+  <h2>About DoD Budget Explorer</h2>
+  <p>
+    DoD Budget Explorer is an independent research tool for exploring U.S. Department of Defense
+    budget justification data. It provides full-text search, interactive visualizations, and
+    program-level analysis across fiscal years, military services, and appropriation accounts.
+  </p>
+
+  <h3>Data Sources</h3>
+  <p>
+    All data is extracted from publicly posted budget justification documents published by the
+    <a href="https://comptroller.defense.gov/Budget-Materials/" target="_blank" rel="noopener">DoD Comptroller</a>
+    and individual service budget offices (Army, Navy, Air Force, Space Force, Defense-Wide agencies).
+    The database covers 9 exhibit types including P-1, P-5, R-1, R-2, O-1, M-1, C-1, and more.
+  </p>
+
+  <h3>How to Use</h3>
+  <ul>
+    <li><strong><a href="/dashboard">Dashboard</a></strong> &mdash; High-level overview of budget totals,
+        service breakdowns, year-over-year trends, and top programs.</li>
+    <li><strong><a href="/">Search</a></strong> &mdash; Filter budget line items by keyword, fiscal year,
+        service, exhibit type, appropriation, and amount range. Download results as CSV, JSON, or Excel.</li>
+    <li><strong><a href="/charts">Charts</a></strong> &mdash; Interactive visualizations including treemaps,
+        service comparisons, appropriation breakdowns, and year-over-year delta analysis.</li>
+    <li><strong><a href="/programs">Program Explorer</a></strong> &mdash; Deep-dive into individual
+        Program Elements (PEs) across all fiscal years, exhibits, and narrative descriptions from
+        budget justification PDFs.</li>
+  </ul>
+
+  <h3>API Access</h3>
+  <p>
+    Programmatic access to all budget data is available via the
+    <a href="/docs" target="_blank" rel="noopener">REST API</a>.
+    Endpoints support filtering, pagination, full-text search, aggregations, and data export
+    in CSV, JSON, and Excel formats.
+  </p>
+
+  <h3>Methodology</h3>
+  <p>
+    Budget documents are downloaded from official DoD sources, parsed from Excel and PDF formats,
+    and loaded into a SQLite database with full-text search indices. Monetary values are normalized
+    to thousands of dollars ($K). Data validation includes cross-service reconciliation,
+    cross-exhibit consistency checks, and year-over-year outlier detection.
+    See <a href="/docs" target="_blank" rel="noopener">the API documentation</a> for complete details.
+  </p>
+
+  <h3>Disclaimer</h3>
+  <p>
+    This tool is not affiliated with, endorsed by, or sponsored by the U.S. Department of Defense
+    or any of its components. Data accuracy depends on the source documents and the extraction process.
+    Users should verify critical figures against the original budget justification documents.
+  </p>
+</div>
+{% endblock %}

@@ -1,0 +1,22 @@
+{% if descriptions %}
+{% for desc in descriptions %}
+<div class="pe-description-card">
+  <div class="pe-desc-header">
+    <span class="badge">FY{{ desc.fiscal_year }}</span>
+    {% if desc.section_header %}<strong>{{ desc.section_header }}</strong>{% endif %}
+    <span style="color:var(--text-secondary);font-size:.75rem">{{ desc.source_file }}</span>
+  </div>
+  <div class="pe-desc-text">{{ desc.description_text }}</div>
+</div>
+{% endfor %}
+{% if total > descriptions | length %}
+<p style="font-size:.85rem;color:var(--text-secondary);margin-top:.75rem">
+  Showing {{ descriptions | length }} of {{ total }} descriptions.
+</p>
+{% endif %}
+{% else %}
+<p style="color:var(--text-secondary);font-size:.85rem">
+  No narrative descriptions available for this program element.
+  Descriptions are extracted from R-2/R-3 budget justification PDFs.
+</p>
+{% endif %}

@@ -157,3 +157,42 @@ def aggregate(
         ))
 
     return AggregationResponse(group_by=group_by, rows=enriched)
+
+
+@router.get("/hierarchy", summary="Hierarchical budget breakdown for treemap")
+def hierarchy(
+    fiscal_year: str | None = FQuery(None, description="Filter by fiscal year"),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> dict:
+    """Return Service > Appropriation > Program hierarchy for treemap visualization.
+
+    Returns items with service, appropriation, program title, PE number, and amount.
+    """
+    conditions: list[str] = [
+        "amount_fy2026_request IS NOT NULL",
+        "organization_name IS NOT NULL",
+    ]
+    params: list[Any] = []
+
+    if fiscal_year:
+        conditions.append("fiscal_year = ?")
+        params.append(fiscal_year)
+
+    where = "WHERE " + " AND ".join(conditions)
+
+    rows = conn.execute(
+        f"SELECT organization_name AS service, "
+        f"appropriation_code AS approp, "
+        f"appropriation_title AS approp_title, "
+        f"line_item_title AS program, "
+        f"pe_number, "
+        f"SUM(amount_fy2026_request) AS amount "
+        f"FROM budget_lines "
+        f"{where} "
+        f"GROUP BY organization_name, appropriation_code, line_item_title "
+        f"HAVING SUM(amount_fy2026_request) > 0 "
+        f"ORDER BY SUM(amount_fy2026_request) DESC",
+        params,
+    ).fetchall()
+
+    return {"items": [dict(r) for r in rows]}

@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}{{ pe_data.index.display_title or pe_data.pe_number }} — Program Explorer{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="/programs">Programs</a> &rsaquo; <span>{{ pe_data.pe_number }}</span>
+</nav>
+
+<h2>{{ pe_data.index.display_title or pe_data.pe_number }}</h2>
+<div class="pe-meta">
+  <span class="badge" style="font-size:.85rem">{{ pe_data.pe_number }}</span>
+  {% if pe_data.index.organization_name %}
+  <span>{{ pe_data.index.organization_name }}</span>
+  {% endif %}
+  {% if pe_data.index.budget_type %}
+  <span style="color:var(--text-secondary)">{{ pe_data.index.budget_type }}</span>
+  {% endif %}
+</div>
+
+{# ── Funding table ────────────────────────────────────────────────────────── #}
+{% if pe_data.funding %}
+<section class="pe-section">
+  <h3>Funding History ($K)</h3>
+  <div class="table-wrapper">
+    <table class="pe-funding-table">
+      <thead>
+        <tr>
+          <th>FY</th>
+          <th>Exhibit</th>
+          <th>Service</th>
+          <th class="td-amount">FY24 Actual</th>
+          <th class="td-amount">FY25 Enacted</th>
+          <th class="td-amount">FY26 Request</th>
+          <th class="td-amount">Delta</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in pe_data.funding %}
+        <tr>
+          <td>{{ row.fiscal_year or "—" }}</td>
+          <td><span class="badge">{{ (row.exhibit_type or "—") | upper }}</span></td>
+          <td>{{ row.organization_name or "—" }}</td>
+          <td class="td-amount">
+            {{ row.amount_fy2024_actual | fmt_amount if row.amount_fy2024_actual is not none else "—" }}
+          </td>
+          <td class="td-amount">
+            {{ row.amount_fy2025_enacted | fmt_amount if row.amount_fy2025_enacted is not none else "—" }}
+          </td>
+          <td class="td-amount">
+            {{ row.amount_fy2026_request | fmt_amount if row.amount_fy2026_request is not none else "—" }}
+          </td>
+          <td class="td-amount">
+            {% if row.amount_fy2025_enacted and row.amount_fy2026_request and row.amount_fy2025_enacted != 0 %}
+              {% set delta_pct = ((row.amount_fy2026_request - row.amount_fy2025_enacted) / (row.amount_fy2025_enacted if row.amount_fy2025_enacted > 0 else 1) * 100) %}
+              <span class="delta {{ 'positive' if delta_pct >= 0 else 'negative' }}">
+                {{ "{:+.1f}".format(delta_pct) }}%
+              </span>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+{# ── Funding trend chart ──────────────────────────────────────────────────── #}
+<section class="pe-section">
+  <h3>Funding Trend</h3>
+  <div class="chart-card" style="margin-top:0">
+    <canvas id="pe-funding-chart" height="200"></canvas>
+  </div>
+</section>
+
+{# ── Related PEs ──────────────────────────────────────────────────────────── #}
+{% if pe_data.related %}
+<section class="pe-section">
+  <h3>Related Programs</h3>
+  <div class="pe-related-grid">
+    {% for rel in pe_data.related %}
+    <a href="/programs/{{ rel.referenced_pe }}" class="pe-card pe-card-sm">
+      <span class="badge">{{ rel.referenced_pe }}</span>
+      {% if rel.referenced_title %}
+      <span style="font-size:.85rem">{{ rel.referenced_title }}</span>
+      {% endif %}
+      <span style="font-size:.75rem;color:var(--text-secondary)">
+        {{ rel.link_type | replace("_", " ") }}
+        {% if rel.confidence %}({{ "%.0f" | format(rel.confidence * 100) }}%){% endif %}
+      </span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{# ── Narrative descriptions (lazy-loaded via HTMX) ───────────────────────── #}
+<section class="pe-section">
+  <h3>Program Descriptions</h3>
+  <div id="pe-descriptions"
+       hx-get="/partials/program-descriptions/{{ pe_data.pe_number }}"
+       hx-trigger="load"
+       hx-indicator="#desc-loading">
+    <div id="desc-loading" class="htmx-indicator">
+      <span class="spinner"></span> Loading descriptions&hellip;
+    </div>
+  </div>
+</section>
+
+{# ── Tags ─────────────────────────────────────────────────────────────────── #}
+{% if pe_data.tags %}
+<section class="pe-section">
+  <h3>Tags</h3>
+  <div class="pe-card-tags">
+    {% for t in pe_data.tags %}
+    <span class="filter-chip">
+      {{ t.tag }}
+      <span style="font-size:.7rem;color:var(--text-secondary)">({{ t.tag_source }})</span>
+    </span>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{# ── Actions ──────────────────────────────────────────────────────────────── #}
+<div class="pe-actions">
+  <a href="/api/v1/pe/{{ pe_data.pe_number }}/export/table"
+     class="btn btn-secondary btn-sm" download>
+    &darr; Download Funding CSV
+  </a>
+  <a href="/?q={{ pe_data.pe_number }}" class="btn btn-secondary btn-sm">
+    Search All Lines
+  </a>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/app.js"></script>
+<script src="/static/js/program-detail.js"></script>
+{% endblock %}

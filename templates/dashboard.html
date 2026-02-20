@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — DoD Budget Explorer{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom:1rem">DoD Budget Overview</h2>
+
+<!-- Summary stat cards -->
+<div class="dashboard-stats">
+  <div class="stat-card">
+    <div class="stat-label">FY2026 Total Request</div>
+    <div class="stat-value" id="stat-total-fy26">--</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">FY2025 Enacted</div>
+    <div class="stat-value" id="stat-total-fy25">--</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">YoY Change</div>
+    <div class="stat-value" id="stat-yoy-change">--</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Budget Lines</div>
+    <div class="stat-value" id="stat-line-count">--</div>
+  </div>
+</div>
+
+<!-- Loading indicator -->
+<div id="dash-loading" style="text-align:center;padding:2rem">
+  <span class="spinner"></span> Loading dashboard data&hellip;
+</div>
+
+<!-- Charts row 1: Service breakdown + Appropriation pie -->
+<div class="dashboard-grid" id="dash-charts" style="display:none">
+  <div class="chart-card">
+    <h3>Budget by Service ($M)</h3>
+    <div id="err-dash-service" style="display:none" class="empty-state" role="alert"></div>
+    <canvas id="dash-service-chart" height="250"></canvas>
+  </div>
+  <div class="chart-card">
+    <h3>By Appropriation</h3>
+    <div id="err-dash-approp" style="display:none" class="empty-state" role="alert"></div>
+    <canvas id="dash-approp-chart" height="250"></canvas>
+  </div>
+</div>
+
+<!-- Top 10 programs -->
+<div class="dashboard-grid" id="dash-programs" style="display:none">
+  <div class="chart-card" style="grid-column: 1 / -1">
+    <h3>Top 10 Programs by FY2026 Request</h3>
+    <div id="dash-top-programs"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/app.js"></script>
+<script src="/static/js/dashboard.js"></script>
+{% endblock %}

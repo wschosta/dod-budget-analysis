@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Program Explorer — DoD Budget Explorer{% endblock %}
+
+{% block content %}
+<div class="programs-layout">
+
+  <aside class="filter-panel">
+    <h2>Program Filters</h2>
+    <form id="pe-filter-form"
+          role="search"
+          aria-label="Program filters"
+          hx-get="/partials/program-list"
+          hx-target="#pe-results"
+          hx-trigger="change, search"
+          hx-indicator="#pe-loading">
+
+      <div class="filter-group">
+        <label for="pe-search">Search Programs</label>
+        <input type="text" id="pe-search" name="q"
+               placeholder="F-35, cyber, missile…"
+               hx-get="/partials/program-list"
+               hx-trigger="keyup changed delay:400ms"
+               hx-target="#pe-results"
+               hx-include="#pe-filter-form">
+      </div>
+
+      <div class="filter-group">
+        <label for="pe-service">Service / Agency</label>
+        <select id="pe-service" name="service">
+          <option value="">All Services</option>
+          {% for svc in services %}
+          <option value="{{ svc.code }}">{{ svc.code }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      {% if tags %}
+      <div class="filter-group">
+        <label for="pe-tag">Tags</label>
+        <select id="pe-tag" name="tag" multiple>
+          {% for t in tags %}
+          <option value="{{ t.tag }}">{{ t.tag }} ({{ t.pe_count }})</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+
+      <div class="filter-actions">
+        <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+        <a href="/programs" class="btn btn-secondary btn-sm">Reset</a>
+      </div>
+    </form>
+  </aside>
+
+  <section>
+    <div id="pe-loading" class="htmx-indicator" style="margin-bottom:.5rem">
+      <span class="spinner"></span> Loading programs&hellip;
+    </div>
+    <div id="pe-results" aria-live="polite">
+      {% include "partials/program-list.html" %}
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/app.js"></script>
+{% endblock %}

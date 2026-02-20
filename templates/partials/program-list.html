@@ -1,0 +1,47 @@
+{% if items %}
+<p class="results-count" style="margin-bottom:.75rem">
+  {{ total }} program{{ "s" if total != 1 }} found
+</p>
+<div class="pe-card-grid">
+  {% for item in items %}
+  <a href="/programs/{{ item.pe_number }}" class="pe-card">
+    <div class="pe-card-header">
+      <span class="badge">{{ item.pe_number }}</span>
+      <span class="pe-card-org">{{ item.organization_name or "—" }}</span>
+    </div>
+    <h4>{{ item.display_title or item.pe_number }}</h4>
+    {% if item.budget_type %}
+    <div style="font-size:.78rem;color:var(--text-secondary);margin-top:.25rem">{{ item.budget_type }}</div>
+    {% endif %}
+    {% if item.tags %}
+    <div class="pe-card-tags">
+      {% for t in item.tags[:5] %}
+      <span class="filter-chip">{{ t.tag }}</span>
+      {% endfor %}
+      {% if item.tags | length > 5 %}
+      <span class="filter-chip" style="font-style:italic">+{{ item.tags | length - 5 }} more</span>
+      {% endif %}
+    </div>
+    {% endif %}
+  </a>
+  {% endfor %}
+</div>
+
+{% if total > items | length %}
+<div style="margin-top:1rem;text-align:center">
+  <p style="font-size:.85rem;color:var(--text-secondary)">
+    Showing {{ items | length }} of {{ total }} programs. Refine your filters to narrow results.
+  </p>
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">
+  <div class="empty-state-icon" aria-hidden="true">&#128203;</div>
+  <p><strong>No programs match your filters.</strong></p>
+  <p style="font-size:.85rem">Try broadening your search or clearing filters.</p>
+  <div style="margin-top:1rem">
+    <a href="/programs" class="btn btn-primary btn-sm">Clear all filters</a>
+  </div>
+</div>
+{% endif %}
