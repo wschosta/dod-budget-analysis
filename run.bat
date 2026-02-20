@@ -20,7 +20,7 @@ python -c "import uvicorn" >nul 2>&1
 if %errorlevel% neq 0 (
     echo uvicorn not found — installing dependencies...
     echo.
-    pip install -r requirements.txt
+    python -m pip install -r requirements.txt
     if %errorlevel% neq 0 (
         echo.
         echo -------------------------------------------------------
@@ -29,7 +29,7 @@ if %errorlevel% neq 0 (
         echo Common fixes:
         echo   1. Install Python 3.8+ from https://www.python.org
         echo      Make sure "Add Python to PATH" is checked.
-        echo   2. Try manually:  pip install -r requirements.txt
+        echo   2. Try manually:  python -m pip install -r requirements.txt
         echo -------------------------------------------------------
         echo.
         pause
@@ -54,7 +54,7 @@ if %errorlevel% neq 0 (
     echo   1. Install Python 3.8+ from https://www.python.org
     echo      Make sure "Add Python to PATH" is checked.
     echo   2. Install dependencies:
-    echo        pip install -r requirements.txt
+    echo        python -m pip install -r requirements.txt
     echo -------------------------------------------------------
 )
 
