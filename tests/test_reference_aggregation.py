@@ -184,7 +184,7 @@ class TestAggregate:
     def test_group_by_service(self, db_with_ref_tables):
         result = aggregate(
             group_by="service", fiscal_year=None, service=None,
-            exhibit_type=None, conn=db_with_ref_tables,
+            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
         )
         assert result.group_by == "service"
         assert len(result.rows) == 2  # Army and Navy
@@ -192,21 +192,21 @@ class TestAggregate:
     def test_group_by_fiscal_year(self, db_with_ref_tables):
         result = aggregate(
             group_by="fiscal_year", fiscal_year=None, service=None,
-            exhibit_type=None, conn=db_with_ref_tables,
+            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
         )
         assert len(result.rows) == 2  # FY 2025 and FY 2026
 
     def test_group_by_exhibit_type(self, db_with_ref_tables):
         result = aggregate(
             group_by="exhibit_type", fiscal_year=None, service=None,
-            exhibit_type=None, conn=db_with_ref_tables,
+            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
         )
         assert len(result.rows) == 2  # p1 and r1
 
     def test_filter_by_fiscal_year(self, db_with_ref_tables):
         result = aggregate(
             group_by="service", fiscal_year=["FY 2026"], service=None,
-            exhibit_type=None, conn=db_with_ref_tables,
+            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
         )
         # Only FY 2026 rows: Army (2) and Navy (1)
         assert len(result.rows) == 2
@@ -214,7 +214,7 @@ class TestAggregate:
     def test_filter_by_service(self, db_with_ref_tables):
         result = aggregate(
             group_by="exhibit_type", fiscal_year=None, service=["Army"],
-            exhibit_type=None, conn=db_with_ref_tables,
+            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
         )
         # Army has p1 and r1
         assert len(result.rows) == 2
@@ -222,7 +222,7 @@ class TestAggregate:
     def test_filter_by_exhibit_type(self, db_with_ref_tables):
         result = aggregate(
             group_by="service", fiscal_year=None, service=None,
-            exhibit_type=["p1"], conn=db_with_ref_tables,
+            exhibit_type=["p1"], appropriation_code=None, conn=db_with_ref_tables,
         )
         # p1: Army and Navy
         assert len(result.rows) == 2
@@ -231,7 +231,7 @@ class TestAggregate:
         result = aggregate(
             group_by="service", fiscal_year=["FY 2026"],
             service=["Army"], exhibit_type=["p1"],
-            conn=db_with_ref_tables,
+            appropriation_code=None, conn=db_with_ref_tables,
         )
         assert len(result.rows) == 1
         assert result.rows[0].group_value == "Army"
@@ -242,14 +242,14 @@ class TestAggregate:
         with pytest.raises(HTTPException) as exc_info:
             aggregate(
                 group_by="invalid", fiscal_year=None, service=None,
-                exhibit_type=None, conn=db_with_ref_tables,
+                exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
             )
         assert exc_info.value.status_code == 400
 
     def test_empty_result(self, db_with_ref_tables):
         result = aggregate(
             group_by="service", fiscal_year=["FY 2030"], service=None,
-            exhibit_type=None, conn=db_with_ref_tables,
+            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
         )
         assert len(result.rows) == 0
 
@@ -257,7 +257,7 @@ class TestAggregate:
         """Each aggregation row includes rows_with_amount count."""
         result = aggregate(
             group_by="service", fiscal_year=None, service=None,
-            exhibit_type=None, conn=db_with_ref_tables,
+            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
         )
         for row in result.rows:
             assert row.rows_with_amount is not None
@@ -272,7 +272,7 @@ class TestAggregate:
         )
         result = aggregate(
             group_by="service", fiscal_year=None, service=None,
-            exhibit_type=None, conn=db_with_ref_tables,
+            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
         )
         army_row = next(r for r in result.rows if r.group_value == "Army")
         # Army now has 4 rows (3 original + 1 NULL) but only 3 with amount
@@ -283,8 +283,19 @@ class TestAggregate:
         """group_by=budget_type returns groups per budget type."""
         result = aggregate(
             group_by="budget_type", fiscal_year=None, service=None,
-            exhibit_type=None, conn=db_with_ref_tables,
+            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
         )
         types = {r.group_value for r in result.rows}
         assert "Procurement" in types
         assert "RDT&E" in types
+
+    def test_filter_by_appropriation_code(self, db_with_ref_tables):
+        """appropriation_code filter narrows to matching budget lines."""
+        result = aggregate(
+            group_by="service", fiscal_year=None, service=None,
+            exhibit_type=None, appropriation_code=["3010"],
+            conn=db_with_ref_tables,
+        )
+        # Only rows with appropriation_code=3010 (3 of 4 rows)
+        total_rows = sum(r.row_count for r in result.rows)
+        assert total_rows == 3

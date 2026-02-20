@@ -44,12 +44,14 @@ def _cache_key(
     service: list[str] | None,
     exhibit_type: list[str] | None,
     conn_id: int = 0,
+    appropriation_code: list[str] | None = None,
 ) -> tuple:
     return (
         group_by,
         tuple(sorted(fiscal_year or [])),
         tuple(sorted(service or [])),
         tuple(sorted(exhibit_type or [])),
+        tuple(sorted(appropriation_code or [])),
         conn_id,
     )
 
@@ -74,6 +76,7 @@ def aggregate(
     fiscal_year: list[str] | None = FQuery(None, description="Pre-filter by fiscal year(s)"),
     service: list[str] | None = FQuery(None, description="Pre-filter by service name"),
     exhibit_type: list[str] | None = FQuery(None, description="Pre-filter by exhibit type"),
+    appropriation_code: list[str] | None = FQuery(None, description="Pre-filter by appropriation code(s)"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> AggregationResponse:
     """Aggregate budget totals grouped by the specified dimension.
@@ -90,7 +93,8 @@ def aggregate(
         )
 
     # OPT-AGG-001: Check cache before querying
-    key = _cache_key(group_by, fiscal_year, service, exhibit_type, id(conn))
+    key = _cache_key(group_by, fiscal_year, service, exhibit_type, id(conn),
+                     appropriation_code=appropriation_code)
     cached = _agg_cache.get(key)
     if cached is not None:
         return cached
@@ -100,6 +104,7 @@ def aggregate(
         fiscal_year=fiscal_year,
         service=service,
         exhibit_type=exhibit_type,
+        appropriation_code=appropriation_code,
     )
 
     # AGG-001: Discover FY amount columns dynamically
