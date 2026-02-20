@@ -2030,6 +2030,22 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     _excel_use_parallel = num_workers > 1 and len(xlsx_to_process) > 1
 
     if _excel_use_parallel:
+        # Pre-clean: remove old data for files being re-processed to avoid
+        # duplicate budget_lines. Mirrors the PDF pre-clean pattern.
+        if xlsx_to_process:
+            _xl_rel_paths = [str(xl.relative_to(docs_dir)) for xl in xlsx_to_process]
+            conn.execute("CREATE TEMP TABLE IF NOT EXISTS _xl_preclean (path TEXT PRIMARY KEY)")
+            conn.executemany("INSERT OR IGNORE INTO _xl_preclean VALUES (?)",
+                             [(p,) for p in _xl_rel_paths])
+            _xl_del = conn.execute(
+                "DELETE FROM budget_lines WHERE source_file IN "
+                "(SELECT path FROM _xl_preclean)"
+            ).rowcount
+            conn.execute("DROP TABLE _xl_preclean")
+            conn.commit()
+            if _xl_del:
+                print(f"  Pre-cleaned {_xl_del} stale budget_lines rows for re-ingestion")
+
         print(f"  Processing {len(xlsx_to_process)} Excel files with "
               f"{num_workers} parallel workers (OPT-BUILD-001)...")
         t_excel_start = time.time()
