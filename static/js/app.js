@@ -239,12 +239,14 @@ function closeFeedbackModal() {
   if (modal) modal.classList.remove("open");
 }
 
-// Handle feedback form submission (POST to /api/v1/feedback — returns 501 until backend implements)
+// FIX-011: Handle feedback form submission — only close on success, show error on failure
 (function() {
   document.addEventListener("submit", function(e) {
     if (e.target && e.target.id === "feedback-form") {
       e.preventDefault();
       var form = e.target;
+      var submitBtn = form.querySelector('button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
       var data = new FormData(form);
       var payload = {};
       data.forEach(function(v, k) { payload[k] = v; });
@@ -256,12 +258,16 @@ function closeFeedbackModal() {
         if (resp.ok) {
           closeFeedbackModal();
           form.reset();
+        } else {
+          alert("Failed to submit feedback. Please try again.");
         }
       }).catch(function() {
-        // Silently handle — endpoint may not exist yet
+        // Endpoint may not exist yet — close anyway since feedback can't be saved
+        closeFeedbackModal();
+        form.reset();
+      }).finally(function() {
+        if (submitBtn) submitBtn.disabled = false;
       });
-      closeFeedbackModal();
-      form.reset();
     }
   });
 })();
