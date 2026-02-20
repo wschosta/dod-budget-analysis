@@ -237,14 +237,80 @@ def _query_results(
         amount_column=filters.get("amount_column"),
     )
 
-    # Apply keyword filter against FTS if provided
+    # EAGLE-5: Advanced search integration — parse structured query if available
     q = filters["q"].strip()
-    fts_ids: list[int] | None = None
+    parsed_query: dict | None = None
+
+    # Try to use HAWK's advanced search parser; fall back to raw free-text
+    fts_terms = q
+    extra_field_conditions: list[str] = []
+    extra_field_params: list = []
+
     if q:
         try:
-            safe_q = sanitize_fts5_query(q)
+            from utils.search_parser import parse_search_query
+            parsed = parse_search_query(q)
+            fts_terms = parsed.fts_terms
+            parsed_query = {
+                "raw": q,
+                "fts_terms": parsed.fts_terms,
+                "field_filters": [
+                    {"field": f.field, "op": f.op, "value": f.value}
+                    for f in parsed.field_filters
+                ],
+                "amount_filters": [
+                    {"op": f.op, "value": f.value}
+                    for f in parsed.amount_filters
+                ],
+            }
+
+            # Convert field filters to SQL WHERE conditions
+            _FIELD_TO_COLUMN = {
+                "service": "organization_name",
+                "exhibit": "exhibit_type",
+                "pe": "pe_number",
+                "org": "organization_name",
+                "tag": None,  # tag filtering handled separately
+            }
+            for ff in parsed.field_filters:
+                col = _FIELD_TO_COLUMN.get(ff.field)
+                if col:
+                    if ff.op == "=":
+                        extra_field_conditions.append(f"{col} = ?")
+                        extra_field_params.append(ff.value)
+
+            # Convert amount filters to SQL WHERE conditions
+            amt_col = filters.get("amount_column", DEFAULT_AMOUNT_COLUMN)
+            for af in parsed.amount_filters:
+                if af.op in (">", "<", ">=", "<="):
+                    extra_field_conditions.append(f"{amt_col} {af.op} ?")
+                    extra_field_params.append(af.value)
+        except ImportError:
+            # HAWK-4 not merged yet — treat entire query as free-text
+            parsed_query = {
+                "raw": q, "fts_terms": q,
+                "field_filters": [], "amount_filters": [],
+            }
         except Exception:
-            safe_q = q.replace('"', '""')
+            parsed_query = {
+                "raw": q, "fts_terms": q,
+                "field_filters": [], "amount_filters": [],
+            }
+
+    # Apply extra field/amount conditions from parsed query
+    if extra_field_conditions:
+        for cond in extra_field_conditions:
+            connector = "AND" if where else "WHERE"
+            where = f"{where} {connector} {cond}"
+        params = list(params) + extra_field_params
+
+    # Apply keyword filter against FTS if provided
+    fts_ids: list[int] | None = None
+    if fts_terms:
+        try:
+            safe_q = sanitize_fts5_query(fts_terms)
+        except Exception:
+            safe_q = fts_terms.replace('"', '""')
         try:
             fts_rows = conn.execute(
                 "SELECT rowid FROM budget_lines_fts WHERE budget_lines_fts MATCH ?",
@@ -260,6 +326,7 @@ def _query_results(
                 "items": [], "total": 0, "page": page,
                 "total_pages": 0, "sort_by": sort_by.lower(),
                 "sort_dir": filters["sort_dir"],
+                "parsed_query": parsed_query,
             }
         id_placeholders = ",".join("?" * len(fts_ids))
         id_condition = f"id IN ({id_placeholders})"
@@ -294,6 +361,8 @@ def _query_results(
         "sort_by":     sort_by,
         "sort_dir":    filters["sort_dir"],
         "page_size":   page_size,
+        # EAGLE-5: Parsed query structure for template display
+        "parsed_query": parsed_query,
     }
 
 
