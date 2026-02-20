@@ -195,7 +195,7 @@ class TestFix002ServiceDropdown:
     def test_service_filter_exact_match(self, gui_client):
         """FIX-002b: Service filter should use exact match, not LIKE."""
         # Filtering by "Air Force" should not match partial strings
-        resp = gui_client.get("/partials/results?service=Air+Force")
+        resp = gui_client.get("/partials/results?service=Air+Force", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         # Should contain Air Force results
         assert "F-35 Lightning II" in resp.text or "Air Force" in resp.text
@@ -203,7 +203,7 @@ class TestFix002ServiceDropdown:
     def test_service_filter_no_partial_match(self, gui_client):
         """FIX-002b: Service filter 'AF' should not match 'CAAF' etc."""
         # "AF" is not an actual org name in our test data, should return no results
-        resp = gui_client.get("/partials/results?service=AF")
+        resp = gui_client.get("/partials/results?service=AF", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         # Should not show any results since "AF" is not an exact org name
         assert "No budget items" in resp.text or "0 result" in resp.text
@@ -247,19 +247,19 @@ class TestFix005MoreFYColumns:
     """FIX-005: Results table should include FY25 total and FY26 total columns."""
 
     def test_results_have_fy25_total_column(self, gui_client):
-        resp = gui_client.get("/partials/results")
+        resp = gui_client.get("/partials/results", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         assert "col-fy25tot" in resp.text
         assert "FY25 Total" in resp.text
 
     def test_results_have_fy26_total_column(self, gui_client):
-        resp = gui_client.get("/partials/results")
+        resp = gui_client.get("/partials/results", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         assert "col-fy26tot" in resp.text
         assert "FY26 Total" in resp.text
 
     def test_column_toggle_buttons_include_new_cols(self, gui_client):
-        resp = gui_client.get("/partials/results")
+        resp = gui_client.get("/partials/results", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         # Toggle buttons for new columns should exist
         assert 'data-col="fy25tot"' in resp.text
@@ -312,13 +312,13 @@ class TestFix007SourceLinks:
     """FIX-007: Results should include source file information."""
 
     def test_results_have_source_column(self, gui_client):
-        resp = gui_client.get("/partials/results")
+        resp = gui_client.get("/partials/results", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         assert "col-source" in resp.text
         assert "Source" in resp.text
 
     def test_source_toggle_button_exists(self, gui_client):
-        resp = gui_client.get("/partials/results")
+        resp = gui_client.get("/partials/results", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         assert 'data-col="source"' in resp.text
 

@@ -335,13 +335,23 @@ def results_partial(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> HTMLResponse:
     """HTMX partial: filtered/paginated results table."""
+    # FIX-010: Non-HTMX requests (e.g. browser refresh) redirect to full page
+    if not request.headers.get("HX-Request"):
+        from starlette.responses import RedirectResponse
+        qs = str(request.query_params)
+        return RedirectResponse(url=f"/?{qs}" if qs else "/", status_code=302)
+
     filters = _parse_filters(request)
     results = _query_results(filters, conn)
 
-    return _tmpl().TemplateResponse(
+    response = _tmpl().TemplateResponse(
         "partials/results.html",
         {"request": request, "filters": filters, **results},
     )
+    # FIX-010: Tell HTMX to push /?params instead of /partials/results?params
+    qs = str(request.query_params)
+    response.headers["HX-Push-Url"] = f"/?{qs}" if qs else "/"
+    return response
 
 
 @router.get("/partials/detail/{item_id}", response_class=HTMLResponse, include_in_schema=False)
@@ -351,6 +361,11 @@ def detail_partial(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> HTMLResponse:
     """HTMX partial: full detail panel for a single budget line."""
+    # FIX-010: Non-HTMX requests redirect to the search page
+    if not request.headers.get("HX-Request"):
+        from starlette.responses import RedirectResponse
+        return RedirectResponse(url="/", status_code=302)
+
     row = conn.execute(
         "SELECT * FROM budget_lines WHERE id = ?", (item_id,)
     ).fetchone()
