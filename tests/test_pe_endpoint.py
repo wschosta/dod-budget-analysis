@@ -687,6 +687,16 @@ class TestListPes:
                 assert "source_files" in tag
                 assert isinstance(tag["source_files"], list)
 
+    def test_enrichment_score_present(self, populated_db):
+        """Each PE list item includes enrichment_score (0-4)."""
+        result = list_pes(tag=None, q=None, service=None, budget_type=None,
+                          approp=None, ba=None, fy=None, sort_by=None,
+                          sort_dir=None, count_only=False, limit=25, offset=0,
+                          conn=populated_db)
+        for item in result["items"]:
+            assert "enrichment_score" in item
+            assert 0 <= item["enrichment_score"] <= 4
+
     def test_filter_by_approp(self, populated_db):
         """Appropriation title substring filter restricts PE results."""
         result = list_pes(tag=None, q=None, service=None, budget_type=None,

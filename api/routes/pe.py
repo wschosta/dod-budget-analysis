@@ -859,6 +859,13 @@ def list_pes(
         d["has_related"] = r["pe_number"] in related_pes
         d["total_fy2026_request"] = funding_by_pe.get(r["pe_number"], 0.0)
         d["pdf_page_count"] = pdf_pages_by_pe.get(r["pe_number"], 0)
+        # Enrichment score: count of enrichment dimensions present (0-4)
+        d["enrichment_score"] = sum([
+            bool(d["tags"]),
+            d["has_descriptions"],
+            d["has_related"],
+            d["pdf_page_count"] > 0,
+        ])
         items.append(d)
 
     return {"total": total, "limit": limit, "offset": offset, "items": items}
