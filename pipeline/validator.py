@@ -73,7 +73,9 @@ KNOWN_EXHIBIT_TYPES = {"m1", "o1", "p1", "p1r", "p5", "r1", "r2", "r3", "r4", "r
 
 # Canonical organization name mapping — merges aliases that refer to the same
 # service/agency.  Keys are lowercased raw values; values are the canonical name.
+# Includes DoD reorganizations (DSS→DCSA 2019, DHP/TMA→DHA 2013, DPMO→DPAA 2015).
 _ORG_ALIASES: dict[str, str] = {
+    # Military services
     "af":        "Air Force",
     "air force": "Air Force",
     "f":         "Air Force",
@@ -81,6 +83,19 @@ _ORG_ALIASES: dict[str, str] = {
     "a":         "Army",
     "navy":      "Navy",
     "n":         "Navy",
+    # DSS renamed to DCSA in 2019
+    "dss":       "DCSA",
+    "dcsa":      "DCSA",
+    # DHP and TMA consolidated into DHA (~2013)
+    "dhp":       "DHA",
+    "tma":       "DHA",
+    "dha":       "DHA",
+    # DPMO reorganized into DPAA in 2015
+    "dpmo":      "DPAA",
+    "dpaa":      "DPAA",
+    # TRANSCOM aliases
+    "trans":     "TRANSCOM",
+    "transcom":  "TRANSCOM",
 }
 
 
@@ -267,7 +282,6 @@ def check_fiscal_year_coverage(conn: sqlite3.Connection) -> dict:
 
     # Merge year sets under canonical org names so aliases like
     # AF / Air Force / F are treated as one organization.
-    all_years: set = set()
     org_years: dict[str, set] = {}
     for r in rows:
         years = set(r[1].split(",")) if r[1] else set()
@@ -276,11 +290,20 @@ def check_fiscal_year_coverage(conn: sqlite3.Connection) -> dict:
             org_years[canonical] |= years
         else:
             org_years[canonical] = years
-        all_years.update(years)
+
+    # Only consider a fiscal year "expected" if at least 25% of orgs have it.
+    # This avoids flagging every org for years that only appear in 1-2 orgs
+    # (e.g. FY 2010/2011 lookback data from Comptroller summary sheets).
+    from collections import Counter
+    year_counts: Counter = Counter()
+    for years in org_years.values():
+        year_counts.update(years)
+    threshold = max(1, len(org_years) // 4)
+    expected_years = {y for y, cnt in year_counts.items() if cnt >= threshold}
 
     missing = []
     for org, years in sorted(org_years.items()):
-        gap = sorted(all_years - years)
+        gap = sorted(expected_years - years)
         if gap:
             missing.append({"organization": org, "missing_years": gap})
 
