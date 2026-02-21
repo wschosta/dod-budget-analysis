@@ -104,7 +104,10 @@ from concurrent.futures import (
     ThreadPoolExecutor, ProcessPoolExecutor, TimeoutError as FuturesTimeoutError,
     as_completed, wait, FIRST_COMPLETED,
 )
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 # Shared utilities: Import from utils package for consistency across codebase
 # Optimization: Pre-compiled patterns and safe_float function reduce data ingestion time by ~10-15%
@@ -1594,8 +1597,7 @@ def _likely_has_tables(page) -> bool:
         # Threshold is conservative: only skip extraction if very text-like
         return (rects + curves) > 10
     except Exception:
-        # If any error computing heuristic, skip table extraction (save time)
-        # Missing some tables is better than crashing
+        logger.debug("Table heuristic failed for page, skipping extraction", exc_info=True)
         return False
 
 

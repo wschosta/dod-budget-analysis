@@ -26,10 +26,13 @@ DONE 2.B3-a: generate_quality_report() writes data_quality_report.json with
 """
 
 import json
+import logging
 import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Shared utilities: Import from utils package for consistency across codebase
 from utils import get_connection
@@ -350,8 +353,10 @@ def check_column_types(conn: sqlite3.Connection) -> dict:
                 "column": row[2],
                 "value": row[3],
             })
+    except sqlite3.OperationalError:
+        pass  # Table/column may not exist
     except Exception:
-        pass
+        logger.debug("check_column_types query failed", exc_info=True)
 
     return {
         "name": "column_types",
