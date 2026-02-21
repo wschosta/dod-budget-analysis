@@ -107,19 +107,19 @@ class TestScan:
         assert "r1" in inv.exhibits
         assert "o1" in inv.exhibits
 
-    def test_scan_verbose(self, docs_dir, capsys):
-        inv = ExhibitInventory(docs_dir, verbose=True)
-        inv.scan()
-        out = capsys.readouterr().out
-        assert "army_p1_fy2026.xlsx" in out
+    def test_scan_verbose(self, docs_dir, caplog):
+        with caplog.at_level("INFO", logger="pipeline.exhibit_inventory"):
+            inv = ExhibitInventory(docs_dir, verbose=True)
+            inv.scan()
+        assert "army_p1_fy2026.xlsx" in caplog.text
 
-    def test_scan_empty_dir(self, tmp_path, capsys):
+    def test_scan_empty_dir(self, tmp_path, caplog):
         empty = tmp_path / "empty"
         empty.mkdir()
-        inv = ExhibitInventory(empty)
-        inv.scan()
-        out = capsys.readouterr().out
-        assert "No .xlsx files" in out
+        with caplog.at_level("WARNING", logger="pipeline.exhibit_inventory"):
+            inv = ExhibitInventory(empty)
+            inv.scan()
+        assert "No .xlsx files" in caplog.text
         assert inv.total_files == 0
 
 

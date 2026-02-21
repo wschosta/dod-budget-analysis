@@ -23,7 +23,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sqlite3
 import time
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -385,7 +387,7 @@ def stage_all_files(
     workers: int = 0,
     force: bool = False,
     pdf_timeout: int = 30,
-    progress_callback=None,
+    progress_callback: Callable[[str, int, int, str], None] | None = None,
 ) -> dict[str, Any]:
     """Stage all Excel and PDF files from docs_dir into staging_dir.
 
@@ -574,7 +576,7 @@ def load_staging_to_db(
     staging_dir: Path,
     db_path: Path,
     rebuild: bool = False,
-    progress_callback=None,
+    progress_callback: Callable[[str, int, int, str], None] | None = None,
 ) -> dict[str, Any]:
     """Load all staged Parquet files into a SQLite database.
 
@@ -589,8 +591,6 @@ def load_staging_to_db(
     Returns:
         Summary dict with total_rows, total_pages, elapsed_sec, fy_columns.
     """
-    import sqlite3
-
     if not staging_dir.exists():
         raise FileNotFoundError(f"Staging directory not found: {staging_dir}")
 
@@ -817,10 +817,10 @@ def _tally_result(
 
 
 def _load_excel_parquets(
-    conn,
+    conn: sqlite3.Connection,
     staging_dir: Path,
     all_fy_columns: list[str],
-    progress_callback=None,
+    progress_callback: Callable[[str, int, int, str], None] | None = None,
 ) -> int:
     """Load all Excel Parquet files into the budget_lines table.
 
@@ -908,9 +908,9 @@ def _load_excel_parquets(
 
 
 def _load_pdf_parquets(
-    conn,
+    conn: sqlite3.Connection,
     staging_dir: Path,
-    progress_callback=None,
+    progress_callback: Callable[[str, int, int, str], None] | None = None,
 ) -> int:
     """Load all PDF Parquet files into the pdf_pages table.
 
@@ -1044,7 +1044,7 @@ def _load_pdf_parquets(
     return total_pages
 
 
-def _rebuild_fts_indexes(conn) -> None:
+def _rebuild_fts_indexes(conn: sqlite3.Connection) -> None:
     """Rebuild FTS5 indexes and recreate triggers for both tables."""
     # Rebuild budget_lines FTS
     try:

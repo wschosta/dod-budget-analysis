@@ -15,14 +15,17 @@ Usage:
 import argparse
 import csv
 import json
+import logging
 import sys
 from collections import defaultdict
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
 try:
     import openpyxl
 except ImportError:
-    print("ERROR: openpyxl not installed. Run: pip install openpyxl")
+    logger.error("openpyxl not installed. Run: pip install openpyxl")
     sys.exit(1)
 
 
@@ -65,15 +68,15 @@ class ExhibitInventory:
     def scan(self):
         """Scan all Excel files in the documents directory."""
         if not self.docs_dir.exists():
-            print(f"ERROR: Directory not found: {self.docs_dir}")
+            logger.error("Directory not found: %s", self.docs_dir)
             sys.exit(1)
 
         xlsx_files = list(self.docs_dir.rglob("*.xlsx"))
         if not xlsx_files:
-            print(f"WARNING: No .xlsx files found in {self.docs_dir}")
+            logger.warning("No .xlsx files found in %s", self.docs_dir)
             return
 
-        print(f"Scanning {len(xlsx_files)} Excel files...")
+        logger.info("Scanning %d Excel files...", len(xlsx_files))
 
         for file_path in xlsx_files:
             try:
@@ -93,7 +96,7 @@ class ExhibitInventory:
                     self.exhibits[exhibit_type]["headers"].add(header_sig[:100])
 
                     if self.verbose:
-                        print(f"  ✓ {file_path.name} / {sheet_name}")
+                        logger.info("  %s / %s", file_path.name, sheet_name)
 
                 wb.close()
 
@@ -102,7 +105,7 @@ class ExhibitInventory:
                     "file": str(file_path.relative_to(self.docs_dir)),
                     "error": str(e),
                 })
-                print(f"  ⚠ ERROR in {file_path.name}: {e}")
+                logger.error("Error in %s: %s", file_path.name, e)
 
     def report(self):
         """Generate summary report."""
@@ -156,7 +159,7 @@ class ExhibitInventory:
         with open(output_path, "w") as f:
             json.dump(data, f, indent=2)
 
-        print(f"✓ Exported JSON to {output_path}")
+        logger.info("Exported JSON to %s", output_path)
 
     def export_csv(self, output_path: Path):
         """Export inventory as CSV."""
@@ -181,11 +184,13 @@ class ExhibitInventory:
                     sample_files,
                 ])
 
-        print(f"✓ Exported CSV to {output_path}")
+        logger.info("Exported CSV to %s", output_path)
 
 
 def main():
     """Parse CLI arguments and run the exhibit type inventory scan."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
     parser = argparse.ArgumentParser(
         description="Inventory exhibit types in Excel files",
         formatter_class=argparse.RawDescriptionHelpFormatter,

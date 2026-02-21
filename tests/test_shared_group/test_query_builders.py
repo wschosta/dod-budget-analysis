@@ -1,9 +1,11 @@
 """
 Tests for SQL query builder functions.
 
-Covers two query builder implementations:
-- api/routes/budget_lines.py :: _build_where() — route-level WHERE builder
-- utils/query.py :: build_where_clause(), build_order_clause() — shared utilities
+Covers the shared query builder utilities:
+- utils/query.py :: build_where_clause(), build_order_clause()
+
+The _build_where alias exercises build_where_clause with the same 5-arg
+signature that the budget_lines route uses.
 """
 import sys
 from pathlib import Path
@@ -11,8 +13,18 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from api.routes.budget_lines import _build_where
 from utils.query import build_where_clause, build_order_clause
+
+
+def _build_where(fiscal_year, service, exhibit_type, pe_number, appropriation_code):
+    """Test helper — mirrors the removed budget_lines._build_where passthrough."""
+    return build_where_clause(
+        fiscal_year=fiscal_year,
+        service=service,
+        exhibit_type=exhibit_type,
+        pe_number=pe_number,
+        appropriation_code=appropriation_code,
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

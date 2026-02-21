@@ -407,16 +407,16 @@ def validate_all(
         pedantic:  Exit non-zero on any *warnings or failures*.
     """
     if not db_path.exists():
-        print(f"ERROR: Database not found: {db_path}")
-        print("Run 'python build_budget_db.py' first to build the database.")
-        sys.exit(1)
+        raise FileNotFoundError(
+            f"Database not found: {db_path}. "
+            "Run 'python build_budget_db.py' first to build the database."
+        )
 
     conn = get_connection(db_path)
     results = []
     for check_fn in ALL_CHECKS:
-        print(f"  Checking {check_fn.__name__}...", end=" ", flush=True)
         result = check_fn(conn)
-        print(result["status"].upper())
+        logger.info("  Checking %s... %s", check_fn.__name__, result["status"].upper())
         results.append(result)
     conn.close()
 
@@ -569,6 +569,9 @@ def generate_quality_report(
 
 def main() -> None:
     import argparse
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
     parser = argparse.ArgumentParser(description="Validate budget database")
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
     parser.add_argument("--strict", action="store_true",

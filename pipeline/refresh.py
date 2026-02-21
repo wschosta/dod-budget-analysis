@@ -59,8 +59,16 @@ _PROGRESS_FILE = Path("refresh_progress.json")
 class RefreshWorkflow:
     """Orchestrates the complete data refresh pipeline."""
 
-    def __init__(self, verbose=False, dry_run=False, workers=4, notify_url=None,
-                 db_path=None, no_rollback=False, phases=None):
+    def __init__(
+        self,
+        verbose: bool = False,
+        dry_run: bool = False,
+        workers: int = 4,
+        notify_url: str | None = None,
+        db_path: str | Path | None = None,
+        no_rollback: bool = False,
+        phases: set[int] | None = None,
+    ) -> None:
         """Initialize workflow state.
 
         Args:
@@ -92,7 +100,7 @@ class RefreshWorkflow:
         # REFRESH-003: path for the pre-build backup
         self._backup_path: Path | None = None
 
-    def log(self, msg: str, level="info"):
+    def log(self, msg: str, level: str = "info") -> None:
         """Print a timestamped log message."""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         if level == "info":
@@ -173,7 +181,7 @@ class RefreshWorkflow:
 
     # ── Stages ─────────────────────────────────────────────────────────────
 
-    def run_command(self, cmd: list, description: str) -> bool:
+    def run_command(self, cmd: list[str], description: str) -> bool:
         """Run a shell command and return success status."""
         self.log(f"Starting: {description}")
         if self.dry_run:
@@ -200,7 +208,7 @@ class RefreshWorkflow:
             self.log(f"Exception during {description}: {e}", "error")
             return False
 
-    def stage_1_download(self, years: list, sources: list) -> bool:
+    def stage_1_download(self, years: list[int], sources: list[str]) -> bool:
         """Stage 1: Download budget documents."""
         self.log("=" * 60)
         self.log("STAGE 1: DOWNLOAD BUDGET DOCUMENTS")
@@ -434,7 +442,7 @@ class RefreshWorkflow:
             self._write_progress("stage_4_report", "failed", str(e))
             return False
 
-    def run(self, years: list, sources: list) -> int:
+    def run(self, years: list[int], sources: list[str]) -> int:
         """Execute the complete refresh workflow."""
         self.start_time = time.time()
 
@@ -558,7 +566,7 @@ def _next_run_time(at_hour: str | None) -> float:
         return time.time()
 
 
-def run_scheduled(args, workflow_kwargs: dict) -> None:
+def run_scheduled(args: argparse.Namespace, workflow_kwargs: dict[str, object]) -> None:
     """Run the refresh workflow on a schedule (REFRESH-005).
 
     Uses a simple sleep loop rather than sched to avoid drift on long intervals.
@@ -585,7 +593,7 @@ def run_scheduled(args, workflow_kwargs: dict) -> None:
         print(f"  Next run scheduled for {datetime.fromtimestamp(next_run).isoformat()}")
 
 
-def main():
+def main() -> None:
     """Parse CLI arguments and run the four-stage data refresh workflow."""
     parser = argparse.ArgumentParser(
         description="Refresh DoD Budget Database with latest data",
