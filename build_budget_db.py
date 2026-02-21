@@ -1416,17 +1416,17 @@ def _extract_fy_from_path(file_path: Path) -> str | None:
     return None
 
 
-def _detect_pdf_exhibit_type(filename: str) -> str | None:
+def _detect_pdf_exhibit_type(filename: str) -> str:
     """Detect the exhibit type from a PDF filename (LION-100).
 
     Reuses the same EXHIBIT_TYPES keys used for Excel files.
-    Returns lowercase exhibit code (e.g. 'r2', 'p1') or None.
+    Returns lowercase exhibit code (e.g. 'r2', 'p1') or 'unknown'.
     """
     name = filename.lower().replace("_display", "")
     for key in sorted(EXHIBIT_TYPES.keys(), key=len, reverse=True):
         if key in name:
             return key
-    return None
+    return "unknown"
 
 
 def _determine_category(file_path: Path) -> str:
