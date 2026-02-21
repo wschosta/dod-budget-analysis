@@ -13,13 +13,14 @@
 #   7. GUI tracker tests (tkinter, requires Xvfb)
 #   8. Operational tests — refresh workflow, scheduled download
 #   9. Custom optimization runner + benchmarks
-#  10. Docker build validation
+#  10. Git workflow tests
+#  11. Docker build validation
 
 name: CI
 
 on:
   push:
-    branches: [main, develop, "claude/**"]
+    branches: [main, develop, "claude/**", "refactor/**"]
   pull_request:
     branches: [main, develop]
 
@@ -66,109 +67,109 @@ jobs:
       - name: "Unit tests: utilities & patterns"
         run: |
           python -m pytest \
-            tests/test_common_utils.py \
-            tests/test_strings_edge_cases.py \
-            tests/test_patterns.py \
-            tests/test_formatting.py \
-            tests/test_cache_utils.py \
-            tests/test_database_utils.py \
-            tests/test_utils.py \
-            tests/test_utils_coverage.py \
-            tests/test_http_utils.py \
-            tests/test_progress_coverage.py \
+            tests/test_shared_group/test_common_utils.py \
+            tests/test_shared_group/test_strings_edge_cases.py \
+            tests/test_shared_group/test_patterns.py \
+            tests/test_shared_group/test_formatting.py \
+            tests/test_shared_group/test_cache_utils.py \
+            tests/test_shared_group/test_database_utils.py \
+            tests/test_shared_group/test_utils.py \
+            tests/test_shared_group/test_utils_coverage.py \
+            tests/test_shared_group/test_http_utils.py \
+            tests/test_shared_group/test_progress_coverage.py \
             -v --tb=short
 
       - name: "Unit tests: config & validation"
         run: |
           python -m pytest \
-            tests/test_config_classes.py \
-            tests/test_validation.py \
-            tests/test_validation_classes.py \
-            tests/test_validate_budget_db.py \
+            tests/test_shared_group/test_config_classes.py \
+            tests/test_pipeline_group/test_validation.py \
+            tests/test_shared_group/test_validation_classes.py \
+            tests/test_pipeline_group/test_validate_budget_db.py \
             -v --tb=short
 
       - name: "Unit tests: query builders"
         run: |
           python -m pytest \
-            tests/test_query_builders.py \
+            tests/test_shared_group/test_query_builders.py \
             -v --tb=short
 
       # ── API tests: endpoints, models, search, download ──────────────────
       - name: "API tests: endpoints & models"
         run: |
           python -m pytest \
-            tests/test_api.py \
-            tests/test_api_models.py \
-            tests/test_api_database.py \
-            tests/test_api_search_snippet.py \
-            tests/test_app_factory.py \
-            tests/test_budget_lines_endpoint.py \
-            tests/test_search_endpoint.py \
-            tests/test_rate_limiter.py \
-            tests/test_pe_endpoint.py \
+            tests/test_web_group/test_api.py \
+            tests/test_web_group/test_api_models.py \
+            tests/test_web_group/test_api_database.py \
+            tests/test_web_group/test_api_search_snippet.py \
+            tests/test_web_group/test_app_factory.py \
+            tests/test_web_group/test_budget_lines_endpoint.py \
+            tests/test_web_group/test_search_endpoint.py \
+            tests/test_web_group/test_rate_limiter.py \
+            tests/test_web_group/test_pe_endpoint.py \
             -v --tb=short
 
       - name: "API tests: download, charts & search"
         run: |
           python -m pytest \
-            tests/test_download.py \
-            tests/test_charts_data.py \
-            tests/test_reference_aggregation.py \
-            tests/test_search.py \
-            tests/test_search_extended.py \
+            tests/test_web_group/test_download.py \
+            tests/test_web_group/test_charts_data.py \
+            tests/test_web_group/test_reference_aggregation.py \
+            tests/test_pipeline_group/test_search.py \
+            tests/test_pipeline_group/test_search_extended.py \
             -v --tb=short
 
       # ── Frontend tests: routes, helpers, GUI, accessibility ─────────────
       - name: "Frontend tests: routes & helpers"
         run: |
           python -m pytest \
-            tests/test_frontend_routes.py \
-            tests/test_frontend_helpers.py \
-            tests/test_gui_features.py \
-            tests/test_gui_fixes.py \
-            tests/test_accessibility.py \
-            tests/test_gui_eta.py \
+            tests/test_web_group/test_frontend_routes.py \
+            tests/test_web_group/test_frontend_helpers.py \
+            tests/test_web_group/test_gui_features.py \
+            tests/test_web_group/test_gui_fixes.py \
+            tests/test_web_group/test_accessibility.py \
+            tests/test_pipeline_group/test_gui_eta.py \
             -v --tb=short
 
       # ── Data pipeline tests ─────────────────────────────────────────────
       - name: "Pipeline tests: build, enrichment, schema"
         run: |
           python -m pytest \
-            tests/test_build_integration.py \
-            tests/test_schema_design.py \
-            tests/test_enrich_budget_db.py \
-            tests/test_checkpoint.py \
-            tests/test_exhibit_inventory.py \
-            tests/test_exhibit_audit.py \
-            tests/test_exhibit_catalog.py \
-            tests/test_parsing.py \
-            tests/test_manifest.py \
-            tests/test_backfill.py \
-            tests/test_fixture_integration.py \
-            tests/test_pdf_quality_audit.py \
-            tests/test_pdf_sections.py \
+            tests/test_pipeline_group/test_build_integration.py \
+            tests/test_pipeline_group/test_schema_design.py \
+            tests/test_pipeline_group/test_enrich_budget_db.py \
+            tests/test_pipeline_group/test_checkpoint.py \
+            tests/test_pipeline_group/test_exhibit_inventory.py \
+            tests/test_pipeline_group/test_exhibit_audit.py \
+            tests/test_pipeline_group/test_exhibit_catalog.py \
+            tests/test_pipeline_group/test_parsing.py \
+            tests/test_pipeline_group/test_manifest.py \
+            tests/test_pipeline_group/test_backfill.py \
+            tests/test_pipeline_group/test_fixture_integration.py \
+            tests/test_pipeline_group/test_pdf_quality_audit.py \
+            tests/test_pipeline_group/test_pdf_sections.py \
             -v --tb=short
 
       - name: "Pipeline tests: full pipeline integration"
         continue-on-error: true
         run: |
-          python -m pytest tests/test_pipeline.py -v --tb=short
+          python -m pytest tests/test_pipeline_group/test_pipeline.py -v --tb=short
 
       # ── Performance & optimization tests ────────────────────────────────
       - name: "Performance & optimization tests"
         run: |
           python -m pytest \
-            tests/test_performance.py \
-            tests/test_optimizations.py \
-            tests/test_optimization.py \
+            tests/test_shared_group/test_performance.py \
+            tests/test_shared_group/test_optimizations.py \
+            tests/test_shared_group/test_optimization.py \
             -v --tb=short
 
       # ── Code quality & pre-commit checks ────────────────────────────────
       - name: "Pre-commit quality checks"
         run: |
           python -m pytest \
-            tests/test_precommit_checks.py \
-            tests/test_precommit_hook.py \
+            tests/test_shared_group/test_precommit_checks.py \
+            tests/test_shared_group/test_precommit_hook.py \
             -v --tb=short
 
       # ── Remaining tests (BEAR, TIGER, LION, etc.) ──────────────────────
@@ -176,39 +177,39 @@ jobs:
         continue-on-error: true
         run: |
           python -m pytest \
-            tests/test_bear_dynamic_schema.py \
-            tests/test_bear_historical_compat.py \
-            tests/test_bear_migration.py \
-            tests/test_bear_docker.py \
-            tests/test_bear_refresh_e2e.py \
-            tests/test_bear_validation_integration.py \
-            tests/test_bear_load.py \
-            tests/test_tiger_performance.py \
-            tests/test_tiger_caching.py \
-            tests/test_tiger_feedback.py \
-            tests/test_tiger_validation.py \
-            tests/test_lion_db_integrity.py \
-            tests/test_reconciliation.py \
+            tests/test_pipeline_group/test_bear_dynamic_schema.py \
+            tests/test_pipeline_group/test_bear_historical_compat.py \
+            tests/test_pipeline_group/test_bear_migration.py \
+            tests/test_web_group/test_bear_docker.py \
+            tests/test_pipeline_group/test_bear_refresh_e2e.py \
+            tests/test_pipeline_group/test_bear_validation_integration.py \
+            tests/test_pipeline_group/test_bear_load.py \
+            tests/test_web_group/test_tiger_performance.py \
+            tests/test_web_group/test_tiger_caching.py \
+            tests/test_web_group/test_tiger_feedback.py \
+            tests/test_shared_group/test_tiger_validation.py \
+            tests/test_pipeline_group/test_lion_db_integrity.py \
+            tests/test_pipeline_group/test_reconciliation.py \
             -v --tb=short
 
       # ── Operational tests ──────────────────────────────────────────────
       - name: "Operational tests: refresh & scheduled download"
         run: |
           python -m pytest \
-            tests/test_refresh_workflow.py \
-            tests/test_scheduled_download.py \
+            tests/test_pipeline_group/test_refresh_workflow.py \
+            tests/test_downloader_group/test_scheduled_download.py \
             -v --tb=short
 
       # ── GUI tracker tests (tkinter StringVar deallocator fix) ──────────
       - name: "GUI tracker tests: unit (no display)"
         run: |
-          pytest tests/test_gui_tracker.py -v --tb=short \
+          pytest tests/test_downloader_group/test_gui_tracker.py -v --tb=short \
             -k "not test_no_deallocator_error_on_close"
 
       - name: "GUI tracker test: integration (Xvfb headless display)"
         run: |
           xvfb-run --auto-servernum \
-            pytest tests/test_gui_tracker.py::test_no_deallocator_error_on_close \
+            pytest tests/test_downloader_group/test_gui_tracker.py::test_no_deallocator_error_on_close \
               -v --tb=short
 
       # ── Custom optimization runner + benchmarks ────────────────────────
@@ -243,7 +244,7 @@ jobs:
         if: always()
         run: |
           python -m pytest tests/ \
-            --ignore=tests/test_gui_tracker.py \
+            --ignore=tests/test_downloader_group/test_gui_tracker.py \
             --ignore=tests/optimization_validation \
             --cov=api --cov=utils --cov=downloader --cov=pipeline \
             --cov-report=xml \
