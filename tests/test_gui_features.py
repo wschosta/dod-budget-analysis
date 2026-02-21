@@ -71,6 +71,7 @@ def app_client(tmp_path_factory):
         CREATE TABLE pe_tags (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             pe_number TEXT,
+            project_number TEXT,
             tag TEXT,
             tag_source TEXT,
             confidence REAL DEFAULT 1.0,
@@ -139,10 +140,10 @@ def app_client(tmp_path_factory):
             ('0604800F', 'F-22A Raptor', 'Air Force', 'Procurement',
              '["2025"]', '["p1"]');
 
-        INSERT INTO pe_tags VALUES (NULL, '0604131A', 'aviation', 'structured', 1.0, '["army_r1.xlsx"]');
-        INSERT INTO pe_tags VALUES (NULL, '0604131A', 'rotary-wing', 'keyword', 0.9, '["army_r2.pdf"]');
-        INSERT INTO pe_tags VALUES (NULL, '0603292N', 'aviation', 'structured', 1.0, '["navy_r1.xlsx"]');
-        INSERT INTO pe_tags VALUES (NULL, '0603292N', 'stealth', 'keyword', 0.8, '["navy_r2.pdf"]');
+        INSERT INTO pe_tags VALUES (NULL, '0604131A', NULL, 'aviation', 'structured', 1.0, '["army_r1.xlsx"]');
+        INSERT INTO pe_tags VALUES (NULL, '0604131A', NULL, 'rotary-wing', 'keyword', 0.9, '["army_r2.pdf"]');
+        INSERT INTO pe_tags VALUES (NULL, '0603292N', NULL, 'aviation', 'structured', 1.0, '["navy_r1.xlsx"]');
+        INSERT INTO pe_tags VALUES (NULL, '0603292N', NULL, 'stealth', 'keyword', 0.8, '["navy_r2.pdf"]');
 
         INSERT INTO pe_lineage VALUES
             (NULL, '0604131A', '0603292N', 'name_match', 0.6, '2026', 'aviation context');
