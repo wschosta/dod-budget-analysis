@@ -21,7 +21,7 @@ DoD Budget Analysis is a Python toolkit for downloading, parsing, normalizing, a
 pip install -r requirements-dev.txt
 python -m playwright install chromium
 
-# Run tests (69 test files, 1,100+ tests)
+# Run tests (75 test files)
 python -m pytest tests/ -v
 
 # Run with coverage (80% minimum on api/ and utils/)
@@ -58,10 +58,11 @@ dod-budget-analysis/
 │       ├── download.py           # GET /api/v1/download (streaming CSV/NDJSON)
 │       ├── feedback.py           # POST /api/v1/feedback
 │       ├── frontend.py           # GET /, /charts, /partials/* (HTML routes)
+│       ├── metadata.py           # GET /api/v1/metadata
 │       ├── pe.py                 # PE-centric views, funding, sub-elements
 │       ├── reference.py          # GET /api/v1/reference/{type}
 │       └── search.py             # GET /api/v1/search (FTS5 full-text search)
-├── utils/                        # Shared utility library (14 modules)
+├── utils/                        # Shared utility library (16 modules)
 │   ├── cache.py                  # TTLCache implementation
 │   ├── common.py                 # format_bytes, elapsed, sanitize_filename
 │   ├── config.py                 # AppConfig, DatabaseConfig, DownloadConfig, KnownValues
@@ -69,13 +70,15 @@ dod-budget-analysis/
 │   ├── formatting.py             # format_amount, extract_snippet, highlight_terms
 │   ├── http.py                   # RetryStrategy, SessionManager, TimeoutManager
 │   ├── manifest.py               # File manifest tracking with hashes
+│   ├── metadata.py               # Metadata extraction and management
 │   ├── patterns.py               # Regex: PE_NUMBER, FISCAL_YEAR, ACCOUNT_CODE_TITLE
 │   ├── pdf_sections.py           # Narrative section parsing from PDFs
 │   ├── progress.py               # ProgressTracker variants (Terminal, Silent, File)
 │   ├── query.py                  # build_where_clause, build_order_clause
+│   ├── search_parser.py          # Search query parsing and tokenization
 │   ├── strings.py                # safe_float, normalize_whitespace, sanitize_fts5_query
 │   └── validation.py             # ValidationIssue, ValidationResult, ValidationRegistry
-├── tests/                        # pytest test suite (69 test files)
+├── tests/                        # pytest test suite (75 test files)
 │   ├── conftest.py               # Session-scoped fixtures: test DBs, Excel/PDF fixtures
 │   ├── fixtures/                 # Static test fixture data (Excel files, expected outputs)
 │   └── optimization_validation/  # Advanced optimization tests
@@ -106,18 +109,24 @@ dod-budget-analysis/
 │   ├── program-detail.html       # Individual program detail page
 │   ├── errors/                   # Custom error pages (404, 500)
 │   └── partials/                 # HTMX partial responses
-│       ├── results.html          # Search results partial
+│       ├── advanced-search.html  # Advanced search form partial
 │       ├── detail.html           # Detail view partial
 │       ├── feedback.html         # Feedback form partial
+│       ├── glossary.html         # Glossary terms partial
+│       ├── program-descriptions.html  # Program descriptions partial
 │       ├── program-list.html     # Program list partial
-│       └── program-descriptions.html  # Program descriptions partial
+│       ├── results.html          # Search results partial
+│       └── toast.html            # Toast notification partial
 ├── static/                       # Static frontend assets
 │   ├── css/main.css              # Main stylesheet (supports dark mode via CSS variables)
 │   └── js/                       # JavaScript modules
 │       ├── app.js                # Main application JS (search, HTMX integration)
+│       ├── charts.js             # Charts page Chart.js visualizations
 │       ├── checkbox-select.js    # Custom checkbox-select dropdown component
+│       ├── dark-mode.js          # Dark mode toggle and persistence
 │       ├── dashboard.js          # Dashboard Chart.js visualizations
-│       └── program-detail.js     # Program detail page interactions
+│       ├── program-detail.js     # Program detail page interactions
+│       └── search.js             # Search-specific JS functionality
 ├── docs/                         # Documentation
 │   ├── instructions/             # Agent instruction files (LION, TIGER, BEAR, OH MY)
 │   ├── wiki/                     # Extended wiki documentation
@@ -127,12 +136,15 @@ dod-budget-analysis/
 ├── docker/                       # Staging Docker configs
 │   ├── Dockerfile.multistage     # Multi-stage production Dockerfile
 │   └── docker-compose.staging.yml  # Staging compose configuration
-├── .github/workflows/            # CI/CD workflows
-│   ├── ci.yml                    # Main CI: lint, type check, test groups, coverage, Docker build
-│   ├── deploy.yml                # Docker build/push to GHCR + deploy template
-│   ├── download.yml              # Automated document download
-│   ├── optimization-tests.yml    # Optimization test suite
-│   └── refresh-data.yml          # Scheduled data refresh
+├── .github/
+│   ├── ISSUE_TEMPLATE/           # GitHub issue templates
+│   │   ├── bug_report.md         # Bug report template
+│   │   └── feature_request.md    # Feature request template
+│   └── workflows/                # CI/CD workflows
+│       ├── ci.yml                # Main CI: lint, type check, test groups, coverage, Docker build
+│       ├── deploy.yml            # Docker build/push to GHCR + deploy template
+│       ├── download.yml          # Automated document download
+│       └── refresh-data.yml      # Scheduled data refresh
 │
 │ # Root-level pipeline scripts
 ├── build_budget_db.py            # Main data ingestion (Excel + PDF parsing)
@@ -218,13 +230,15 @@ python -m pytest tests/ --ignore=tests/test_gui_tracker.py --ignore=tests/optimi
 ### Test Groups (as organized in CI)
 
 1. **Unit tests:** utilities, patterns, config, validation, query builders
-2. **API tests:** endpoints, models, search, download, rate limiting, charts
+2. **API tests:** endpoints, models, search, download, rate limiting, charts, PE
 3. **Frontend tests:** routes, helpers, GUI features, fixes, accessibility
-4. **Data pipeline tests:** build, enrichment, schema, pipeline, exhibits, manifests
+4. **Data pipeline tests:** build, enrichment, schema, pipeline, exhibits, manifests, PDF
 5. **Performance tests:** load, benchmarks, optimization
 6. **Code quality:** pre-commit checks and hook tests
-7. **Advanced:** BEAR (schema/migration/Docker/refresh) and TIGER (caching/performance/feedback/validation) groups
-8. **Docker build validation:** separate CI job verifying Docker image builds and imports
+7. **Advanced:** BEAR (schema/migration/Docker/refresh), TIGER (caching/performance/feedback/validation), LION (DB integrity), and EAGLE (frontend/PE) groups
+8. **Operational tests:** refresh workflow, scheduled download
+9. **GUI tracker tests:** tkinter tests (requires Xvfb for headless display)
+10. **Docker build validation:** separate CI job verifying Docker image builds and imports
 
 ### Test Fixtures
 
@@ -313,6 +327,7 @@ All API routes are prefixed with `/api/v1`. OpenAPI docs at `/docs`, ReDoc at `/
 | `/api/v1/aggregations` | GET | GROUP BY summaries for charts/dashboards |
 | `/api/v1/download` | GET | Streaming CSV/NDJSON export |
 | `/api/v1/reference/{type}` | GET | Reference data (services, exhibit types, FYs) |
+| `/api/v1/metadata` | GET | Database and dataset metadata |
 | `/api/v1/feedback` | POST | User feedback submission |
 | `/health` | GET | Health check (DB connectivity) |
 | `/health/detailed` | GET | Detailed metrics (uptime, counters, query stats) |
