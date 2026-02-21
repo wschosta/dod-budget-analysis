@@ -473,7 +473,7 @@ def generate_quality_report(
     return report
 
 
-if __name__ == "__main__":
+def main() -> None:
     import argparse
     parser = argparse.ArgumentParser(description="Validate budget database")
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
@@ -491,3 +491,7 @@ if __name__ == "__main__":
         print_report(summary)
 
     sys.exit(summary["exit_code"])
+
+
+if __name__ == "__main__":
+    main()
