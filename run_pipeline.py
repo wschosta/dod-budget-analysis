@@ -29,9 +29,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+import signal
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -48,6 +51,9 @@ _PROGRESS_FILE = Path("pipeline_progress.json")
 
 # Track completed steps for progress reporting
 _completed_steps: dict[str, str] = {}
+
+# Graceful shutdown event — shared across all pipeline steps
+_stop_event = threading.Event()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -124,6 +130,67 @@ def _cleanup_backup(backup: Path | None) -> None:
             backup.unlink()
         except OSError:
             pass
+
+
+def _build_progress(phase: str, current: int, total: int, detail: str = "",
+                     metrics: dict | None = None) -> None:
+    """Progress callback for build_database() — prints live file-by-file status."""
+    if phase == "scan":
+        if total > 0:
+            print(f"  Scanning... {total} files found", flush=True)
+        else:
+            print(f"  {detail}", flush=True)
+    elif phase in ("excel", "pdf"):
+        label = "Excel" if phase == "excel" else "PDF"
+        pct = (current / total * 100) if total > 0 else 0
+        eta = ""
+        if metrics and metrics.get("eta_sec", 0) > 0:
+            eta_min = metrics["eta_sec"] / 60
+            eta = f"  ETA: {eta_min:.0f}m" if eta_min >= 1 else f"  ETA: {metrics['eta_sec']:.0f}s"
+        # Truncate detail (filename) to keep output clean
+        short_detail = detail[:60] + "..." if len(detail) > 63 else detail
+        print(f"  [{label}] {current}/{total} ({pct:.0f}%){eta}  {short_detail}", flush=True)
+    elif phase == "index":
+        print(f"  {detail}", flush=True)
+    elif phase == "done":
+        if isinstance(detail, dict):
+            rows = detail.get("total_rows", 0)
+            pages = detail.get("total_pages", 0)
+            print(f"  Build complete: {rows:,} rows, {pages:,} PDF pages", flush=True)
+        elif isinstance(detail, str) and detail:
+            print(f"  {detail}", flush=True)
+    elif phase == "error":
+        print(f"  ERROR: {detail}", flush=True)
+
+
+def _staging_progress(phase: str, current: int, total: int, detail: str = "") -> None:
+    """Progress callback for stage_all_files() and load_staging_to_db()."""
+    if phase == "scan":
+        if total > 0:
+            print(f"  Scanning... {total} files", flush=True)
+        elif detail:
+            print(f"  {detail}", flush=True)
+    elif phase in ("excel", "pdf", "load_excel", "load_pdf"):
+        label = {"excel": "Stage Excel", "pdf": "Stage PDF",
+                 "load_excel": "Load Excel", "load_pdf": "Load PDF"}.get(phase, phase)
+        pct = (current / total * 100) if total > 0 else 0
+        short_detail = detail[:60] + "..." if len(detail) > 63 else detail
+        print(f"  [{label}] {current}/{total} ({pct:.0f}%)  {short_detail}", flush=True)
+    elif phase == "index":
+        print(f"  {detail}", flush=True)
+    elif phase == "done":
+        if detail:
+            print(f"  {detail}", flush=True)
+
+
+def _check_stopped(step_name: str = "") -> bool:
+    """Return True and print a message if graceful shutdown was requested."""
+    if _stop_event.is_set():
+        where = f" during {step_name}" if step_name else ""
+        print(f"\n  Pipeline stopped gracefully{where}.", flush=True)
+        _write_progress(step_name or "shutdown", "stopped", 0, "Graceful shutdown")
+        return True
+    return False
 
 
 def _run_step(label: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> tuple[bool, Any]:
@@ -309,8 +376,31 @@ def _download_cmd(args: argparse.Namespace) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
 
+    # Configure logging so pipeline modules (builder, enricher, validator, staging)
+    # emit visible status messages instead of being silently swallowed.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(message)s",
+        force=True,
+    )
+
     # Reset global state for testability
     _completed_steps.clear()
+    _stop_event.clear()
+
+    # ── Graceful shutdown via Ctrl+C ──────────────────────────────────────
+    def _sigint_handler(sig: int, frame: Any) -> None:
+        if not _stop_event.is_set():
+            print(
+                "\n\n  Keyboard interrupt — finishing current operation and shutting down...",
+                flush=True,
+            )
+            _stop_event.set()
+        else:
+            print("\n  Force-quitting...", flush=True)
+            sys.exit(1)
+
+    signal.signal(signal.SIGINT, _sigint_handler)
 
     pipeline_start = time.monotonic()
     use_staging = args.use_staging or args.stage_only or args.load_only
@@ -354,6 +444,8 @@ def main(argv: list[str] | None = None) -> int:
         if rc != 0:
             print(f"\nPipeline aborted: download step failed (exit {rc}).", flush=True)
             return rc
+        if _check_stopped("download"):
+            return 0
 
     # ── Step 1: Build or Stage+Load ──────────────────────────────────────
     backup = None
@@ -373,6 +465,8 @@ def main(argv: list[str] | None = None) -> int:
                 workers=args.workers or 0,
                 force=args.rebuild,
                 pdf_timeout=args.pdf_timeout,
+                progress_callback=_staging_progress,
+                stop_event=_stop_event,
             )
             if not ok:
                 _rollback_db(db_path, backup) if not args.no_rollback else None
@@ -397,6 +491,8 @@ def main(argv: list[str] | None = None) -> int:
             staging_dir=staging_dir,
             db_path=db_path,
             rebuild=args.rebuild,
+            progress_callback=_staging_progress,
+            stop_event=_stop_event,
         )
         if not ok:
             if not args.no_rollback:
@@ -419,6 +515,8 @@ def main(argv: list[str] | None = None) -> int:
             "resume": args.resume,
             "workers": args.workers or 0,
             "pdf_timeout": args.pdf_timeout,
+            "progress_callback": _build_progress,
+            "stop_event": _stop_event,
         }
         if args.checkpoint_interval is not None:
             build_kwargs["checkpoint_interval"] = args.checkpoint_interval
@@ -434,6 +532,10 @@ def main(argv: list[str] | None = None) -> int:
             print("\nPipeline aborted: build step failed.", flush=True)
             return 1
 
+    if _check_stopped("build"):
+        _cleanup_backup(backup)
+        return 0
+
     # ── Step 2: Validate ─────────────────────────────────────────────────
     if not args.skip_validate:
         from pipeline.validator import validate_all
@@ -444,6 +546,7 @@ def main(argv: list[str] | None = None) -> int:
             db_path=db_path,
             strict=args.strict,
             pedantic=args.pedantic,
+            stop_event=_stop_event,
         )
 
         if ok and val_summary:
@@ -489,6 +592,10 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("\n[Step 2 / 4 -- Validate database] SKIPPED", flush=True)
 
+    if _check_stopped("validate"):
+        _cleanup_backup(backup)
+        return 0
+
     # ── Step 3: Enrich ───────────────────────────────────────────────────
     if not args.skip_enrich:
         from pipeline.enricher import enrich
@@ -506,6 +613,7 @@ def main(argv: list[str] | None = None) -> int:
             phases=phases,
             with_llm=args.with_llm,
             rebuild=args.rebuild_enrich or args.rebuild,
+            stop_event=_stop_event,
         )
         if not ok:
             print(

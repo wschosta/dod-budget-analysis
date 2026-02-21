@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import sqlite3
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -388,6 +389,7 @@ def stage_all_files(
     force: bool = False,
     pdf_timeout: int = 30,
     progress_callback: Callable[[str, int, int, str], None] | None = None,
+    stop_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     """Stage all Excel and PDF files from docs_dir into staging_dir.
 
@@ -400,6 +402,7 @@ def stage_all_files(
         force: If True, restage all files regardless of change detection.
         pdf_timeout: Seconds per PDF page table extraction timeout.
         progress_callback: Optional callable(phase, current, total, detail).
+        stop_event: Optional threading.Event for graceful shutdown.
 
     Returns:
         Summary dict with total_files, staged_count, skipped_count,
@@ -442,6 +445,11 @@ def stage_all_files(
                     for a in xl_args
                 }
                 for i, future in enumerate(as_completed(futures)):
+                    if stop_event and stop_event.is_set():
+                        for f in futures:
+                            f.cancel()
+                        logger.info("Staging stopped gracefully (Excel phase)")
+                        break
                     result = future.result()
                     _tally_result(result, all_fy_columns, errors)
                     if result.get("skipped"):
@@ -458,6 +466,9 @@ def stage_all_files(
                         )
         else:
             for i, a in enumerate(xl_args):
+                if stop_event and stop_event.is_set():
+                    logger.info("Staging stopped gracefully (Excel phase)")
+                    break
                 result = _stage_excel_worker(a)
                 _tally_result(result, all_fy_columns, errors)
                 if result.get("skipped"):
@@ -474,7 +485,7 @@ def stage_all_files(
                     )
 
     # ── Stage PDF files ──────────────────────────────────────────────────
-    if pdf_files:
+    if pdf_files and not (stop_event and stop_event.is_set()):
         pdf_args = [
             (str(f), str(docs_dir), str(staging_dir), pdf_timeout, force)
             for f in pdf_files
@@ -486,6 +497,11 @@ def stage_all_files(
                     for a in pdf_args
                 }
                 for i, future in enumerate(as_completed(futures)):
+                    if stop_event and stop_event.is_set():
+                        for f in futures:
+                            f.cancel()
+                        logger.info("Staging stopped gracefully (PDF phase)")
+                        break
                     result = future.result()
                     if result.get("skipped"):
                         skipped_count += 1
@@ -505,6 +521,9 @@ def stage_all_files(
                         )
         else:
             for i, a in enumerate(pdf_args):
+                if stop_event and stop_event.is_set():
+                    logger.info("Staging stopped gracefully (PDF phase)")
+                    break
                 result = _stage_pdf_worker(a)
                 if result.get("skipped"):
                     skipped_count += 1
@@ -577,6 +596,7 @@ def load_staging_to_db(
     db_path: Path,
     rebuild: bool = False,
     progress_callback: Callable[[str, int, int, str], None] | None = None,
+    stop_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     """Load all staged Parquet files into a SQLite database.
 
@@ -587,6 +607,7 @@ def load_staging_to_db(
         db_path: Path for the SQLite database file.
         rebuild: If True, delete existing database first.
         progress_callback: Optional callable(phase, current, total, detail).
+        stop_event: Optional threading.Event for graceful shutdown.
 
     Returns:
         Summary dict with total_rows, total_pages, elapsed_sec, fy_columns.
@@ -630,10 +651,11 @@ def load_staging_to_db(
 
     # ── Load Excel Parquets ──────────────────────────────────────────────
     total_rows = _load_excel_parquets(conn, staging_dir, all_fy_columns,
-                                       progress_callback)
+                                       progress_callback, stop_event)
 
     # ── Load PDF Parquets ────────────────────────────────────────────────
-    total_pages = _load_pdf_parquets(conn, staging_dir, progress_callback)
+    total_pages = _load_pdf_parquets(conn, staging_dir, progress_callback,
+                                      stop_event)
 
     # ── Rebuild FTS indexes ──────────────────────────────────────────────
     if progress_callback:
@@ -821,6 +843,7 @@ def _load_excel_parquets(
     staging_dir: Path,
     all_fy_columns: list[str],
     progress_callback: Callable[[str, int, int, str], None] | None = None,
+    stop_event: threading.Event | None = None,
 ) -> int:
     """Load all Excel Parquet files into the budget_lines table.
 
@@ -845,6 +868,9 @@ def _load_excel_parquets(
     insert_sql = f"INSERT INTO budget_lines ({col_str}) VALUES ({placeholders})"
 
     for fi, pf in enumerate(parquet_files):
+        if stop_event and stop_event.is_set():
+            logger.info("Load stopped gracefully (Excel parquets)")
+            break
         if progress_callback:
             progress_callback("load_excel", fi + 1, len(parquet_files),
                               f"Loading: {pf.stem}")
@@ -911,6 +937,7 @@ def _load_pdf_parquets(
     conn: sqlite3.Connection,
     staging_dir: Path,
     progress_callback: Callable[[str, int, int, str], None] | None = None,
+    stop_event: threading.Event | None = None,
 ) -> int:
     """Load all PDF Parquet files into the pdf_pages table.
 
@@ -940,6 +967,9 @@ def _load_pdf_parquets(
     )
 
     for fi, pf in enumerate(parquet_files):
+        if stop_event and stop_event.is_set():
+            logger.info("Load stopped gracefully (PDF parquets)")
+            break
         if progress_callback:
             progress_callback("load_pdf", fi + 1, len(parquet_files),
                               f"Loading: {pf.stem}")

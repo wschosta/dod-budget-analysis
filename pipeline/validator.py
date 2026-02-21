@@ -29,6 +29,7 @@ import json
 import logging
 import sqlite3
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -398,6 +399,7 @@ def validate_all(
     db_path: Path = DEFAULT_DB_PATH,
     strict: bool = False,
     pedantic: bool = False,
+    stop_event: threading.Event | None = None,
 ) -> dict:
     """Run all validation checks and return a summary dict.
 
@@ -405,6 +407,7 @@ def validate_all(
         db_path:   Path to the SQLite database.
         strict:    Exit non-zero on any *failures* (status="fail").
         pedantic:  Exit non-zero on any *warnings or failures*.
+        stop_event: Optional threading.Event for graceful shutdown.
     """
     if not db_path.exists():
         raise FileNotFoundError(
@@ -415,6 +418,9 @@ def validate_all(
     conn = get_connection(db_path)
     results = []
     for check_fn in ALL_CHECKS:
+        if stop_event and stop_event.is_set():
+            logger.info("  Validation stopped gracefully")
+            break
         result = check_fn(conn)
         logger.info("  Checking %s... %s", check_fn.__name__, result["status"].upper())
         results.append(result)

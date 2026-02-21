@@ -42,6 +42,7 @@ import os
 import re
 import sqlite3
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -1057,6 +1058,7 @@ def enrich(
     phases: set[int],
     with_llm: bool = False,
     rebuild: bool = False,
+    stop_event: threading.Event | None = None,
 ) -> None:
     if not db_path.exists():
         logger.error("Database not found: %s", db_path)
@@ -1083,12 +1085,32 @@ def enrich(
 
     if 1 in phases:
         run_phase1(conn)
+    if stop_event and stop_event.is_set():
+        logger.info("Enrichment stopped gracefully after Phase 1")
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.close()
+        return
     if 2 in phases:
         run_phase2(conn)
+    if stop_event and stop_event.is_set():
+        logger.info("Enrichment stopped gracefully after Phase 2")
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.close()
+        return
     if 3 in phases:
         run_phase3(conn, with_llm=with_llm)
+    if stop_event and stop_event.is_set():
+        logger.info("Enrichment stopped gracefully after Phase 3")
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.close()
+        return
     if 4 in phases:
         run_phase4(conn)
+    if stop_event and stop_event.is_set():
+        logger.info("Enrichment stopped gracefully after Phase 4")
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.close()
+        return
     if 5 in phases:
         run_phase5(conn)
 
