@@ -28,10 +28,10 @@
   - Performance benchmarks
 
 ### 4. CI/CD Integration
-- **`.github/workflows/optimization-tests.yml`** - GitHub Actions workflow
+- **`.github/workflows/ci.yml`** - Consolidated CI workflow
   - Runs on every push and PR
   - Tests Python 3.11 and 3.12
-  - Includes benchmarks
+  - Includes optimization runner and benchmarks
 
 - **`.pre-commit-hook.py`** - Pre-commit validation
   - Runs tests before commits
@@ -136,7 +136,7 @@ String normalization: <0.5 µs per operation
 
 ### CI/CD Pipeline ✓
 ```bash
-.github/workflows/optimization-tests.yml
+.github/workflows/ci.yml  (consolidated CI workflow)
 - Python 3.11 and 3.12
 - Comprehensive test suite
 - Performance benchmarks
@@ -195,7 +195,7 @@ Check PR status for test results.
 4. `utils/strings.py` - String utilities
 5. `run_optimization_tests.py` - Test runner
 6. `tests/test_optimizations.py` - pytest tests
-7. `.github/workflows/optimization-tests.yml` - CI/CD
+7. `.github/workflows/ci.yml` - CI/CD (consolidated)
 8. `.pre-commit-hook.py` - Pre-commit validation
 9. Documentation files (3x .md)
 

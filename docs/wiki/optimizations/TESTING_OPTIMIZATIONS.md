@@ -72,7 +72,7 @@ The optimization test suite verifies:
 
 ### GitHub Actions
 
-The workflow file `.github/workflows/optimization-tests.yml` runs on:
+The consolidated CI workflow `.github/workflows/ci.yml` runs on:
 - Every push to `main` or `develop` branches
 - Every pull request to `main` or `develop` branches
 - Python 3.11 and 3.12

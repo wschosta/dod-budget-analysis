@@ -46,7 +46,7 @@
 **Coverage:** 28 tests, all passing
 
 ### 4. CI/CD Integration
-- `.github/workflows/optimization-tests.yml` - GitHub Actions
+- `.github/workflows/ci.yml` - GitHub Actions (consolidated CI workflow)
 - `.pre-commit-hook.py` - Pre-commit validation
 
 ---
@@ -133,7 +133,7 @@ docs/wiki/optimizations/
 - `tests/test_optimizations.py` - pytest test suite
 
 ### CI/CD
-- `.github/workflows/optimization-tests.yml` - GitHub Actions
+- `.github/workflows/ci.yml` - GitHub Actions (consolidated CI workflow)
 - `.pre-commit-hook.py` - Pre-commit validation
 
 ### Documentation (now in this folder)
