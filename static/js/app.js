@@ -368,7 +368,7 @@ function closeFeedbackModal() {
         if (resp.ok) {
           closeFeedbackModal();
           form.reset();
-          if (typeof showToast === "function") showToast("Feedback submitted. Thank you!", "success");
+          if (typeof showToast === "function") showToast("Feedback submitted — thank you!", "success");
         } else {
           if (typeof showToast === "function") showToast("Failed to submit feedback. Please try again.", "error");
         }
@@ -376,6 +376,7 @@ function closeFeedbackModal() {
         // Endpoint may not exist yet — close anyway since feedback can't be saved
         closeFeedbackModal();
         form.reset();
+        showToast("Feedback saved locally", "info");
       }).finally(function() {
         if (submitBtn) submitBtn.disabled = false;
       });
@@ -414,7 +415,7 @@ function copyShareURL() {
     document.execCommand("copy");
     document.body.removeChild(ta);
   }
-  // Show "Copied!" tooltip and toast
+  // Show "Copied!" tooltip + toast
   var btn = document.getElementById("share-btn");
   if (btn) {
     btn.classList.add("copied");
@@ -840,22 +841,20 @@ document.addEventListener("DOMContentLoaded", function () {
   // FALCON-1: Load landing page summary visuals
   loadLandingVisuals();
 
-  // OPT-JS-001: Debounce filter form changes — add delay:300ms to multi-selects
-  // HTMX hx-trigger delay is set on the q input already; for selects we use
-  // a manual debounce on the form change event
+  // OPT-JS-001: Debounce filter form changes — multi-selects get a 300ms
+  // debounce before firing HTMX. The form's hx-trigger listens for a custom
+  // "filter-debounced" event (not raw "change") so rapid clicks don't cause
+  // duplicate requests. Number inputs also debounce on change.
   let debounceTimer = null;
   const form = document.getElementById("filter-form");
   if (form) {
     form.addEventListener("change", function (e) {
       updateDownloadLinks();
-      // Selects (multi-select filters) get debounced; text inputs fire via HTMX
       const tag = e.target.tagName;
-      if (tag === "SELECT") {
+      if (tag === "SELECT" || e.target.type === "number") {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(function () {
-          // HTMX will handle the actual form submission via hx-trigger="change"
-          // This debounce prevents rapid multi-select clicks firing many requests.
-          // We manually trigger htmx on the form with the delay already elapsed.
+          htmx.trigger(form, "filter-debounced");
         }, 300);
       }
     });
@@ -866,7 +865,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const qInput = document.getElementById("q");
   if (qInput) {
     const hint = document.createElement("span");
-    hint.style.cssText = "font-size:.7rem;color:#999;display:block;margin-top:.15rem";
+    hint.style.cssText = "font-size:.7rem;color:var(--text-secondary);display:block;margin-top:.15rem";
     hint.textContent = "Press / or Ctrl+K to focus";
     qInput.parentNode.insertBefore(hint, qInput.nextSibling);
   }
@@ -876,6 +875,22 @@ document.addEventListener("DOMContentLoaded", function () {
   if (dlBtn) {
     dlBtn.removeAttribute("onclick");
     dlBtn.addEventListener("click", openDownloadModal);
+  }
+
+  // Toast on download link clicks
+  document.querySelectorAll("#dl-csv, #dl-json, #dl-xlsx").forEach(function (el) {
+    el.addEventListener("click", function () {
+      var fmt = el.id.replace("dl-", "").toUpperCase();
+      showToast("Downloading " + fmt + "…", "info");
+    });
+  });
+
+  // ── Back to top button ───────────────────────────────────────────────
+  var backToTop = document.getElementById("back-to-top");
+  if (backToTop) {
+    window.addEventListener("scroll", function () {
+      backToTop.classList.toggle("visible", window.scrollY > 400);
+    }, { passive: true });
   }
 
   // ── Search autocomplete ─────────────────────────────────────────────────
@@ -951,6 +966,39 @@ function initAutocomplete() {
 }
 
 // ── Saved searches (localStorage) ───────────────────────────────────────────
+
+function showSaveSearchInput() {
+  var panel = document.getElementById("save-search-inline");
+  var nameInput = document.getElementById("save-search-name");
+  if (panel) {
+    panel.style.display = "";
+    if (nameInput) { nameInput.value = ""; nameInput.focus(); }
+  }
+}
+
+function hideSaveSearchInput() {
+  var panel = document.getElementById("save-search-inline");
+  if (panel) panel.style.display = "none";
+}
+
+function confirmSaveSearch() {
+  var nameInput = document.getElementById("save-search-name");
+  var name = nameInput ? nameInput.value.trim() : "";
+  if (name) {
+    saveCurrentSearch(name);
+    hideSaveSearchInput();
+  } else {
+    nameInput && nameInput.focus();
+  }
+}
+
+// Allow Enter key to confirm save
+document.addEventListener("keydown", function (e) {
+  if (e.key === "Enter" && e.target.id === "save-search-name") {
+    e.preventDefault();
+    confirmSaveSearch();
+  }
+});
 
 var SAVED_SEARCHES_KEY = "dod_saved_searches";
 

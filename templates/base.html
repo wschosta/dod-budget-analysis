@@ -89,6 +89,13 @@
 <!-- DONE [Group: LION] LION-002: Feedback form modal -->
 {% include "partials/feedback.html" %}
 
+<!-- Toast notification container -->
+<div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+<!-- Back to top button -->
+<button id="back-to-top" class="back-to-top" aria-label="Back to top"
+        onclick="window.scrollTo({top:0,behavior:'smooth'})">&#8593;</button>
+
 <script src="/static/js/checkbox-select.js"></script>
 <!-- FALCON-10: Toast notification component -->
 {% include "partials/toast.html" %}

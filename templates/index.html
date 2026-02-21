@@ -59,7 +59,7 @@
           aria-label="Budget data filters"
           hx-get="/partials/results"
           hx-target="#results-container"
-          hx-trigger="change, search"
+          hx-trigger="submit, search, filter-debounced"
           hx-push-url="true"
           hx-indicator="#loading-indicator">
 
@@ -161,9 +161,19 @@
         {# LION-007: Share button — copies filtered URL to clipboard #}
         <button type="button" id="share-btn" class="btn btn-secondary btn-sm share-btn"
                 onclick="copyShareURL()" aria-label="Copy shareable URL">&#128279; Share</button>
-        <button type="button" class="btn btn-secondary btn-sm"
-                onclick="var name=prompt('Name this search:');if(name)saveCurrentSearch(name)"
-                aria-label="Save current search">&#9733; Save</button>
+        <button type="button" id="save-search-btn" class="btn btn-secondary btn-sm"
+                onclick="showSaveSearchInput()" aria-label="Save current search">&#9733; Save</button>
+      </div>
+      <div id="save-search-inline" style="display:none;margin-top:.5rem">
+        <label for="save-search-name" style="font-size:.78rem;font-weight:600;color:var(--text-secondary)">Search name</label>
+        <div style="display:flex;gap:.3rem;margin-top:.15rem">
+          <input type="text" id="save-search-name" placeholder="e.g. Army cyber programs"
+                 style="flex:1;padding:.3rem .5rem;font-size:.82rem;border:1px solid var(--border-color);border-radius:var(--radius);background:var(--bg-surface);color:var(--text-primary)">
+          <button type="button" class="btn btn-primary btn-sm" style="padding:.3rem .6rem"
+                  onclick="confirmSaveSearch()">Save</button>
+          <button type="button" class="btn btn-secondary btn-sm" style="padding:.3rem .6rem"
+                  onclick="hideSaveSearchInput()">Cancel</button>
+        </div>
       </div>
     </form>
 

@@ -191,7 +191,18 @@ function showDashError(id, canvasId, msg) {
     }
 
   } catch (err) {
-    if (loadingEl) loadingEl.innerHTML = '<p style="color:var(--clr-red)">Failed to load dashboard: ' + err.message + "</p>";
+    if (loadingEl) {
+      loadingEl.innerHTML =
+        '<div class="empty-state">' +
+        '<div class="empty-state-icon" aria-hidden="true">&#128202;</div>' +
+        '<p><strong>Dashboard data unavailable</strong></p>' +
+        '<p style="font-size:.85rem;max-width:480px;margin:.5rem auto">Could not load dashboard summary (' + escapeHtml(err.message) + '). ' +
+        'Make sure the database has been built by running <code>python build_budget_db.py</code> ' +
+        'and the API server is running.</p>' +
+        '<div style="margin-top:1rem">' +
+        '<a href="/" class="btn btn-primary btn-sm">Go to Search</a>' +
+        '</div></div>';
+    }
   }
 
   function escapeHtml(s) {

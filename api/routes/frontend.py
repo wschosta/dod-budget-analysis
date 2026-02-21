@@ -564,7 +564,8 @@ def programs(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HT
     items: list[dict] = []
     total = 0
 
-    if _table_exists(conn, "pe_index"):
+    has_pe_data = _table_exists(conn, "pe_index")
+    if has_pe_data:
         try:
             from api.routes.pe import list_pes, list_tags
             tag_result = list_tags(tag_source=None, conn=conn)
@@ -587,6 +588,7 @@ def programs(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HT
         "tags": tags,
         "items": items,
         "total": total,
+        "has_pe_data": has_pe_data,
     })
 
 

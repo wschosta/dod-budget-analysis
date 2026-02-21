@@ -74,12 +74,27 @@
   </aside>
 
   <section aria-label="Program list">
+    {% if not has_pe_data %}
+    <div class="empty-state" style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:2rem">
+      <div class="empty-state-icon" aria-hidden="true">&#128203;</div>
+      <p><strong>Program enrichment data not available.</strong></p>
+      <p style="font-size:.85rem;max-width:480px;margin:0 auto">
+        The Program Explorer requires enriched program element (PE) data.
+        Run <code>python enrich_budget_db.py</code> to generate PE metadata,
+        tags, and narrative descriptions from the budget database.
+      </p>
+      <div style="margin-top:1rem">
+        <a href="/" class="btn btn-primary btn-sm">Search budget lines instead</a>
+      </div>
+    </div>
+    {% else %}
     <div id="pe-loading" class="htmx-indicator" style="margin-bottom:.5rem">
       <span class="spinner"></span> Loading programs&hellip;
     </div>
     <div id="pe-results" aria-live="polite">
       {% include "partials/program-list.html" %}
     </div>
+    {% endif %}
   </section>
 
 </div>
