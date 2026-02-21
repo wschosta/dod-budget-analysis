@@ -23,8 +23,8 @@
 {% for svc in filters.service %}{% set _ = active.append(("service", "Service", svc)) %}{% endfor %}
 {% for et in filters.exhibit_type %}{% set _ = active.append(("exhibit_type", "Exhibit", et)) %}{% endfor %}
 {% for ac in filters.appropriation_code %}{% set _ = active.append(("appropriation_code", "Approp.", ac)) %}{% endfor %}
-{% if filters.min_amount %}{% set _ = active.append(("min_amount", "Min $K", filters.min_amount)) %}{% endif %}
-{% if filters.max_amount %}{% set _ = active.append(("max_amount", "Max $K", filters.max_amount)) %}{% endif %}
+{% if filters.min_amount %}{% set _ = active.append(("min_amount", "FY26 Min $K", filters.min_amount)) %}{% endif %}
+{% if filters.max_amount %}{% set _ = active.append(("max_amount", "FY26 Max $K", filters.max_amount)) %}{% endif %}
 {% if active %}
 <div class="active-filters" aria-label="Active filters">
   {% for param, label, value in active %}
