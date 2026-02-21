@@ -189,6 +189,88 @@ def migrate_all(
     return totals
 
 
+def reclassify_all(
+    docs_dir: Path,
+    dry_run: bool = False,
+) -> dict[str, int]:
+    """Reclassify files within the already-migrated new layout.
+
+    Scans all ``other/`` directories under the new layout and re-evaluates
+    each file with the current classification rules.  Files that now classify
+    as "summary" or "detail" are moved to the appropriate sibling directory.
+
+    This is useful after improving classification rules — files that were
+    originally placed in ``other/`` because no pattern matched can be moved
+    to the correct category without re-downloading.
+
+    Layout:
+        FY{year}/{cycle}/{source}/other/file → FY{year}/{cycle}/{source}/{new_cat}/file
+
+    Args:
+        docs_dir: Root documents directory (e.g. DoD_Budget_Documents/).
+        dry_run: If True, print what would happen without moving files.
+
+    Returns:
+        Dict with keys: moved, skipped, errors.
+    """
+    totals = {"moved": 0, "skipped": 0, "errors": 0}
+
+    if not docs_dir.exists():
+        print(f"Error: {docs_dir} does not exist.", file=sys.stderr)
+        return totals
+
+    # Find all "other" directories in the new layout
+    for other_dir in sorted(docs_dir.rglob("other")):
+        if not other_dir.is_dir():
+            continue
+        # Verify this is part of the new layout (parent should be a source,
+        # grandparent should be a budget cycle)
+        source_dir = other_dir.parent
+        cycle_dir = source_dir.parent
+        if cycle_dir.name.upper() not in _KNOWN_BUDGET_CYCLES:
+            continue
+
+        for file_path in sorted(other_dir.rglob("*")):
+            if not file_path.is_file():
+                continue
+
+            new_cat = _classify_file(file_path.name)
+            if new_cat == "other":
+                # Still classified as other — no change needed
+                continue
+
+            # Build new destination: replace "other" with new category
+            rel_to_other = file_path.relative_to(other_dir)
+            new_dest = source_dir / new_cat / rel_to_other
+
+            if new_dest.exists():
+                if dry_run:
+                    print(f"  SKIP (exists): {file_path} -> {new_dest}")
+                totals["skipped"] += 1
+                continue
+
+            if dry_run:
+                print(f"  MOVE: {file_path.relative_to(docs_dir)} -> "
+                      f"{new_dest.relative_to(docs_dir)}")
+                totals["moved"] += 1
+            else:
+                try:
+                    new_dest.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(file_path), str(new_dest))
+                    totals["moved"] += 1
+                except Exception as exc:
+                    print(f"  ERROR moving {file_path}: {exc}", file=sys.stderr)
+                    totals["errors"] += 1
+
+    # Clean up empty directories
+    if not dry_run and totals["moved"] > 0:
+        for fy_dir in sorted(docs_dir.iterdir()):
+            if fy_dir.is_dir() and fy_dir.name.startswith("FY"):
+                _cleanup_empty_dirs(fy_dir)
+
+    return totals
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Migrate download folder layout to include budget cycle and exhibit category.",
@@ -209,19 +291,36 @@ def main():
         default=DEFAULT_CYCLE,
         help="Budget cycle to assign to migrated files (default: PB).",
     )
+    parser.add_argument(
+        "--reclassify",
+        action="store_true",
+        help="Re-evaluate files in other/ and move to correct category if "
+             "classification rules have been updated.",
+    )
     args = parser.parse_args()
 
     mode = "DRY RUN" if args.dry_run else "LIVE"
-    print(f"Download Layout Migration ({mode})")
-    print(f"  Docs dir: {args.docs_dir}")
-    print(f"  Budget cycle: {args.budget_cycle}")
-    print("=" * 60)
 
-    totals = migrate_all(
-        docs_dir=args.docs_dir,
-        dry_run=args.dry_run,
-        budget_cycle=args.budget_cycle,
-    )
+    if args.reclassify:
+        print(f"Reclassify Files ({mode})")
+        print(f"  Docs dir: {args.docs_dir}")
+        print("=" * 60)
+
+        totals = reclassify_all(
+            docs_dir=args.docs_dir,
+            dry_run=args.dry_run,
+        )
+    else:
+        print(f"Download Layout Migration ({mode})")
+        print(f"  Docs dir: {args.docs_dir}")
+        print(f"  Budget cycle: {args.budget_cycle}")
+        print("=" * 60)
+
+        totals = migrate_all(
+            docs_dir=args.docs_dir,
+            dry_run=args.dry_run,
+            budget_cycle=args.budget_cycle,
+        )
 
     print(f"\n{'=' * 60}")
     print(f"Total: {totals['moved']} moved, {totals['skipped']} skipped, "

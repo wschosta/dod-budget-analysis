@@ -29,7 +29,7 @@ class TestClassifyExhibitCategory:
     """Tests for the shared classify_exhibit_category()."""
 
     @pytest.mark.parametrize("input_val, expected", [
-        # Bare exhibit type keys
+        # ── Tier 1: Bare exhibit type keys ──
         ("p1", "summary"),
         ("r1", "summary"),
         ("o1", "summary"),
@@ -41,19 +41,113 @@ class TestClassifyExhibitCategory:
         ("r2", "detail"),
         ("r3", "detail"),
         ("r4", "detail"),
-        # Full filenames
+        # ── Tier 1: Full filenames with exhibit codes ──
         ("p1_display.xlsx", "summary"),
         ("r2_navy.xlsx", "detail"),
         ("p5_army.xlsx", "detail"),
         ("r1_display.pdf", "summary"),
         ("rf1_display.xlsx", "summary"),
-        # Case insensitive
+        # ── Tier 1: Case insensitive ──
         ("P1_Display.xlsx", "summary"),
         ("R2_Detail.pdf", "detail"),
-        # Unknown
+        # ── Tier 2: Procurement → detail ──
+        ("aircraft.pdf", "detail"),
+        ("acft_army.pdf", "detail"),
+        ("acft_fy_2022_pb_aircraft_procurement_army.pdf", "detail"),
+        ("missiles.pdf", "detail"),
+        ("msls_army.pdf", "detail"),
+        ("missle.pdf", "detail"),
+        ("ammo.pdf", "detail"),
+        ("ammunition.pdf", "detail"),
+        ("wtcv.pdf", "detail"),
+        ("weapons and tracked combat vehicles.pdf", "detail"),
+        ("opa1.pdf", "detail"),
+        ("opa2.pdf", "detail"),
+        ("opa34.pdf", "detail"),
+        ("opa_ba_1_fy_2022_pb_other_procurement.pdf", "detail"),
+        ("opn_ba1_book.pdf", "detail"),
+        ("apn_ba5_book.pdf", "detail"),
+        ("scn_book.pdf", "detail"),
+        ("panmc_book.pdf", "detail"),
+        ("pmc_book.pdf", "detail"),
+        ("fy26 air force aircraft procurement vol i.pdf", "detail"),
+        ("fy26 air force missile procurement.pdf", "detail"),
+        ("sup-pf-opa1.pdf", "detail"),
+        ("shipbuilding plan.pdf", "detail"),
+        # ── Tier 2: O&M → summary ──
+        ("oma-v1.pdf", "summary"),
+        ("oma-v2.pdf", "summary"),
+        ("oma_vol_1.pdf", "summary"),
+        ("omar.pdf", "summary"),
+        ("omar_vol_1_fy_2022_pb.pdf", "summary"),
+        ("omng.pdf", "summary"),
+        ("omng_vol_1.pdf", "summary"),
+        ("omnr_book.pdf", "summary"),
+        ("ommc_book.pdf", "summary"),
+        ("ommc_vol2_book.pdf", "summary"),
+        ("ommcr_book.pdf", "summary"),
+        ("omn_book.pdf", "summary"),
+        ("awcf.pdf", "summary"),
+        ("awcf_fy_2022_pb.pdf", "summary"),
+        ("nwcf_book.pdf", "summary"),
+        ("afwcf 22pb congressional.pdf", "summary"),
+        ("army working capital fund.pdf", "summary"),
+        ("fy26 air force operations and maintenance vol i.pdf", "summary"),
+        ("fy26 air force working capital fund.pdf", "summary"),
+        ("CAAF_OP-5.pdf", "summary"),
+        ("OIG_OP-5.pdf", "summary"),
+        ("op-32a_summary_exhibit.pdf", "summary"),
+        ("oco-oma.pdf", "summary"),
+        # ── Tier 2: Military Personnel → summary ──
+        ("mpa.pdf", "summary"),
+        ("mpa_fy_2022.pdf", "summary"),
+        ("ngpa.pdf", "summary"),
+        ("rpa.pdf", "summary"),
+        ("mpn_book.pdf", "summary"),
+        ("mpmc_book.pdf", "summary"),
+        ("rpmc_book.pdf", "summary"),
+        ("rpn_book.pdf", "summary"),
+        ("mpaf_fy22.pdf", "summary"),
+        ("fy26 air force milpers.pdf", "summary"),
+        ("military personnel army volume 1.pdf", "summary"),
+        ("reserve personnel army volume 1.pdf", "summary"),
+        ("national guard personnel army volume 1.pdf", "summary"),
+        # ── Tier 2: MILCON → detail ──
+        ("mca.pdf", "detail"),
+        ("mca-afh-hoa.pdf", "detail"),
+        ("mcar.pdf", "detail"),
+        ("mcar_fy_2022_pb.pdf", "detail"),
+        ("mcng.pdf", "detail"),
+        ("mcon_book.pdf", "detail"),
+        ("fy26 air force milcon.pdf", "detail"),
+        ("military construction defense-wide.pdf", "detail"),
+        ("brac_book.pdf", "detail"),
+        ("brac2005.pdf", "detail"),
+        ("brac95.pdf", "detail"),
+        ("brac_fy_2022_pb.pdf", "detail"),
+        ("base realignment and closure account.pdf", "detail"),
+        ("family housing.pdf", "detail"),
+        ("afh.pdf", "detail"),
+        ("fh.pdf", "detail"),
+        ("hoa.pdf", "detail"),
+        ("nsip_cover_page.pdf", "detail"),
+        # ── Tier 2: RDT&E → detail ──
+        ("rdte_ba_1_fy_2022_pb.pdf", "detail"),
+        ("rdten_ba1-3_book.pdf", "detail"),
+        ("fy26 space force research and development test and evaluation.pdf", "detail"),
+        ("vol1.pdf", "detail"),
+        ("vol_1-budget_activity_1.pdf", "detail"),
+        ("vol5a.pdf", "detail"),
+        ("volume_2.pdf", "detail"),
+        # ── Should remain "other" ──
         ("readme.txt", "other"),
         ("budget_summary.xlsx", "other"),
         ("unknown", "other"),
+        ("overview.pdf", "other"),
+        ("pbhl.pdf", "other"),
+        ("1-cover.pdf", "other"),
+        ("disa.pdf", "other"),
+        ("green_book.pdf", "other"),
     ])
     def test_classification(self, input_val, expected):
         assert classify_exhibit_category(input_val) == expected
@@ -61,6 +155,38 @@ class TestClassifyExhibitCategory:
     def test_p1r_classified_as_summary_not_detail(self):
         """p1r should be summary, not confused with r1."""
         assert classify_exhibit_category("p1r_reserves.xlsx") == "summary"
+
+    def test_exhibit_type_takes_priority_over_appropriation(self):
+        """Tier 1 exhibit codes should take priority over Tier 2 patterns.
+
+        A file like 'r2_procurement_detail.pdf' has both 'r2' (exhibit code)
+        and 'procurement' (appropriation pattern). The exhibit code should win.
+        """
+        # Both should be detail, but for different reasons
+        assert classify_exhibit_category("r2_procurement_detail.pdf") == "detail"
+        # p1 is summary even though 'procurement' pattern would suggest detail
+        assert classify_exhibit_category("p1_procurement.xlsx") == "summary"
+
+    def test_abbreviations_followed_by_underscore(self):
+        """Abbreviations like apn_, scn_, mcon_ should be recognized.
+
+        Regression test: \b word boundaries fail between abbreviations and
+        underscores because _ is a word character in regex.
+        """
+        assert classify_exhibit_category("apn_ba5_book.pdf") == "detail"
+        assert classify_exhibit_category("scn_book.pdf") == "detail"
+        assert classify_exhibit_category("mcon_book.pdf") == "detail"
+        assert classify_exhibit_category("mpmc_book.pdf") == "summary"
+        assert classify_exhibit_category("nwcf_book.pdf") == "summary"
+
+    def test_abbreviations_followed_by_digits(self):
+        """Abbreviations like brac2005 should be recognized.
+
+        Regression test: \b fails between abbreviation and digit.
+        """
+        assert classify_exhibit_category("brac2005.pdf") == "detail"
+        assert classify_exhibit_category("brac95.pdf") == "detail"
+        assert classify_exhibit_category("opa34.pdf") == "detail"
 
     def test_constants_disjoint(self):
         """Summary and detail sets must not overlap."""
@@ -203,6 +329,78 @@ class TestMigrateFyDirectory:
         stats = migrate_fy_directory(fy_dir, dry_run=False)
         # Nothing should move — PB is recognized as a cycle dir and skipped
         assert stats["moved"] == 0
+
+    def test_appropriation_based_classification(self, tmp_path):
+        """Files with descriptive names should be classified by appropriation type."""
+        fy_dir = tmp_path / "FY2026"
+        army = fy_dir / "US_Army"
+        army.mkdir(parents=True)
+        # Procurement files → detail
+        (army / "aircraft.pdf").write_text("procurement")
+        (army / "missiles.pdf").write_text("procurement")
+        (army / "ammo.pdf").write_text("procurement")
+        (army / "wtcv.pdf").write_text("procurement")
+        # O&M files → summary
+        (army / "oma-v1.pdf").write_text("om")
+        (army / "omar.pdf").write_text("om")
+        (army / "awcf.pdf").write_text("om")
+        # Milpers files → summary
+        (army / "mpa.pdf").write_text("milpers")
+        # MILCON files → detail
+        (army / "mcar.pdf").write_text("milcon")
+        # RDT&E files → detail
+        (army / "vol1.pdf").write_text("rdte")
+        # Other
+        (army / "overview.pdf").write_text("other")
+
+        stats = migrate_fy_directory(fy_dir, dry_run=False)
+        assert stats["moved"] == 11
+        assert stats["errors"] == 0
+
+        # Verify procurement → detail
+        assert (fy_dir / "PB" / "US_Army" / "detail" / "aircraft.pdf").exists()
+        assert (fy_dir / "PB" / "US_Army" / "detail" / "missiles.pdf").exists()
+        assert (fy_dir / "PB" / "US_Army" / "detail" / "ammo.pdf").exists()
+        assert (fy_dir / "PB" / "US_Army" / "detail" / "wtcv.pdf").exists()
+        # O&M → summary
+        assert (fy_dir / "PB" / "US_Army" / "summary" / "oma-v1.pdf").exists()
+        assert (fy_dir / "PB" / "US_Army" / "summary" / "omar.pdf").exists()
+        assert (fy_dir / "PB" / "US_Army" / "summary" / "awcf.pdf").exists()
+        # Milpers → summary
+        assert (fy_dir / "PB" / "US_Army" / "summary" / "mpa.pdf").exists()
+        # MILCON → detail
+        assert (fy_dir / "PB" / "US_Army" / "detail" / "mcar.pdf").exists()
+        # RDT&E → detail
+        assert (fy_dir / "PB" / "US_Army" / "detail" / "vol1.pdf").exists()
+        # Other
+        assert (fy_dir / "PB" / "US_Army" / "other" / "overview.pdf").exists()
+
+    def test_navy_book_classification(self, tmp_path):
+        """Navy _book.pdf files should be properly classified."""
+        fy_dir = tmp_path / "FY2026"
+        navy = fy_dir / "US_Navy"
+        navy.mkdir(parents=True)
+        (navy / "apn_ba5_book.pdf").write_text("procurement")
+        (navy / "opn_ba1_book.pdf").write_text("procurement")
+        (navy / "scn_book.pdf").write_text("procurement")
+        (navy / "mpn_book.pdf").write_text("milpers")
+        (navy / "ommc_book.pdf").write_text("om")
+        (navy / "nwcf_book.pdf").write_text("om")
+        (navy / "mcon_book.pdf").write_text("milcon")
+        (navy / "rdten_ba4_book.pdf").write_text("rdte")
+
+        stats = migrate_fy_directory(fy_dir, dry_run=False)
+        assert stats["moved"] == 8
+        assert stats["errors"] == 0
+
+        assert (fy_dir / "PB" / "US_Navy" / "detail" / "apn_ba5_book.pdf").exists()
+        assert (fy_dir / "PB" / "US_Navy" / "detail" / "opn_ba1_book.pdf").exists()
+        assert (fy_dir / "PB" / "US_Navy" / "detail" / "scn_book.pdf").exists()
+        assert (fy_dir / "PB" / "US_Navy" / "summary" / "mpn_book.pdf").exists()
+        assert (fy_dir / "PB" / "US_Navy" / "summary" / "ommc_book.pdf").exists()
+        assert (fy_dir / "PB" / "US_Navy" / "summary" / "nwcf_book.pdf").exists()
+        assert (fy_dir / "PB" / "US_Navy" / "detail" / "mcon_book.pdf").exists()
+        assert (fy_dir / "PB" / "US_Navy" / "detail" / "rdten_ba4_book.pdf").exists()
 
 
 class TestMigrateAll:
