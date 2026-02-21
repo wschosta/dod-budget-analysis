@@ -241,17 +241,19 @@ def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
         END;
 
         CREATE TABLE IF NOT EXISTS pe_tags (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            pe_number    TEXT NOT NULL,
-            tag          TEXT NOT NULL,
-            tag_source   TEXT NOT NULL,
-            confidence   REAL DEFAULT 1.0,
-            source_files TEXT,
-            UNIQUE(pe_number, tag, tag_source),
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            pe_number      TEXT NOT NULL,
+            project_number TEXT,
+            tag            TEXT NOT NULL,
+            tag_source     TEXT NOT NULL,
+            confidence     REAL DEFAULT 1.0,
+            source_files   TEXT,
+            UNIQUE(pe_number, project_number, tag, tag_source),
             FOREIGN KEY (pe_number) REFERENCES pe_index(pe_number)
         );
         CREATE INDEX IF NOT EXISTS idx_pe_tags_pe ON pe_tags(pe_number);
         CREATE INDEX IF NOT EXISTS idx_pe_tags_tag ON pe_tags(tag);
+        CREATE INDEX IF NOT EXISTS idx_pe_tags_proj ON pe_tags(project_number);
         CREATE TABLE IF NOT EXISTS pe_lineage (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             source_pe        TEXT NOT NULL,
@@ -673,37 +675,53 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
         if row[2] and row[2] not in desc_sources[row[0]]:
             desc_sources[row[0]].append(row[2])
 
-    # insert_buf: (pe_number, tag, tag_source, confidence, source_files_json)
+    # insert_buf: (pe_number, project_number, tag, tag_source, confidence, source_files_json)
     insert_buf: list[tuple] = []
     total_tags = 0
+
+    # --- HAWK-2: Pre-load project-level text for project-level tagging ---
+    # pe_number → [(project_number, text), ...]
+    project_texts: dict[str, list[tuple[str, str]]] = {}
+    try:
+        for row in conn.execute(f"""
+            SELECT pe_number, project_number, description_text
+            FROM project_descriptions
+            WHERE pe_number IN ({placeholders})
+              AND project_number IS NOT NULL
+              AND description_text IS NOT NULL
+        """, to_tag).fetchall():
+            project_texts.setdefault(row[0], []).append((row[1], row[2]))
+    except Exception:
+        pass  # project_descriptions table may not exist yet
 
     for pe in to_tag:
         # LION-106: Source files for this PE's structured tags
         pe_src_json = json.dumps(structured_sources.get(pe, []))
 
         # 3a: structured field tags — LION-105: confidence=1.0 (direct match)
+        # These are PE-level (project_number=NULL)
         fields = structured_fields.get(pe)
         if fields:
             ba_title, approp_title, org_name = fields
             if ba_title:
                 for pattern, tag in _BUDGET_ACTIVITY_TAGS:
                     if pattern.search(ba_title):
-                        insert_buf.append((pe, tag, "structured", 1.0, pe_src_json))
+                        insert_buf.append((pe, None, tag, "structured", 1.0, pe_src_json))
                         break
             if approp_title:
                 low = approp_title.lower()
                 for key, tag in _APPROP_TAGS.items():
                     if key in low:
-                        insert_buf.append((pe, tag, "structured", 1.0, pe_src_json))
+                        insert_buf.append((pe, None, tag, "structured", 1.0, pe_src_json))
                         break
             if org_name:
                 low = org_name.lower()
                 for key, tag in _ORG_TAGS.items():
                     if key in low:
-                        insert_buf.append((pe, tag, "structured", 1.0, pe_src_json))
+                        insert_buf.append((pe, None, tag, "structured", 1.0, pe_src_json))
                         break
 
-        # 3b: keyword tags from budget_lines text fields
+        # 3b: keyword tags from budget_lines text fields (PE-level)
         # LION-104: Use line_item_title etc. for PEs with or without PDF text
         # LION-105: confidence=0.9 (field-level match, high signal)
         bl_text = bl_texts.get(pe, "")
@@ -711,10 +729,10 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
             for tag, patterns in _COMPILED_TAXONOMY:
                 for pat in patterns:
                     if pat.search(bl_text):
-                        insert_buf.append((pe, tag, "keyword", 0.9, pe_src_json))
+                        insert_buf.append((pe, None, tag, "keyword", 0.9, pe_src_json))
                         break
 
-        # 3c: keyword tags from PDF narrative text
+        # 3c: keyword tags from PDF narrative text (PE-level)
         # LION-105: confidence=0.8 (narrative context, more noise)
         combined_desc = " ".join(desc_texts.get(pe, []))
         desc_src_json = json.dumps(desc_sources.get(pe, []))
@@ -722,15 +740,25 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
             for tag, patterns in _COMPILED_TAXONOMY:
                 for pat in patterns:
                     if pat.search(combined_desc):
-                        insert_buf.append((pe, tag, "keyword", 0.8, desc_src_json))
+                        insert_buf.append((pe, None, tag, "keyword", 0.8, desc_src_json))
+                        break
+
+        # HAWK-2: 3e: project-level keyword tags from project_descriptions
+        # When project-level text is available, apply tags at the project level
+        pe_projects = project_texts.get(pe, [])
+        for proj_num, proj_text in pe_projects:
+            for tag, patterns in _COMPILED_TAXONOMY:
+                for pat in patterns:
+                    if pat.search(proj_text):
+                        insert_buf.append((pe, proj_num, tag, "keyword", 0.85, desc_src_json))
                         break
 
     # Flush structured + keyword tags
     if insert_buf:
         conn.executemany("""
             INSERT OR IGNORE INTO pe_tags
-                (pe_number, tag, tag_source, confidence, source_files)
-            VALUES (?, ?, ?, ?, ?)
+                (pe_number, project_number, tag, tag_source, confidence, source_files)
+            VALUES (?, ?, ?, ?, ?, ?)
         """, insert_buf)
         conn.commit()
         total_tags += len(insert_buf)
@@ -756,13 +784,13 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
                     for tag in tags:
                         tag = tag.strip().lower().replace(" ", "-")
                         if tag:
-                            insert_buf.append((pe_num, tag, "llm", 0.7, src_json))
+                            insert_buf.append((pe_num, None, tag, "llm", 0.7, src_json))
 
             if insert_buf:
                 conn.executemany("""
                     INSERT OR IGNORE INTO pe_tags
-                        (pe_number, tag, tag_source, confidence, source_files)
-                    VALUES (?, ?, ?, ?, ?)
+                        (pe_number, project_number, tag, tag_source, confidence, source_files)
+                    VALUES (?, ?, ?, ?, ?, ?)
                 """, insert_buf)
                 conn.commit()
                 total_tags += len(insert_buf)
