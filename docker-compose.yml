@@ -20,6 +20,8 @@ services:
       # Hot-reload for API source in development
       - ./api:/app/api:ro
       - ./utils:/app/utils:ro
+      - ./downloader:/app/downloader:ro
+      - ./pipeline:/app/pipeline:ro
       # Hot-reload for frontend templates and static assets (DOCKER-003)
       - ./templates:/app/templates:ro
       - ./static:/app/static:ro
@@ -32,6 +34,8 @@ services:
         --reload
         --reload-dir /app/api
         --reload-dir /app/utils
+        --reload-dir /app/downloader
+        --reload-dir /app/pipeline
         --reload-dir /app/templates
         --reload-dir /app/static
     healthcheck:

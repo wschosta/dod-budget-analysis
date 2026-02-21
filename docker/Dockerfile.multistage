@@ -72,12 +72,17 @@ RUN pip install --no-cache-dir fastapi uvicorn[standard] jinja2 python-multipart
 # Copy app source
 COPY api/           api/
 COPY utils/         utils/
+COPY downloader/    downloader/
+COPY pipeline/      pipeline/
 COPY templates/     templates/
 COPY static/        static/
+# Backward-compatible shims
 COPY exhibit_catalog.py      .
 COPY validate_budget_data.py .
 COPY validate_budget_db.py   .
 COPY search_budget.py        .
+COPY build_budget_db.py      .
+COPY schema_design.py        .
 
 # Copy the pre-built database from the builder stage
 COPY --from=builder /build/dod_budget.sqlite /app/dod_budget.sqlite
