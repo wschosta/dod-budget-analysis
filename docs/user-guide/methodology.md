@@ -1,6 +1,31 @@
 # Methodology & Limitations
 
 How data is collected, parsed, and loaded into the DoD Budget Analysis database.
+This document is intended to help users understand the provenance and quality of
+the data, and to be transparent about the limitations of automated parsing.
+
+---
+
+## Data Sources
+
+All data in this database originates from publicly available U.S. government budget
+justification documents. The source sites are:
+
+| Source | Website | Content |
+|--------|---------|---------|
+| **DoD Comptroller** | comptroller.defense.gov | Defense-Wide and consolidated budget exhibits |
+| **Department of the Army** | asafm.army.mil | Army budget justification books |
+| **Department of the Navy** | secnav.navy.mil | Navy and Marine Corps budget documents |
+| **Department of the Air Force** | saffm.hq.af.mil | Air Force and Space Force budget documents |
+
+These sites publish budget documents in a mix of formats: Excel spreadsheets (`.xlsx`,
+`.xls`), PDF files, and occasionally ZIP archives containing multiple files.
+
+All downloaded documents are public domain U.S. government records. No login, FOIA
+request, or fee is required to access the originals.
+
+See [Data Sources](data-sources.md) for the full catalog of source URLs, access methods,
+and coverage matrix.
 
 ---
 
@@ -31,15 +56,18 @@ DoD_Budget_Documents/
   airforce/FY2026/
 ```
 
-### Access methods by source
+### Access Methods by Source
 
 | Source | Method | Reason |
 |--------|--------|--------|
 | Comptroller | Direct HTTP (`requests`) | Publicly accessible, no WAF |
 | Defense-Wide | Direct HTTP (`requests`) | Publicly accessible, no WAF |
-| Army (asafm.army.mil) | Playwright headless browser | WAF blocks plain HTTP |
-| Navy (secnav.navy.mil) | Playwright headless browser | WAF blocks plain HTTP |
-| Air Force (saffm.hq.af.mil) | Playwright headless browser | WAF blocks plain HTTP |
+| Army (asafm.army.mil) | Playwright browser | WAF blocks plain HTTP |
+| Navy (secnav.navy.mil) | Playwright browser | WAF blocks plain HTTP |
+| Air Force (saffm.hq.af.mil) | Playwright browser | WAF blocks plain HTTP |
+
+The downloader skips files that have already been downloaded (checking by filename and
+file size) to avoid redundant network requests on subsequent runs.
 
 ---
 
@@ -47,7 +75,13 @@ DoD_Budget_Documents/
 
 The database builder (`build_budget_db.py`) processes two file types differently:
 
-### Excel Files (`.xlsx`)
+### Excel Files (openpyxl)
+
+Excel budget exhibits are parsed using **openpyxl**, a Python library for reading
+`.xlsx` files. The parser reads each sheet, identifies header rows, maps column names
+to standardized field names, and extracts individual line items.
+
+The detailed steps are:
 
 1. **Open workbook** with `openpyxl` in read-only mode for memory efficiency
 2. **Detect exhibit type** from the filename using `_detect_exhibit_type()` -- maps filename
@@ -67,7 +101,22 @@ The database builder (`build_budget_db.py`) processes two file types differently
    1000 for performance
 9. **Update FTS5 index** -- triggers automatically sync `budget_lines_fts` after each insert
 
-### PDF Files (`.pdf`)
+Excel parsing is generally the most reliable method. Budget justification spreadsheets
+follow relatively consistent column layouts within a given exhibit type and fiscal year.
+Common issues include:
+
+- **Merged cells:** Exhibit headers sometimes span multiple columns or rows with merged
+  cells, which openpyxl handles by propagating the merged cell value.
+- **Format changes across years:** Column positions and names have shifted in some years,
+  requiring year-specific parsing logic for affected exhibit types.
+- **Hidden rows or sheets:** Some spreadsheets include hidden summary rows or sheets
+  that are not intended as line-item data. These are filtered during parsing.
+
+### PDF Files (pdfplumber)
+
+PDF budget documents are parsed using **pdfplumber**, a Python library that extracts
+text and tables from PDF files. PDF parsing is inherently less reliable than Excel
+parsing and is used when a given document is only available in PDF format.
 
 1. **Open** with `pdfplumber`
 2. **Per-page extraction** -- for each page, extract raw text via `page.extract_text()`
@@ -76,6 +125,48 @@ The database builder (`build_budget_db.py`) processes two file types differently
 4. **Timeout protection** -- table extraction runs with a 10-second timeout to prevent
    hanging on complex layouts
 5. **Insert** one row per page into `pdf_pages`; FTS5 trigger syncs `pdf_pages_fts`
+
+**Known limitations of PDF parsing:**
+
+- **Table detection accuracy:** pdfplumber uses heuristics to identify table boundaries
+  in PDFs. Complex multi-column layouts, nested tables, or tables that span page breaks
+  can produce garbled or incomplete output.
+- **Column alignment:** PDF text extraction relies on character position coordinates.
+  If a PDF is generated from a scanned image (rather than from digital text), character
+  positions may be imprecise, causing columns to misalign during extraction.
+- **Scanned documents:** Older budget documents (pre-2010 in many cases) were scanned
+  from paper rather than digitally generated. The database does not currently perform
+  OCR on scanned PDFs. These documents are excluded from the database or flagged as
+  low-confidence records.
+- **Footnotes and annotations:** Footnotes, asterisks, and margin annotations in PDFs
+  are sometimes mixed into tabular data during extraction, producing spurious values.
+
+Users should treat amounts extracted from PDFs with more caution than amounts from
+Excel exhibits. The `source_file` field on each record identifies whether data came
+from a PDF or spreadsheet source.
+
+---
+
+## SQLite FTS5 Full-Text Search
+
+The database is stored in **SQLite** and uses the **FTS5** (Full-Text Search version 5)
+extension for keyword search across budget records and extracted document text.
+
+FTS5 provides ranked full-text search with support for phrase queries, prefix matching,
+and relevance ranking using the BM25 algorithm. Two FTS5 virtual tables are maintained:
+
+1. **Budget line items** -- indexed fields include program title, account title,
+   organization name, and narrative text extracted from R-2 exhibits.
+2. **PDF text excerpts** -- page-level text extracted from PDF documents, allowing
+   search to surface relevant passages even when the structured data extraction was
+   incomplete.
+
+Search results from both tables are merged and ranked by relevance before being
+returned to the user.
+
+FTS5 search is case-insensitive and handles common stemming (e.g., a search for
+`aircraft` will match `aircrafts`). It does not perform semantic search or synonym
+expansion -- a search for `plane` will not automatically match `aircraft`.
 
 ---
 
@@ -144,42 +235,101 @@ The validation suite (`validate_budget_db.py` and `validate_budget_data.py`) run
 
 ## Known Limitations
 
-**PDF table extraction accuracy**
-PDF layouts vary significantly across services, years, and document types. pdfplumber
-extracts text reliably for text-layer PDFs but struggles with complex multi-column layouts,
-overlapping elements, and rotated text. Scanned PDFs with no text layer produce no output.
+### PDF Parsing Accuracy
 
-**Exhibit type column variation**
+PDF extraction accuracy varies significantly by document. For well-structured digital
+PDFs from recent years, accuracy is generally high. For older, scanned, or
+unusually formatted PDFs, extraction errors -- including wrong amounts, truncated text,
+or missing rows -- are possible. Every PDF-sourced record should be verified against
+the original document for high-stakes use.
+
+### Coverage Gaps
+
+Not every exhibit type is available for every service in every year. Some documents
+were not accessible via automated collection (due to site changes, link rot, or format
+incompatibility). The database reflects what was successfully downloaded and parsed;
+it is not guaranteed to be comprehensive.
+
+### Amount Reconciliation
+
+Amounts parsed from individual line items may not sum to the officially published
+topline totals for a service or appropriation account. This can result from parsing
+errors, missing line items, rounding differences, or the presence of classified
+adjustments in official totals that do not appear in unclassified exhibits.
+
+Do not rely on this database as the authoritative source for DoD topline spending
+figures. Use the official DoD Comptroller publications for authoritative totals.
+
+### Classified Programs
+
+Classified or "black" programs appear in published budget documents as aggregate
+placeholders without program names or details. These placeholders are present in the
+database as parsed but contain limited information by design. The database does not
+contain any classified information.
+
+### Exhibit Type Column Variation
+
 Column headers for the same exhibit type (e.g., P-1) vary across services and occasionally
 across fiscal years. The column mapper handles common variations but may miss new patterns
 when DoD updates document templates. Unknown columns are captured in `extra_fields` for
 manual review.
 
-**Historical fiscal year URL changes**
+### Historical Fiscal Year URL Changes
+
 DoD service websites occasionally reorganize their URL structures for older fiscal years.
 The downloader's URL templates are calibrated for recent fiscal years (FY2023+). Older
 years may require URL pattern updates.
 
-**WAF rate limiting**
+### WAF Rate Limiting
+
 Browser-based downloads use Playwright but may still be rate-limited or blocked by WAF
 policies if too many requests are made too quickly. The downloader includes a configurable
 delay between file downloads.
 
-**Monetary unit consistency**
+### Monetary Unit Consistency
+
 Most DoD exhibits denominate amounts in thousands of dollars, but a small number use
 whole dollars or millions. The parser assumes thousands by default. If a particular
 exhibit uses a different unit, values will be misinterpreted.
 
-**Currency year**
-The database does not yet distinguish between then-year dollars and constant dollars.
-All amounts are stored as-is from source documents.
+### Currency Year
+
+The `currency_year` field distinguishes between then-year (nominal) and constant
+(inflation-adjusted) dollars where the source document provides this information.
+Most DoD budget exhibits use then-year dollars. Assume then-year if the field is null.
+
+### Timeliness
+
+The database reflects documents collected at a specific point in time. Corrections,
+amendments, or supplemental budget requests issued after the initial download may not
+be reflected.
 
 ---
 
 ## How to Report Data Errors
 
-1. Run `python validate_budget_db.py --verbose` to confirm the issue is detected
-2. Note the source file, exhibit type, and specific row or field affected
-3. Open a GitHub Issue with the `[Data Quality]` label
-4. Include: source file path, exhibit type, fiscal year, expected vs actual value,
-   and the output of `validate_budget_db.py --verbose` for that file if possible
+Data quality depends on user feedback. If you find a record with an incorrect amount,
+a mislabeled service or program, or other apparent parsing error, please report it:
+
+1. Copy the record's **ID** from the detail view (e.g., `bl_12345` or `pdf_67890_p45`)
+2. Note the specific field and what the correct value should be
+3. If possible, identify the source document (filename, page number, or row number)
+   where the correct value can be verified
+4. Open an issue on the project's GitHub repository with the above information
+
+You can also run `python validate_budget_db.py --verbose` to confirm the issue is
+detected by the automated validation suite.
+
+Reports that include a reference to the source document are most actionable, because
+they allow the maintainers to determine whether the error is a parser bug (fixable by
+updating the parsing logic) or an anomaly in the source document itself.
+
+Systematic errors -- where a whole exhibit type or fiscal year appears to be parsed
+incorrectly -- are especially valuable to report, as they may indicate a format change
+that requires a parser update.
+
+---
+
+See also [Data Sources](data-sources.md) for source URL details,
+[Data Dictionary](data-dictionary.md) for field definitions,
+and the [FAQ](faq.md) for answers to common questions.
