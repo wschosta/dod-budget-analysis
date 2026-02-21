@@ -239,6 +239,49 @@ def _ensure_fy_columns(conn: sqlite3.Connection, col_names: list[str]) -> None:
 
 # ── Database Setup ────────────────────────────────────────────────────────────
 
+
+def _migrate_add_columns(conn: sqlite3.Connection) -> None:
+    """Add columns that were introduced in later schema versions.
+
+    SQLite's CREATE TABLE IF NOT EXISTS won't modify existing tables, so
+    we must ALTER TABLE ADD COLUMN for any columns added after v1.
+    This is safe to call on fresh databases (tables won't exist yet,
+    so the PRAGMA table_info queries return empty results).
+    """
+    # Helper: get existing column names for a table
+    def _cols(table: str) -> set[str]:
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+        return {r[1] for r in rows}
+
+    # Map of table -> list of (column_name, column_def) to add if missing
+    migrations: dict[str, list[tuple[str, str]]] = {
+        # LION-100: pdf_pages gained fiscal_year and exhibit_type
+        "pdf_pages": [
+            ("fiscal_year", "TEXT"),
+            ("exhibit_type", "TEXT"),
+        ],
+        # HAWK-2 / LION-106: pe_tags gained project_number and source_files
+        "pe_tags": [
+            ("project_number", "TEXT"),
+            ("source_files", "TEXT"),
+        ],
+    }
+
+    for table, columns in migrations.items():
+        if not conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone():
+            continue
+        existing = _cols(table)
+        for col_name, col_type in columns:
+            if col_name not in existing:
+                conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}"
+                )
+    conn.commit()
+
+
 def create_database(db_path: Path) -> sqlite3.Connection:
     """Create the SQLite database with all tables."""
     conn = sqlite3.connect(str(db_path))
@@ -249,6 +292,11 @@ def create_database(db_path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA cache_size=-262144")          # 256MB cache (was 64MB)
     conn.execute("PRAGMA mmap_size=536870912")         # 512MB memory-mapped I/O (was 30MB)
     conn.execute("PRAGMA wal_autocheckpoint=0")        # Disable auto-checkpoint; manual at end
+
+    # ── Schema migration: add columns that may be missing on older databases ──
+    # CREATE TABLE IF NOT EXISTS won't alter existing tables, so we need to
+    # explicitly ADD COLUMN for any columns added after the initial schema.
+    _migrate_add_columns(conn)
 
     conn.executescript("""
         -- Structured budget line items from Excel files
@@ -808,6 +856,23 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
         elif h == "classification":
             mapping["classification"] = i
 
+        # R-2/R-3/R-4 detail exhibits: use PE as anchor mapped to account
+        # so these exhibits pass the "account" gate in header detection.
+        elif h in ("pe", "program element") and exhibit_type in ("r2", "r3", "r4"):
+            mapping.setdefault("account", i)
+        elif h in ("program title", "title") and exhibit_type in ("r2",):
+            mapping.setdefault("line_item_title", i)
+        elif h in ("sub-element", "sub element") and exhibit_type in ("r2",):
+            mapping.setdefault("line_item", i)
+        elif h in ("project number", "project no") and exhibit_type in ("r3",):
+            mapping.setdefault("line_item", i)
+        elif h == "project title" and exhibit_type in ("r3",):
+            mapping.setdefault("line_item_title", i)
+        elif h in ("line item", "item") and exhibit_type in ("r4",):
+            mapping.setdefault("line_item", i)
+        elif h in ("narrative", "justification") and exhibit_type in ("r4",):
+            mapping.setdefault("line_item_title", i)
+
         # Sub-activity / line item fields
         elif h in ("bsa", "ag/bsa"):
             mapping["sub_activity"] = i
@@ -910,6 +975,8 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
 
         # Find the header row in the first 5 rows (buffer to avoid full materialization).
         # When found, read one extra row for two-row header merge detection.
+        # Anchor columns: "Account" for most exhibits, "PE"/"Program Element" for R-2/R-3/R-4.
+        _anchor_words = {"account", "pe", "program element"}
         header_idx = None
         first_rows = []
         for i, row in enumerate(rows_iter):
@@ -920,7 +987,7 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
             if i >= 4:
                 break
             for val in row:
-                if val and str(val).strip().lower() == "account":
+                if val and str(val).strip().lower() in _anchor_words:
                     header_idx = i
                     break
 
@@ -1139,13 +1206,17 @@ def _extract_excel_rows(args: tuple) -> dict:
         result["error"] = str(e)
         return result
 
-    all_rows: list[tuple] = []
+    # Each entry: (fixed_fields_tuple, fy_dict, tail_fields_tuple)
+    # We normalize fy_dict → positional values after all sheets are processed,
+    # because different sheets may contribute different FY columns.
+    _raw_rows: list[tuple[tuple, dict, tuple]] = []
     all_cols: list[str] = []
 
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
         rows_iter = ws.iter_rows(values_only=True)
 
+        _anchor_words = {"account", "pe", "program element"}
         header_idx = None
         first_rows = []
         for i, row in enumerate(rows_iter):
@@ -1155,7 +1226,7 @@ def _extract_excel_rows(args: tuple) -> dict:
             if i >= 4:
                 break
             for val in row:
-                if val and str(val).strip().lower() == "account":
+                if val and str(val).strip().lower() in _anchor_words:
                     header_idx = i
                     break
 
@@ -1232,32 +1303,43 @@ def _extract_excel_rows(args: tuple) -> dict:
             acct_title_val = _get_str(row, "account_title")
             approp_code, approp_title = _parse_appropriation(acct_title_val)
 
-            fy_values = []
+            fy_dict: dict[str, float | None] = {}
             for fc in _fy_cols_in_map:
                 if fc.startswith("amount_"):
-                    fy_values.append(_amt(row, fc))
+                    fy_dict[fc] = _amt(row, fc)
                 else:
                     idx = col_map.get(fc)
                     v = row[idx] if idx is not None and idx < len(row) else None
-                    fy_values.append(safe_float(v))
+                    fy_dict[fc] = safe_float(v)
 
-            all_rows.append((
+            fixed = (
                 rel_path_str, exhibit_type, sheet_name, fiscal_year,
                 account_val, acct_title_val, org_code, org_name,
                 _get_str(row, "budget_activity"), _get_str(row, "budget_activity_title"),
                 _get_str(row, "sub_activity"), _get_str(row, "sub_activity_title"),
                 line_item_val, line_item_title_val,
                 _get_str(row, "classification"),
-                *fy_values,
+            )
+            tail = (
                 # LION-102: additional PEs in extra_fields
                 json.dumps({"additional_pe_numbers": additional_pes}) if additional_pes else None,
                 pe_number, currency_year, approp_code, approp_title,
                 amount_unit, budget_type, amount_type,
-            ))
+            )
+            _raw_rows.append((fixed, fy_dict, tail))
 
     wb.close()
+
+    # Normalize: expand each row's FY dict into positional values matching
+    # the full all_cols order, filling None for columns absent in that sheet.
+    sorted_cols = sorted(all_cols)
+    all_rows: list[tuple] = []
+    for fixed, fy_dict, tail in _raw_rows:
+        fy_values = tuple(fy_dict.get(c) for c in sorted_cols)
+        all_rows.append(fixed + fy_values + tail)
+
     result["rows"] = all_rows
-    result["columns"] = all_cols
+    result["columns"] = sorted_cols
     return result
 
 
