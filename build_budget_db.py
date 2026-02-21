@@ -510,17 +510,19 @@ def create_database(db_path: Path) -> sqlite3.Connection:
         -- Tags per PE from multiple sources (structured fields, keywords, LLM)
         -- LION-106: Added source_files column for data lineage tracking
         CREATE TABLE IF NOT EXISTS pe_tags (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            pe_number    TEXT NOT NULL,
-            tag          TEXT NOT NULL,
-            tag_source   TEXT NOT NULL,   -- "structured" | "keyword" | "taxonomy" | "llm"
-            confidence   REAL DEFAULT 1.0,
-            source_files TEXT,            -- LION-106: JSON array of source filenames
-            UNIQUE(pe_number, tag, tag_source),
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            pe_number      TEXT NOT NULL,
+            project_number TEXT,           -- HAWK-2: nullable project-level tag scope
+            tag            TEXT NOT NULL,
+            tag_source     TEXT NOT NULL,   -- "structured" | "keyword" | "taxonomy" | "llm"
+            confidence     REAL DEFAULT 1.0,
+            source_files   TEXT,            -- LION-106: JSON array of source filenames
+            UNIQUE(pe_number, project_number, tag, tag_source),
             FOREIGN KEY (pe_number) REFERENCES pe_index(pe_number)
         );
         CREATE INDEX IF NOT EXISTS idx_pe_tags_pe  ON pe_tags(pe_number);
         CREATE INDEX IF NOT EXISTS idx_pe_tags_tag ON pe_tags(tag);
+        CREATE INDEX IF NOT EXISTS idx_pe_tags_proj ON pe_tags(project_number);
         CREATE INDEX IF NOT EXISTS idx_pe_tags_pe_tag ON pe_tags(pe_number, tag);
 
         -- Detected cross-PE references (project movement / lineage)

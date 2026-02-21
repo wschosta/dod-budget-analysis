@@ -7,6 +7,7 @@ Orchestrates the complete data refresh pipeline:
 2. Build/update the database incrementally
 3. Run validation checks
 4. Generate quality report
+5. Run enrichment pipeline (PE index, descriptions, tags, lineage, project decomposition)
 
 Usage:
     python refresh_data.py --years 2026                    # Refresh FY2026 (all sources)
@@ -66,7 +67,7 @@ class RefreshWorkflow:
     """Orchestrates the complete data refresh pipeline."""
 
     def __init__(self, verbose=False, dry_run=False, workers=4, notify_url=None,
-                 db_path=None, no_rollback=False):
+                 db_path=None, no_rollback=False, phases=None):
         """Initialize workflow state.
 
         Args:
@@ -77,6 +78,8 @@ class RefreshWorkflow:
                          there after the workflow completes (REFRESH-002).
             db_path:     Path to the SQLite database (default: dod_budget.sqlite).
             no_rollback: If True, skip the automatic rollback on failure (REFRESH-003).
+            phases:      Set of stage numbers to run (default: {1,2,3,4,5}).
+                         HAWK-3: Stage 5 = enrichment pipeline.
         """
         self.verbose = verbose
         self.dry_run = dry_run
@@ -90,6 +93,7 @@ class RefreshWorkflow:
         self.notify_url = notify_url
         self.db_path = Path(db_path) if db_path else Path("dod_budget.sqlite")
         self.no_rollback = no_rollback
+        self.phases = phases if phases is not None else {1, 2, 3, 4, 5}
         self.start_time = None
         self.results = {}
         # REFRESH-003: path for the pre-build backup
@@ -258,34 +262,37 @@ class RefreshWorkflow:
             self.results["rollback"] = "completed" if rolled_back else "skipped"
             return False
 
-    def stage_2b_enrich(self) -> bool:
-        """Stage 2b: Run enrichment pipeline (LION-107).
+    def stage_5_enrich(self) -> bool:
+        """Stage 5: Run enrichment pipeline (HAWK-3, formerly LION-107 stage 2b).
 
         Runs enrich_budget_db.enrich() with rebuild=True to populate
-        pe_index, pe_descriptions, pe_tags, and pe_lineage after a build.
+        pe_index, pe_descriptions, pe_tags, pe_lineage, and
+        project_descriptions after a build.
         Also performs post-enrichment integrity checks.
+
+        Enrichment failure warns but does not trigger rollback.
         """
         self.log("=" * 60)
-        self.log("STAGE 2b: ENRICH DATABASE")
+        self.log("STAGE 5: ENRICH DATABASE")
         self.log("=" * 60)
-        self._write_progress("stage_2b_enrich", "running", "Running enrichment pipeline")
+        self._write_progress("stage_5_enrich", "running", "Running enrichment pipeline")
 
         if self.dry_run:
             self.log("[DRY RUN] Would call enrich_budget_db.enrich()", "detail")
             self.results["enrich"] = "completed"
-            self._write_progress("stage_2b_enrich", "completed")
+            self._write_progress("stage_5_enrich", "completed")
             return True
 
         if not self.db_path.exists():
             self.log("Database not found; skipping enrichment", "warn")
             self.results["enrich"] = "skipped"
-            self._write_progress("stage_2b_enrich", "skipped", "DB not found")
+            self._write_progress("stage_5_enrich", "skipped", "DB not found")
             return False
 
         t0 = time.time()
         try:
             from enrich_budget_db import enrich  # noqa: PLC0415
-            enrich(self.db_path, phases={1, 2, 3, 4}, rebuild=True)
+            enrich(self.db_path, phases={1, 2, 3, 4, 5}, rebuild=True)
             elapsed = time.time() - t0
             self.log(f"Enrichment complete in {elapsed:.1f}s", "ok")
 
@@ -326,14 +333,14 @@ class RefreshWorkflow:
 
             conn.close()
             self.results["enrich"] = "completed"
-            self._write_progress("stage_2b_enrich", "completed",
+            self._write_progress("stage_5_enrich", "completed",
                                  f"{elapsed:.1f}s, {tag_count} tags")
             return True
 
         except Exception as e:
             self.log(f"Exception during enrichment: {e}", "error")
             self.results["enrich"] = "failed"
-            self._write_progress("stage_2b_enrich", "failed", str(e))
+            self._write_progress("stage_5_enrich", "failed", str(e))
             return False
 
     def stage_3_validate(self) -> bool:
@@ -445,28 +452,37 @@ class RefreshWorkflow:
         self.log(f"Sources: {sources if sources else 'all'}")
         self.log(f"Dry Run: {self.dry_run}")
         self.log(f"Rollback on failure: {not self.no_rollback}")
+        self.log(f"Phases: {sorted(self.phases)}")
         self.log("")
 
         # REFRESH-004: Initial progress entry
         self._write_progress("starting", "running", "Refresh workflow starting")
 
-        # Execute stages
+        # Execute stages (HAWK-3: controlled by --phases flag)
         success = True
-        success = self.stage_1_download(years, sources) and success
-        if not success:
-            self.log("Download failed; proceeding with build anyway...", "warn")
 
-        success = self.stage_2_build() and success
-        if not success:
-            self.log("Database build failed; proceeding with enrichment anyway...", "warn")
+        if 1 in self.phases:
+            success = self.stage_1_download(years, sources) and success
+            if not success:
+                self.log("Download failed; proceeding with build anyway...", "warn")
 
-        # LION-107: Run enrichment after build, before validation
-        success = self.stage_2b_enrich() and success
-        if not success:
-            self.log("Enrichment failed; proceeding with validation anyway...", "warn")
+        if 2 in self.phases:
+            success = self.stage_2_build() and success
+            if not success:
+                self.log("Database build failed; proceeding anyway...", "warn")
 
-        success = self.stage_3_validate() and success
-        success = self.stage_4_report() and success
+        if 3 in self.phases:
+            success = self.stage_3_validate() and success
+
+        if 4 in self.phases:
+            success = self.stage_4_report() and success
+
+        # HAWK-3: Stage 5 = enrichment pipeline (runs after validation)
+        # Enrichment failure warns but does not roll back the entire refresh
+        if 5 in self.phases:
+            enrich_ok = self.stage_5_enrich()
+            if not enrich_ok:
+                self.log("Enrichment failed (non-fatal); database is still valid.", "warn")
 
         # Summary
         elapsed = time.time() - self.start_time
@@ -638,6 +654,13 @@ Examples:
         action="store_true",
         help="Disable automatic rollback on failed refresh (REFRESH-003)",
     )
+    # HAWK-3: Stage selection
+    parser.add_argument(
+        "--phases",
+        default="1,2,3,4,5",
+        help="Comma-separated stages to run (default: 1,2,3,4,5). "
+             "1=download, 2=build, 3=validate, 4=report, 5=enrich",
+    )
     # REFRESH-005: Scheduling
     parser.add_argument(
         "--schedule",
@@ -654,6 +677,12 @@ Examples:
 
     args = parser.parse_args()
 
+    try:
+        phases = {int(p.strip()) for p in args.phases.split(",")}
+    except ValueError:
+        print("ERROR: --phases must be comma-separated integers, e.g. '1,2,3,4,5'")
+        sys.exit(1)
+
     workflow_kwargs = {
         "verbose": args.verbose,
         "dry_run": args.dry_run,
@@ -661,6 +690,7 @@ Examples:
         "notify_url": args.notify,
         "db_path": args.db,
         "no_rollback": args.no_rollback,
+        "phases": phases,
     }
 
     if args.schedule:

@@ -13,6 +13,50 @@ _ALLOWED_SORTS_DEFAULT = {
     "amount_fy2026_request", "amount_fy2025_enacted", "amount_fy2024_actual",
 }
 
+# EAGLE-1: Whitelist of valid fiscal year amount columns for dynamic filtering
+VALID_AMOUNT_COLUMNS = {
+    "amount_fy2024_actual",
+    "amount_fy2025_enacted",
+    "amount_fy2025_supplemental",
+    "amount_fy2025_total",
+    "amount_fy2026_request",
+    "amount_fy2026_reconciliation",
+    "amount_fy2026_total",
+}
+
+# EAGLE-1: Human-readable labels for FY amount columns
+FISCAL_YEAR_COLUMN_LABELS = [
+    {"column": "amount_fy2024_actual", "label": "FY2024 Actual"},
+    {"column": "amount_fy2025_enacted", "label": "FY2025 Enacted"},
+    {"column": "amount_fy2025_total", "label": "FY2025 Total"},
+    {"column": "amount_fy2026_request", "label": "FY2026 Request"},
+    {"column": "amount_fy2026_total", "label": "FY2026 Total"},
+]
+
+DEFAULT_AMOUNT_COLUMN = "amount_fy2026_request"
+
+
+def validate_amount_column(column: str | None) -> str:
+    """Validate and return an amount column name, defaulting to FY2026 request.
+
+    Args:
+        column: Column name to validate. None returns the default.
+
+    Returns:
+        A valid amount column name from VALID_AMOUNT_COLUMNS.
+
+    Raises:
+        ValueError: If the column name is not in the whitelist.
+    """
+    if column is None:
+        return DEFAULT_AMOUNT_COLUMN
+    if column not in VALID_AMOUNT_COLUMNS:
+        raise ValueError(
+            f"Invalid amount column: '{column}'. "
+            f"Must be one of: {', '.join(sorted(VALID_AMOUNT_COLUMNS))}"
+        )
+    return column
+
 
 def build_where_clause(
     fiscal_year: list[str] | None = None,
@@ -25,6 +69,7 @@ def build_where_clause(
     max_amount: float | None = None,
     q: str | None = None,
     fts_ids: list[int] | None = None,
+    amount_column: str | None = None,
 ) -> tuple[str, list[Any]]:
     """Build a SQL WHERE clause from filter parameters.
 
@@ -35,10 +80,12 @@ def build_where_clause(
         pe_number: Filter by PE number(s).
         appropriation_code: Filter by appropriation code(s).
         budget_type: Filter by budget type(s) (e.g. RDT&E, Procurement).
-        min_amount: Minimum amount_fy2026_request value.
-        max_amount: Maximum amount_fy2026_request value.
+        min_amount: Minimum amount value (applied to amount_column).
+        max_amount: Maximum amount value (applied to amount_column).
         q: Free-text search (unused here — caller should use fts_ids).
         fts_ids: Row IDs from FTS MATCH query to restrict results.
+        amount_column: Which FY amount column to filter on.
+            Must be in VALID_AMOUNT_COLUMNS. Defaults to amount_fy2026_request.
 
     Returns:
         Tuple of (where_clause_string, params_list). The where_clause_string
@@ -79,12 +126,15 @@ def build_where_clause(
         conditions.append(f"budget_type IN ({placeholders})")
         params.extend(budget_type)
 
+    # EAGLE-1: Use dynamic amount column (validated against whitelist)
+    amt_col = validate_amount_column(amount_column)
+
     if min_amount is not None:
-        conditions.append("amount_fy2026_request >= ?")
+        conditions.append(f"{amt_col} >= ?")
         params.append(min_amount)
 
     if max_amount is not None:
-        conditions.append("amount_fy2026_request <= ?")
+        conditions.append(f"{amt_col} <= ?")
         params.append(max_amount)
 
     if fts_ids is not None:

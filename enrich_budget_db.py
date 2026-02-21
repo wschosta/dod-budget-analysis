@@ -2,10 +2,11 @@
 Budget Database Enrichment Pipeline
 
 Runs after build_budget_db.py to populate the enrichment tables:
-  - pe_index        — canonical record per PE number across all years/exhibits
-  - pe_descriptions — links PE numbers to their PDF narrative pages
-  - pe_tags         — auto-generated tags from structured fields, keywords, and optionally LLM
-  - pe_lineage      — detected cross-PE references (project movement / lineage)
+  - pe_index              — canonical record per PE number across all years/exhibits
+  - pe_descriptions       — links PE numbers to their PDF narrative pages
+  - pe_tags               — auto-generated tags from structured fields, keywords, and optionally LLM
+  - pe_lineage            — detected cross-PE references (project movement / lineage)
+  - project_descriptions  — project-level decomposition of PE narrative text (Phase 5)
 
 Usage:
     python enrich_budget_db.py                          # all phases, no LLM
@@ -57,7 +58,7 @@ from pathlib import Path
 
 from utils import get_connection
 from utils.patterns import PE_NUMBER, FISCAL_YEAR
-from utils.pdf_sections import parse_narrative_sections
+from utils.pdf_sections import parse_narrative_sections, detect_project_boundaries
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 
@@ -191,7 +192,7 @@ def _context_window(text: str, pos: int, window: int = 200) -> str:
 def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
     # Drop FTS5 table first (depends on pe_descriptions content table)
     conn.execute("DROP TABLE IF EXISTS pe_descriptions_fts")
-    for table in ("pe_lineage", "pe_tags", "pe_descriptions", "pe_index"):
+    for table in ("project_descriptions", "pe_lineage", "pe_tags", "pe_descriptions", "pe_index"):
         conn.execute(f"DROP TABLE IF EXISTS {table}")
     conn.commit()
     # Recreate the tables so enrichment phases can INSERT into them.
@@ -240,17 +241,19 @@ def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
         END;
 
         CREATE TABLE IF NOT EXISTS pe_tags (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            pe_number    TEXT NOT NULL,
-            tag          TEXT NOT NULL,
-            tag_source   TEXT NOT NULL,
-            confidence   REAL DEFAULT 1.0,
-            source_files TEXT,
-            UNIQUE(pe_number, tag, tag_source),
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            pe_number      TEXT NOT NULL,
+            project_number TEXT,
+            tag            TEXT NOT NULL,
+            tag_source     TEXT NOT NULL,
+            confidence     REAL DEFAULT 1.0,
+            source_files   TEXT,
+            UNIQUE(pe_number, project_number, tag, tag_source),
             FOREIGN KEY (pe_number) REFERENCES pe_index(pe_number)
         );
         CREATE INDEX IF NOT EXISTS idx_pe_tags_pe ON pe_tags(pe_number);
         CREATE INDEX IF NOT EXISTS idx_pe_tags_tag ON pe_tags(tag);
+        CREATE INDEX IF NOT EXISTS idx_pe_tags_proj ON pe_tags(project_number);
         CREATE TABLE IF NOT EXISTS pe_lineage (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             source_pe        TEXT NOT NULL,
@@ -266,6 +269,23 @@ def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_pe_lineage_src ON pe_lineage(source_pe);
         CREATE INDEX IF NOT EXISTS idx_pe_lineage_ref ON pe_lineage(referenced_pe);
+
+        CREATE TABLE IF NOT EXISTS project_descriptions (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            pe_number        TEXT NOT NULL,
+            project_number   TEXT,
+            project_title    TEXT,
+            fiscal_year      TEXT,
+            section_header   TEXT NOT NULL,
+            description_text TEXT NOT NULL,
+            source_file      TEXT,
+            page_start       INTEGER,
+            page_end         INTEGER,
+            created_at       TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_proj_desc_pe ON project_descriptions(pe_number);
+        CREATE INDEX IF NOT EXISTS idx_proj_desc_proj ON project_descriptions(project_number);
+        CREATE INDEX IF NOT EXISTS idx_proj_desc_fy ON project_descriptions(fiscal_year);
     """)
     print("  Dropped enrichment tables.")
 
@@ -655,37 +675,53 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
         if row[2] and row[2] not in desc_sources[row[0]]:
             desc_sources[row[0]].append(row[2])
 
-    # insert_buf: (pe_number, tag, tag_source, confidence, source_files_json)
+    # insert_buf: (pe_number, project_number, tag, tag_source, confidence, source_files_json)
     insert_buf: list[tuple] = []
     total_tags = 0
+
+    # --- HAWK-2: Pre-load project-level text for project-level tagging ---
+    # pe_number → [(project_number, text), ...]
+    project_texts: dict[str, list[tuple[str, str]]] = {}
+    try:
+        for row in conn.execute(f"""
+            SELECT pe_number, project_number, description_text
+            FROM project_descriptions
+            WHERE pe_number IN ({placeholders})
+              AND project_number IS NOT NULL
+              AND description_text IS NOT NULL
+        """, to_tag).fetchall():
+            project_texts.setdefault(row[0], []).append((row[1], row[2]))
+    except Exception:
+        pass  # project_descriptions table may not exist yet
 
     for pe in to_tag:
         # LION-106: Source files for this PE's structured tags
         pe_src_json = json.dumps(structured_sources.get(pe, []))
 
         # 3a: structured field tags — LION-105: confidence=1.0 (direct match)
+        # These are PE-level (project_number=NULL)
         fields = structured_fields.get(pe)
         if fields:
             ba_title, approp_title, org_name = fields
             if ba_title:
                 for pattern, tag in _BUDGET_ACTIVITY_TAGS:
                     if pattern.search(ba_title):
-                        insert_buf.append((pe, tag, "structured", 1.0, pe_src_json))
+                        insert_buf.append((pe, None, tag, "structured", 1.0, pe_src_json))
                         break
             if approp_title:
                 low = approp_title.lower()
                 for key, tag in _APPROP_TAGS.items():
                     if key in low:
-                        insert_buf.append((pe, tag, "structured", 1.0, pe_src_json))
+                        insert_buf.append((pe, None, tag, "structured", 1.0, pe_src_json))
                         break
             if org_name:
                 low = org_name.lower()
                 for key, tag in _ORG_TAGS.items():
                     if key in low:
-                        insert_buf.append((pe, tag, "structured", 1.0, pe_src_json))
+                        insert_buf.append((pe, None, tag, "structured", 1.0, pe_src_json))
                         break
 
-        # 3b: keyword tags from budget_lines text fields
+        # 3b: keyword tags from budget_lines text fields (PE-level)
         # LION-104: Use line_item_title etc. for PEs with or without PDF text
         # LION-105: confidence=0.9 (field-level match, high signal)
         bl_text = bl_texts.get(pe, "")
@@ -693,10 +729,10 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
             for tag, patterns in _COMPILED_TAXONOMY:
                 for pat in patterns:
                     if pat.search(bl_text):
-                        insert_buf.append((pe, tag, "keyword", 0.9, pe_src_json))
+                        insert_buf.append((pe, None, tag, "keyword", 0.9, pe_src_json))
                         break
 
-        # 3c: keyword tags from PDF narrative text
+        # 3c: keyword tags from PDF narrative text (PE-level)
         # LION-105: confidence=0.8 (narrative context, more noise)
         combined_desc = " ".join(desc_texts.get(pe, []))
         desc_src_json = json.dumps(desc_sources.get(pe, []))
@@ -704,15 +740,25 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
             for tag, patterns in _COMPILED_TAXONOMY:
                 for pat in patterns:
                     if pat.search(combined_desc):
-                        insert_buf.append((pe, tag, "keyword", 0.8, desc_src_json))
+                        insert_buf.append((pe, None, tag, "keyword", 0.8, desc_src_json))
+                        break
+
+        # HAWK-2: 3e: project-level keyword tags from project_descriptions
+        # When project-level text is available, apply tags at the project level
+        pe_projects = project_texts.get(pe, [])
+        for proj_num, proj_text in pe_projects:
+            for tag, patterns in _COMPILED_TAXONOMY:
+                for pat in patterns:
+                    if pat.search(proj_text):
+                        insert_buf.append((pe, proj_num, tag, "keyword", 0.85, desc_src_json))
                         break
 
     # Flush structured + keyword tags
     if insert_buf:
         conn.executemany("""
             INSERT OR IGNORE INTO pe_tags
-                (pe_number, tag, tag_source, confidence, source_files)
-            VALUES (?, ?, ?, ?, ?)
+                (pe_number, project_number, tag, tag_source, confidence, source_files)
+            VALUES (?, ?, ?, ?, ?, ?)
         """, insert_buf)
         conn.commit()
         total_tags += len(insert_buf)
@@ -738,13 +784,13 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
                     for tag in tags:
                         tag = tag.strip().lower().replace(" ", "-")
                         if tag:
-                            insert_buf.append((pe_num, tag, "llm", 0.7, src_json))
+                            insert_buf.append((pe_num, None, tag, "llm", 0.7, src_json))
 
             if insert_buf:
                 conn.executemany("""
                     INSERT OR IGNORE INTO pe_tags
-                        (pe_number, tag, tag_source, confidence, source_files)
-                    VALUES (?, ?, ?, ?, ?)
+                        (pe_number, project_number, tag, tag_source, confidence, source_files)
+                    VALUES (?, ?, ?, ?, ?, ?)
                 """, insert_buf)
                 conn.commit()
                 total_tags += len(insert_buf)
@@ -894,6 +940,151 @@ def run_phase4(conn: sqlite3.Connection) -> int:
     return total
 
 
+# ── Phase 5: Project-Level Narrative Decomposition ────────────────────────────
+
+def run_phase5(conn: sqlite3.Connection) -> int:
+    """Decompose PE descriptions into project-level sections.
+
+    Iterates pe_descriptions, uses detect_project_boundaries() to find
+    project-level text within R-2 narrative content, then parses each
+    project's text through parse_narrative_sections().  Results are
+    stored in the project_descriptions table.
+
+    When project boundaries cannot be detected, the PE-level text is
+    stored with project_number=NULL as a fallback.
+    """
+    print("\n  [Phase 5] Decomposing PE descriptions into project-level sections...")
+
+    # Ensure project_descriptions table exists (may not exist if --rebuild was not used)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS project_descriptions (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            pe_number        TEXT NOT NULL,
+            project_number   TEXT,
+            project_title    TEXT,
+            fiscal_year      TEXT,
+            section_header   TEXT NOT NULL,
+            description_text TEXT NOT NULL,
+            source_file      TEXT,
+            page_start       INTEGER,
+            page_end         INTEGER,
+            created_at       TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_proj_desc_pe ON project_descriptions(pe_number);
+        CREATE INDEX IF NOT EXISTS idx_proj_desc_proj ON project_descriptions(project_number);
+        CREATE INDEX IF NOT EXISTS idx_proj_desc_fy ON project_descriptions(fiscal_year);
+    """)
+
+    # Check if we have any pe_descriptions to process
+    desc_count = conn.execute("SELECT COUNT(*) FROM pe_descriptions").fetchone()[0]
+    if desc_count == 0:
+        print("  pe_descriptions is empty — run Phase 2 first.")
+        return 0
+
+    # Skip already-processed source files (for incremental runs)
+    done_files = {
+        r[0] for r in conn.execute(
+            "SELECT DISTINCT source_file FROM project_descriptions WHERE source_file IS NOT NULL"
+        ).fetchall()
+    }
+
+    CHUNK = 500
+    cur = conn.execute("""
+        SELECT pe_number, fiscal_year, source_file, page_start, page_end,
+               section_header, description_text
+        FROM pe_descriptions
+        WHERE description_text IS NOT NULL
+    """)
+
+    insert_buf: list[tuple] = []
+    total_rows = 0
+    pe_level_fallback = 0
+
+    while True:
+        chunk = cur.fetchmany(CHUNK)
+        if not chunk:
+            break
+
+        for pe_num, fy, source_file, page_start, page_end, section_header, desc_text in chunk:
+            if source_file and source_file in done_files:
+                continue
+
+            # Attempt project-level decomposition
+            projects = detect_project_boundaries(desc_text)
+
+            if projects:
+                # Parse each project's text into narrative sections
+                for proj in projects:
+                    sections = parse_narrative_sections(proj["text"])
+                    if sections:
+                        for sec in sections:
+                            insert_buf.append((
+                                pe_num, proj["project_number"], proj["project_title"],
+                                fy, sec["header"], sec["text"],
+                                source_file, page_start, page_end,
+                            ))
+                    else:
+                        # No sub-sections found — store the project text as-is
+                        text = proj["text"][:4000]
+                        if text.strip():
+                            insert_buf.append((
+                                pe_num, proj["project_number"], proj["project_title"],
+                                fy, section_header or "Project Description", text,
+                                source_file, page_start, page_end,
+                            ))
+            else:
+                # PE-level fallback: no project boundaries detected
+                sections = parse_narrative_sections(desc_text)
+                if sections:
+                    for sec in sections:
+                        insert_buf.append((
+                            pe_num, None, None,
+                            fy, sec["header"], sec["text"],
+                            source_file, page_start, page_end,
+                        ))
+                else:
+                    # Store as single PE-level entry
+                    text = desc_text[:4000]
+                    if text.strip():
+                        insert_buf.append((
+                            pe_num, None, None,
+                            fy, section_header or "Description", text,
+                            source_file, page_start, page_end,
+                        ))
+                pe_level_fallback += 1
+
+        # Flush buffer periodically
+        if insert_buf:
+            conn.executemany("""
+                INSERT INTO project_descriptions
+                    (pe_number, project_number, project_title, fiscal_year,
+                     section_header, description_text, source_file,
+                     page_start, page_end)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, insert_buf)
+            conn.commit()
+            total_rows += len(insert_buf)
+            insert_buf = []
+
+    if insert_buf:
+        conn.executemany("""
+            INSERT INTO project_descriptions
+                (pe_number, project_number, project_title, fiscal_year,
+                 section_header, description_text, source_file,
+                 page_start, page_end)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, insert_buf)
+        conn.commit()
+        total_rows += len(insert_buf)
+
+    proj_rows = conn.execute(
+        "SELECT COUNT(*) FROM project_descriptions WHERE project_number IS NOT NULL"
+    ).fetchone()[0]
+    print(f"  Done. {total_rows} project_descriptions rows inserted "
+          f"({proj_rows} project-level, {pe_level_fallback} PE-level fallback).")
+    return total_rows
+
+
 # ── Orchestrator ──────────────────────────────────────────────────────────────
 
 def enrich(
@@ -933,13 +1124,15 @@ def enrich(
         run_phase3(conn, with_llm=with_llm)
     if 4 in phases:
         run_phase4(conn)
+    if 5 in phases:
+        run_phase5(conn)
 
     elapsed = time.time() - t0
     print(f"\nEnrichment complete in {elapsed:.1f}s")
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # Summary counts
-    for table in ("pe_index", "pe_descriptions", "pe_tags", "pe_lineage"):
+    for table in ("pe_index", "pe_descriptions", "pe_tags", "pe_lineage", "project_descriptions"):
         try:
             n = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             print(f"  {table}: {n:,} rows")
@@ -957,8 +1150,8 @@ def main() -> None:
                         help="Path to SQLite database (default: dod_budget.sqlite)")
     parser.add_argument("--with-llm", action="store_true",
                         help="Enable LLM-based tagging (requires ANTHROPIC_API_KEY)")
-    parser.add_argument("--phases", default="1,2,3,4",
-                        help="Comma-separated phases to run (default: 1,2,3,4)")
+    parser.add_argument("--phases", default="1,2,3,4,5",
+                        help="Comma-separated phases to run (default: 1,2,3,4,5)")
     parser.add_argument("--rebuild", action="store_true",
                         help="Drop and rebuild all enrichment tables")
     args = parser.parse_args()

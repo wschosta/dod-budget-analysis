@@ -23,7 +23,12 @@ from fastapi.templating import Jinja2Templates
 from api.database import get_db
 from api.routes.budget_lines import _ALLOWED_SORT
 from utils.cache import TTLCache
-from utils.query import build_where_clause
+from utils.query import (
+    build_where_clause,
+    validate_amount_column,
+    FISCAL_YEAR_COLUMN_LABELS,
+    DEFAULT_AMOUNT_COLUMN,
+)
 from utils import sanitize_fts5_query
 
 router = APIRouter(tags=["frontend"])
@@ -163,6 +168,12 @@ def _parse_filters(request: Request) -> dict[str, Any]:
     # FE-001: parse min/max amount
     min_amt = params.get("min_amount", "")
     max_amt = params.get("max_amount", "")
+    # EAGLE-1: dynamic amount column (validated against whitelist)
+    raw_amount_col = params.get("amount_column", "")
+    try:
+        amount_column = validate_amount_column(raw_amount_col or None)
+    except ValueError:
+        amount_column = DEFAULT_AMOUNT_COLUMN
     return {
         "q":                 params.get("q", ""),
         "fiscal_year":       params.getlist("fiscal_year"),
@@ -172,11 +183,16 @@ def _parse_filters(request: Request) -> dict[str, Any]:
         "appropriation_code": params.getlist("appropriation_code"),
         "min_amount":        min_amt,
         "max_amount":        max_amt,
+        "amount_column":     amount_column,
         "sort_by":           params.get("sort_by", "id"),
         "sort_dir":          params.get("sort_dir", "asc"),
         "page":              max(1, int(params.get("page", 1))),
-        "page_size":         min(100, max(10, int(params.get("page_size", 25)))),
+        # EAGLE-4: Expanded page size cap from 100 to 200
+        "page_size":         min(200, max(10, int(params.get("page_size", 25)))),
     }
+
+# EAGLE-4: Page size options for template dropdown
+PAGE_SIZE_OPTIONS = [25, 50, 100, 200]
 
 
 def _query_results(
@@ -191,43 +207,109 @@ def _query_results(
     page_size = page_size or filters.get("page_size", 25)
     offset    = (page - 1) * page_size
 
+    # EAGLE-1: Parse amount filter values with dynamic column support
+    min_amt_val = None
+    max_amt_val = None
+    min_amt = filters.get("min_amount", "")
+    max_amt = filters.get("max_amount", "")
+    if min_amt:
+        try:
+            min_amt_val = float(min_amt)
+        except ValueError:
+            pass
+    if max_amt:
+        try:
+            max_amt_val = float(max_amt)
+        except ValueError:
+            pass
+
     # OPT-FE-001: Use shared WHERE builder from utils/query.py
+    # EAGLE-1: Pass amount_column for dynamic FY filtering
     where, params = build_where_clause(
         fiscal_year=filters["fiscal_year"] or None,
         service=filters["service"] or None,
         exhibit_type=filters["exhibit_type"] or None,
         pe_number=filters["pe_number"] or None,
         appropriation_code=filters.get("appropriation_code") or None,
+        min_amount=min_amt_val,
+        max_amount=max_amt_val,
+        amount_column=filters.get("amount_column"),
     )
 
-    # FE-001: amount range filter
-    min_amt = filters.get("min_amount", "")
-    max_amt = filters.get("max_amount", "")
-    if min_amt:
-        try:
-            val = float(min_amt)
-            connector = "AND" if where else "WHERE"
-            where = f"{where} {connector} amount_fy2026_request >= ?"
-            params = list(params) + [val]
-        except ValueError:
-            pass
-    if max_amt:
-        try:
-            val = float(max_amt)
-            connector = "AND" if where else "WHERE"
-            where = f"{where} {connector} amount_fy2026_request <= ?"
-            params = list(params) + [val]
-        except ValueError:
-            pass
-
-    # Apply keyword filter against FTS if provided
+    # EAGLE-5: Advanced search integration — parse structured query if available
     q = filters["q"].strip()
-    fts_ids: list[int] | None = None
+    parsed_query: dict | None = None
+
+    # Try to use HAWK's advanced search parser; fall back to raw free-text
+    fts_terms = q
+    extra_field_conditions: list[str] = []
+    extra_field_params: list = []
+
     if q:
         try:
-            safe_q = sanitize_fts5_query(q)
+            from utils.search_parser import parse_search_query
+            parsed = parse_search_query(q)
+            fts_terms = parsed.fts_terms
+            parsed_query = {
+                "raw": q,
+                "fts_terms": parsed.fts_terms,
+                "field_filters": [
+                    {"field": f.field, "op": f.op, "value": f.value}
+                    for f in parsed.field_filters
+                ],
+                "amount_filters": [
+                    {"op": f.op, "value": f.value}
+                    for f in parsed.amount_filters
+                ],
+            }
+
+            # Convert field filters to SQL WHERE conditions
+            _FIELD_TO_COLUMN = {
+                "service": "organization_name",
+                "exhibit": "exhibit_type",
+                "pe": "pe_number",
+                "org": "organization_name",
+                "tag": None,  # tag filtering handled separately
+            }
+            for ff in parsed.field_filters:
+                col = _FIELD_TO_COLUMN.get(ff.field)
+                if col:
+                    if ff.op == "=":
+                        extra_field_conditions.append(f"{col} = ?")
+                        extra_field_params.append(ff.value)
+
+            # Convert amount filters to SQL WHERE conditions
+            amt_col = filters.get("amount_column", DEFAULT_AMOUNT_COLUMN)
+            for af in parsed.amount_filters:
+                if af.op in (">", "<", ">=", "<="):
+                    extra_field_conditions.append(f"{amt_col} {af.op} ?")
+                    extra_field_params.append(af.value)
+        except ImportError:
+            # HAWK-4 not merged yet — treat entire query as free-text
+            parsed_query = {
+                "raw": q, "fts_terms": q,
+                "field_filters": [], "amount_filters": [],
+            }
         except Exception:
-            safe_q = q.replace('"', '""')
+            parsed_query = {
+                "raw": q, "fts_terms": q,
+                "field_filters": [], "amount_filters": [],
+            }
+
+    # Apply extra field/amount conditions from parsed query
+    if extra_field_conditions:
+        for cond in extra_field_conditions:
+            connector = "AND" if where else "WHERE"
+            where = f"{where} {connector} {cond}"
+        params = list(params) + extra_field_params
+
+    # Apply keyword filter against FTS if provided
+    fts_ids: list[int] | None = None
+    if fts_terms:
+        try:
+            safe_q = sanitize_fts5_query(fts_terms)
+        except Exception:
+            safe_q = fts_terms.replace('"', '""')
         try:
             fts_rows = conn.execute(
                 "SELECT rowid FROM budget_lines_fts WHERE budget_lines_fts MATCH ?",
@@ -243,6 +325,7 @@ def _query_results(
                 "items": [], "total": 0, "page": page,
                 "total_pages": 0, "sort_by": sort_by.lower(),
                 "sort_dir": filters["sort_dir"],
+                "parsed_query": parsed_query,
             }
         id_placeholders = ",".join("?" * len(fts_ids))
         id_condition = f"id IN ({id_placeholders})"
@@ -277,6 +360,8 @@ def _query_results(
         "sort_by":     sort_by,
         "sort_dir":    filters["sort_dir"],
         "page_size":   page_size,
+        # EAGLE-5: Parsed query structure for template display
+        "parsed_query": parsed_query,
     }
 
 
@@ -301,6 +386,11 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLR
             "services":       services,
             "exhibit_types":  exhibit_types,
             "appropriations": appropriations,
+            # EAGLE-1: Dynamic amount column context for FY selector
+            "amount_column":        filters.get("amount_column", DEFAULT_AMOUNT_COLUMN),
+            "fiscal_year_columns":  FISCAL_YEAR_COLUMN_LABELS,
+            # EAGLE-4: Pagination options for template dropdown
+            "page_size_options":    PAGE_SIZE_OPTIONS,
             **results,
         },
     )
@@ -345,7 +435,16 @@ def results_partial(
 
     response = _tmpl().TemplateResponse(
         "partials/results.html",
-        {"request": request, "filters": filters, **results},
+        {
+            "request": request,
+            "filters": filters,
+            # EAGLE-1: Dynamic amount column context
+            "amount_column": filters.get("amount_column", DEFAULT_AMOUNT_COLUMN),
+            "fiscal_year_columns": FISCAL_YEAR_COLUMN_LABELS,
+            # EAGLE-4: Pagination options
+            "page_size_options": PAGE_SIZE_OPTIONS,
+            **results,
+        },
     )
     # FIX-010: Tell HTMX to push /?params instead of /partials/results?params
     qs = str(request.query_params)
@@ -373,11 +472,50 @@ def detail_partial(
 
     item = dict(row)
 
-    # FE-006: Related items — same program across fiscal years
-    # FIX-015: Include multiple amount columns so button labels show relevant amounts
+    # EAGLE-2: Tag-based related items — find budget lines sharing tags
     related_items: list[dict] = []
     pe_number = item.get("pe_number")
-    if pe_number:
+
+    if pe_number and _table_exists(conn, "pe_tags"):
+        try:
+            # Get tags for this item's PE
+            item_tags = conn.execute(
+                "SELECT DISTINCT tag FROM pe_tags WHERE pe_number = ?",
+                (pe_number,),
+            ).fetchall()
+            tag_list = [t[0] for t in item_tags]
+
+            if tag_list:
+                # Find other PEs sharing these tags, ranked by shared tag count
+                tag_placeholders = ",".join("?" * len(tag_list))
+                tag_related_rows = conn.execute(
+                    f"SELECT b.id, b.pe_number, b.fiscal_year, b.line_item_title, "
+                    f"b.organization_name, "
+                    f"b.amount_fy2024_actual, b.amount_fy2025_enacted, "
+                    f"b.amount_fy2026_request, "
+                    f"COUNT(DISTINCT pt.tag) AS shared_tag_count, "
+                    f"GROUP_CONCAT(DISTINCT pt.tag) AS shared_tags "
+                    f"FROM pe_tags pt "
+                    f"JOIN budget_lines b ON b.pe_number = pt.pe_number "
+                    f"WHERE pt.tag IN ({tag_placeholders}) "
+                    f"AND b.id != ? "
+                    f"GROUP BY b.id "
+                    f"ORDER BY shared_tag_count DESC, b.pe_number "
+                    f"LIMIT 10",
+                    tag_list + [item_id],
+                ).fetchall()
+                related_items = [
+                    {
+                        **dict(r),
+                        "shared_tags": (r["shared_tags"] or "").split(","),
+                    }
+                    for r in tag_related_rows
+                ]
+        except Exception:
+            pass
+
+    # Fallback: PE number match (original behavior)
+    if not related_items and pe_number:
         related_rows = conn.execute(
             "SELECT id, fiscal_year, line_item_title, organization_name, "
             "amount_fy2024_actual, amount_fy2025_enacted, amount_fy2026_request "

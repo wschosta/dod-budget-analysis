@@ -46,7 +46,7 @@ from fastapi.templating import Jinja2Templates
 
 from api.database import get_db_path
 from utils.database import get_slow_queries, get_query_stats
-from api.routes import aggregations, budget_lines, dashboard, download, feedback, pe, reference, search
+from api.routes import aggregations, budget_lines, dashboard, download, feedback, metadata, pe, reference, search
 from api.routes import frontend as frontend_routes
 from utils.config import AppConfig
 
@@ -581,6 +581,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     app.include_router(pe.router,           prefix=prefix)
     app.include_router(feedback.router,     prefix=prefix)
     app.include_router(dashboard.router,   prefix=prefix)
+    app.include_router(metadata.router,    prefix=prefix)
 
     # ── Static files + Jinja2 templates (3.A0-a) ──────────────────────────────
     _here = Path(__file__).parent.parent  # project root

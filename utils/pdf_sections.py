@@ -129,6 +129,89 @@ def parse_narrative_sections(
     return sections
 
 
+def detect_project_boundaries(page_text: str) -> list[dict[str, str]]:
+    """Detect project number/title boundaries within R-2 narrative text.
+
+    R-2 exhibits often contain project-level breakdowns within a PE.  These
+    appear as lines like::
+
+        Project: 1234 — Advanced Targeting System
+        Project 1234: Advanced Targeting System
+        Project Number: 1234   Project Title: Advanced Targeting System
+
+    Returns a list of dicts with keys ``project_number``, ``project_title``,
+    and ``text`` (the narrative text belonging to that project section).  If no
+    project boundaries are detected, returns an empty list.
+    """
+    if not page_text:
+        return []
+
+    # Patterns for project boundary lines in R-2 exhibits.
+    # Order matters: more specific patterns first to avoid greedy matches.
+    _project_patterns = [
+        # "Project Number: 1234   Project Title: Advanced Targeting System"
+        re.compile(
+            r"^[ \t]*Project\s+Number\s*:\s*(\w[\w\-\.]*)"
+            r"(?:\s+Project\s+Title\s*:\s*(.+?))?[ \t]*$",
+            re.MULTILINE | re.IGNORECASE,
+        ),
+        # "Project #1234 Advanced Targeting System"
+        re.compile(
+            r"^[ \t]*Project\s+#\s*(\w[\w\-\.]*)"
+            r"(?:\s+(.+?))?[ \t]*$",
+            re.MULTILINE | re.IGNORECASE,
+        ),
+        # "Project 1234: Advanced Targeting System"
+        # (must NOT match "Project Number:" — use negative lookahead)
+        re.compile(
+            r"^[ \t]*Project\s+(?!Number\s*:)(?!#)(\w[\w\-\.]*)\s*:\s*(.+?)[ \t]*$",
+            re.MULTILINE | re.IGNORECASE,
+        ),
+        # "Project: 1234 — Advanced Targeting System" or "Project: 1234 - Title"
+        # (must NOT match "Project Number:" — exclude "Number" after colon)
+        re.compile(
+            r"^[ \t]*Project\s*:\s*(?!Number\b)(\w[\w\-\.]*)"
+            r"(?:\s*[—\-–]\s*(.+?))?[ \t]*$",
+            re.MULTILINE | re.IGNORECASE,
+        ),
+    ]
+
+    # Collect all project boundary matches with their positions
+    boundaries: list[tuple[int, str, str | None]] = []
+    for pattern in _project_patterns:
+        for m in pattern.finditer(page_text):
+            proj_num = m.group(1).strip()
+            proj_title = m.group(2).strip() if m.group(2) else None
+            boundaries.append((m.start(), proj_num, proj_title))
+
+    if not boundaries:
+        return []
+
+    # Sort by position and deduplicate by project number
+    boundaries.sort(key=lambda x: x[0])
+    seen: set[str] = set()
+    unique_boundaries: list[tuple[int, str, str | None]] = []
+    for pos, num, title in boundaries:
+        if num not in seen:
+            seen.add(num)
+            unique_boundaries.append((pos, num, title))
+
+    # Extract text between consecutive project boundaries
+    projects: list[dict[str, str]] = []
+    for i, (pos, proj_num, proj_title) in enumerate(unique_boundaries):
+        if i + 1 < len(unique_boundaries):
+            text = page_text[pos:unique_boundaries[i + 1][0]].strip()
+        else:
+            text = page_text[pos:].strip()
+        projects.append({
+            "project_number": proj_num,
+            "project_title": proj_title or "",
+            "text": text,
+        })
+
+    return projects
+
+
 def is_narrative_exhibit(exhibit_type: Optional[str]) -> bool:
     """Return True if an exhibit type is known to contain R-2/R-3 narrative blocks."""
     if not exhibit_type:

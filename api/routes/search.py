@@ -186,7 +186,7 @@ def search(
     exhibit_type: list[str] | None = Query(None, description="Filter by exhibit type(s)"),
     pe_number: list[str] | None = Query(None, description="Filter by PE number(s)"),
     appropriation_code: list[str] | None = Query(None, description="Filter by appropriation code(s)"),
-    limit: int = Query(20, ge=1, le=100, description="Max results per type"),
+    limit: int = Query(20, ge=1, le=200, description="Max results per type"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> SearchResponse:
