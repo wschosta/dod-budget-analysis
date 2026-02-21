@@ -16,6 +16,11 @@
            autocomplete="off">
     <button type="submit" class="btn btn-primary hero-search-btn">Search</button>
   </form>
+  <div class="hero-actions">
+    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleAdvancedSearch()">Advanced Search</button>
+  </div>
+  {# FALCON-4: Advanced search UI #}
+  {% include "partials/advanced-search.html" %}
 </section>
 
 {# ── FALCON-1: Clickable summary visuals ─────────────────────────────── #}
@@ -239,4 +244,6 @@
 
 {% block extra_scripts %}
 <script src="/static/js/app.js"></script>
+<!-- FALCON-4: Advanced search UI -->
+<script src="/static/js/search.js"></script>
 {% endblock %}

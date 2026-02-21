@@ -1061,6 +1061,77 @@ tr:focus-within td {
 .autocomplete-item:hover { background: var(--clr-sky); }
 .autocomplete-field { font-size: .75rem; color: var(--text-secondary); }
 
+/* ── FALCON-4: Advanced search UI ────────────────────────────────────────── */
+.advanced-search {
+  max-width: 640px;
+  margin: 1rem auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 1rem;
+  box-shadow: var(--shadow-sm);
+}
+.advanced-search-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .5rem;
+}
+.advanced-search-header h3 { font-size: .95rem; margin: 0; }
+.advanced-search-help {
+  font-size: .82rem;
+  color: var(--text-secondary);
+  margin-bottom: .75rem;
+}
+.adv-conditions { display: flex; flex-direction: column; gap: .5rem; margin-bottom: .75rem; }
+.adv-condition-row {
+  display: flex;
+  gap: .35rem;
+  align-items: center;
+}
+.adv-condition-row select,
+.adv-condition-row input {
+  padding: .35rem .5rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  font-size: .82rem;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-family: inherit;
+}
+.adv-field { flex: 0 0 150px; }
+.adv-op { flex: 0 0 100px; }
+.adv-value { flex: 1; min-width: 0; }
+.adv-remove-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--clr-red);
+  font-size: 1rem;
+  padding: .2rem .4rem;
+  line-height: 1;
+}
+.advanced-search-actions {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+.advanced-search-syntax { margin-top: .75rem; }
+.advanced-search-syntax code {
+  background: var(--clr-gray-100);
+  padding: .1rem .3rem;
+  border-radius: 3px;
+  font-size: .78rem;
+}
+.hero-actions {
+  margin-top: .75rem;
+  text-align: center;
+}
+@media (max-width: 640px) {
+  .adv-condition-row { flex-wrap: wrap; }
+  .adv-field, .adv-op { flex: 1 1 100%; }
+}
+
 /* ── Saved searches ──────────────────────────────────────────────────────── */
 .saved-search-item {
   display: flex;
