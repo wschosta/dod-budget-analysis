@@ -161,9 +161,9 @@ def test_map_columns_c1_authorization():
     assert "account" in mapping
     assert "line_item" in mapping         # construction project
     assert "line_item_title" in mapping   # construction project title
-    # Authorization → amount_fy2026_request, Appropriation → amount_fy2025_enacted
-    assert "amount_fy2026_request" in mapping
-    assert "amount_fy2025_enacted" in mapping
+    # Without FY prefix, Authorization/Appropriation use generic field names
+    assert "amount_authorization" in mapping
+    assert "amount_appropriation" in mapping
 
 
 def test_map_columns_empty_headers():
