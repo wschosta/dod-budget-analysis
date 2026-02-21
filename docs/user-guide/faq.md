@@ -1,7 +1,5 @@
 # Frequently Asked Questions
 
-> **Current Status:** Core FAQs documented based on implemented functionality.
-
 ---
 
 ## Data Coverage
@@ -10,7 +8,7 @@
 
 A: Army, Navy, Marine Corps, Air Force, Space Force, Defense-Wide agencies, and Joint Staff.
 Each service publishes its own budget justification exhibits; coverage depends on which
-sources were downloaded. See [Data Sources](Data-Sources.md) for details.
+sources were downloaded. See [Data Sources](data-sources.md) for details.
 
 **Q: What fiscal years are available?**
 
@@ -78,7 +76,7 @@ A: Budget activities subdivide appropriations into functional categories. For RD
 
 **Q: What does each exhibit type represent?**
 
-A: See [Exhibit Types](Exhibit-Types.md) for the full catalog. In brief:
+A: See [Exhibit Types](exhibit-types.md) for the full catalog. In brief:
 
 | Code | Name |
 |------|------|

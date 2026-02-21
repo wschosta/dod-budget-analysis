@@ -147,11 +147,28 @@ dod-budget-analysis/
 │       ├── program-detail.js     # Program detail page interactions
 │       └── search.js             # Search-specific JS functionality
 ├── docs/                         # Documentation
-│   ├── instructions/             # Agent instruction files (LION, TIGER, BEAR, OH MY)
-│   ├── wiki/                     # Extended wiki documentation
-│   ├── design/                   # Design documents (api_design.py, frontend_design.py, deployment_design.py)
-│   ├── *.md                      # Various planning and specification docs
-│   └── AGENT_PROMPTS.md          # Agent prompt documentation
+│   ├── README.md                 # Documentation index
+│   ├── ROADMAP.md                # Project roadmap
+│   ├── user-guide/               # End-user documentation
+│   │   ├── getting-started.md    # Setup, usage, web UI guide
+│   │   ├── data-sources.md       # DoD data source catalog
+│   │   ├── exhibit-types.md      # Budget exhibit type reference
+│   │   ├── data-dictionary.md    # Field definitions for all tables
+│   │   ├── methodology.md        # Data collection and parsing methodology
+│   │   └── faq.md                # Frequently asked questions
+│   ├── developer/                # Developer documentation
+│   │   ├── architecture.md       # System architecture overview
+│   │   ├── api-reference.md      # REST API endpoints and schemas
+│   │   ├── database-schema.md    # Database tables, indexes, migrations
+│   │   ├── utilities.md          # utils/ package reference
+│   │   ├── testing.md            # Testing guide and fixtures
+│   │   ├── deployment.md         # Deployment runbook
+│   │   └── performance.md        # Performance optimization summary
+│   ├── decisions/                # Architecture Decision Records (ADRs)
+│   │   ├── 001-api-framework.md  # FastAPI decision
+│   │   ├── 002-frontend-technology.md # HTMX + Jinja2 decision
+│   │   └── 003-fts5-search.md    # SQLite FTS5 decision
+│   └── archive/                  # Historical development docs (preserved for reference)
 ├── docker/                       # Staging Docker configs
 │   ├── Dockerfile.multistage     # Multi-stage production Dockerfile
 │   └── docker-compose.staging.yml  # Staging compose configuration
