@@ -450,6 +450,44 @@ document.addEventListener("keydown", function (e) {
   }
 });
 
+// ── FALCON-5: URL-based state management ─────────────────────────────────────
+// Handle back/forward navigation by re-fetching results from the URL.
+
+window.addEventListener("popstate", function () {
+  restoreFiltersFromURL();
+  // Reload results via HTMX to match the URL
+  var container = document.getElementById("results-container");
+  var form = document.getElementById("filter-form");
+  if (container && form) {
+    var url = "/partials/results" + window.location.search;
+    htmx.ajax("GET", url, {
+      target: "#results-container",
+      swap: "innerHTML"
+    });
+  }
+});
+
+// FALCON-5: Sync URL from form state before HTMX pushes
+document.addEventListener("htmx:beforeRequest", function(evt) {
+  var form = document.getElementById("filter-form");
+  if (!form || evt.detail.target.id !== "results-container") return;
+
+  // Build canonical URL from current form state
+  var data = new FormData(form);
+  var params = new URLSearchParams();
+  for (var pair of data.entries()) {
+    if (pair[1]) params.append(pair[0], pair[1]);
+  }
+  // Preserve sort/page from htmx vals if present
+  var htmxVals = evt.detail.requestConfig && evt.detail.requestConfig.parameters;
+  if (htmxVals) {
+    if (htmxVals.sort_by) params.set("sort_by", htmxVals.sort_by);
+    if (htmxVals.sort_dir) params.set("sort_dir", htmxVals.sort_dir);
+    if (htmxVals.page) params.set("page", htmxVals.page);
+    if (htmxVals.page_size) params.set("page_size", htmxVals.page_size);
+  }
+});
+
 // ── HTMX events ────────────────────────────────────────────────────────────────
 // After every HTMX swap, re-apply column visibility and update download links.
 
