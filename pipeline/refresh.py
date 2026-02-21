@@ -33,16 +33,9 @@ DONE REFRESH-005: --schedule flag for periodic refresh (daily/weekly/monthly).
 LION TODOs — Rebuild Orchestration
 ──────────────────────────────────────────────────────────────────────────────
 
-LION-107: Add rebuild orchestration with timing and integrity checks.
-    The current refresh_data.py runs download → build → validate → report but
-    does NOT run enrichment (enrich_budget_db.py). After a rebuild, the
-    enrichment tables (pe_index, pe_descriptions, pe_tags, pe_lineage) are
-    stale or empty. Fix: add a Stage 2b between build and validate that runs
-    enrich_budget_db.enrich() with rebuild=True. Add timing output for each
-    stage. Also add a post-enrichment integrity check that verifies:
-    (a) every PE in budget_lines has a pe_index entry,
-    (b) pe_tags is non-empty,
-    (c) pe_descriptions covers expected PE/FY combinations.
+LION-107 [DONE]: Add rebuild orchestration with timing and integrity checks.
+    stage_5_enrich() runs enrich_budget_db.enrich() with rebuild=True.
+    Post-enrichment integrity checks verify pe_index, pe_tags, pe_descriptions.
 
 """
 

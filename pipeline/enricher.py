@@ -176,7 +176,7 @@ def _extract_fy_from_path(source_file: str) -> str | None:
     """Extract fiscal year from a source file path string."""
     m = FISCAL_YEAR.search(source_file)
     if m:
-        digits = re.search(r"20\d{2}", m.group(), re.IGNORECASE)
+        digits = re.search(r"(?:19|20)\d{2}", m.group(), re.IGNORECASE)
         return digits.group() if digits else None
     return None
 
