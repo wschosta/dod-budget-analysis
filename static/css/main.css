@@ -316,8 +316,58 @@ a:hover { text-decoration: underline; }
   text-transform: uppercase;
   letter-spacing: .05em;
   color: var(--clr-gray-700);
+  margin-bottom: 0;
+}
+
+/* FALCON-3: Collapsible filter panel header */
+.filter-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: .75rem;
 }
+.filter-collapse-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: .75rem;
+  color: var(--text-secondary);
+  padding: .2rem;
+  line-height: 1;
+}
+.filter-panel.collapsed form { display: none; }
+.filter-panel.collapsed .filter-collapse-btn { transform: rotate(180deg); }
+
+/* FALCON-3: Collapsible filter sections */
+.filter-section {
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: .5rem;
+  margin-bottom: .5rem;
+}
+.filter-section:last-of-type { border-bottom: none; }
+.filter-section-header {
+  font-size: .78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: .3rem 0;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.filter-section-header::-webkit-details-marker { display: none; }
+.filter-section-header::after {
+  content: "\25B6";
+  font-size: .6rem;
+  transition: transform .15s;
+}
+.filter-section[open] > .filter-section-header::after {
+  transform: rotate(90deg);
+}
+
 .filter-group { margin-bottom: 1rem; }
 .filter-group label {
   display: block;

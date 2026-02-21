@@ -166,6 +166,20 @@ function restoreDensity() {
   if (saved) setDensity(saved);
 }
 
+// ── FALCON-3: Collapsible filter panel ───────────────────────────────────────
+
+function toggleFilterPanel() {
+  var panel = document.getElementById("filter-panel");
+  var btn = document.getElementById("filter-collapse-btn");
+  if (!panel) return;
+  panel.classList.toggle("collapsed");
+  var isCollapsed = panel.classList.contains("collapsed");
+  if (btn) {
+    btn.setAttribute("aria-expanded", String(!isCollapsed));
+    btn.setAttribute("aria-label", isCollapsed ? "Expand filters" : "Collapse filters");
+  }
+}
+
 // ── URL query params → filter state (3.A3-b) ──────────────────────────────────
 // On page load, read URL params and pre-populate form fields.
 
