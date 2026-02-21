@@ -181,7 +181,9 @@ class KnownValues:
                 pass
         return [2024, 2025, 2026]
 
-    fiscal_years: list[int] = property(lambda self: KnownValues._load_fiscal_years())  # type: ignore
+    fiscal_years: list[int] = property(  # type: ignore
+        lambda self: KnownValues._load_fiscal_years()
+    )
 
     @classmethod
     def get_fiscal_years(cls) -> list[int]:

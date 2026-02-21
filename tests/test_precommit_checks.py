@@ -278,7 +278,7 @@ class TestLineLength:
             if "test_" in py_file.name or py_file.name in skip_files:
                 continue
 
-            with open(py_file) as f:
+            with open(py_file, encoding="utf-8") as f:
                 for i, line in enumerate(f, 1):
                     # Strip newline and don't count trailing whitespace
                     line_content = line.rstrip()

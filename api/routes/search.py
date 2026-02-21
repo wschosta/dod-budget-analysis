@@ -342,8 +342,8 @@ def suggest(
             (prefix_param, contains_param, limit),
         ).fetchall():
             _add(r["pe_number"], "pe_number", r["display_title"])
-    except Exception:
-        pass
+    except sqlite3.OperationalError:
+        pass  # pe_index table may not exist
 
     # line_item_title (prefix match, then contains)
     if len(suggestions) < limit:
@@ -356,8 +356,8 @@ def suggest(
                 (prefix_param, limit - len(suggestions)),
             ).fetchall():
                 _add(r["value"], "line_item_title")
-        except Exception:
-            pass
+        except sqlite3.OperationalError:
+            logger.debug("Suggest query failed for line_item_title prefix", exc_info=True)
 
     if len(suggestions) < limit:
         try:
@@ -370,8 +370,8 @@ def suggest(
                 (contains_param, prefix_param, limit - len(suggestions)),
             ).fetchall():
                 _add(r["value"], "line_item_title")
-        except Exception:
-            pass
+        except sqlite3.OperationalError:
+            logger.debug("Suggest query failed for line_item_title contains", exc_info=True)
 
     # account_title
     if len(suggestions) < limit:
@@ -384,8 +384,8 @@ def suggest(
                 (contains_param, limit - len(suggestions)),
             ).fetchall():
                 _add(r["value"], "account_title")
-        except Exception:
-            pass
+        except sqlite3.OperationalError:
+            logger.debug("Suggest query failed for account_title", exc_info=True)
 
     # organization_name
     if len(suggestions) < limit:
@@ -398,7 +398,7 @@ def suggest(
                 (contains_param, limit - len(suggestions)),
             ).fetchall():
                 _add(r["value"], "organization_name")
-        except Exception:
-            pass
+        except sqlite3.OperationalError:
+            logger.debug("Suggest query failed for organization_name", exc_info=True)
 
     return suggestions[:limit]

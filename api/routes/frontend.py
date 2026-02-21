@@ -13,6 +13,7 @@ Routes:
 
 # DONE [Group: LION] LION-001: Add error page templates (404, 500) with branded styling (~1,500 tokens)
 
+import logging
 import sqlite3
 from typing import Any
 
@@ -21,6 +22,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from api.database import get_db
+
+logger = logging.getLogger(__name__)
 from api.routes.budget_lines import _ALLOWED_SORT
 from utils.cache import TTLCache
 from utils.query import (
@@ -35,18 +38,18 @@ router = APIRouter(tags=["frontend"])
 
 
 # LION-001: Custom HTML error handlers for 404/500 pages
-def register_error_handlers(app) -> None:
+def register_error_handlers(app: Any) -> None:
     """Register custom exception handlers that render branded error pages."""
 
     @app.exception_handler(404)
-    async def not_found_handler(request: Request, exc):
+    async def not_found_handler(request: Request, exc: Exception) -> HTMLResponse:
         tmpl = _tmpl()
         return tmpl.TemplateResponse(
             "errors/404.html", {"request": request}, status_code=404
         )
 
     @app.exception_handler(500)
-    async def server_error_handler(request: Request, exc):
+    async def server_error_handler(request: Request, exc: Exception) -> HTMLResponse:
         tmpl = _tmpl()
         return tmpl.TemplateResponse(
             "errors/500.html", {"request": request}, status_code=500
@@ -512,7 +515,7 @@ def detail_partial(
                     for r in tag_related_rows
                 ]
         except Exception:
-            pass
+            logger.debug("Tag-based related items lookup failed", exc_info=True)
 
     # Fallback: PE number match (original behavior)
     if not related_items and pe_number:
@@ -580,7 +583,7 @@ def programs(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HT
             items = pe_result.get("items", [])
             total = pe_result.get("total", 0)
         except Exception:
-            pass
+            logger.debug("Failed to load PE data for programs page", exc_info=True)
 
     return _tmpl().TemplateResponse("programs.html", {
         "request": request,
@@ -605,8 +608,11 @@ def program_detail(
     try:
         from api.routes.pe import get_pe
         pe_data = get_pe(pe_number, conn=conn)
-    except HTTPException:
-        raise HTTPException(status_code=404, detail=f"Program {pe_number} not found")
+    except HTTPException as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=exc.detail or f"Program {pe_number} not found",
+        ) from exc
 
     # Also fetch related PE titles for display
     related = pe_data.get("related", [])
@@ -650,7 +656,7 @@ def program_list_partial(
             items = result.get("items", [])
             total = result.get("total", 0)
         except Exception:
-            pass
+            logger.debug("Failed to load PE list for program-list partial", exc_info=True)
 
     return _tmpl().TemplateResponse("partials/program-list.html", {
         "request": request,
@@ -677,7 +683,7 @@ def program_descriptions_partial(
             descriptions = result.get("descriptions", [])
             total = result.get("total", 0)
         except Exception:
-            pass
+            logger.debug("Failed to load PE descriptions for %s", pe_number, exc_info=True)
 
     return _tmpl().TemplateResponse("partials/program-descriptions.html", {
         "request": request,

@@ -161,7 +161,8 @@ def test_map_columns_c1_authorization():
     assert "account" in mapping
     assert "line_item" in mapping         # construction project
     assert "line_item_title" in mapping   # construction project title
-    # Without FY prefix, Authorization/Appropriation use generic field names
+    # Without FY prefix, these map to generic fallback keys
+    # (FY-specific remapping happens later in _process_sheet)
     assert "amount_authorization" in mapping
     assert "amount_appropriation" in mapping
 

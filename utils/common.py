@@ -1,9 +1,11 @@
 """Common utility functions used across the DoD budget tools."""
 
+import logging
 import sqlite3
-import sys
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def format_bytes(b: int) -> str:
@@ -118,12 +120,13 @@ def get_connection(db_path: Path, cached: bool = False) -> sqlite3.Connection:
         sqlite3.Connection with row_factory set to sqlite3.Row.
 
     Raises:
-        SystemExit: If database file does not exist.
+        FileNotFoundError: If database file does not exist.
     """
     if not db_path.exists():
-        print(f"ERROR: Database not found: {db_path}")
-        print("Run 'python build_budget_db.py' first to build the database.")
-        sys.exit(1)
+        raise FileNotFoundError(
+            f"Database not found: {db_path}. "
+            "Run 'python build_budget_db.py' first to build the database."
+        )
 
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
