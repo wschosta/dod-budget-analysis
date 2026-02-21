@@ -974,6 +974,39 @@ function initAutocomplete() {
 
 // ── Saved searches (localStorage) ───────────────────────────────────────────
 
+function showSaveSearchInput() {
+  var panel = document.getElementById("save-search-inline");
+  var nameInput = document.getElementById("save-search-name");
+  if (panel) {
+    panel.style.display = "";
+    if (nameInput) { nameInput.value = ""; nameInput.focus(); }
+  }
+}
+
+function hideSaveSearchInput() {
+  var panel = document.getElementById("save-search-inline");
+  if (panel) panel.style.display = "none";
+}
+
+function confirmSaveSearch() {
+  var nameInput = document.getElementById("save-search-name");
+  var name = nameInput ? nameInput.value.trim() : "";
+  if (name) {
+    saveCurrentSearch(name);
+    hideSaveSearchInput();
+  } else {
+    nameInput && nameInput.focus();
+  }
+}
+
+// Allow Enter key to confirm save
+document.addEventListener("keydown", function (e) {
+  if (e.key === "Enter" && e.target.id === "save-search-name") {
+    e.preventDefault();
+    confirmSaveSearch();
+  }
+});
+
 var SAVED_SEARCHES_KEY = "dod_saved_searches";
 
 function getSavedSearches() {
