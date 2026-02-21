@@ -11,21 +11,6 @@
 
 "use strict";
 
-// ── Toast notifications ──────────────────────────────────────────────────────
-
-function showToast(message, type) {
-  type = type || "info";
-  var container = document.getElementById("toast-container");
-  if (!container) return;
-  var toast = document.createElement("div");
-  toast.className = "toast toast-" + type;
-  toast.textContent = message;
-  container.appendChild(toast);
-  setTimeout(function () {
-    if (toast.parentNode) toast.parentNode.removeChild(toast);
-  }, 3200);
-}
-
 // ── LION-010: Dark mode toggle ──────────────────────────────────────────────
 
 var THEME_KEY = "dod_theme";
@@ -110,17 +95,6 @@ function applyHiddenCols(hidden) {
       btn.classList.toggle("active", !hidden.has("col-" + cls));
     }
   });
-}
-
-// ── Mobile filter drawer toggle ──────────────────────────────────────────────
-
-function toggleFilterPanel() {
-  var toggle = document.getElementById("filter-toggle");
-  var body = document.getElementById("filter-body");
-  if (!toggle || !body) return;
-  var expanded = toggle.getAttribute("aria-expanded") === "true";
-  toggle.setAttribute("aria-expanded", String(!expanded));
-  body.classList.toggle("open");
 }
 
 // ── Row selection (3.A6-a) ─────────────────────────────────────────────────────
