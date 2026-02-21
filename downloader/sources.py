@@ -83,6 +83,9 @@ SERVICE_PAGE_TEMPLATES = {
     "navy-archive": {
         "url": "https://www.secnav.navy.mil/fmc/fmb/Pages/archive.aspx",
         "label": "US Navy Archive",
+        # SharePoint REST API endpoint for the document library
+        "sp_list_guid": "AE8ECF7F-2D4B-4077-8BE2-159CA7CEBBDF",
+        "sp_site_url": "https://www.secnav.navy.mil/fmc/fmb",
     },
 }
 
@@ -252,6 +255,91 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
             }
             return files;
         }""", [list(DOWNLOADABLE_EXTENSIONS_SET), text_filter])
+
+        return [_clean_file_entry(f) for f in raw]
+
+    finally:
+        page.close()
+
+
+def _browser_extract_sharepoint_files(
+    page_url: str,
+    site_url: str,
+    list_guid: str,
+    year: str,
+) -> list[dict]:
+    """Query a SharePoint document library via REST API to discover files.
+
+    SharePoint grouped list views load file links lazily via AJAX when groups
+    are expanded.  Instead of clicking through hundreds of nested groups, this
+    function calls the SharePoint REST API from within the authenticated browser
+    context to retrieve all files for a fiscal year in one request.
+
+    Args:
+        page_url: The archive page URL (used to establish the browser session).
+        site_url: The SharePoint site URL (e.g. ``https://…/fmc/fmb``).
+        list_guid: The GUID of the SharePoint document library list.
+        year: Four-digit fiscal year string.
+
+    Returns:
+        List of file dicts compatible with the standard discovery format.
+    """
+    ctx = _get_browser_context()
+    page = ctx.new_page()
+
+    try:
+        # Navigate to the archive page first to establish auth cookies
+        timeout = _timeout_mgr.get_timeout(page_url, is_download=False)
+        start = time.time()
+        try:
+            page.goto(page_url, timeout=timeout, wait_until="domcontentloaded")
+        except Exception:
+            pass  # proceed with whatever loaded
+        elapsed_ms = int((time.time() - start) * 1000)
+        _timeout_mgr.record_time(page_url, elapsed_ms)
+
+        # Use the SharePoint REST API to query files filtered by fiscal year.
+        # File_x0020_Type ne null excludes folders from the results.
+        # $top=500 handles the largest year groups (max observed ~50 files).
+        raw = page.evaluate("""(args) => {
+            const [siteUrl, listGuid, fiscalYear] = args;
+            const apiUrl = siteUrl +
+                "/_api/web/lists(guid'" + listGuid + "')/items" +
+                "?$top=500" +
+                "&$select=Title,FileRef,File_x0020_Type,Section" +
+                "&$filter=Fiscal_x0020_Year eq '" + fiscalYear + "'" +
+                " and File_x0020_Type ne null" +
+                "&$orderby=Title";
+
+            return fetch(apiUrl, {
+                headers: { 'Accept': 'application/json;odata=verbose' },
+                credentials: 'same-origin'
+            })
+            .then(r => r.json())
+            .then(data => {
+                const items = data.d && data.d.results ? data.d.results : [];
+                const exts = new Set(['.pdf', '.xlsx', '.xls', '.zip', '.csv']);
+                return items.filter(item => {
+                    const ref = (item.FileRef || '').toLowerCase();
+                    const ext = '.' + ref.split('.').pop();
+                    return exts.has(ext);
+                }).map(item => {
+                    const ref = item.FileRef || '';
+                    const filename = decodeURIComponent(ref.split('/').pop());
+                    const ext = '.' + filename.split('.').pop().toLowerCase();
+                    const title = item.Title || filename;
+                    const section = item.Section || '';
+                    const fullUrl = new URL(ref, window.location.origin).href;
+                    return {
+                        name: section ? (title + ' (' + section + ')') : title,
+                        url: fullUrl,
+                        filename: filename,
+                        extension: ext
+                    };
+                });
+            })
+            .catch(() => []);
+        }""", [site_url, list_guid, year])
 
         return [_clean_file_entry(f) for f in raw]
 
@@ -638,9 +726,13 @@ def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
 # ---- Navy Archive (browser required) ----
 
 def discover_navy_archive_files(_session: requests.Session, year: str) -> list[dict]:
-    """Discover Navy budget files from the SECNAV archive page using a headless browser.
+    """Discover Navy budget files from the SECNAV archive via SharePoint REST API.
 
-    Alternate source for Navy/Marine Corps exhibits hosted on the archive URL.
+    The archive page is a SharePoint grouped list view with fiscal year and
+    section groups.  File links are loaded lazily when groups are expanded,
+    so standard link extraction returns 0 results.  Instead, this function
+    uses the SharePoint REST API (authenticated through the browser session)
+    to query all files for a given fiscal year in a single request.
 
     Args:
         _session: Unused (browser handles HTTP); kept for interface consistency.
@@ -658,9 +750,21 @@ def discover_navy_archive_files(_session: requests.Session, year: str) -> list[d
             print(f"  [Navy Archive] Using cached results for FY{year}")
             return cached
 
-    url = SERVICE_PAGE_TEMPLATES["navy-archive"]["url"]
-    print(f"  [Navy Archive] Scanning FY{year} (browser)...")
-    files = _browser_extract_links(url, text_filter=f"/{year}/")
+    config = SERVICE_PAGE_TEMPLATES["navy-archive"]
+    page_url = config["url"]
+    site_url = config["sp_site_url"]
+    list_guid = config["sp_list_guid"]
+
+    print(f"  [Navy Archive] Scanning FY{year} (SharePoint API)...")
+    files = _browser_extract_sharepoint_files(page_url, site_url, list_guid, year)
+
+    # Fallback: if REST API returns 0 (e.g. auth issue), try the old
+    # link-extraction approach with the corrected text filter.
+    if not files:
+        yy = year[-2:]
+        print(f"  [Navy Archive] REST API returned 0, trying link extraction...")
+        files = _browser_extract_links(page_url, text_filter=f"/{yy}pres/")
+
     _save_cache(cache_key, files)
     return files
 
