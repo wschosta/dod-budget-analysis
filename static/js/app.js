@@ -880,7 +880,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const qInput = document.getElementById("q");
   if (qInput) {
     const hint = document.createElement("span");
-    hint.style.cssText = "font-size:.7rem;color:#999;display:block;margin-top:.15rem";
+    hint.style.cssText = "font-size:.7rem;color:var(--text-secondary);display:block;margin-top:.15rem";
     hint.textContent = "Press / or Ctrl+K to focus";
     qInput.parentNode.insertBefore(hint, qInput.nextSibling);
   }
