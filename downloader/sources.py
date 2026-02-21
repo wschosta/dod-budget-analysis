@@ -163,13 +163,12 @@ def _get_browser_context():
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
-        print("\nERROR: Playwright is required for Army and Air Force sources.")
-        print("Install it with:")
-        print("  pip install playwright")
-        print("  python -m playwright install chromium")
-        sys.exit(1)
+        raise ImportError(
+            "Playwright is required for Army and Air Force sources. "
+            "Install with: pip install playwright && python -m playwright install chromium"
+        )
 
-    print("  Starting browser for WAF-protected sites...")
+    logger.info("Starting browser for WAF-protected sites...")
     _pw_instance = sync_playwright().start()
     _headless = os.environ.get("PLAYWRIGHT_HEADLESS", "").lower() in (
         "1", "true", "yes",
@@ -375,7 +374,7 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
     3. Navigate directly as last resort
     """
     if dest_path.exists() and not overwrite and dest_path.stat().st_size > 0:
-        print(f"    [SKIP] Already exists: {dest_path.name}")
+        logger.info("[SKIP] Already exists: %s", dest_path.name)
         return True
 
     ctx = _get_browser_context()
@@ -400,19 +399,16 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
     # Strategy 2: Trigger download via injected anchor element
     try:
         page = _new_browser_page(ctx, url)
-        # Escape the URL for JS
-        safe_url = url.replace("'", "\\'")
-        safe_filename = dest_path.name.replace("'", "\\'")
         with page.expect_download(timeout=120000) as download_info:
-            page.evaluate(f"""() => {{
+            page.evaluate("""([url, filename]) => {
                 const a = document.createElement('a');
-                a.href = '{safe_url}';
-                a.download = '{safe_filename}';
+                a.href = url;
+                a.download = filename;
                 a.style.display = 'none';
                 document.body.appendChild(a);
                 a.click();
                 a.remove();
-            }}""")
+            }""", [url, dest_path.name])
 
         download = download_info.value
         download.save_as(str(dest_path))
@@ -577,7 +573,7 @@ def discover_fiscal_years(session: requests.Session) -> dict[str, str]:
     if _fiscal_years_cache is not None:
         return _fiscal_years_cache
 
-    print("Discovering available fiscal years...")
+    logger.info("Discovering available fiscal years...")
     resp = session.get(BUDGET_MATERIALS_URL, timeout=30)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, PARSER)
@@ -611,10 +607,10 @@ def discover_comptroller_files(session: requests.Session, year: str,
     if not _refresh_cache:
         cached = _load_cache(cache_key)
         if cached is not None:
-            print(f"  [Comptroller] Using cached results for FY{year}")
+            logger.info("[Comptroller] Using cached results for FY%s", year)
             return cached
 
-    print(f"  [Comptroller] Scanning FY{year}...")
+    logger.info("[Comptroller] Scanning FY%s...", year)
     resp = session.get(page_url, timeout=30)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, PARSER)
@@ -641,16 +637,16 @@ def discover_defense_wide_files(session: requests.Session, year: str) -> list[di
     if not _refresh_cache:
         cached = _load_cache(cache_key)
         if cached is not None:
-            print(f"  [Defense Wide] Using cached results for FY{year}")
+            logger.info("[Defense Wide] Using cached results for FY%s", year)
             return cached
 
     url = SERVICE_PAGE_TEMPLATES["defense-wide"]["url"].format(fy=year)
-    print(f"  [Defense Wide] Scanning FY{year}...")
+    logger.info("[Defense Wide] Scanning FY%s...", year)
     try:
         resp = session.get(url, timeout=30)
         resp.raise_for_status()
     except requests.RequestException as e:
-        print(f"    WARNING: Could not fetch Defense Wide page for FY{year}: {e}")
+        logger.warning("Could not fetch Defense Wide page for FY%s: %s", year, e)
         return []
     soup = BeautifulSoup(resp.text, PARSER)
     files = _extract_downloadable_links(soup, url)
@@ -678,11 +674,11 @@ def discover_army_files(_session: requests.Session, year: str) -> list[dict]:
     if not _refresh_cache:
         cached = _load_cache(cache_key)
         if cached is not None:
-            print(f"  [Army] Using cached results for FY{year}")
+            logger.info("[Army] Using cached results for FY%s", year)
             return cached
 
     url = SERVICE_PAGE_TEMPLATES["army"]["url"]
-    print(f"  [Army] Scanning FY{year} (browser)...")
+    logger.info("[Army] Scanning FY%s (browser)...", year)
     files = _browser_extract_links(url, text_filter=f"/{year}/")
     _save_cache(cache_key, files)
     return files
@@ -710,11 +706,11 @@ def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
     if not _refresh_cache:
         cached = _load_cache(cache_key)
         if cached is not None:
-            print(f"  [Navy] Using cached results for FY{year}")
+            logger.info("[Navy] Using cached results for FY%s", year)
             return cached
 
     url = SERVICE_PAGE_TEMPLATES["navy"]["url"].format(fy=year)
-    print(f"  [Navy] Scanning FY{year} (browser)...")
+    logger.info("[Navy] Scanning FY%s (browser)...", year)
     files = _browser_extract_links(url)
 
     # Fallback: older FYs (pre-2022) use a different URL path
@@ -722,7 +718,7 @@ def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
         alt_url = (
             f"https://www.secnav.navy.mil/fmc/fmb/Pages/Fiscal-Year-{year}.aspx"
         )
-        print("  [Navy] Primary URL returned 0 files, trying alternate URL...")
+        logger.info("[Navy] Primary URL returned 0 files, trying alternate URL...")
         files = _browser_extract_links(alt_url)
 
     _save_cache(cache_key, files)
@@ -753,7 +749,7 @@ def discover_navy_archive_files(_session: requests.Session, year: str) -> list[d
     if not _refresh_cache:
         cached = _load_cache(cache_key)
         if cached is not None:
-            print(f"  [Navy Archive] Using cached results for FY{year}")
+            logger.info("[Navy Archive] Using cached results for FY%s", year)
             return cached
 
     config = SERVICE_PAGE_TEMPLATES["navy-archive"]
@@ -761,14 +757,14 @@ def discover_navy_archive_files(_session: requests.Session, year: str) -> list[d
     site_url = config["sp_site_url"]
     list_guid = config["sp_list_guid"]
 
-    print(f"  [Navy Archive] Scanning FY{year} (SharePoint API)...")
+    logger.info("[Navy Archive] Scanning FY%s (SharePoint API)...", year)
     files = _browser_extract_sharepoint_files(page_url, site_url, list_guid, year)
 
     # Fallback: if REST API returns 0 (e.g. auth issue), try the old
     # link-extraction approach with the corrected text filter.
     if not files:
         yy = year[-2:]
-        print(f"  [Navy Archive] REST API returned 0, trying link extraction...")
+        logger.info("[Navy Archive] REST API returned 0, trying link extraction...")
         files = _browser_extract_links(page_url, text_filter=f"/{yy}pres/")
 
     _save_cache(cache_key, files)
@@ -794,12 +790,12 @@ def discover_airforce_files(_session: requests.Session, year: str) -> list[dict]
     if not _refresh_cache:
         cached = _load_cache(cache_key)
         if cached is not None:
-            print(f"  [Air Force] Using cached results for FY{year}")
+            logger.info("[Air Force] Using cached results for FY%s", year)
             return cached
 
     fy2 = year[-2:]
     url = SERVICE_PAGE_TEMPLATES["airforce"]["url"].format(fy2=fy2)
-    print(f"  [Air Force] Scanning FY{year} (browser)...")
+    logger.info("[Air Force] Scanning FY%s (browser)...", year)
     files = _browser_extract_links(url, text_filter=f"FY{fy2}", expand_all=True)
     _save_cache(cache_key, files)
     return files

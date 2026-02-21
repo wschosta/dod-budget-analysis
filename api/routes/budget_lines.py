@@ -77,7 +77,7 @@ def list_budget_lines(
                     (safe_q,),
                 ).fetchall()
                 fts_ids = [r[0] for r in fts_rows]
-            except Exception:
+            except (sqlite3.OperationalError, sqlite3.DatabaseError):
                 fts_ids = []  # FTS table missing → no matches
 
     where, params = build_where_clause(

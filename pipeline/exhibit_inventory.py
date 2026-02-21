@@ -19,6 +19,7 @@ import logging
 import sys
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ except ImportError:
 class ExhibitInventory:
     """Scans Excel files and inventories exhibit types."""
 
-    def __init__(self, docs_dir: Path, verbose=False):
+    def __init__(self, docs_dir: Path, verbose: bool = False) -> None:
         """Initialize the scanner with a documents directory path and verbosity flag.
 
         Args:
@@ -55,7 +56,7 @@ class ExhibitInventory:
                 return e_type
         return "unknown"
 
-    def _extract_headers(self, worksheet) -> list:
+    def _extract_headers(self, worksheet: Any) -> list[str]:
         """Extract header row from worksheet."""
         for row_idx, row in enumerate(worksheet.iter_rows(max_row=5, values_only=True)):
             # Look for "Account" or similar header indicator
@@ -65,7 +66,7 @@ class ExhibitInventory:
                 return [str(v or "").strip() for v in row if v]
         return []
 
-    def scan(self):
+    def scan(self) -> None:
         """Scan all Excel files in the documents directory."""
         if not self.docs_dir.exists():
             logger.error("Directory not found: %s", self.docs_dir)
@@ -107,7 +108,7 @@ class ExhibitInventory:
                 })
                 logger.error("Error in %s: %s", file_path.name, e)
 
-    def report(self):
+    def report(self) -> str:
         """Generate summary report."""
         report_lines = []
         report_lines.append("=" * 80)
@@ -146,7 +147,7 @@ class ExhibitInventory:
         report_lines.append("")
         return "\n".join(report_lines)
 
-    def export_json(self, output_path: Path):
+    def export_json(self, output_path: Path) -> None:
         """Export inventory as JSON."""
         data = {}
         for exhibit_type, info in self.exhibits.items():
@@ -161,7 +162,7 @@ class ExhibitInventory:
 
         logger.info("Exported JSON to %s", output_path)
 
-    def export_csv(self, output_path: Path):
+    def export_csv(self, output_path: Path) -> None:
         """Export inventory as CSV."""
         with open(output_path, "w", newline="") as f:
             writer = csv.writer(f)

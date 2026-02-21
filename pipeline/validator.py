@@ -70,7 +70,7 @@ def _get_amount_columns(conn: sqlite3.Connection) -> list[str]:
             if row[1].startswith("amount_fy") or row[1].startswith("quantity_fy")
         ]
         return sorted(cols) if cols else _BASELINE_AMOUNT_COLUMNS
-    except Exception:
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
         return _BASELINE_AMOUNT_COLUMNS
 
 

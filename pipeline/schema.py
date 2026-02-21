@@ -605,7 +605,7 @@ def check_database_integrity(conn: sqlite3.Connection) -> dict:
             integrity_ok = False
             for msg in messages:
                 details.append(f"integrity_check: {msg}")
-    except Exception as e:
+    except sqlite3.Error as e:
         integrity_ok = False
         details.append(f"integrity_check error: {e}")
 
@@ -625,9 +625,9 @@ def check_database_integrity(conn: sqlite3.Connection) -> dict:
                 details.append(
                     f"fts_sync: MISMATCH budget_lines={bl_count} fts={fts_count}"
                 )
-        except Exception:
+        except sqlite3.OperationalError:
             details.append("fts_sync: budget_lines_fts table not found (skipped)")
-    except Exception as e:
+    except sqlite3.Error as e:
         details.append(f"fts_sync error: {e}")
 
     # 3. Foreign key check
@@ -638,7 +638,7 @@ def check_database_integrity(conn: sqlite3.Connection) -> dict:
             details.append(f"foreign_key_check: {len(fk_violations)} violation(s)")
         else:
             details.append("foreign_key_check: ok")
-    except Exception as e:
+    except sqlite3.Error as e:
         details.append(f"foreign_key_check error: {e}")
 
     return {

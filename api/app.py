@@ -597,17 +597,11 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         templates = Jinja2Templates(directory=str(templates_dir))
 
         # OPT-FMT-001: Use shared format_amount from utils.formatting
-        def fmt_amount(value) -> str:
+        def fmt_amount(value: object) -> str:
             """Jinja filter: format dollar amount in $K with comma separators."""
             try:
-                v = float(value)
+                return f"{float(value):,.1f}"
             except (TypeError, ValueError):
-                return "—"
-            # For the template display we show value as-is with comma formatting
-            # (values are already in $K)
-            try:
-                return f"{v:,.1f}"
-            except Exception:
                 return "—"
 
         # FE-003: Custom filter to remove a single key=value from query params

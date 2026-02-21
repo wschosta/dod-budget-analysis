@@ -92,6 +92,7 @@ LION-103 [DONE]: Create pdf_pe_numbers junction table populated during PDF inges
 import argparse
 import dataclasses
 import json
+from typing import Any
 import re
 import signal
 import sqlite3
@@ -2077,8 +2078,8 @@ def _create_session_id() -> str:
 
 def _save_checkpoint(conn: sqlite3.Connection, session_id: str, files_processed: int,
                      total_files: int, pages_processed: int, rows_inserted: int,
-                     bytes_processed: int, last_file: str = None,
-                     last_file_status: str = None, notes: str = None,
+                     bytes_processed: int, last_file: str | None = None,
+                     last_file_status: str | None = None, notes: str | None = None,
                      commit: bool = True) -> None:
     """Save current build progress as a checkpoint.
 
@@ -2152,7 +2153,7 @@ def _get_processed_files(conn: sqlite3.Connection, session_id: str) -> set:
     return {row[0] for row in cursor.fetchall()}
 
 
-def _mark_session_complete(conn: sqlite3.Connection, session_id: str, notes: str = None) -> None:
+def _mark_session_complete(conn: sqlite3.Connection, session_id: str, notes: str | None = None) -> None:
     """Mark a session as completed."""
     conn.execute("""
         UPDATE build_progress
@@ -2163,12 +2164,12 @@ def _mark_session_complete(conn: sqlite3.Connection, session_id: str, notes: str
 
 
 def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
-                   progress_callback=None, resume: bool = False,
+                   progress_callback: Any = None, resume: bool = False,
                    checkpoint_interval: int = 10,
-                   stop_event=None, workers: int = 0,
+                   stop_event: Any = None, workers: int = 0,
                    pdf_timeout: int = 30,
                    failures_log: Path | None = None,
-                   retry_failures: bool = False):
+                   retry_failures: bool = False) -> dict:
     """Build or incrementally update the budget database.
 
     Args:

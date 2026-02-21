@@ -82,7 +82,7 @@ def _build_download_sql(
                 (safe_q,),
             ).fetchall()
             fts_ids = [r[0] for r in fts_rows]
-        except Exception:
+        except (sqlite3.OperationalError, sqlite3.DatabaseError):
             fts_ids = []
 
     # OPT-DL-001: Use shared WHERE builder

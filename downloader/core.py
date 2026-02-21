@@ -87,7 +87,7 @@ class ProgressTracker:
         self.current_year = ""
         self.term_width = shutil.get_terminal_size((80, 24)).columns
         self._last_progress_time = 0.0
-        # Structured failure records for --retry-failures (TODO 1.A6-a)
+        # Structured failure records for --retry-failures
         # Schema: {url, dest, filename, error, source, year, use_browser, timestamp}
         self._failed_files: list[dict] = []
         # Thread-safety primitives
@@ -195,7 +195,7 @@ class ProgressTracker:
 
     def file_failed(self, url: str, dest: str, filename: str, error: str,
                     use_browser: bool = False) -> None:
-        """Record a structured failure entry and update counters (TODO 1.A6-a).
+        """Record a structured failure entry and update counters.
 
         Stores the full metadata needed to retry the download later via
         ``--retry-failures``, then delegates to ``file_done`` for display.
@@ -348,7 +348,7 @@ def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
                          expected_hash: str | None = None) -> str:
     """Check if a local file matches the remote.
 
-    If expected_hash is provided (from the manifest, TODO 1.A3-b), verifies
+    If expected_hash is provided (from the manifest), verifies
     the local file's SHA-256 digest against it and triggers a redownload on
     mismatch (handles silent corruption).
 
@@ -466,7 +466,7 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
     global _tracker
     fname = dest_path.name
 
-    # Retrieve expected hash from manifest for integrity check (TODO 1.A3-b)
+    # Retrieve expected hash from manifest for integrity check
     expected_hash = (_manifest.get(url) or {}).get("sha256")
 
     if not overwrite and dest_path.exists():
@@ -540,7 +540,7 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
             resp = session.get(url, headers=headers, timeout=120, stream=True)
             resp.raise_for_status()
 
-            # WAF / bot-protection detection (TODO 1.A3-c)
+            # WAF / bot-protection detection
             if _detect_waf_block(resp):
                 print(f"\r    [WAF] {fname}: WAF/bot-protection block detected "
                       f"(HTTP {resp.status_code}) -- skipping retry          ")
@@ -807,7 +807,7 @@ def interactive_select_sources() -> list[str]:
     return _interactive_select("Available Sources:", list(ALL_SOURCES), labels, "sources")
 
 
-# ---- Programmatic download entry point (TODO 1.A4-a) ----
+# ---- Programmatic download entry point ----
 
 
 def download_all(
@@ -857,7 +857,7 @@ def download_all(
     if manifest_path is None:
         manifest_path = output_dir / "manifest.json"
 
-    # Write initial manifest before downloading (TODO 1.A3-a)
+    # Write initial manifest before downloading
     write_manifest(output_dir, all_files, manifest_path)
 
     session = get_session()
@@ -997,7 +997,7 @@ def download_all(
         "total_bytes": _tracker.total_bytes,
     }
 
-    # Write structured failure log for --retry-failures (TODO 1.A6-a)
+    # Write structured failure log for --retry-failures
     # JSON schema: list of {url, dest, filename, error, source, year,
     #                        use_browser, timestamp}
     failed_json_path = output_dir / "failed_downloads.json"
@@ -1094,7 +1094,7 @@ def main() -> None:
         help=(
             "Re-download only previously failed files. Reads from "
             "failed_downloads.json in the output directory by default, "
-            "or from PATH if specified. Skips discovery. (TODO 1.A6-b)"
+            "or from PATH if specified. Skips discovery."
         ),
     )
     parser.add_argument(
@@ -1119,7 +1119,7 @@ def main() -> None:
     import downloader.sources as _sources_mod
     _sources_mod._refresh_cache = args.refresh_cache
 
-    # -- Retry-failures early path (TODO 1.A6-b) --
+    # -- Retry-failures early path --
     if args.retry_failures is not False:
         # Determine the path to read failures from
         failures_path = (
