@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.database import get_db
 from api.models import BudgetLineDetailOut, BudgetLineOut, PaginatedResponse
-from utils.query import build_where_clause
+from utils.query import ALLOWED_SORT_COLUMNS, build_where_clause
 from utils.strings import sanitize_fts5_query
 
 router = APIRouter(prefix="/budget-lines", tags=["budget-lines"])
@@ -39,11 +39,8 @@ _SELECT_ALL_COLUMNS = """
     quantity_fy2026_request, quantity_fy2026_total
 """
 
-_ALLOWED_SORT = {
-    "id", "source_file", "exhibit_type", "fiscal_year",
-    "organization_name", "account", "account_title", "pe_number",
-    "amount_fy2026_request", "amount_fy2025_enacted", "amount_fy2024_actual",
-}
+# Backward-compatible alias — canonical definition lives in utils/query.py
+_ALLOWED_SORT = ALLOWED_SORT_COLUMNS
 
 
 def _build_where(

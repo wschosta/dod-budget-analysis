@@ -24,9 +24,9 @@ from fastapi.templating import Jinja2Templates
 from api.database import get_db
 
 logger = logging.getLogger(__name__)
-from api.routes.budget_lines import _ALLOWED_SORT
 from utils.cache import TTLCache
 from utils.query import (
+    ALLOWED_SORT_COLUMNS,
     build_where_clause,
     validate_amount_column,
     FISCAL_YEAR_COLUMN_LABELS,
@@ -204,7 +204,7 @@ def _query_results(
     page_size: int | None = None,
 ) -> dict[str, Any]:
     """Run the filtered budget_lines query and return template context vars."""
-    sort_by   = filters["sort_by"] if filters["sort_by"] in _ALLOWED_SORT else "id"
+    sort_by   = filters["sort_by"] if filters["sort_by"] in ALLOWED_SORT_COLUMNS else "id"
     sort_dir  = "DESC" if filters["sort_dir"] == "desc" else "ASC"
     page      = filters["page"]
     page_size = page_size or filters.get("page_size", 25)
