@@ -6,7 +6,7 @@
 <h2 style="margin-bottom:1rem">DoD Budget Overview</h2>
 
 <!-- Summary stat cards -->
-<div class="dashboard-stats">
+<div class="dashboard-stats" role="region" aria-label="Budget summary statistics">
   <div class="stat-card">
     <div class="stat-label">FY2026 Total Request</div>
     <div class="stat-value" id="stat-total-fy26">--</div>
@@ -31,21 +31,21 @@
 </div>
 
 <!-- Charts row 1: Service breakdown + Appropriation pie -->
-<div class="dashboard-grid" id="dash-charts" style="display:none">
+<div class="dashboard-grid" id="dash-charts" style="display:none" role="region" aria-label="Service and appropriation charts">
   <div class="chart-card">
     <h3>Budget by Service ($M)</h3>
     <div id="err-dash-service" style="display:none" class="empty-state" role="alert"></div>
-    <canvas id="dash-service-chart" height="250"></canvas>
+    <canvas id="dash-service-chart" height="250" role="img" aria-label="Bar chart showing budget by service in millions"></canvas>
   </div>
   <div class="chart-card">
     <h3>By Appropriation</h3>
     <div id="err-dash-approp" style="display:none" class="empty-state" role="alert"></div>
-    <canvas id="dash-approp-chart" height="250"></canvas>
+    <canvas id="dash-approp-chart" height="250" role="img" aria-label="Doughnut chart showing budget by appropriation type"></canvas>
   </div>
 </div>
 
 <!-- Top 10 programs -->
-<div class="dashboard-grid" id="dash-programs" style="display:none">
+<div class="dashboard-grid" id="dash-programs" style="display:none" role="region" aria-label="Top programs">
   <div class="chart-card" style="grid-column: 1 / -1">
     <h3>Top 10 Programs by FY2026 Request</h3>
     <div id="dash-top-programs"></div>

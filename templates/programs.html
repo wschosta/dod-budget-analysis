@@ -3,9 +3,28 @@
 {% block title %}Program Explorer — DoD Budget Explorer{% endblock %}
 
 {% block content %}
+{# FALCON-12: Programs page intro with enrichment status #}
+<div class="programs-intro">
+  <h2>Program Explorer</h2>
+  <p class="programs-subtitle">
+    Browse and search Program Elements (PEs) across all military services and defense agencies.
+    Each PE card links to detailed funding history, trend charts, and narrative descriptions.
+  </p>
+  <div class="programs-stats" id="programs-stats">
+    <!-- Populated by JS from /api/v1/metadata -->
+  </div>
+</div>
+
 <div class="programs-layout">
 
-  <aside class="filter-panel">
+  {# FALCON-14: Mobile filter drawer toggle #}
+  <button type="button" class="filter-drawer-toggle" id="pe-filter-drawer-toggle"
+          aria-expanded="false" aria-controls="pe-filter-panel"
+          onclick="toggleFilterDrawer('pe-filter-panel','pe-filter-drawer-toggle')">
+    Filters &amp; Search Options
+  </button>
+
+  <aside class="filter-panel" id="pe-filter-panel" aria-label="Program filters">
     <h2>Program Filters</h2>
     <form id="pe-filter-form"
           role="search"
@@ -54,7 +73,7 @@
     </form>
   </aside>
 
-  <section>
+  <section aria-label="Program list">
     <div id="pe-loading" class="htmx-indicator" style="margin-bottom:.5rem">
       <span class="spinner"></span> Loading programs&hellip;
     </div>

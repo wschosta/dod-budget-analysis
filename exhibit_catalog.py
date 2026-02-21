@@ -295,7 +295,7 @@ EXHIBIT_CATALOG = {
              "description": "Program Element number"},
             {"field": "sub_element", "header_patterns": ["Sub-Element", "Sub Element"], "dtype": "text",
              "description": "Sub-element or sub-project designation"},
-            {"field": "title", "header_patterns": ["Program Title"], "dtype": "text",
+            {"field": "title", "header_patterns": ["Program Title", "Title"], "dtype": "text",
              "description": "Program element title or description"},
             {"field": "prior_year_amount", "header_patterns": ["Prior Year"], "dtype": "currency_thousands",
              "description": "Prior year funding in thousands"},

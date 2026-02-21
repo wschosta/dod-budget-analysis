@@ -219,7 +219,7 @@ a:hover { text-decoration: underline; }
   padding: 1.5rem 1rem;
 }
 
-/* ── Footer ───────────────────────────────────────────────────────────────── */
+/* ── Footer (FALCON-7: enhanced) ──────────────────────────────────────────── */
 .site-footer {
   background: var(--bg-footer);
   border-top: 1px solid var(--border-color);
@@ -227,6 +227,72 @@ a:hover { text-decoration: underline; }
   font-size: .8rem;
   color: var(--text-secondary);
   text-align: center;
+}
+.footer-content { display: flex; flex-direction: column; gap: .35rem; align-items: center; }
+.footer-meta { font-size: .72rem; color: var(--text-secondary); }
+.footer-links { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; justify-content: center; }
+.footer-links a { font-size: .8rem; }
+
+/* ── FALCON-1: Hero search section ────────────────────────────────────────── */
+.hero-search {
+  text-align: center;
+  padding: 2rem 1rem 1.5rem;
+  margin-bottom: 1.5rem;
+}
+.hero-title {
+  font-family: var(--font-heading);
+  font-size: 1.8rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: .5rem;
+}
+.hero-subtitle {
+  font-size: .95rem;
+  color: var(--text-secondary);
+  margin-bottom: 1.25rem;
+  max-width: 550px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.hero-search-form {
+  display: flex;
+  max-width: 640px;
+  margin: 0 auto;
+  gap: .5rem;
+}
+.hero-search-input {
+  flex: 1;
+  padding: .7rem 1rem;
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius);
+  font-size: 1rem;
+  font-family: var(--font-body);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  transition: border-color .15s;
+}
+.hero-search-input:focus {
+  outline: none;
+  border-color: var(--clr-blue);
+}
+.hero-search-btn {
+  padding: .7rem 1.5rem;
+  font-size: 1rem;
+  min-height: 48px;
+}
+
+/* FALCON-1: Landing summary visuals */
+.landing-visuals { margin-bottom: 1.5rem; }
+.landing-charts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+.landing-chart { cursor: default; }
+@media (max-width: 768px) {
+  .hero-search-form { flex-direction: column; }
+  .landing-charts-grid { grid-template-columns: 1fr; }
+  .hero-title { font-size: 1.4rem; }
 }
 
 /* ── Search layout (filter sidebar + results) ─────────────────────────────── */
@@ -250,8 +316,58 @@ a:hover { text-decoration: underline; }
   text-transform: uppercase;
   letter-spacing: .05em;
   color: var(--clr-gray-700);
+  margin-bottom: 0;
+}
+
+/* FALCON-3: Collapsible filter panel header */
+.filter-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: .75rem;
 }
+.filter-collapse-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: .75rem;
+  color: var(--text-secondary);
+  padding: .2rem;
+  line-height: 1;
+}
+.filter-panel.collapsed form { display: none; }
+.filter-panel.collapsed .filter-collapse-btn { transform: rotate(180deg); }
+
+/* FALCON-3: Collapsible filter sections */
+.filter-section {
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: .5rem;
+  margin-bottom: .5rem;
+}
+.filter-section:last-of-type { border-bottom: none; }
+.filter-section-header {
+  font-size: .78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: .3rem 0;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.filter-section-header::-webkit-details-marker { display: none; }
+.filter-section-header::after {
+  content: "\25B6";
+  font-size: .6rem;
+  transition: transform .15s;
+}
+.filter-section[open] > .filter-section-header::after {
+  transform: rotate(90deg);
+}
+
 .filter-group { margin-bottom: 1rem; }
 .filter-group label {
   display: block;
@@ -328,6 +444,18 @@ a:hover { text-decoration: underline; }
   font-size: .85rem;
   color: var(--clr-gray-700);
 }
+/* FALCON-6: Export button group */
+.export-btn-group {
+  display: flex;
+  gap: .25rem;
+  align-items: center;
+}
+.export-btn-group .export-btn {
+  padding: .2rem .5rem;
+  font-size: .72rem;
+  min-height: 28px;
+}
+
 .col-toggles {
   display: flex;
   gap: .4rem;
@@ -613,7 +741,46 @@ tr.selected td { background: var(--clr-sky); }
   flex-wrap: wrap;
 }
 
-/* ── Responsive (3.A7-a) ──────────────────────────────────────────────────── */
+/* ── Responsive (3.A7-a + FALCON-14) ─────────────────────────────────────── */
+
+/* FALCON-14: Filter drawer toggle button (hidden on desktop) */
+.filter-drawer-toggle {
+  display: none;
+  width: 100%;
+  padding: .6rem 1rem;
+  margin-bottom: .75rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  font-size: .85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+.filter-drawer-toggle::after {
+  content: "\25BC";
+  float: right;
+  font-size: .7rem;
+  transition: transform .2s;
+}
+.filter-drawer-toggle.open::after {
+  transform: rotate(180deg);
+}
+
+/* FALCON-14: Horizontal scroll hint for tables on touch devices */
+.table-wrapper {
+  -webkit-overflow-scrolling: touch;
+  position: relative;
+}
+.table-scroll-hint {
+  display: none;
+  text-align: center;
+  font-size: .75rem;
+  color: var(--text-secondary);
+  padding: .25rem 0;
+}
+
 @media (max-width: 768px) {
   .hamburger { display: flex; }
   .nav-links {
@@ -630,17 +797,49 @@ tr.selected td { background: var(--clr-sky); }
   }
   .nav-links.open { display: flex; }
   .nav-links a { margin-left: 0; padding: .5rem 0; }
+
+  /* FALCON-14: Filter drawer behavior */
   .search-layout {
     grid-template-columns: 1fr;
   }
+  .filter-drawer-toggle { display: block; }
   .filter-panel {
     order: -1;
+    display: none;
   }
+  .filter-panel.drawer-open {
+    display: block;
+  }
+
+  /* FALCON-14: Programs filter drawer */
+  .programs-layout {
+    grid-template-columns: 1fr;
+  }
+
   .charts-grid {
     grid-template-columns: 1fr;
   }
   .col-toggles { display: none; }  /* hide column toggles on mobile */
   td, th { padding: .45rem .5rem; font-size: .8rem; }
+
+  /* FALCON-14: Table scroll hint on narrow screens */
+  .table-scroll-hint { display: block; }
+  .table-wrapper table { min-width: 640px; }
+
+  /* FALCON-14: Chart responsive sizing */
+  .chart-card canvas { max-height: 250px; }
+  .chart-card { padding: .75rem; }
+  .chart-export-btn { font-size: .75rem; padding: .25rem .5rem; }
+
+  /* FALCON-14: Footer responsive */
+  .footer-content { flex-direction: column; gap: .5rem; text-align: center; }
+  .footer-links { justify-content: center; }
+
+  /* FALCON-14: PE detail responsive */
+  .pe-meta { flex-wrap: wrap; }
+  .pe-enrichment-status { flex-wrap: wrap; }
+  .pe-actions { flex-direction: column; }
+  .pe-actions .btn { width: 100%; text-align: center; }
 }
 
 /* ── Tablet breakpoint (~600px) ────────────────────────────────────────────── */
@@ -648,11 +847,40 @@ tr.selected td { background: var(--clr-sky); }
   .charts-grid { grid-template-columns: 1fr; }
   .dashboard-stats { grid-template-columns: repeat(2, 1fr); }
   .pe-card-grid { grid-template-columns: 1fr; }
+  .pe-related-grid { grid-template-columns: 1fr; }
+
+  /* FALCON-14: Compact filter groups at tablet */
+  .filter-group label { font-size: .75rem; }
+  .filter-group select,
+  .filter-group input { font-size: .8rem; }
+
+  /* FALCON-14: Landing charts single-column */
+  .landing-charts-grid { grid-template-columns: 1fr; }
+  .hero-search-form { flex-direction: column; }
+  .hero-title { font-size: 1.4rem; }
+
+  /* FALCON-14: Advanced search compact */
+  .adv-condition-row { flex-wrap: wrap; }
+  .adv-field, .adv-op { flex: 1 1 100%; }
+
+  /* FALCON-14: Results header stacking */
+  .results-header { flex-wrap: wrap; gap: .5rem; }
+  .export-btn-group { order: 10; }
 }
 
 @media (max-width: 480px) {
   .results-header { flex-direction: column; align-items: flex-start; }
   .dashboard-stats { grid-template-columns: 1fr; }
+
+  /* FALCON-14: Very small screen tweaks */
+  .container { padding: 0 .5rem; }
+  .main-content { padding: .75rem .5rem; }
+  .hero-search { padding: 1.5rem .5rem; }
+  .hero-subtitle { font-size: .85rem; }
+  .stat-card { padding: .75rem; }
+  .stat-label { font-size: .7rem; }
+  .stat-value { font-size: 1.2rem; }
+  .breadcrumb { font-size: .8rem; }
 }
 
 /* ── CSS-001: Focus-visible styles for keyboard navigation ───────────────── */
@@ -945,6 +1173,74 @@ tr:focus-within td {
 .autocomplete-item:hover { background: var(--clr-sky); }
 .autocomplete-field { font-size: .75rem; color: var(--text-secondary); }
 
+/* ── FALCON-4: Advanced search UI ────────────────────────────────────────── */
+.advanced-search {
+  max-width: 640px;
+  margin: 1rem auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 1rem;
+  box-shadow: var(--shadow-sm);
+}
+.advanced-search-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: .5rem;
+}
+.advanced-search-header h3 { font-size: .95rem; margin: 0; }
+.advanced-search-help {
+  font-size: .82rem;
+  color: var(--text-secondary);
+  margin-bottom: .75rem;
+}
+.adv-conditions { display: flex; flex-direction: column; gap: .5rem; margin-bottom: .75rem; }
+.adv-condition-row {
+  display: flex;
+  gap: .35rem;
+  align-items: center;
+}
+.adv-condition-row select,
+.adv-condition-row input {
+  padding: .35rem .5rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  font-size: .82rem;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-family: inherit;
+}
+.adv-field { flex: 0 0 150px; }
+.adv-op { flex: 0 0 100px; }
+.adv-value { flex: 1; min-width: 0; }
+.adv-remove-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--clr-red);
+  font-size: 1rem;
+  padding: .2rem .4rem;
+  line-height: 1;
+}
+.advanced-search-actions {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+.advanced-search-syntax { margin-top: .75rem; }
+.advanced-search-syntax code {
+  background: var(--clr-gray-100);
+  padding: .1rem .3rem;
+  border-radius: 3px;
+  font-size: .78rem;
+}
+.hero-actions {
+  margin-top: .75rem;
+  text-align: center;
+}
+/* FALCON-14: adv-condition responsive now consolidated in 600px block */
+
 /* ── Saved searches ──────────────────────────────────────────────────────── */
 .saved-search-item {
   display: flex;
@@ -954,6 +1250,46 @@ tr:focus-within td {
   border-bottom: 1px solid var(--clr-gray-100);
 }
 .saved-search-item:last-child { border-bottom: none; }
+
+/* ── FALCON-12: Programs intro ────────────────────────────────────────────── */
+.programs-intro {
+  margin-bottom: 1.25rem;
+}
+.programs-intro h2 { margin-bottom: .35rem; }
+.programs-subtitle {
+  font-size: .9rem;
+  color: var(--text-secondary);
+  margin-bottom: .5rem;
+  max-width: 600px;
+}
+.programs-stats {
+  font-size: .8rem;
+  color: var(--text-secondary);
+}
+
+/* FALCON-12: Enrichment badges */
+.pe-enrichment-status {
+  display: flex;
+  gap: .35rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.enrichment-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+  padding: .15rem .5rem;
+  border-radius: 99px;
+  font-size: .72rem;
+  background: var(--clr-gray-100);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+.enrichment-badge.enrichment-complete {
+  background: var(--clr-sky);
+  border-color: var(--clr-blue);
+  color: var(--clr-navy);
+}
 
 /* ── Program Explorer ─────────────────────────────────────────────────────── */
 .programs-layout {
@@ -1030,11 +1366,7 @@ tr:focus-within td {
 .pe-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
 .pe-related-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .75rem; }
 
-@media (max-width: 768px) {
-  .programs-layout { grid-template-columns: 1fr; }
-  .pe-card-grid { grid-template-columns: 1fr; }
-  .pe-related-grid { grid-template-columns: 1fr; }
-}
+/* FALCON-14: programs-layout responsive now consolidated in main 768px block above */
 
 /* ── Dashboard ────────────────────────────────────────────────────────────── */
 .dashboard-stats {
@@ -1105,6 +1437,25 @@ tr:focus-within td {
 .about-page ul { padding-left: 1.5rem; margin-bottom: .75rem; }
 .about-page li { margin-bottom: .5rem; line-height: 1.55; }
 
+/* ── FALCON-7: Glossary ──────────────────────────────────────────────────── */
+.glossary { margin-top: 1.5rem; }
+.glossary h3 { margin-bottom: .75rem; font-size: 1rem; }
+.glossary-list dt {
+  font-weight: 600;
+  margin-top: .75rem;
+  color: var(--text-primary);
+  font-size: .9rem;
+}
+.glossary-list dd {
+  margin-left: 0;
+  padding-left: 1rem;
+  border-left: 2px solid var(--clr-blue);
+  font-size: .85rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  margin-bottom: .25rem;
+}
+
 /* LION-010: Theme toggle button */
 .theme-toggle {
   background: transparent;
@@ -1133,13 +1484,39 @@ tr:focus-within td {
   :root:not([data-theme="light"]) .theme-toggle .icon-moon { display: none; }
 }
 
-/* ── Data density options ─────────────────────────────────────────────────── */
+/* ── Data density options (FALCON-2) ─────────────────────────────────────── */
 /* Three density levels for table rows. Default: comfortable.                 */
 /* Applied via class on a parent container: density-compact, density-spacious */
 .density-compact td { padding: .3rem .5rem; font-size: .8rem; }
 .density-compact th { padding: .35rem .5rem; font-size: .72rem; }
 .density-spacious td { padding: .75rem 1rem; font-size: .9rem; }
 .density-spacious th { padding: .7rem 1rem; font-size: .82rem; }
+
+/* FALCON-2: Density toggle buttons */
+.density-toggles {
+  display: flex;
+  gap: .25rem;
+  align-items: center;
+}
+.density-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: .2rem .4rem;
+  font-size: .75rem;
+  color: var(--text-secondary);
+  min-width: 28px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.density-btn.active {
+  background: var(--clr-blue);
+  color: #fff;
+  border-color: var(--clr-blue);
+}
 
 /* ── Reduced motion ──────────────────────────────────────────────────────── */
 /* Respect prefers-reduced-motion for accessibility (decision 5.4)            */
@@ -1156,6 +1533,66 @@ tr:focus-within td {
   [data-tooltip]::before {
     transition: none;
   }
+}
+
+/* ── FALCON-10: Toast notifications ─────────────────────────────────────── */
+.toast-container {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .6rem 1rem;
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow);
+  font-size: .85rem;
+  color: var(--text-primary);
+  min-width: 240px;
+  max-width: 400px;
+  animation: toast-in .25s ease-out;
+}
+.toast.toast-success { border-left: 3px solid var(--clr-green); }
+.toast.toast-info    { border-left: 3px solid var(--clr-blue); }
+.toast.toast-warning { border-left: 3px solid var(--clr-amber); }
+.toast.toast-error   { border-left: 3px solid var(--clr-red); }
+.toast-icon { font-size: 1rem; flex-shrink: 0; }
+.toast-success .toast-icon { color: var(--clr-green); }
+.toast-info .toast-icon    { color: var(--clr-blue); }
+.toast-warning .toast-icon { color: var(--clr-amber); }
+.toast-error .toast-icon   { color: var(--clr-red); }
+.toast-dismiss {
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: .9rem;
+  padding: 0 .25rem;
+  line-height: 1;
+}
+.toast-dismiss:hover { color: var(--text-primary); }
+.toast.removing { animation: toast-out .2s ease-in forwards; }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(1rem); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes toast-out {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(1rem); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast, .toast.removing { animation: none; }
 }
 
 /* LION-010: Dark mode overrides for inputs/selects */
@@ -1183,4 +1620,68 @@ tr:focus-within td {
   background: var(--bg-surface);
   border-color: var(--border-color);
   color: var(--text-primary);
+}
+
+/* FALCON-8: Dark mode overrides for new FALCON components */
+[data-theme="dark"] .density-btn {
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border-color: var(--border-color);
+}
+[data-theme="dark"] .advanced-search {
+  background: var(--bg-surface);
+  border-color: var(--border-color);
+}
+[data-theme="dark"] .adv-condition-row select,
+[data-theme="dark"] .adv-condition-row input {
+  background: var(--bg-body);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+[data-theme="dark"] .hero-search-input {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+[data-theme="dark"] .glossary-list dd {
+  border-left-color: var(--clr-blue);
+}
+/* FALCON-8: Ensure .btn-primary stays white text in dark mode */
+[data-theme="dark"] .btn-primary { color: #fff; }
+[data-theme="dark"] .btn-primary:hover { color: #fff; }
+
+/* FALCON-8: System dark mode overrides for same components */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .density-btn {
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    border-color: var(--border-color);
+  }
+  :root:not([data-theme="light"]) .advanced-search {
+    background: var(--bg-surface);
+    border-color: var(--border-color);
+  }
+  :root:not([data-theme="light"]) .adv-condition-row select,
+  :root:not([data-theme="light"]) .adv-condition-row input {
+    background: var(--bg-body);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+  }
+  :root:not([data-theme="light"]) .hero-search-input {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+  }
+  :root:not([data-theme="light"]) .filter-drawer-toggle {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+  }
+}
+
+/* FALCON-14: Dark mode filter drawer toggle */
+[data-theme="dark"] .filter-drawer-toggle {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-color: var(--border-color);
 }

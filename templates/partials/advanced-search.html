@@ -1,0 +1,38 @@
+<!-- FALCON-4: Advanced search UI with structured query builder -->
+<div class="advanced-search" id="advanced-search" style="display:none">
+  <div class="advanced-search-header">
+    <h3>Advanced Search</h3>
+    <button type="button" class="btn btn-secondary btn-sm"
+            onclick="toggleAdvancedSearch()" aria-label="Close advanced search">Close</button>
+  </div>
+  <p class="advanced-search-help">
+    Build complex queries using field-specific search. Results match <strong>all</strong> conditions.
+  </p>
+
+  <div id="adv-conditions" class="adv-conditions">
+    <!-- Condition rows are added dynamically by search.js -->
+  </div>
+
+  <div class="advanced-search-actions">
+    <button type="button" class="btn btn-secondary btn-sm"
+            onclick="addAdvancedCondition()">+ Add Condition</button>
+    <button type="button" class="btn btn-primary btn-sm"
+            onclick="executeAdvancedSearch()">Search</button>
+    <button type="button" class="btn btn-secondary btn-sm"
+            onclick="clearAdvancedConditions()">Clear All</button>
+  </div>
+
+  <div class="advanced-search-syntax">
+    <details>
+      <summary style="font-size:.78rem;color:var(--text-secondary);cursor:pointer">Query syntax reference</summary>
+      <div style="font-size:.78rem;color:var(--text-secondary);margin-top:.35rem;line-height:1.5">
+        <p><strong>Exact phrase:</strong> <code>"hypersonic missile"</code></p>
+        <p><strong>Exclude:</strong> <code>missile -navy</code></p>
+        <p><strong>PE number:</strong> <code>PE:0603285E</code></p>
+        <p><strong>Service:</strong> <code>service:army</code></p>
+        <p><strong>Fiscal year:</strong> <code>FY:2026</code></p>
+        <p><strong>Amount range:</strong> <code>amount:>100000</code> or <code>amount:50000-200000</code></p>
+      </div>
+    </details>
+  </div>
+</div>

@@ -269,7 +269,7 @@ def process_file(path: str) -> str:
 - CI/CD configuration valid
 
 **Fails if:**
-- `.github/workflows/optimization-tests.yml` missing
+- `.github/workflows/ci.yml` missing
 - `.pre-commit-hook.py` missing
 - Any utils file missing
 

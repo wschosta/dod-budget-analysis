@@ -5,16 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}DoD Budget Explorer{% endblock %}</title>
 
-  <!-- DONE [Group: LION] LION-010: Dark mode toggle with CSS custom properties -->
-  <script>
-    // LION-010: Apply saved theme before first paint to avoid flash
-    (function() {
-      var saved = localStorage.getItem('dod_theme');
-      if (saved) {
-        document.documentElement.setAttribute('data-theme', saved);
-      }
-    })();
-  </script>
+  <!-- FALCON-11: Dark mode init extracted to external file -->
+  <script src="/static/js/dark-mode.js"></script>
 
   <!-- FE-009: Meta description and Open Graph tags -->
   <meta name="description" content="Search and explore U.S. Department of Defense budget justification data across fiscal years, services, and appropriation accounts.">
@@ -53,12 +45,13 @@
         <span class="hamburger-bar"></span>
         <span class="hamburger-bar"></span>
       </button>
+      <!-- FALCON-7: Nav order — Home > Search > Charts > Programs > About > API Docs -->
       <div class="nav-links">
+        <a href="/"          {% if request.url.path == "/" %}class="active"{% endif %}>Home</a>
         <a href="/dashboard" {% if request.url.path == "/dashboard" %}class="active"{% endif %}>Dashboard</a>
-        <a href="/"          {% if request.url.path == "/" %}class="active"{% endif %}>Search</a>
         <a href="/charts"    {% if request.url.path == "/charts" %}class="active"{% endif %}>Charts</a>
         <a href="/programs"  {% if request.url.path.startswith("/programs") %}class="active"{% endif %}>Programs</a>
-        <a href="/about"     {% if request.url.path == "/about" %}class="active"{% endif %}>About</a>
+        <a href="/about"     {% if request.url.path == "/about" or request.url.path == "/glossary" %}class="active"{% endif %}>About</a>
         <a href="/docs"      target="_blank" rel="noopener">API Docs</a>
       </div>
       <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode">
@@ -73,14 +66,23 @@
   {% block content %}{% endblock %}
 </main>
 
+<!-- FALCON-7: Enhanced footer with metadata -->
 <footer class="site-footer">
-  <div class="container">
-    Data sourced from <a href="https://comptroller.defense.gov/Budget-Materials/" target="_blank"
-      rel="noopener">DoD Comptroller</a>.
-    This is an independent research tool; not affiliated with the U.S. Department of Defense.
-    <a href="/docs" target="_blank" rel="noopener">API</a>
-    <!-- DONE [Group: LION] LION-002: Feedback button -->
-    <button class="btn btn-secondary btn-sm feedback-btn" onclick="openFeedbackModal()" aria-label="Send feedback">Feedback</button>
+  <div class="container footer-content">
+    <div class="footer-main">
+      Data sourced from <a href="https://comptroller.defense.gov/Budget-Materials/" target="_blank"
+        rel="noopener">DoD Comptroller</a>.
+      This is an independent research tool; not affiliated with the U.S. Department of Defense.
+    </div>
+    <div class="footer-meta" id="footer-meta">
+      <!-- Populated via /api/v1/metadata by FALCON-7 JS -->
+    </div>
+    <div class="footer-links">
+      <a href="/about">About</a>
+      <a href="/about#glossary">Glossary</a>
+      <a href="/docs" target="_blank" rel="noopener">API</a>
+      <button class="btn btn-secondary btn-sm feedback-btn" onclick="openFeedbackModal()" aria-label="Send feedback">Feedback</button>
+    </div>
   </div>
 </footer>
 
@@ -88,6 +90,9 @@
 {% include "partials/feedback.html" %}
 
 <script src="/static/js/checkbox-select.js"></script>
+<!-- FALCON-10: Toast notification component -->
+{% include "partials/toast.html" %}
+
 {% block extra_scripts %}{% endblock %}
 </body>
 </html>

@@ -3,11 +3,57 @@
 {% block title %}Search — DoD Budget Explorer{% endblock %}
 
 {% block content %}
+{# ── FALCON-1: Hybrid landing — prominent search + clickable visuals ────── #}
+<section class="hero-search" id="hero-search" aria-label="Search">
+  <h1 class="hero-title">DoD Budget Explorer</h1>
+  <p class="hero-subtitle">Search and explore U.S. Department of Defense budget data across fiscal years, services, and programs.</p>
+  <form class="hero-search-form" role="search" aria-label="Quick search"
+        action="/" method="get">
+    <input type="text" name="q" class="hero-search-input"
+           value="{{ filters.q }}"
+           placeholder="Search programs, PE numbers, keywords..."
+           aria-label="Search budget data"
+           autocomplete="off">
+    <button type="submit" class="btn btn-primary hero-search-btn">Search</button>
+  </form>
+  <div class="hero-actions">
+    <button type="button" class="btn btn-secondary btn-sm" onclick="toggleAdvancedSearch()">Advanced Search</button>
+  </div>
+  {# FALCON-4: Advanced search UI #}
+  {% include "partials/advanced-search.html" %}
+</section>
+
+{# ── FALCON-1: Clickable summary visuals ─────────────────────────────── #}
+<section class="landing-visuals" id="landing-visuals" aria-label="Budget overview charts">
+  <div class="landing-charts-grid">
+    <div class="chart-card landing-chart" id="landing-service-chart-card">
+      <h3>Budget by Service</h3>
+      <canvas id="landing-service-chart" height="200" role="img" aria-label="Bar chart showing budget totals by military service"></canvas>
+    </div>
+    <div class="chart-card landing-chart" id="landing-approp-chart-card">
+      <h3>By Appropriation Type</h3>
+      <canvas id="landing-approp-chart" height="200" role="img" aria-label="Doughnut chart showing budget by appropriation type"></canvas>
+    </div>
+  </div>
+</section>
+
 <div class="search-layout">
 
-  {# ── Filter sidebar (3.A3-a) ─────────────────────────────────────────── #}
-  <aside class="filter-panel">
-    <h2>Filters</h2>
+  {# FALCON-14: Mobile filter drawer toggle #}
+  <button type="button" class="filter-drawer-toggle" id="filter-drawer-toggle"
+          aria-expanded="false" aria-controls="filter-panel"
+          onclick="toggleFilterDrawer()">
+    Filters &amp; Search Options
+  </button>
+
+  {# ── Filter sidebar (3.A3-a + FALCON-3: collapsible groups) ─────────── #}
+  <aside class="filter-panel" id="filter-panel" aria-label="Search filters">
+    <div class="filter-panel-header">
+      <h2>Filters</h2>
+      <button type="button" class="filter-collapse-btn" id="filter-collapse-btn"
+              aria-label="Collapse filters" aria-expanded="true"
+              onclick="toggleFilterPanel()">&#9650;</button>
+    </div>
     <form id="filter-form"
           role="search"
           aria-label="Budget data filters"
@@ -29,73 +75,85 @@
                hx-include="#filter-form">
       </div>
 
-      <div class="filter-group">
-        <label for="fiscal_year" data-tooltip="DoD fiscal year runs Oct 1 – Sep 30. FY2026 = Oct 2025 – Sep 2026. Select multiple years with Ctrl+click (Windows) or Cmd+click (Mac).">Fiscal Year</label>
-        <select id="fiscal_year" name="fiscal_year" multiple>
-          {% for fy in fiscal_years %}
-          <option value="{{ fy.fiscal_year }}"
-                  {% if fy.fiscal_year in filters.fiscal_year %}selected{% endif %}>
-            {{ fy.fiscal_year }} ({{ "{:,}".format(fy.row_count) }} rows)
-          </option>
-          {% endfor %}
-        </select>
-      </div>
-
-      {# FIX-002: Service dropdown now uses deduplicated values from budget_lines #}
-      <div class="filter-group">
-        <label for="service" data-tooltip="Military service or defense agency submitting the budget justification. Includes Army, Navy, Air Force, Space Force, Marine Corps, and Defense-Wide agencies.">Service / Agency</label>
-        <select id="service" name="service" multiple>
-          {% for svc in services %}
-          <option value="{{ svc.code }}"
-                  {% if svc.code in filters.service %}selected{% endif %}>
-            {{ svc.full_name if svc.full_name != svc.code else svc.code }}
-          </option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div class="filter-group">
-        <label for="exhibit_type" data-tooltip="Budget exhibit format. R-2: RDT&amp;E program details. P-5: procurement details. O-1: operation &amp; maintenance. P-1/R-1: summary rolls. C-1: construction. M-1: military personnel.">Exhibit Type</label>
-        <select id="exhibit_type" name="exhibit_type" multiple>
-          {% for et in exhibit_types %}
-          <option value="{{ et.code }}"
-                  {% if et.code in filters.exhibit_type %}selected{% endif %}>
-            {{ et.code }} — {{ et.display_name }}
-          </option>
-          {% endfor %}
-        </select>
-      </div>
-
-      {# FE-001: Amount range filters #}
-      <div class="filter-group">
-        <label data-tooltip="Amount in thousands of dollars ($K). Filter lines where the FY2026 request falls within this range.">Amount Range ($K)</label>
-        <div style="display:flex;gap:.4rem;align-items:center">
-          <input type="number" id="min_amount" name="min_amount"
-                 value="{{ filters.min_amount }}"
-                 placeholder="Min"
-                 style="width:50%"
-                 min="0">
-          <span style="font-size:.8rem;color:var(--clr-gray-700)">–</span>
-          <input type="number" id="max_amount" name="max_amount"
-                 value="{{ filters.max_amount }}"
-                 placeholder="Max"
-                 style="width:50%"
-                 min="0">
+      {# FALCON-3: Collapsible filter sections #}
+      <details class="filter-section" open>
+        <summary class="filter-section-header">Time &amp; Service</summary>
+        <div class="filter-group">
+          <label for="fiscal_year" data-tooltip="DoD fiscal year runs Oct 1 – Sep 30. FY2026 = Oct 2025 – Sep 2026. Select multiple years with Ctrl+click (Windows) or Cmd+click (Mac).">Fiscal Year</label>
+          <select id="fiscal_year" name="fiscal_year" multiple>
+            {% for fy in fiscal_years %}
+            <option value="{{ fy.fiscal_year }}"
+                    {% if fy.fiscal_year in filters.fiscal_year %}selected{% endif %}>
+              {{ fy.fiscal_year }} ({{ "{:,}".format(fy.row_count) }} rows)
+            </option>
+            {% endfor %}
+          </select>
         </div>
-      </div>
 
-      {# FE-002: Appropriation filter #}
-      <div class="filter-group">
-        <label for="appropriation_code" data-tooltip="Appropriation 'color of money' — e.g., RDT&amp;E, Procurement, O&amp;M. Select multiple with Ctrl+click (Windows) or Cmd+click (Mac).">Appropriation</label>
-        <select id="appropriation_code" name="appropriation_code" multiple>
-          {% for ap in appropriations %}
-          <option value="{{ ap.code }}"
-                  {% if ap.code in filters.appropriation_code %}selected{% endif %}>
-            {{ ap.code }}{% if ap.title %} — {{ ap.title }}{% endif %}
-          </option>
-          {% endfor %}
-        </select>
-      </div>
+        <div class="filter-group">
+          <label for="service" data-tooltip="Military service or defense agency submitting the budget justification. Includes Army, Navy, Air Force, Space Force, Marine Corps, and Defense-Wide agencies.">Service / Agency</label>
+          <select id="service" name="service" multiple>
+            {% for svc in services %}
+            <option value="{{ svc.code }}"
+                    {% if svc.code in filters.service %}selected{% endif %}>
+              {{ svc.full_name if svc.full_name != svc.code else svc.code }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+      </details>
+
+      <details class="filter-section" open>
+        <summary class="filter-section-header">Budget Category</summary>
+        <div class="filter-group">
+          <label for="exhibit_type" data-tooltip="Budget exhibit format. R-2: RDT&amp;E program details. P-5: procurement details. O-1: operation &amp; maintenance. P-1/R-1: summary rolls. C-1: construction. M-1: military personnel.">Exhibit Type</label>
+          <select id="exhibit_type" name="exhibit_type" multiple>
+            {% for et in exhibit_types %}
+            <option value="{{ et.code }}"
+                    {% if et.code in filters.exhibit_type %}selected{% endif %}>
+              {{ et.code }} — {{ et.display_name }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="filter-group">
+          <label for="appropriation_code" data-tooltip="Appropriation 'color of money' — e.g., RDT&amp;E, Procurement, O&amp;M. Select multiple with Ctrl+click (Windows) or Cmd+click (Mac).">Appropriation</label>
+          <select id="appropriation_code" name="appropriation_code" multiple>
+            {% for ap in appropriations %}
+            <option value="{{ ap.code }}"
+                    {% if ap.code in filters.appropriation_code %}selected{% endif %}>
+              {{ ap.code }}{% if ap.title %} — {{ ap.title }}{% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+      </details>
+
+      <details class="filter-section" open>
+        <summary class="filter-section-header">Amount Range</summary>
+        {# FE-001: Amount range filters + FALCON-3: dynamic FY column selector #}
+        <div class="filter-group">
+          <span id="amount-range-label" data-tooltip="Amount in thousands of dollars ($K). Filter lines where the selected FY column falls within this range.">Amount Range ($K)</span>
+          <div style="display:flex;gap:.4rem;align-items:center" role="group" aria-labelledby="amount-range-label">
+            <label for="min_amount" class="sr-only">Minimum amount ($K)</label>
+            <input type="number" id="min_amount" name="min_amount"
+                   value="{{ filters.min_amount }}"
+                   placeholder="Min"
+                   aria-label="Minimum amount in thousands"
+                   style="width:50%"
+                   min="0">
+            <span style="font-size:.8rem;color:var(--clr-gray-700)" aria-hidden="true">–</span>
+            <label for="max_amount" class="sr-only">Maximum amount ($K)</label>
+            <input type="number" id="max_amount" name="max_amount"
+                   value="{{ filters.max_amount }}"
+                   placeholder="Max"
+                   aria-label="Maximum amount in thousands"
+                   style="width:50%"
+                   min="0">
+          </div>
+        </div>
+      </details>
 
       <div class="filter-actions">
         <button type="submit" class="btn btn-primary btn-sm">Apply</button>
@@ -126,7 +184,7 @@
   </aside>
 
   {# ── Results area ─────────────────────────────────────────────────────── #}
-  <section>
+  <section aria-label="Search results">
     {# LION-008: Print header (visible only when printing) #}
     <div class="print-header">
       <h2>DoD Budget Explorer</h2>
@@ -197,4 +255,6 @@
 
 {% block extra_scripts %}
 <script src="/static/js/app.js"></script>
+<!-- FALCON-4: Advanced search UI -->
+<script src="/static/js/search.js"></script>
 {% endblock %}

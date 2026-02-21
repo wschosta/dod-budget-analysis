@@ -33,12 +33,13 @@ function toggleTheme() {
 }
 
 function updateChartTheme() {
-  // Update Chart.js defaults color for theme
+  // FALCON-8: Use CSS custom properties for chart theme colors
   if (typeof Chart !== "undefined") {
+    var style = getComputedStyle(document.documentElement);
+    var textColor = style.getPropertyValue("--chart-text").trim() || style.getPropertyValue("--text-secondary").trim() || "#374151";
     var isDark = document.documentElement.getAttribute("data-theme") === "dark" ||
       (!document.documentElement.getAttribute("data-theme") &&
        window.matchMedia("(prefers-color-scheme: dark)").matches);
-    var textColor = isDark ? "#c4c4d4" : "#374151";
     var gridColor = isDark ? "rgba(255,255,255,.1)" : "rgba(0,0,0,.1)";
     Chart.defaults.color = textColor;
     Chart.defaults.borderColor = gridColor;
@@ -50,6 +51,7 @@ function updateChartTheme() {
 
 const COL_KEY = "dod_hidden_cols";
 const PAGE_SIZE_KEY = "dod_page_size";
+var AMT_FMT_KEY = "dod_amt_fmt";
 
 function toggleCol(btn, cssClass) {
   btn.classList.toggle("active");
@@ -105,6 +107,93 @@ function selectRow(tr) {
   });
   tr.classList.add("selected");
   tr.setAttribute("aria-expanded", "true");
+}
+
+// ── FALCON-2: Keyboard navigation for search results ────────────────────────
+
+var DENSITY_KEY = "dod_density";
+
+function initResultsKeyboardNav() {
+  var container = document.getElementById("results-container");
+  if (!container) return;
+
+  container.addEventListener("keydown", function(e) {
+    var rows = Array.from(container.querySelectorAll("tbody tr[tabindex]"));
+    if (!rows.length) return;
+
+    var current = document.activeElement;
+    var idx = rows.indexOf(current);
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      var next = idx < rows.length - 1 ? rows[idx + 1] : rows[0];
+      next.focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      var prev = idx > 0 ? rows[idx - 1] : rows[rows.length - 1];
+      prev.focus();
+    } else if (e.key === "Enter" || e.key === " ") {
+      if (current && rows.includes(current)) {
+        e.preventDefault();
+        selectRow(current);
+        htmx.trigger(current, "click");
+      }
+    } else if (e.key === "Escape") {
+      var detail = document.getElementById("detail-container");
+      if (detail && detail.innerHTML.trim()) {
+        detail.innerHTML = "";
+        if (current && rows.includes(current)) current.focus();
+      }
+    }
+  });
+}
+
+// FALCON-2: Density toggle
+function setDensity(level) {
+  var wrapper = document.getElementById("results-container");
+  if (!wrapper) return;
+  wrapper.classList.remove("density-compact", "density-spacious");
+  if (level === "compact") wrapper.classList.add("density-compact");
+  else if (level === "spacious") wrapper.classList.add("density-spacious");
+  // comfortable = default (no class)
+  localStorage.setItem(DENSITY_KEY, level);
+  // Update toggle button states
+  document.querySelectorAll(".density-btn").forEach(function(btn) {
+    btn.classList.toggle("active", btn.getAttribute("data-density") === level);
+  });
+}
+
+function restoreDensity() {
+  var saved = localStorage.getItem(DENSITY_KEY);
+  if (saved) setDensity(saved);
+}
+
+// ── FALCON-3: Collapsible filter panel ───────────────────────────────────────
+
+function toggleFilterPanel() {
+  var panel = document.getElementById("filter-panel");
+  var btn = document.getElementById("filter-collapse-btn");
+  if (!panel) return;
+  panel.classList.toggle("collapsed");
+  var isCollapsed = panel.classList.contains("collapsed");
+  if (btn) {
+    btn.setAttribute("aria-expanded", String(!isCollapsed));
+    btn.setAttribute("aria-label", isCollapsed ? "Expand filters" : "Collapse filters");
+  }
+}
+
+// ── FALCON-14: Filter drawer toggle for mobile viewports ──────────────────────
+function toggleFilterDrawer(panelId, btnId) {
+  panelId = panelId || "filter-panel";
+  btnId = btnId || "filter-drawer-toggle";
+  var panel = document.getElementById(panelId);
+  var btn = document.getElementById(btnId);
+  if (!panel) return;
+  var isOpen = panel.classList.toggle("drawer-open");
+  if (btn) {
+    btn.classList.toggle("open", isOpen);
+    btn.setAttribute("aria-expanded", String(isOpen));
+  }
 }
 
 // ── URL query params → filter state (3.A3-b) ──────────────────────────────────
@@ -192,6 +281,23 @@ function updateDownloadLinks() {
   if (xlsx) xlsx.href = buildDownloadURL("xlsx");  // JS-001
 }
 
+// ── FALCON-6: Quick export with toast notifications ─────────────────────────
+
+function quickExport(fmt) {
+  var url = buildDownloadURL(fmt);
+  if (typeof showToast === "function") {
+    showToast("Preparing " + fmt.toUpperCase() + " download...", "info", 2000);
+  }
+  // Trigger download via hidden link
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = "";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function() { document.body.removeChild(a); }, 100);
+}
+
 // ── JS-002: Show estimated result count in download modal ──────────────────────
 
 function updateDownloadModalCount() {
@@ -262,8 +368,9 @@ function closeFeedbackModal() {
         if (resp.ok) {
           closeFeedbackModal();
           form.reset();
+          if (typeof showToast === "function") showToast("Feedback submitted. Thank you!", "success");
         } else {
-          alert("Failed to submit feedback. Please try again.");
+          if (typeof showToast === "function") showToast("Failed to submit feedback. Please try again.", "error");
         }
       }).catch(function() {
         // Endpoint may not exist yet — close anyway since feedback can't be saved
@@ -307,12 +414,13 @@ function copyShareURL() {
     document.execCommand("copy");
     document.body.removeChild(ta);
   }
-  // Show "Copied!" tooltip
+  // Show "Copied!" tooltip and toast
   var btn = document.getElementById("share-btn");
   if (btn) {
     btn.classList.add("copied");
     setTimeout(function() { btn.classList.remove("copied"); }, 1500);
   }
+  if (typeof showToast === "function") showToast("URL copied to clipboard", "success");
 }
 
 // ── FE-010: Page-size selector ────────────────────────────────────────────────
@@ -389,6 +497,44 @@ document.addEventListener("keydown", function (e) {
   }
 });
 
+// ── FALCON-5: URL-based state management ─────────────────────────────────────
+// Handle back/forward navigation by re-fetching results from the URL.
+
+window.addEventListener("popstate", function () {
+  restoreFiltersFromURL();
+  // Reload results via HTMX to match the URL
+  var container = document.getElementById("results-container");
+  var form = document.getElementById("filter-form");
+  if (container && form) {
+    var url = "/partials/results" + window.location.search;
+    htmx.ajax("GET", url, {
+      target: "#results-container",
+      swap: "innerHTML"
+    });
+  }
+});
+
+// FALCON-5: Sync URL from form state before HTMX pushes
+document.addEventListener("htmx:beforeRequest", function(evt) {
+  var form = document.getElementById("filter-form");
+  if (!form || evt.detail.target.id !== "results-container") return;
+
+  // Build canonical URL from current form state
+  var data = new FormData(form);
+  var params = new URLSearchParams();
+  for (var pair of data.entries()) {
+    if (pair[1]) params.append(pair[0], pair[1]);
+  }
+  // Preserve sort/page from htmx vals if present
+  var htmxVals = evt.detail.requestConfig && evt.detail.requestConfig.parameters;
+  if (htmxVals) {
+    if (htmxVals.sort_by) params.set("sort_by", htmxVals.sort_by);
+    if (htmxVals.sort_dir) params.set("sort_dir", htmxVals.sort_dir);
+    if (htmxVals.page) params.set("page", htmxVals.page);
+    if (htmxVals.page_size) params.set("page_size", htmxVals.page_size);
+  }
+});
+
 // ── HTMX events ────────────────────────────────────────────────────────────────
 // After every HTMX swap, re-apply column visibility and update download links.
 
@@ -397,6 +543,9 @@ document.addEventListener("htmx:afterSwap", function (evt) {
     applyHiddenCols(getHiddenCols());
     updateDownloadLinks();
     restorePageSize();
+    restoreDensity();
+    restoreAmountFormat();
+    if (currentAmtFmt !== "K") applyAmountFormat();
   }
 
   // JS-004: focus detail panel heading after it loads
@@ -421,6 +570,245 @@ document.addEventListener("htmx:afterSwap", function (evt) {
   }
 });
 
+// ── FALCON-10: Toast notifications ───────────────────────────────────────────
+
+var TOAST_ICONS = {
+  success: "\u2713",
+  info: "\u2139",
+  warning: "\u26A0",
+  error: "\u2717"
+};
+
+/**
+ * Show a toast notification.
+ * @param {string} message - The message to display
+ * @param {string} type - One of: success, info, warning, error
+ * @param {number} duration - Auto-dismiss after ms (default 4000, 0 to disable)
+ */
+function showToast(message, type, duration) {
+  type = type || "info";
+  if (duration === undefined) duration = 4000;
+
+  var container = document.getElementById("toast-container");
+  if (!container) return;
+
+  var toast = document.createElement("div");
+  toast.className = "toast toast-" + type;
+  toast.setAttribute("role", "alert");
+
+  var icon = document.createElement("span");
+  icon.className = "toast-icon";
+  icon.textContent = TOAST_ICONS[type] || TOAST_ICONS.info;
+  icon.setAttribute("aria-hidden", "true");
+
+  var msg = document.createElement("span");
+  msg.textContent = message;
+
+  var dismiss = document.createElement("button");
+  dismiss.className = "toast-dismiss";
+  dismiss.textContent = "\u00D7";
+  dismiss.setAttribute("aria-label", "Dismiss");
+  dismiss.addEventListener("click", function() { removeToast(toast); });
+
+  toast.appendChild(icon);
+  toast.appendChild(msg);
+  toast.appendChild(dismiss);
+  container.appendChild(toast);
+
+  if (duration > 0) {
+    setTimeout(function() { removeToast(toast); }, duration);
+  }
+}
+
+function removeToast(toast) {
+  if (!toast || !toast.parentNode) return;
+  toast.classList.add("removing");
+  setTimeout(function() {
+    if (toast.parentNode) toast.parentNode.removeChild(toast);
+  }, 200);
+}
+
+// ── FALCON-9: Amount formatting toggle ($K / $M / $B) ───────────────────────
+
+var currentAmtFmt = localStorage.getItem(AMT_FMT_KEY) || "K";
+
+/**
+ * Format amount in $K to the selected display unit.
+ * @param {number} valK - Amount in thousands of dollars
+ * @returns {string} Formatted string
+ */
+function formatAmount(valK) {
+  if (valK == null || isNaN(valK)) return "\u2014";
+  var fmt = currentAmtFmt;
+  if (fmt === "M") {
+    return "$" + (valK / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 }) + "M";
+  } else if (fmt === "B") {
+    return "$" + (valK / 1000000).toLocaleString(undefined, { maximumFractionDigits: 2 }) + "B";
+  }
+  // Default: $K
+  return "$" + Number(valK).toLocaleString(undefined, { maximumFractionDigits: 0 }) + "K";
+}
+
+function setAmountFormat(fmt) {
+  currentAmtFmt = fmt;
+  localStorage.setItem(AMT_FMT_KEY, fmt);
+  // Update toggle button states
+  document.querySelectorAll(".amt-fmt-btn").forEach(function(btn) {
+    btn.classList.toggle("active", btn.getAttribute("data-fmt") === fmt);
+  });
+  // Re-format all visible amounts in the results table
+  applyAmountFormat();
+}
+
+function applyAmountFormat() {
+  document.querySelectorAll(".td-amount[data-raw]").forEach(function(el) {
+    var raw = parseFloat(el.getAttribute("data-raw"));
+    if (!isNaN(raw)) {
+      el.textContent = formatAmount(raw);
+    }
+  });
+}
+
+function restoreAmountFormat() {
+  var saved = localStorage.getItem(AMT_FMT_KEY);
+  if (saved) {
+    currentAmtFmt = saved;
+    document.querySelectorAll(".amt-fmt-btn").forEach(function(btn) {
+      btn.classList.toggle("active", btn.getAttribute("data-fmt") === saved);
+    });
+  }
+}
+
+// ── FALCON-7: Footer metadata ────────────────────────────────────────────────
+
+function loadFooterMetadata() {
+  var el = document.getElementById("footer-meta");
+  if (!el) return;
+  fetch("/api/v1/metadata")
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(data) {
+      if (!data) return;
+      var parts = [];
+      if (data.version) parts.push("v" + data.version);
+      if (data.last_refresh) {
+        var d = data.last_refresh.slice(0, 10);
+        parts.push("Updated " + d);
+      }
+      if (data.budget_lines) parts.push(data.budget_lines.toLocaleString() + " budget lines");
+      if (data.pe_count) parts.push(data.pe_count.toLocaleString() + " PEs");
+      if (data.fiscal_years && data.fiscal_years.length) {
+        parts.push(data.fiscal_years.join(", "));
+      }
+      if (parts.length) el.textContent = parts.join(" \u00B7 ");
+    })
+    .catch(function() { /* silently ignore — footer just stays empty */ });
+}
+
+// ── FALCON-1: Landing page summary visuals ──────────────────────────────────
+
+var LANDING_COLORS = [
+  "#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed",
+  "#0891b2", "#c2410c", "#065f46", "#92400e", "#1e1b4b"
+];
+
+function loadLandingVisuals() {
+  var svcCanvas = document.getElementById("landing-service-chart");
+  var appCanvas = document.getElementById("landing-approp-chart");
+  if (!svcCanvas && !appCanvas) return; // not on landing page
+
+  // Load service breakdown chart
+  if (svcCanvas) {
+    fetch("/api/v1/aggregations?group_by=service")
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (!data || !data.rows || !data.rows.length) return;
+        var cols = Object.keys(data.rows[0]).filter(function(k) { return /^total_fy\d+/.test(k); }).sort();
+        var reqCol = cols.find(function(c) { return c.includes("request"); }) || cols[cols.length - 1];
+        if (!reqCol) return;
+
+        var labels = data.rows.filter(function(r) { return r[reqCol]; }).map(function(r) { return r.group_value || "Unknown"; });
+        var amounts = data.rows.filter(function(r) { return r[reqCol]; }).map(function(r) { return (r[reqCol] || 0) / 1000; });
+
+        new Chart(svcCanvas, {
+          type: "bar",
+          data: {
+            labels: labels,
+            datasets: [{
+              label: "FY Request ($M)",
+              data: amounts,
+              backgroundColor: LANDING_COLORS,
+              borderRadius: 4
+            }]
+          },
+          options: {
+            indexAxis: "y",
+            plugins: { legend: { display: false } },
+            scales: { x: { ticks: { callback: function(v) { return "$" + v.toLocaleString() + "M"; } } } },
+            onHover: function(e, el) { e.native.target.style.cursor = el.length ? "pointer" : "default"; },
+            onClick: function(e, el) {
+              if (el.length) {
+                var idx = el[0].index;
+                window.location.href = "/?service=" + encodeURIComponent(labels[idx]);
+              }
+            }
+          }
+        });
+      })
+      .catch(function() {});
+  }
+
+  // Load appropriation stacked bar chart
+  if (appCanvas) {
+    fetch("/api/v1/aggregations?group_by=appropriation")
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (!data || !data.rows || !data.rows.length) return;
+        var cols = Object.keys(data.rows[0]).filter(function(k) { return /^total_fy\d+/.test(k); }).sort();
+        var reqCol = cols.find(function(c) { return c.includes("request"); }) || cols[cols.length - 1];
+        if (!reqCol) return;
+
+        var labels = data.rows.map(function(r) { return r.group_value || "Unknown"; });
+        var amounts = data.rows.map(function(r) { return (r[reqCol] || 0) / 1000; });
+
+        new Chart(appCanvas, {
+          type: "doughnut",
+          data: {
+            labels: labels,
+            datasets: [{
+              data: amounts,
+              backgroundColor: LANDING_COLORS.slice(0, labels.length),
+              borderWidth: 2,
+              borderColor: getComputedStyle(document.documentElement).getPropertyValue("--bg-surface").trim() || "#fff"
+            }]
+          },
+          options: {
+            plugins: {
+              legend: { position: "right", labels: { boxWidth: 12, font: { size: 11 } } },
+              tooltip: {
+                callbacks: {
+                  label: function(ctx) {
+                    var total = ctx.dataset.data.reduce(function(a, b) { return a + b; }, 0);
+                    var pct = total > 0 ? (ctx.parsed / total * 100).toFixed(1) : 0;
+                    return ctx.label + ": $" + ctx.parsed.toLocaleString() + "M (" + pct + "%)";
+                  }
+                }
+              }
+            },
+            onHover: function(e, el) { e.native.target.style.cursor = el.length ? "pointer" : "default"; },
+            onClick: function(e, el) {
+              if (el.length) {
+                var idx = el[0].index;
+                var approp = data.rows[idx].group_value;
+                if (approp) window.location.href = "/?appropriation_code=" + encodeURIComponent(approp);
+              }
+            }
+          }
+        });
+      })
+      .catch(function() {});
+  }
+}
+
 // ── Initialise ─────────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", function () {
@@ -442,6 +830,15 @@ document.addEventListener("DOMContentLoaded", function () {
   applyHiddenCols(getHiddenCols());
   updateDownloadLinks();
   restorePageSize();
+  restoreDensity();
+  restoreAmountFormat();
+  initResultsKeyboardNav();
+
+  // FALCON-7: Fetch metadata for footer
+  loadFooterMetadata();
+
+  // FALCON-1: Load landing page summary visuals
+  loadLandingVisuals();
 
   // OPT-JS-001: Debounce filter form changes — add delay:300ms to multi-selects
   // HTMX hx-trigger delay is set on the q input already; for selects we use
@@ -573,6 +970,7 @@ function saveCurrentSearch(name) {
   if (searches.length > 20) searches = searches.slice(-20);
   localStorage.setItem(SAVED_SEARCHES_KEY, JSON.stringify(searches));
   renderSavedSearches();
+  if (typeof showToast === "function") showToast('Search "' + name + '" saved', "success");
 }
 
 function deleteSavedSearch(index) {

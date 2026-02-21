@@ -278,7 +278,7 @@ def main():
 
     def check_config_files():
         required = [
-            ".github/workflows/optimization-tests.yml",
+            ".github/workflows/ci.yml",
             ".pre-commit-hook.py",
             "utils/__init__.py",
             "utils/common.py",

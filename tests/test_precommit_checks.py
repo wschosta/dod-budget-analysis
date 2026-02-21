@@ -405,8 +405,8 @@ class TestConfigurationFiles:
 
     def test_workflow_file_exists(self):
         """GitHub Actions workflow should be present."""
-        workflow_file = Path(".github/workflows/optimization-tests.yml")
-        assert workflow_file.exists(), "GitHub Actions workflow not found"
+        workflow_file = Path(".github/workflows/ci.yml")
+        assert workflow_file.exists(), "GitHub Actions CI workflow not found"
 
     def test_hook_file_exists(self):
         """Pre-commit hook should be present."""

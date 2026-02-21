@@ -41,7 +41,7 @@ Test Results: 28 passed, 0 failed (28 total)
 - `.pre-commit-hook.py` - Auto-run tests before commits
 
 ### CI/CD
-- `.github/workflows/optimization-tests.yml` - GitHub Actions workflow
+- `.github/workflows/ci.yml` - GitHub Actions (consolidated CI workflow)
 
 ### Documentation
 - `OPTIMIZATION_COMPLETE.md` - Implementation summary
@@ -140,7 +140,7 @@ If benchmarks exceed these values, investigate:
 1. **Before commit:** Run `python run_optimization_tests.py`
 2. **Install hook:** `cp .pre-commit-hook.py .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit`
 3. **On PR:** GitHub Actions automatically runs full test suite
-4. **Monitor:** Check `.github/workflows/optimization-tests.yml` for results
+4. **Monitor:** Check `.github/workflows/ci.yml` for results
 
 ## Documentation
 

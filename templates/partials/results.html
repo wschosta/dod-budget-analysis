@@ -52,8 +52,32 @@
       <span style="font-size:.75rem;color:var(--text-secondary)">(showing {{ items|length }})</span>
     </span>
 
+    {# FALCON-6: Quick export button group #}
+    <div class="export-btn-group" role="group" aria-label="Export results">
+      <button type="button" class="btn btn-secondary btn-sm export-btn"
+              onclick="quickExport('csv')" title="Download CSV">CSV</button>
+      <button type="button" class="btn btn-secondary btn-sm export-btn"
+              onclick="quickExport('xlsx')" title="Download Excel">Excel</button>
+      <button type="button" class="btn btn-secondary btn-sm export-btn"
+              onclick="quickExport('json')" title="Download JSON">JSON</button>
+    </div>
+
+    {# FALCON-9: Amount format toggle #}
+    <div class="density-toggles" role="group" aria-label="Amount format">
+      <button class="amt-fmt-btn density-btn active" data-fmt="K" onclick="setAmountFormat('K')" title="Thousands ($K)">$K</button>
+      <button class="amt-fmt-btn density-btn" data-fmt="M" onclick="setAmountFormat('M')" title="Millions ($M)">$M</button>
+      <button class="amt-fmt-btn density-btn" data-fmt="B" onclick="setAmountFormat('B')" title="Billions ($B)">$B</button>
+    </div>
+
+    {# FALCON-2: Density toggle #}
+    <div class="density-toggles" role="group" aria-label="Table density">
+      <button class="density-btn" data-density="compact" onclick="setDensity('compact')" title="Compact" aria-label="Compact table density">&#9776;</button>
+      <button class="density-btn active" data-density="comfortable" onclick="setDensity('comfortable')" title="Comfortable" aria-label="Comfortable table density">&#9783;</button>
+      <button class="density-btn" data-density="spacious" onclick="setDensity('spacious')" title="Spacious" aria-label="Spacious table density">&#9744;</button>
+    </div>
+
     {# Column toggles (3.A4-b) — FIX-005: added FY25 total, FY26 total; FIX-007: added source #}
-    <div class="col-toggles" id="col-toggles">
+    <div class="col-toggles" id="col-toggles" role="group" aria-label="Toggle table columns">
       <button class="col-toggle active" data-col="org"      onclick="toggleCol(this,'col-org')">Service</button>
       <button class="col-toggle active" data-col="fy"       onclick="toggleCol(this,'col-fy')">FY</button>
       <button class="col-toggle active" data-col="exhibit"  onclick="toggleCol(this,'col-exhibit')">Exhibit</button>
@@ -68,11 +92,12 @@
     </div>
   </div>
 
+  <div class="table-scroll-hint" aria-hidden="true">&#8592; Scroll horizontally to see all columns &#8594;</div>
   <div class="table-wrapper">
     <table>
       <thead>
         <tr>
-          <th {% if sort_by == "line_item_title" %}aria-sort="{{ 'ascending' if sort_dir == 'asc' else 'descending' }}"{% endif %}>
+          <th scope="col" {% if sort_by == "line_item_title" %}aria-sort="{{ 'ascending' if sort_dir == 'asc' else 'descending' }}"{% endif %}>
             {% set next_dir = "desc" if sort_by == "line_item_title" and sort_dir == "asc" else "asc" %}
             <a hx-get="/partials/results" hx-target="#results-container"
                hx-push-url="true"
@@ -82,7 +107,7 @@
               {% if sort_by == "line_item_title" %}<span class="sort-icon">{{ "▲" if sort_dir == "asc" else "▼" }}</span>{% endif %}
             </a>
           </th>
-          <th class="col-org" {% if sort_by == "organization_name" %}aria-sort="{{ 'ascending' if sort_dir == 'asc' else 'descending' }}"{% endif %}>
+          <th scope="col" class="col-org" {% if sort_by == "organization_name" %}aria-sort="{{ 'ascending' if sort_dir == 'asc' else 'descending' }}"{% endif %}>
             <a hx-get="/partials/results" hx-target="#results-container"
                hx-push-url="true"
                hx-vals='{"sort_by":"organization_name","sort_dir":"{% if sort_by == "organization_name" and sort_dir == "asc" %}desc{% else %}asc{% endif %}","page":"1"}'
@@ -91,11 +116,11 @@
               {% if sort_by == "organization_name" %}<span class="sort-icon">{{ "▲" if sort_dir == "asc" else "▼" }}</span>{% endif %}
             </a>
           </th>
-          <th class="col-fy" data-tooltip="Fiscal year: Oct 1 – Sep 30">FY</th>
-          <th class="col-exhibit" data-tooltip="Budget exhibit type (R-2, P-5, O-1, etc.)">Exhibit</th>
-          <th class="col-account" data-tooltip="Appropriation account code">Account</th>
-          <th class="col-pe" data-tooltip="Program Element number — unique identifier for each R&amp;D program">PE #</th>
-          <th class="col-fy24 td-amount" data-tooltip="FY2024 actual expenditure in thousands of dollars ($K). Actual = amounts obligated by end of fiscal year.">
+          <th scope="col" class="col-fy" data-tooltip="Fiscal year: Oct 1 – Sep 30">FY</th>
+          <th scope="col" class="col-exhibit" data-tooltip="Budget exhibit type (R-2, P-5, O-1, etc.)">Exhibit</th>
+          <th scope="col" class="col-account" data-tooltip="Appropriation account code">Account</th>
+          <th scope="col" class="col-pe" data-tooltip="Program Element number — unique identifier for each R&amp;D program">PE #</th>
+          <th scope="col" class="col-fy24 td-amount" data-tooltip="FY2024 actual expenditure in thousands of dollars ($K). Actual = amounts obligated by end of fiscal year.">
             <a hx-get="/partials/results" hx-target="#results-container"
                hx-push-url="true"
                hx-vals='{"sort_by":"amount_fy2024_actual","sort_dir":"{% if sort_by == "amount_fy2024_actual" and sort_dir == "desc" %}asc{% else %}desc{% endif %}","page":"1"}'
@@ -104,7 +129,7 @@
               {% if sort_by == "amount_fy2024_actual" %}<span class="sort-icon">{{ "▲" if sort_dir == "asc" else "▼" }}</span>{% endif %}
             </a>
           </th>
-          <th class="col-fy25 td-amount" {% if sort_by == "amount_fy2025_enacted" %}aria-sort="{{ 'ascending' if sort_dir == 'asc' else 'descending' }}"{% endif %}
+          <th scope="col" class="col-fy25 td-amount" {% if sort_by == "amount_fy2025_enacted" %}aria-sort="{{ 'ascending' if sort_dir == 'asc' else 'descending' }}"{% endif %}
               data-tooltip="FY2025 enacted amount in thousands of dollars ($K). Enacted = signed into law by Congress.">
             <a hx-get="/partials/results" hx-target="#results-container"
                hx-push-url="true"
@@ -114,8 +139,8 @@
               {% if sort_by == "amount_fy2025_enacted" %}<span class="sort-icon">{{ "▲" if sort_dir == "asc" else "▼" }}</span>{% endif %}
             </a>
           </th>
-          <th class="col-fy25tot td-amount" style="display:none" data-tooltip="FY2025 total amount ($K) including supplementals.">FY25 Total ($K)</th>
-          <th class="col-fy26 td-amount" data-tooltip="FY2026 budget request in thousands of dollars ($K). Request = President's budget submission to Congress.">
+          <th scope="col" class="col-fy25tot td-amount" style="display:none" data-tooltip="FY2025 total amount ($K) including supplementals.">FY25 Total ($K)</th>
+          <th scope="col" class="col-fy26 td-amount" data-tooltip="FY2026 budget request in thousands of dollars ($K). Request = President's budget submission to Congress.">
             <a hx-get="/partials/results" hx-target="#results-container"
                hx-push-url="true"
                hx-vals='{"sort_by":"amount_fy2026_request","sort_dir":"{% if sort_by == "amount_fy2026_request" and sort_dir == "desc" %}asc{% else %}desc{% endif %}","page":"1"}'
@@ -124,8 +149,8 @@
               {% if sort_by == "amount_fy2026_request" %}<span class="sort-icon">{{ "▲" if sort_dir == "asc" else "▼" }}</span>{% endif %}
             </a>
           </th>
-          <th class="col-fy26tot td-amount" style="display:none" data-tooltip="FY2026 total amount ($K) including reconciliation adjustments.">FY26 Total ($K)</th>
-          <th class="col-source" style="display:none" data-tooltip="Source file from which this budget line was extracted.">Source</th>
+          <th scope="col" class="col-fy26tot td-amount" style="display:none" data-tooltip="FY2026 total amount ($K) including reconciliation adjustments.">FY26 Total ($K)</th>
+          <th scope="col" class="col-source" style="display:none" data-tooltip="Source file from which this budget line was extracted.">Source</th>
         </tr>
       </thead>
       <tbody>
@@ -155,11 +180,12 @@
           </td>
           <td class="col-account" style="font-size:.8rem">{{ item.account or "—" }}</td>
           <td class="col-pe" style="font-size:.8rem;font-family:monospace">{{ item.pe_number or "—" }}</td>
-          <td class="col-fy24 td-amount">{{ item.amount_fy2024_actual | fmt_amount if item.amount_fy2024_actual is not none else "—" }}</td>
-          <td class="col-fy25 td-amount">{{ item.amount_fy2025_enacted | fmt_amount if item.amount_fy2025_enacted is not none else "—" }}</td>
-          <td class="col-fy25tot td-amount" style="display:none">{{ item.amount_fy2025_total | fmt_amount if item.amount_fy2025_total is not none else "—" }}</td>
-          <td class="col-fy26 td-amount">{{ item.amount_fy2026_request | fmt_amount if item.amount_fy2026_request is not none else "—" }}</td>
-          <td class="col-fy26tot td-amount" style="display:none">{{ item.amount_fy2026_total | fmt_amount if item.amount_fy2026_total is not none else "—" }}</td>
+          {# FALCON-9: data-raw attribute enables client-side $K/$M/$B reformatting #}
+          <td class="col-fy24 td-amount" {% if item.amount_fy2024_actual is not none %}data-raw="{{ item.amount_fy2024_actual }}"{% endif %}>{{ item.amount_fy2024_actual | fmt_amount if item.amount_fy2024_actual is not none else "—" }}</td>
+          <td class="col-fy25 td-amount" {% if item.amount_fy2025_enacted is not none %}data-raw="{{ item.amount_fy2025_enacted }}"{% endif %}>{{ item.amount_fy2025_enacted | fmt_amount if item.amount_fy2025_enacted is not none else "—" }}</td>
+          <td class="col-fy25tot td-amount" style="display:none" {% if item.amount_fy2025_total is not none %}data-raw="{{ item.amount_fy2025_total }}"{% endif %}>{{ item.amount_fy2025_total | fmt_amount if item.amount_fy2025_total is not none else "—" }}</td>
+          <td class="col-fy26 td-amount" {% if item.amount_fy2026_request is not none %}data-raw="{{ item.amount_fy2026_request }}"{% endif %}>{{ item.amount_fy2026_request | fmt_amount if item.amount_fy2026_request is not none else "—" }}</td>
+          <td class="col-fy26tot td-amount" style="display:none" {% if item.amount_fy2026_total is not none %}data-raw="{{ item.amount_fy2026_total }}"{% endif %}>{{ item.amount_fy2026_total | fmt_amount if item.amount_fy2026_total is not none else "—" }}</td>
           <td class="col-source" style="display:none;font-size:.75rem;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ item.source_file or '' }}">{{ item.source_file or "—" }}</td>
         </tr>
         {% endfor %}

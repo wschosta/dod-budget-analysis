@@ -94,7 +94,7 @@ dod-budget-analysis/
 
   # CI/CD
   .github/workflows/
-    optimization-tests.yml   # Automated optimization test suite
+    ci.yml                   # Main CI workflow (includes optimization tests)
 
   # Data (not committed)
   DoD_Budget_Documents/      # Downloaded source files
