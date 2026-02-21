@@ -205,7 +205,7 @@ def _enrich_cmd(args: argparse.Namespace) -> list[str]:
         cmd.append("--with-llm")
     if args.enrich_phases:
         cmd += ["--phases", args.enrich_phases]
-    if args.rebuild_enrich:
+    if args.rebuild_enrich or args.rebuild:
         cmd.append("--rebuild")
     return cmd
 

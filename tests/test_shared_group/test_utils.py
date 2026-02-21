@@ -280,8 +280,10 @@ def test_validation_registry_exception_handling():
 @pytest.mark.parametrize("year, expected", [
     (2024, True),
     (2000, True),
+    (1998, True),   # Navy archive historical data
+    (1990, True),   # lower bound
     (2099, True),
-    (1999, False),  # too old
+    (1989, False),  # too old
     (2100, False),  # too new
     (0, False),
     ("2024", False),  # string not int

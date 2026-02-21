@@ -194,11 +194,11 @@ class TestValidationRegistry:
 
 
 class TestIsValidFiscalYear:
-    @pytest.mark.parametrize("year", [2000, 2025, 2026, 2099])
+    @pytest.mark.parametrize("year", [1990, 1998, 2000, 2025, 2026, 2099])
     def test_valid_years(self, year):
         assert is_valid_fiscal_year(year)
 
-    @pytest.mark.parametrize("year", [1999, 2100, 0, -1])
+    @pytest.mark.parametrize("year", [1989, 2100, 0, -1])
     def test_invalid_years(self, year):
         assert not is_valid_fiscal_year(year)
 

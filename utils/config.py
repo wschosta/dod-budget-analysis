@@ -367,32 +367,6 @@ class KnownValues:
         "3450": "Missile Procurement, Air Force",
     }
 
-    # OPT-CFG-002: Configurable fiscal years via SUPPORTED_FISCAL_YEARS env var
-    # Default: [2024, 2025, 2026]. Override: SUPPORTED_FISCAL_YEARS=2024,2025,2026,2027
-    @classmethod
-    def _load_fiscal_years(cls) -> list[int]:
-        import os
-        raw = os.getenv("SUPPORTED_FISCAL_YEARS", "")
-        if raw.strip():
-            try:
-                return [int(y.strip()) for y in raw.split(",") if y.strip()]
-            except ValueError:
-                pass
-        return [2024, 2025, 2026]
-
-    fiscal_years: list[int] = property(  # type: ignore
-        lambda self: KnownValues._load_fiscal_years()
-    )
-
-    @classmethod
-    def get_fiscal_years(cls) -> list[int]:
-        """Return supported fiscal years from SUPPORTED_FISCAL_YEARS env var.
-
-        Returns:
-            List of fiscal year integers (e.g. [2024, 2025, 2026]).
-        """
-        return cls._load_fiscal_years()
-
     @classmethod
     def is_valid_org(cls, org: str) -> bool:
         """Check if organization is in known values.
