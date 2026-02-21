@@ -444,6 +444,18 @@ a:hover { text-decoration: underline; }
   font-size: .85rem;
   color: var(--clr-gray-700);
 }
+/* FALCON-6: Export button group */
+.export-btn-group {
+  display: flex;
+  gap: .25rem;
+  align-items: center;
+}
+.export-btn-group .export-btn {
+  padding: .2rem .5rem;
+  font-size: .72rem;
+  min-height: 28px;
+}
+
 .col-toggles {
   display: flex;
   gap: .4rem;

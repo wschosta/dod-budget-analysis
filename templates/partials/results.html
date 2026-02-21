@@ -52,6 +52,16 @@
       <span style="font-size:.75rem;color:var(--text-secondary)">(showing {{ items|length }})</span>
     </span>
 
+    {# FALCON-6: Quick export button group #}
+    <div class="export-btn-group" aria-label="Export results">
+      <button type="button" class="btn btn-secondary btn-sm export-btn"
+              onclick="quickExport('csv')" title="Download CSV">CSV</button>
+      <button type="button" class="btn btn-secondary btn-sm export-btn"
+              onclick="quickExport('xlsx')" title="Download Excel">Excel</button>
+      <button type="button" class="btn btn-secondary btn-sm export-btn"
+              onclick="quickExport('json')" title="Download JSON">JSON</button>
+    </div>
+
     {# FALCON-2: Density toggle #}
     <div class="density-toggles" aria-label="Table density">
       <button class="density-btn" data-density="compact" onclick="setDensity('compact')" title="Compact">&#9776;</button>

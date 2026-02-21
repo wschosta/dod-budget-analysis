@@ -265,6 +265,23 @@ function updateDownloadLinks() {
   if (xlsx) xlsx.href = buildDownloadURL("xlsx");  // JS-001
 }
 
+// ── FALCON-6: Quick export with toast notifications ─────────────────────────
+
+function quickExport(fmt) {
+  var url = buildDownloadURL(fmt);
+  if (typeof showToast === "function") {
+    showToast("Preparing " + fmt.toUpperCase() + " download...", "info", 2000);
+  }
+  // Trigger download via hidden link
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = "";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function() { document.body.removeChild(a); }, 100);
+}
+
 // ── JS-002: Show estimated result count in download modal ──────────────────────
 
 function updateDownloadModalCount() {
