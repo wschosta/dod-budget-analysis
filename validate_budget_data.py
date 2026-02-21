@@ -36,7 +36,9 @@ from utils import get_connection
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 
-AMOUNT_COLUMNS = [
+# Baseline amount columns — used as fallback when database is unavailable.
+# The runtime list is built dynamically by _get_amount_columns() below.
+_BASELINE_AMOUNT_COLUMNS = [
     "amount_fy2024_actual",
     "amount_fy2025_enacted",
     "amount_fy2025_supplemental",
@@ -45,6 +47,27 @@ AMOUNT_COLUMNS = [
     "amount_fy2026_reconciliation",
     "amount_fy2026_total",
 ]
+
+
+def _get_amount_columns(conn: sqlite3.Connection) -> list[str]:
+    """Dynamically discover all amount/quantity FY columns from the DB schema.
+
+    Returns column names matching 'amount_fy*' or 'quantity_fy*' from the
+    budget_lines table, sorted alphabetically.  Falls back to the baseline
+    list if the table doesn't exist or the query fails.
+    """
+    try:
+        cols = [
+            row[1] for row in conn.execute("PRAGMA table_info(budget_lines)").fetchall()
+            if row[1].startswith("amount_fy") or row[1].startswith("quantity_fy")
+        ]
+        return sorted(cols) if cols else _BASELINE_AMOUNT_COLUMNS
+    except Exception:
+        return _BASELINE_AMOUNT_COLUMNS
+
+
+# Legacy alias — kept for any external consumers
+AMOUNT_COLUMNS = _BASELINE_AMOUNT_COLUMNS
 
 KNOWN_EXHIBIT_TYPES = {"m1", "o1", "p1", "p1r", "p5", "r1", "r2", "r3", "r4", "rf1", "c1"}
 
@@ -106,8 +129,9 @@ def check_duplicate_rows(conn: sqlite3.Connection) -> dict:
 
 def check_null_heavy_rows(conn: sqlite3.Connection) -> dict:
     """1.B6-c: Flag rows where ALL amount columns are NULL or zero."""
+    amount_cols = _get_amount_columns(conn)
     conditions = " AND ".join(
-        f"(COALESCE({col}, 0) = 0)" for col in AMOUNT_COLUMNS
+        f"(COALESCE({col}, 0) = 0)" for col in amount_cols
     )
     cur = conn.execute(f"""
         SELECT exhibit_type, COUNT(*) as cnt
@@ -154,12 +178,13 @@ def check_value_ranges(conn: sqlite3.Connection) -> dict:
     """1.B6-f: Flag extreme monetary values (likely unit-of-measure errors)."""
     threshold = 1_000_000_000  # $1T in thousands
     outliers = []
-    # Single UNION ALL query replaces 7 separate table scans.
+    amount_cols = _get_amount_columns(conn)
+    # Single UNION ALL query replaces N separate table scans.
     union_parts = " UNION ALL ".join(
         f"SELECT source_file, exhibit_type, account, organization,"
         f" '{col}' AS col_name, {col} AS val"
         f" FROM budget_lines WHERE ABS({col}) > {threshold}"
-        for col in AMOUNT_COLUMNS
+        for col in amount_cols
     )
     cur = conn.execute(f"SELECT * FROM ({union_parts}) LIMIT 70")
     for row in cur.fetchall():
@@ -250,13 +275,14 @@ def check_fiscal_year_coverage(conn: sqlite3.Connection) -> dict:
 def check_column_types(conn: sqlite3.Connection) -> dict:
     """1.B6-d: Detect text values stored in numeric amount columns."""
     misaligned = []
-    # Single UNION ALL query replaces 7 separate table scans.
+    amount_cols = _get_amount_columns(conn)
+    # Single UNION ALL query replaces N separate table scans.
     union_parts = " UNION ALL ".join(
         f"SELECT source_file, exhibit_type, '{col}' AS col_name, {col} AS val"
         f" FROM budget_lines"
         f" WHERE {col} IS NOT NULL"
         f"   AND TYPEOF({col}) NOT IN ('real', 'integer')"
-        for col in AMOUNT_COLUMNS
+        for col in amount_cols
     )
     try:
         cur = conn.execute(f"SELECT * FROM ({union_parts}) LIMIT 70")
@@ -393,19 +419,20 @@ def generate_quality_report(
     ]
 
     # 2. Null/zero percentages for each amount column.
-    # Single conditional-aggregation query replaces 14 separate COUNT(*) scans
-    # (2 per column × 7 columns).  All counts computed in one table pass.
+    # Single conditional-aggregation query replaces N separate COUNT(*) scans.
+    # Dynamically discovers all FY amount/quantity columns from the schema.
+    amount_cols = _get_amount_columns(conn)
     agg_exprs = ", ".join(
         f"SUM(CASE WHEN {col} IS NULL THEN 1 ELSE 0 END) AS {col}_null,"
         f" SUM(CASE WHEN {col} = 0    THEN 1 ELSE 0 END) AS {col}_zero"
-        for col in AMOUNT_COLUMNS
+        for col in amount_cols
     )
     agg_row = conn.execute(
         f"SELECT COUNT(*) AS total, {agg_exprs} FROM budget_lines"
     ).fetchone()
     total_rows = agg_row[0]
     amount_stats: dict = {}
-    for i, col in enumerate(AMOUNT_COLUMNS):
+    for i, col in enumerate(amount_cols):
         null_ct = agg_row[1 + i * 2] or 0
         zero_ct = agg_row[2 + i * 2] or 0
         if total_rows:
