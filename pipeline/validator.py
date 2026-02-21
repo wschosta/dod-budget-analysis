@@ -71,6 +71,23 @@ AMOUNT_COLUMNS = _BASELINE_AMOUNT_COLUMNS
 
 KNOWN_EXHIBIT_TYPES = {"m1", "o1", "p1", "p1r", "p5", "r1", "r2", "r3", "r4", "rf1", "c1"}
 
+# Canonical organization name mapping — merges aliases that refer to the same
+# service/agency.  Keys are lowercased raw values; values are the canonical name.
+_ORG_ALIASES: dict[str, str] = {
+    "af":        "Air Force",
+    "air force": "Air Force",
+    "f":         "Air Force",
+    "army":      "Army",
+    "a":         "Army",
+    "navy":      "Navy",
+    "n":         "Navy",
+}
+
+
+def _normalize_org(name: str) -> str:
+    """Return canonical org name, collapsing known aliases."""
+    return _ORG_ALIASES.get(name.lower().strip(), name)
+
 
 # ── Individual checks ────────────────────────────────────────────────────────
 
@@ -248,15 +265,21 @@ def check_fiscal_year_coverage(conn: sqlite3.Connection) -> dict:
             "details": [],
         }
 
+    # Merge year sets under canonical org names so aliases like
+    # AF / Air Force / F are treated as one organization.
     all_years: set = set()
-    org_years: dict = {}
+    org_years: dict[str, set] = {}
     for r in rows:
         years = set(r[1].split(",")) if r[1] else set()
-        org_years[r[0]] = years
+        canonical = _normalize_org(r[0])
+        if canonical in org_years:
+            org_years[canonical] |= years
+        else:
+            org_years[canonical] = years
         all_years.update(years)
 
     missing = []
-    for org, years in org_years.items():
+    for org, years in sorted(org_years.items()):
         gap = sorted(all_years - years)
         if gap:
             missing.append({"organization": org, "missing_years": gap})
@@ -321,8 +344,18 @@ ALL_CHECKS = [
 ]
 
 
-def validate_all(db_path: Path = DEFAULT_DB_PATH, strict: bool = False) -> dict:
-    """Run all validation checks and return a summary dict."""
+def validate_all(
+    db_path: Path = DEFAULT_DB_PATH,
+    strict: bool = False,
+    pedantic: bool = False,
+) -> dict:
+    """Run all validation checks and return a summary dict.
+
+    Args:
+        db_path:   Path to the SQLite database.
+        strict:    Exit non-zero on any *failures* (status="fail").
+        pedantic:  Exit non-zero on any *warnings or failures*.
+    """
     if not db_path.exists():
         print(f"ERROR: Database not found: {db_path}")
         print("Run 'python build_budget_db.py' first to build the database.")
@@ -340,13 +373,22 @@ def validate_all(db_path: Path = DEFAULT_DB_PATH, strict: bool = False) -> dict:
     total_warnings = sum(1 for r in results if r["status"] == "warn")
     total_failures = sum(1 for r in results if r["status"] == "fail")
 
+    # --strict: fail on structural failures only
+    # --pedantic: fail on any warnings OR failures
+    if pedantic and (total_warnings + total_failures) > 0:
+        exit_code = 1
+    elif strict and total_failures > 0:
+        exit_code = 1
+    else:
+        exit_code = 0
+
     summary = {
         "database": str(db_path),
         "checks": results,
         "total_checks": len(results),
         "total_warnings": total_warnings,
         "total_failures": total_failures,
-        "exit_code": 1 if strict and (total_warnings + total_failures) > 0 else 0,
+        "exit_code": exit_code,
     }
     return summary
 
@@ -478,12 +520,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Validate budget database")
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH)
     parser.add_argument("--strict", action="store_true",
+                        help="Exit non-zero on structural failures")
+    parser.add_argument("--pedantic", action="store_true",
                         help="Exit non-zero on any warnings or failures")
     parser.add_argument("--json", action="store_true", dest="output_json",
                         help="Output results as JSON")
     args = parser.parse_args()
 
-    summary = validate_all(args.db, strict=args.strict)
+    summary = validate_all(args.db, strict=args.strict, pedantic=args.pedantic)
 
     if args.output_json:
         print(json.dumps(summary, indent=2))

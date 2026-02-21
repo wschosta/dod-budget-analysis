@@ -109,7 +109,11 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--strict", action="store_true",
-        help="Treat validation warnings as errors and abort the pipeline",
+        help="Abort the pipeline on validation failures",
+    )
+    p.add_argument(
+        "--pedantic", action="store_true",
+        help="Abort the pipeline on any validation warnings or failures",
     )
 
     # enrich_budget_db options
@@ -150,7 +154,9 @@ def _build_cmd(args: argparse.Namespace) -> list[str]:
 
 def _validate_cmd(args: argparse.Namespace) -> list[str]:
     cmd = [PYTHON, str(STEP_VALIDATE), "--db", args.db]
-    if args.strict:
+    if args.pedantic:
+        cmd.append("--pedantic")
+    elif args.strict:
         cmd.append("--strict")
     return cmd
 
@@ -173,9 +179,10 @@ def main() -> int:
     print("\nDoD Budget Pipeline")
     print(f"  Database : {args.db}")
     print(f"  Rebuild  : {'yes (full)' if args.rebuild else 'no (incremental)'}")
+    validate_mode = " [pedantic]" if args.pedantic else " [strict]" if args.strict else ""
     print(
         f"  Validate : {'skip' if args.skip_validate else 'yes'}"
-        + (" [strict]" if args.strict else "")
+        + validate_mode
     )
     print(
         f"  Enrich   : {'skip' if args.skip_enrich else 'yes'}"
@@ -193,16 +200,17 @@ def main() -> int:
     if not args.skip_validate:
         rc = _run("Step 2 / 3 -- Validate database", _validate_cmd(args))
         if rc != 0:
-            if args.strict:
+            if args.strict or args.pedantic:
+                mode = "pedantic" if args.pedantic else "strict"
                 print(
                     f"\nPipeline aborted: validation failed (exit {rc}).\n"
-                    "Re-run without --strict to continue past warnings.",
+                    f"Re-run without --{mode} to continue past issues.",
                     flush=True,
                 )
                 return rc
             print(
                 "\nValidation reported warnings -- continuing pipeline.\n"
-                "Use --strict to treat warnings as errors.",
+                "Use --strict to fail on errors, --pedantic to fail on warnings.",
                 flush=True,
             )
     else:
