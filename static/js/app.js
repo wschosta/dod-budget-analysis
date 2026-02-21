@@ -481,6 +481,31 @@ function removeToast(toast) {
   }, 200);
 }
 
+// ── FALCON-7: Footer metadata ────────────────────────────────────────────────
+
+function loadFooterMetadata() {
+  var el = document.getElementById("footer-meta");
+  if (!el) return;
+  fetch("/api/v1/metadata")
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(data) {
+      if (!data) return;
+      var parts = [];
+      if (data.version) parts.push("v" + data.version);
+      if (data.last_refresh) {
+        var d = data.last_refresh.slice(0, 10);
+        parts.push("Updated " + d);
+      }
+      if (data.budget_lines) parts.push(data.budget_lines.toLocaleString() + " budget lines");
+      if (data.pe_count) parts.push(data.pe_count.toLocaleString() + " PEs");
+      if (data.fiscal_years && data.fiscal_years.length) {
+        parts.push(data.fiscal_years.join(", "));
+      }
+      if (parts.length) el.textContent = parts.join(" \u00B7 ");
+    })
+    .catch(function() { /* silently ignore — footer just stays empty */ });
+}
+
 // ── Initialise ─────────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", function () {
@@ -502,6 +527,9 @@ document.addEventListener("DOMContentLoaded", function () {
   applyHiddenCols(getHiddenCols());
   updateDownloadLinks();
   restorePageSize();
+
+  // FALCON-7: Fetch metadata for footer
+  loadFooterMetadata();
 
   // OPT-JS-001: Debounce filter form changes — add delay:300ms to multi-selects
   // HTMX hx-trigger delay is set on the q input already; for selects we use

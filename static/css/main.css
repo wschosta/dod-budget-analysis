@@ -219,7 +219,7 @@ a:hover { text-decoration: underline; }
   padding: 1.5rem 1rem;
 }
 
-/* ── Footer ───────────────────────────────────────────────────────────────── */
+/* ── Footer (FALCON-7: enhanced) ──────────────────────────────────────────── */
 .site-footer {
   background: var(--bg-footer);
   border-top: 1px solid var(--border-color);
@@ -228,6 +228,10 @@ a:hover { text-decoration: underline; }
   color: var(--text-secondary);
   text-align: center;
 }
+.footer-content { display: flex; flex-direction: column; gap: .35rem; align-items: center; }
+.footer-meta { font-size: .72rem; color: var(--text-secondary); }
+.footer-links { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; justify-content: center; }
+.footer-links a { font-size: .8rem; }
 
 /* ── Search layout (filter sidebar + results) ─────────────────────────────── */
 .search-layout {
@@ -1104,6 +1108,25 @@ tr:focus-within td {
 .about-page p { margin-bottom: .75rem; line-height: 1.65; }
 .about-page ul { padding-left: 1.5rem; margin-bottom: .75rem; }
 .about-page li { margin-bottom: .5rem; line-height: 1.55; }
+
+/* ── FALCON-7: Glossary ──────────────────────────────────────────────────── */
+.glossary { margin-top: 1.5rem; }
+.glossary h3 { margin-bottom: .75rem; font-size: 1rem; }
+.glossary-list dt {
+  font-weight: 600;
+  margin-top: .75rem;
+  color: var(--text-primary);
+  font-size: .9rem;
+}
+.glossary-list dd {
+  margin-left: 0;
+  padding-left: 1rem;
+  border-left: 2px solid var(--clr-blue);
+  font-size: .85rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  margin-bottom: .25rem;
+}
 
 /* LION-010: Theme toggle button */
 .theme-toggle {
