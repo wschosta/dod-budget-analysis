@@ -36,8 +36,13 @@ logger = logging.getLogger(__name__)
 
 # Shared utilities: Import from utils package for consistency across codebase
 from utils import get_connection
+from utils.database import _validate_identifier
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
+
+# Extreme monetary value threshold: $1T in thousands.
+# Values exceeding this are likely unit-of-measure errors.
+_EXTREME_VALUE_THRESHOLD = 1_000_000_000
 
 # Baseline amount columns — used as fallback when database is unavailable.
 # The runtime list is built dynamically by _get_amount_columns() below.
@@ -176,6 +181,8 @@ def check_duplicate_rows(conn: sqlite3.Connection) -> dict:
 def check_null_heavy_rows(conn: sqlite3.Connection) -> dict:
     """1.B6-c: Flag rows where ALL amount columns are NULL or zero."""
     amount_cols = _get_amount_columns(conn)
+    for col in amount_cols:
+        _validate_identifier(col, "column name")
     conditions = " AND ".join(
         f"(COALESCE({col}, 0) = 0)" for col in amount_cols
     )
@@ -222,9 +229,11 @@ def check_unknown_exhibit_types(conn: sqlite3.Connection) -> dict:
 
 def check_value_ranges(conn: sqlite3.Connection) -> dict:
     """1.B6-f: Flag extreme monetary values (likely unit-of-measure errors)."""
-    threshold = 1_000_000_000  # $1T in thousands
+    threshold = _EXTREME_VALUE_THRESHOLD
     outliers = []
     amount_cols = _get_amount_columns(conn)
+    for col in amount_cols:
+        _validate_identifier(col, "column name")
     # Single UNION ALL query replaces N separate table scans.
     union_parts = " UNION ALL ".join(
         f"SELECT source_file, exhibit_type, account, organization,"
@@ -336,6 +345,8 @@ def check_column_types(conn: sqlite3.Connection) -> dict:
     """1.B6-d: Detect text values stored in numeric amount columns."""
     misaligned = []
     amount_cols = _get_amount_columns(conn)
+    for col in amount_cols:
+        _validate_identifier(col, "column name")
     # Single UNION ALL query replaces N separate table scans.
     union_parts = " UNION ALL ".join(
         f"SELECT source_file, exhibit_type, '{col}' AS col_name, {col} AS val"
@@ -503,6 +514,8 @@ def generate_quality_report(
     # Single conditional-aggregation query replaces N separate COUNT(*) scans.
     # Dynamically discovers all FY amount/quantity columns from the schema.
     amount_cols = _get_amount_columns(conn)
+    for col in amount_cols:
+        _validate_identifier(col, "column name")
     agg_exprs = ", ".join(
         f"SUM(CASE WHEN {col} IS NULL THEN 1 ELSE 0 END) AS {col}_null,"
         f" SUM(CASE WHEN {col} = 0    THEN 1 ELSE 0 END) AS {col}_zero"
