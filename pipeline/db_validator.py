@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 # Shared utilities: Import from utils package for consistency across codebase
 from utils import get_connection
+from utils.database import _validate_identifier
 from pipeline.schema import check_database_integrity
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
@@ -140,6 +141,8 @@ def check_zero_amounts(conn: sqlite3.Connection) -> list[dict]:
     amount_cols = _get_amount_columns(conn)
     if not amount_cols:
         return issues
+    for col in amount_cols:
+        _validate_identifier(col, "column name")
     null_checks = " AND ".join(
         f"(COALESCE({col}, 0) = 0)" for col in amount_cols
     )
@@ -263,8 +266,8 @@ def check_unit_consistency(conn: sqlite3.Connection) -> list[dict]:
     except sqlite3.OperationalError:
         # Column may not exist in pre-1.B3-b databases
         return []
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_unit_consistency: %s", e, exc_info=True)
         return []
 
     for r in rows:
@@ -325,8 +328,8 @@ def check_pe_number_format(conn: sqlite3.Connection) -> list[dict]:
         """).fetchall()
     except sqlite3.OperationalError:
         return []  # Table/column may not exist
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_pe_number_format: %s", e, exc_info=True)
         return []
 
     malformed = [r for r in rows if not _PE_PATTERN.match(str(r["pe_number"]))]
@@ -363,6 +366,7 @@ def check_negative_amounts(conn: sqlite3.Connection) -> list[dict]:
         return issues
 
     for col in amount_cols:
+        _validate_identifier(col, "column name")
         try:
             rows = conn.execute(f"""
                 SELECT source_file, exhibit_type, account_title,
@@ -374,8 +378,8 @@ def check_negative_amounts(conn: sqlite3.Connection) -> list[dict]:
             """).fetchall()
         except sqlite3.OperationalError:
             continue  # Table/column may not exist
-        except Exception:
-            logger.debug("validation check failed", exc_info=True)
+        except Exception as e:
+            logger.debug("Unexpected error in check_negative_amounts: %s", e, exc_info=True)
             continue
 
         if rows:
@@ -418,6 +422,9 @@ def check_yoy_budget_anomalies(conn: sqlite3.Connection) -> list[dict]:
     if len(amount_cols) < 2:
         return issues
 
+    for col in amount_cols:
+        _validate_identifier(col, "column name")
+
     # Compare adjacent pairs of amount columns
     for i in range(len(amount_cols) - 1):
         col_old = amount_cols[i]
@@ -435,8 +442,8 @@ def check_yoy_budget_anomalies(conn: sqlite3.Connection) -> list[dict]:
             """).fetchall()
         except sqlite3.OperationalError:
             continue  # Table/column may not exist
-        except Exception:
-            logger.debug("validation check failed", exc_info=True)
+        except Exception as e:
+            logger.debug("Unexpected error in check_yoy_budget_anomalies: %s", e, exc_info=True)
             continue
 
         if rows:
@@ -477,8 +484,8 @@ def check_appropriation_title_consistency(conn: sqlite3.Connection) -> list[dict
         """).fetchall()
     except sqlite3.OperationalError:
         return []  # Table/column may not exist
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_appropriation_title_consistency: %s", e, exc_info=True)
         return []
 
     for r in rows:
@@ -520,6 +527,9 @@ def check_line_item_rollups(conn: sqlite3.Connection) -> list[dict]:
     amount_cols = _get_amount_columns(conn)
     if not amount_cols:
         return issues
+
+    for col in amount_cols:
+        _validate_identifier(col, "column name")
 
     # Use the most recent request column for comparison
     check_col = amount_cols[-1]
@@ -581,8 +591,8 @@ def check_line_item_rollups(conn: sqlite3.Connection) -> list[dict]:
                 })
     except sqlite3.OperationalError:
         pass  # Table/column may not exist
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_line_item_rollups: %s", e, exc_info=True)
 
     return issues
 
@@ -629,8 +639,8 @@ def check_referential_integrity(conn: sqlite3.Connection) -> list[dict]:
     except sqlite3.OperationalError:
         # services_agencies table may not exist
         pass
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_referential_integrity: %s", e, exc_info=True)
 
     # Check exhibit_type → exhibit_types
     try:
@@ -660,8 +670,8 @@ def check_referential_integrity(conn: sqlite3.Connection) -> list[dict]:
     except sqlite3.OperationalError:
         # exhibit_types table may not exist
         pass
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_referential_integrity: %s", e, exc_info=True)
 
     return issues
 
@@ -721,8 +731,8 @@ def check_pdf_extraction_quality(conn: sqlite3.Connection) -> list[dict]:
         ).fetchone()["c"]
     except sqlite3.OperationalError:
         return issues  # Table/column may not exist
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_pdf_extraction_quality: %s", e, exc_info=True)
         return issues
 
     if total_pages == 0:
@@ -737,8 +747,8 @@ def check_pdf_extraction_quality(conn: sqlite3.Connection) -> list[dict]:
         """).fetchone()["c"]
     except sqlite3.OperationalError:
         short_pages = 0  # Table/column may not exist
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_pdf_extraction_quality: %s", e, exc_info=True)
         short_pages = 0
 
     # Empty table data pages
@@ -750,8 +760,8 @@ def check_pdf_extraction_quality(conn: sqlite3.Connection) -> list[dict]:
         """).fetchone()["c"]
     except sqlite3.OperationalError:
         empty_table_pages = 0  # Table/column may not exist
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_pdf_extraction_quality: %s", e, exc_info=True)
         empty_table_pages = 0
 
     bad_pages = short_pages + empty_table_pages
@@ -823,8 +833,8 @@ def check_budget_type_values(conn: sqlite3.Connection) -> list[dict]:
         """).fetchall()
     except sqlite3.OperationalError:
         return []  # Table/column may not exist
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_budget_type_values: %s", e, exc_info=True)
         return []
 
     for row in rows:
@@ -856,8 +866,8 @@ def check_pdf_pages_fiscal_year(conn: sqlite3.Connection) -> list[dict]:
         ).fetchone()["c"]
     except sqlite3.OperationalError:
         return []  # Table/column may not exist
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_pdf_pages_fiscal_year: %s", e, exc_info=True)
         return []
 
     if total == 0:
@@ -874,8 +884,8 @@ def check_pdf_pages_fiscal_year(conn: sqlite3.Connection) -> list[dict]:
             "severity": "warning",
             "detail": "pdf_pages table missing fiscal_year column (LION-100 not applied)",
         }]
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_pdf_pages_fiscal_year: %s", e, exc_info=True)
         return []
 
     if null_fy > 0:
@@ -924,8 +934,8 @@ def check_pdf_pe_numbers_populated(conn: sqlite3.Connection) -> list[dict]:
             """).fetchone()["c"]
         except sqlite3.OperationalError:
             pe_pages = 0  # Table/column may not exist
-        except Exception:
-            logger.debug("validation check failed", exc_info=True)
+        except Exception as e:
+            logger.debug("Unexpected error in check_pdf_pe_numbers_populated: %s", e, exc_info=True)
             pe_pages = 0
 
         if pe_pages > 0:
@@ -966,8 +976,8 @@ def check_pe_tags_source_files(conn: sqlite3.Connection) -> list[dict]:
         ).fetchone()["c"]
     except sqlite3.OperationalError:
         return []  # Table/column may not exist
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_pe_tags_source_files: %s", e, exc_info=True)
         return []
 
     if total == 0:
@@ -983,8 +993,8 @@ def check_pe_tags_source_files(conn: sqlite3.Connection) -> list[dict]:
             "severity": "warning",
             "detail": "pe_tags table missing source_files column (LION-106 not applied)",
         }]
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_pe_tags_source_files: %s", e, exc_info=True)
         return []
 
     if null_src > 0:
@@ -1028,8 +1038,8 @@ def check_budget_activity_consistency(conn: sqlite3.Connection) -> list[dict]:
         """).fetchall()
     except sqlite3.OperationalError:
         return []  # Table/column may not exist
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_budget_activity_consistency: %s", e, exc_info=True)
         return []
 
     for r in rows:
@@ -1072,6 +1082,7 @@ def check_extreme_outliers(conn: sqlite3.Connection) -> list[dict]:
     threshold = 1_000_000_000  # $1T in thousands
 
     for col in amount_cols:
+        _validate_identifier(col, "column name")
         try:
             rows = conn.execute(f"""
                 SELECT source_file, exhibit_type, pe_number,
@@ -1083,8 +1094,8 @@ def check_extreme_outliers(conn: sqlite3.Connection) -> list[dict]:
             """, (threshold,)).fetchall()
         except sqlite3.OperationalError:
             continue  # Table/column may not exist
-        except Exception:
-            logger.debug("validation check failed", exc_info=True)
+        except Exception as e:
+            logger.debug("Unexpected error in check_extreme_outliers: %s", e, exc_info=True)
             continue
 
         if rows:
@@ -1130,8 +1141,8 @@ def check_pe_org_consistency(conn: sqlite3.Connection) -> list[dict]:
         """).fetchall()
     except sqlite3.OperationalError:
         return []  # Table/column may not exist
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_pe_org_consistency: %s", e, exc_info=True)
         return []
 
     for r in rows:
@@ -1183,8 +1194,8 @@ def check_enrichment_orphans(conn: sqlite3.Connection) -> list[dict]:
             """).fetchone()["c"]
         except sqlite3.OperationalError:
             continue  # Table/column may not exist
-        except Exception:
-            logger.debug("validation check failed", exc_info=True)
+        except Exception as e:
+            logger.debug("Unexpected error in check_enrichment_orphans: %s", e, exc_info=True)
             continue
 
         if orphans > 0:
@@ -1226,8 +1237,8 @@ def check_enrichment_staleness(conn: sqlite3.Connection) -> list[dict]:
         """).fetchone()
     except sqlite3.OperationalError:
         return []  # Table/column may not exist
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_enrichment_staleness: %s", e, exc_info=True)
         return []
 
     missing = row["missing_count"]
@@ -1276,22 +1287,23 @@ def check_fy_column_null_rates(conn: sqlite3.Connection) -> list[dict]:
         ).fetchone()["c"]
     except sqlite3.OperationalError:
         return []  # Table/column may not exist
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_fy_column_null_rates: %s", e, exc_info=True)
         return []
 
     if total_rows == 0:
         return []
 
     for col in amount_cols:
+        _validate_identifier(col, "column name")
         try:
             null_count = conn.execute(
                 f"SELECT COUNT(*) AS c FROM budget_lines WHERE {col} IS NULL"
             ).fetchone()["c"]
         except sqlite3.OperationalError:
             continue  # Table/column may not exist
-        except Exception:
-            logger.debug("validation check failed", exc_info=True)
+        except Exception as e:
+            logger.debug("Unexpected error in check_fy_column_null_rates: %s", e, exc_info=True)
             continue
 
         pct = round(null_count / total_rows * 100, 1)
@@ -1349,8 +1361,8 @@ def check_duplicate_budget_lines(conn: sqlite3.Connection) -> list[dict]:
             })
     except sqlite3.OperationalError:
         pass  # Table/column may not exist
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_duplicate_budget_lines: %s", e, exc_info=True)
 
     return issues
 
@@ -1387,8 +1399,8 @@ def check_source_file_tracking(conn: sqlite3.Connection) -> list[dict]:
             })
     except sqlite3.OperationalError:
         pass  # ingested_files may not exist
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_source_file_tracking: %s", e, exc_info=True)
 
     return issues
 
@@ -1430,8 +1442,8 @@ def check_expected_indexes(conn: sqlite3.Connection) -> list[dict]:
             })
     except sqlite3.OperationalError:
         pass  # Table/column may not exist
-    except Exception:
-        logger.debug("validation check failed", exc_info=True)
+    except Exception as e:
+        logger.debug("Unexpected error in check_expected_indexes: %s", e, exc_info=True)
 
     return issues
 

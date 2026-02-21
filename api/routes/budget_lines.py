@@ -68,7 +68,7 @@ def list_budget_lines(
     pe_number: list[str] | None = Query(None, description="Filter by PE number(s)"),
     appropriation_code: list[str] | None = Query(None, description="Filter by appropriation"),
     budget_type: list[str] | None = Query(None, description="Filter by budget type (RDT&E, Procurement, etc.)"),
-    q: str | None = Query(None, description="Free-text search across account/line-item titles"),
+    q: str | None = Query(None, max_length=500, description="Free-text search across account/line-item titles"),
     min_amount: float | None = Query(None, description="Min FY2026 request amount (thousands)"),
     max_amount: float | None = Query(None, description="Max FY2026 request amount (thousands)"),
     sort_by: str = Query("id", description="Column to sort by"),

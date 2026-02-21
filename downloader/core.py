@@ -364,7 +364,6 @@ def _check_existing_file(session: requests.Session, url: str, dest_path: Path,
     if local_size == 0:
         return "redownload"
 
-    # TODO 1.A3-b: if we have a previously-recorded hash, verify it
     if expected_hash:
         local_hash = _compute_sha256(dest_path)
         if local_hash != expected_hash:

@@ -24,6 +24,16 @@ from fastapi.templating import Jinja2Templates
 from api.database import get_db
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_int(value: str, default: int) -> int:
+    """Convert string to int, returning default on failure."""
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
 from utils.cache import TTLCache
 from utils.query import (
     ALLOWED_SORT_COLUMNS,
@@ -189,9 +199,9 @@ def _parse_filters(request: Request) -> dict[str, Any]:
         "amount_column":     amount_column,
         "sort_by":           params.get("sort_by", "id"),
         "sort_dir":          params.get("sort_dir", "asc"),
-        "page":              max(1, int(params.get("page", 1))),
+        "page":              max(1, _safe_int(params.get("page", "1"), 1)),
         # EAGLE-4: Expanded page size cap from 100 to 200
-        "page_size":         min(200, max(10, int(params.get("page_size", 25)))),
+        "page_size":         min(200, max(10, _safe_int(params.get("page_size", "25"), 25))),
     }
 
 # EAGLE-4: Page size options for template dropdown

@@ -169,7 +169,7 @@ def _pdf_select(
     },
 )
 def search(
-    q: str = Query(..., min_length=1, description="Search query string"),
+    q: str = Query(..., min_length=1, max_length=500, description="Search query string"),
     type: str = Query(
         "both",
         description="Result type: 'both', 'excel', or 'pdf'",
@@ -231,7 +231,7 @@ def search(
                 appropriation_code=appropriation_code,
             )
             rows = conn.execute(sql, params).fetchall()
-        except Exception:
+        except (sqlite3.OperationalError, sqlite3.DatabaseError):
             logger.warning("Budget lines FTS query failed for q=%r", q, exc_info=True)
             rows = []
         if len(rows) > limit:
@@ -262,7 +262,7 @@ def search(
                 service=service,
             )
             rows = conn.execute(sql, params).fetchall()
-        except Exception:
+        except (sqlite3.OperationalError, sqlite3.DatabaseError):
             logger.warning("PDF pages FTS query failed for q=%r", q, exc_info=True)
             rows = []
         if len(rows) > limit:
@@ -304,7 +304,7 @@ def search(
     response_model=list[dict],
 )
 def suggest(
-    q: str = Query(..., min_length=1, description="Prefix to complete"),
+    q: str = Query(..., min_length=1, max_length=200, description="Prefix to complete"),
     limit: int = Query(5, ge=1, le=20, description="Max suggestions"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> list[dict]:

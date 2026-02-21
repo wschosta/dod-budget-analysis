@@ -723,7 +723,7 @@ def get_pe_related(
 )
 def list_pes(
     tag: list[str] | None = Query(None, description="Filter by tag(s) (AND logic)"),
-    q: str | None = Query(None, description="Free-text topic search via FTS5"),
+    q: str | None = Query(None, max_length=500, description="Free-text topic search via FTS5"),
     service: str | None = Query(None, description="Filter by service/org name"),
     budget_type: str | None = Query(None, description="Filter by budget type"),
     approp: str | None = Query(None, description="Filter by appropriation title (substring)"),

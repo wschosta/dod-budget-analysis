@@ -260,7 +260,7 @@ def _ensure_fy_columns(conn: sqlite3.Connection, col_names: list[str]) -> None:
             col_type = "REAL" if col.startswith(("amount_", "quantity_")) else "TEXT"
             conn.execute(f"ALTER TABLE budget_lines ADD COLUMN {col} {col_type}")
             conn.commit()
-            print(f"  BUILD-002: Added new column to budget_lines: {col}")
+            logger.info("  BUILD-002: Added new column to budget_lines: %s", col)
 
 
 # ── Database Setup ────────────────────────────────────────────────────────────
@@ -1149,8 +1149,9 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
             fiscal_year = dir_fy
         elif dir_fy and fiscal_year != dir_fy and fiscal_year.startswith("FY "):
             # Both present but disagree — log warning, prefer sheet-derived value
-            print(f"  LION-101 WARNING: FY mismatch in {file_path.name}: "
-                  f"sheet='{fiscal_year}' vs dir='{dir_fy}' — using sheet value")
+            logger.warning("  LION-101 WARNING: FY mismatch in %s: "
+                          "sheet='%s' vs dir='%s' — using sheet value",
+                          file_path.name, fiscal_year, dir_fy)
 
         # C-1 fallback: remap generic authorization/appropriation columns to
         # FY-specific names using the sheet's fiscal year context.
@@ -1782,7 +1783,7 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                 table_executor.shutdown(wait=False)
 
     except Exception as e:
-        print(f"  ERROR processing {file_path.name}: {e}")
+        logger.error("  ERROR processing %s: %s", file_path.name, e)
         _et, _bc, _so = _derive_ingest_metadata(relative_path, "pdf")
         conn.execute(
             "INSERT OR REPLACE INTO ingested_files "
@@ -2227,10 +2228,10 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             with open(_failures_log_path) as _f:
                 _prev_failures = json.load(_f)
             _retry_only = {e["file_path"] for e in _prev_failures if "file_path" in e}
-            print(f"  BUILD-001: Retrying {len(_retry_only)} previously-failed file(s) "
-                  f"from {_failures_log_path}")
+            logger.info("  BUILD-001: Retrying %d previously-failed file(s) from %s",
+                        len(_retry_only), _failures_log_path)
         except Exception as _lf_err:
-            print(f"  BUILD-001: Could not load failures log: {_lf_err}")
+            logger.warning("  BUILD-001: Could not load failures log: %s", _lf_err)
             _retry_only = None
 
     # ── Setup ──────────────────────────────────────────────────────────────
@@ -2240,15 +2241,15 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
     if rebuild and db_path.exists():
         db_path.unlink()
-        print(f"Removed existing database for rebuild: {db_path}")
+        logger.info("Removed existing database for rebuild: %s", db_path)
 
     is_new = not db_path.exists()
     conn = create_database(db_path)
 
     if is_new:
-        print(f"Created new database: {db_path}")
+        logger.info("Created new database: %s", db_path)
     else:
-        print(f"Updating existing database: {db_path}")
+        logger.info("Updating existing database: %s", db_path)
 
     # ── Session and resume setup ───────────────────────────────────────────
     session_id = None
@@ -2259,10 +2260,10 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         if checkpoint:
             session_id = checkpoint["session_id"]
             already_processed = _get_processed_files(conn, session_id)
-            print(f"\nResuming session: {session_id}")
-            print(f"  Already processed: {len(already_processed)} file(s)")
+            logger.info("Resuming session: %s", session_id)
+            logger.info("  Already processed: %d file(s)", len(already_processed))
         else:
-            print("\nNo checkpoint found — starting fresh build.")
+            logger.info("No checkpoint found — starting fresh build.")
 
     if session_id is None:
         session_id = _create_session_id()
@@ -2285,8 +2286,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             f for f in pdf_files
             if str(f.relative_to(docs_dir_resolved)) in _retry_only
         ]
-        print(f"  BUILD-001: Filtered to {len(xlsx_files)} Excel "
-              f"+ {len(pdf_files)} PDF retry files")
+        logger.info("  BUILD-001: Filtered to %d Excel + %d PDF retry files",
+                    len(xlsx_files), len(pdf_files))
 
     total_files = len(xlsx_files) + len(pdf_files)
 
@@ -2307,20 +2308,20 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     _progress("scan", 0, total_files,
               f"Found {len(xlsx_files)} Excel + {len(pdf_files)} PDF files",
               {"files_remaining": total_files - len(already_processed)})
-    print(f"\nFound {len(xlsx_files)} Excel files and {len(pdf_files)} PDF files")
+    logger.info("Found %d Excel files and %d PDF files", len(xlsx_files), len(pdf_files))
 
     if already_processed:
         xl_skipped_resume = sum(1 for f in xlsx_files
                                 if str(f.relative_to(docs_dir)) in already_processed)
         pdf_skipped_resume = sum(1 for f in pdf_files
                                  if str(f.relative_to(docs_dir)) in already_processed)
-        print(f"  Resuming: skipping {xl_skipped_resume} Excel + {pdf_skipped_resume} PDF "
-              f"files already processed in session {session_id}")
+        logger.info("  Resuming: skipping %d Excel + %d PDF files already processed in session %s",
+                    xl_skipped_resume, pdf_skipped_resume, session_id)
 
     # ── Ingest Excel files ─────────────────────────────────────────────────
-    print(f"\n{'='*60}")
-    print("  INGESTING EXCEL FILES")
-    print(f"{'='*60}")
+    logger.info("=" * 60)
+    logger.info("  INGESTING EXCEL FILES")
+    logger.info("=" * 60)
 
     # Resolve worker count early (used for both Excel and PDF)
     num_workers = workers if workers > 0 else min(os.cpu_count() or 1, 4)
@@ -2385,10 +2386,10 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             conn.execute("DROP TABLE _xl_preclean")
             conn.commit()
             if _xl_del:
-                print(f"  Pre-cleaned {_xl_del} stale budget_lines rows for re-ingestion")
+                logger.info("  Pre-cleaned %d stale budget_lines rows for re-ingestion", _xl_del)
 
-        print(f"  Processing {len(xlsx_to_process)} Excel files with "
-              f"{num_workers} parallel workers (OPT-BUILD-001)...")
+        logger.info("  Processing %d Excel files with %d parallel workers (OPT-BUILD-001)...",
+                    len(xlsx_to_process), num_workers)
         t_excel_start = time.time()
         with ProcessPoolExecutor(max_workers=num_workers) as pool:
             future_to_xl = {
@@ -2412,7 +2413,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 try:
                     result = future.result(timeout=120)
                 except Exception as _xl_err:
-                    print(f"  ERROR: {xl.name}: {_xl_err}")
+                    logger.error("  ERROR: %s: %s", xl.name, _xl_err)
                     _failures.append(FailedFileEntry(
                         file_path=rel_path,
                         error_type=type(_xl_err).__name__,
@@ -2478,21 +2479,21 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 _mark_file_processed(conn, session_id, rel_path, "excel", rows_count=len(rows))
                 elapsed = time.time() - t_excel_start
                 excel_file_times.append(elapsed / max(xi + 1, 1))
-                print(f"  [{xi+1}/{len(xlsx_to_process)}] {xl.name}: {len(rows)} rows")
+                logger.info("  [%d/%d] %s: %d rows", xi + 1, len(xlsx_to_process), xl.name, len(rows))
                 _progress("excel", xi + 1 + skipped_xlsx, len(xlsx_files),
                           f"Done: {xl.name} ({len(rows)} rows)",
                           {"rows": total_budget_rows,
                            "files_remaining": total_files - files_done_total})
         conn.commit()
         if skipped_xlsx:
-            print(f"\n  Skipped {skipped_xlsx} unchanged Excel file(s)")
-        print(f"  Ingested budget line items: {total_budget_rows:,}")
+            logger.info("  Skipped %d unchanged Excel file(s)", skipped_xlsx)
+        logger.info("  Ingested budget line items: %s", f"{total_budget_rows:,}")
 
     if not _excel_use_parallel:
      for xi, xlsx in enumerate(xlsx_to_process):
         # Check for graceful shutdown request
         if stop_event and stop_event.is_set():
-            print("\n  Graceful stop requested — saving checkpoint...")
+            logger.info("  Graceful stop requested — saving checkpoint...")
             _save_checkpoint(conn, session_id, files_done_total, total_files,
                              _metrics["pages"], _metrics["rows"],
                              0, str(xlsx), "interrupted")
@@ -2526,7 +2527,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         _progress("excel", xi + 1, len(xlsx_files),
                   f"Processing: {xlsx.name}",
                   {"files_remaining": total_files - files_done_total})
-        print(f"  Processing: {xlsx.name}...", end=" ", flush=True)
+        logger.info("  Processing: %s...", xlsx.name)
 
         _remove_file_data(conn, rel_path, "xlsx")
 
@@ -2535,7 +2536,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             rows = ingest_excel_file(conn, xlsx, docs_dir=docs_dir)
         except Exception as _xl_err:
             file_elapsed = time.time() - t0
-            print(f"ERROR ({file_elapsed:.1f}s): {_xl_err}")
+            logger.error("  ERROR: %s (%.1fs): %s", xlsx.name, file_elapsed, _xl_err)
             _failures.append(FailedFileEntry(
                 file_path=rel_path,
                 error_type=type(_xl_err).__name__,
@@ -2554,7 +2555,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             files_done_total += 1
             continue
         file_elapsed = time.time() - t0
-        print(f"{rows} rows ({file_elapsed:.1f}s)")
+        logger.info("  %s: %d rows (%.1fs)", xlsx.name, rows, file_elapsed)
 
         # Update speed tracking
         if file_elapsed > 0 and rows > 0:
@@ -2606,7 +2607,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         "SELECT COUNT(*) FROM budget_lines"
     ).fetchone()[0]
     if final_bl_count > initial_bl_count:
-        print("  Rebuilding budget_lines FTS index...")
+        logger.info("  Rebuilding budget_lines FTS index...")
         conn.execute(
             "INSERT INTO budget_lines_fts(budget_lines_fts) VALUES('rebuild')"
         )
@@ -2639,13 +2640,13 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
     if not _excel_use_parallel:
         if skipped_xlsx:
-            print(f"\n  Skipped {skipped_xlsx} unchanged Excel file(s)")
-        print(f"  Ingested budget line items: {total_budget_rows:,}")
+            logger.info("  Skipped %d unchanged Excel file(s)", skipped_xlsx)
+        logger.info("  Ingested budget line items: %s", f"{total_budget_rows:,}")
 
     # ── Ingest PDF files ───────────────────────────────────────────────────
-    print(f"\n{'='*60}")
-    print("  INGESTING PDF FILES")
-    print(f"{'='*60}")
+    logger.info("=" * 60)
+    logger.info("  INGESTING PDF FILES")
+    logger.info("=" * 60)
 
     total_pdf_pages = 0
     skipped_pdf = 0
@@ -2678,21 +2679,21 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
               {"files_remaining": total_files - files_done_total})
 
     if skipped_pdf:
-        print(f"  Skipping {skipped_pdf} unchanged/resumed PDF file(s)")
+        logger.info("  Skipping %d unchanged/resumed PDF file(s)", skipped_pdf)
 
     # Drop FTS5 triggers before pre-clean to avoid per-row FTS5 updates on DELETE
-    print("  Dropping FTS5 triggers for bulk insert optimization...")
+    logger.info("  Dropping FTS5 triggers for bulk insert optimization...")
     try:
         conn.execute("DROP TRIGGER IF EXISTS pdf_pages_ai")
         conn.execute("DROP TRIGGER IF EXISTS pdf_pages_ad")
         conn.commit()
     except Exception as e:
-        print(f"    (Warning: {e})")
+        logger.warning("    (Warning: %s)", e)
 
     # Pre-clean: remove old data for files being re-processed (triggers already dropped)
     # Use a single batched DELETE via a temp table to avoid 4000+ individual statements
     if pdfs_to_process:
-        print(f"  Pre-cleaning {len(pdfs_to_process)} PDF(s) from DB...")
+        logger.info("  Pre-cleaning %d PDF(s) from DB...", len(pdfs_to_process))
         rel_paths = [str(pdf.relative_to(docs_dir)) for pdf in pdfs_to_process]
         conn.execute("CREATE TEMP TABLE IF NOT EXISTS _pdf_preclean (path TEXT PRIMARY KEY)")
         conn.executemany("INSERT OR IGNORE INTO _pdf_preclean VALUES (?)",
@@ -2714,8 +2715,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     try:
       if num_workers > 1 and len(pdfs_to_process) > 1:
         # ── Parallel PDF extraction ───────────────────────────────────
-        print(f"  Processing {len(pdfs_to_process)} PDFs with {num_workers} "
-              f"parallel workers...")
+        logger.info("  Processing %d PDFs with %d parallel workers...",
+                    len(pdfs_to_process), num_workers)
         pdf_phase_start = time.time()
 
         # Sliding window: keep at most (num_workers * 2) futures in-flight at once.
@@ -2740,7 +2741,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
             while active:
                 if stop_event and stop_event.is_set():
-                    print("\n  Graceful stop requested — cancelling workers...")
+                    logger.info("  Graceful stop requested — cancelling workers...")
                     for f in active:
                         f.cancel()
                     _save_checkpoint(conn, session_id, files_done_total,
@@ -2767,7 +2768,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                     try:
                         result = future.result(timeout=300)  # 5-min safety timeout
                     except Exception as e:
-                        print(f"  ERROR: {pdf.name}: {e}")
+                        logger.error("  ERROR: %s: %s", pdf.name, e)
                         stat = pdf.stat()
                         _et, _bc, _so = _derive_ingest_metadata(rel_path, "pdf")
                         conn.execute(
@@ -2792,7 +2793,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                     error = result["error"]
 
                     if error:
-                        print(f"  ERROR: {pdf.name}: {error}")
+                        logger.error("  ERROR: %s: %s", pdf.name, error)
                         stat = pdf.stat()
                         _et, _bc, _so = _derive_ingest_metadata(rel_path, "pdf")
                         conn.execute(
@@ -2881,8 +2882,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                         remaining = len(pdfs_to_process) - processed_pdf
                         _metrics["eta_sec"] = avg_per_file * remaining
 
-                    print(f"  [{processed_pdf}/{len(pdfs_to_process)}] "
-                          f"{pdf.name}: {pages} pages")
+                    logger.info("  [%d/%d] %s: %d pages",
+                               processed_pdf, len(pdfs_to_process), pdf.name, pages)
                     _progress("pdf", processed_pdf, len(pdfs_to_process),
                               f"[{processed_pdf}/{len(pdfs_to_process)}] "
                               f"{pdf.name}: {pages} pages",
@@ -2905,10 +2906,10 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
       else:
         # ── Sequential PDF extraction (workers=1) ─────────────────────
         if pdfs_to_process:
-            print(f"  Processing {len(pdfs_to_process)} PDFs sequentially...")
+            logger.info("  Processing %d PDFs sequentially...", len(pdfs_to_process))
         for idx, pdf in enumerate(pdfs_to_process):
             if stop_event and stop_event.is_set():
-                print("\n  Graceful stop requested — saving checkpoint...")
+                logger.info("  Graceful stop requested — saving checkpoint...")
                 _save_checkpoint(conn, session_id, files_done_total, total_files,
                                  total_pdf_pages, total_budget_rows,
                                  0, str(pdf), "interrupted")
@@ -2929,8 +2930,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                       {"files_remaining": total_files - files_done_total,
                        "current_pages": 0,
                        "current_total_pages": 0})
-            print(f"  [{processed_pdf}/{len(pdfs_to_process)}] {pdf.name}...",
-                  end=" ", flush=True)
+            logger.info("  [%d/%d] %s...", processed_pdf, len(pdfs_to_process), pdf.name)
 
             def _page_cb(pages_done: int, page_total: int,
                          _proc=processed_pdf, _name=pdf.name,
@@ -2949,7 +2949,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                                                  docs_dir=docs_dir,
                                                  pdf_timeout=pdf_timeout)
             file_elapsed = time.time() - t0
-            print(f"{pages} pages ({file_elapsed:.1f}s)")
+            logger.info("  %s: %d pages (%.1fs)", pdf.name, pages, file_elapsed)
 
             if file_elapsed > 0 and pages > 0:
                 _update_speed("speed_pages", pages / file_elapsed)
@@ -2994,7 +2994,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             # Rebuild FTS5 if new pages were added
             final_page_count = conn.execute("SELECT COUNT(*) FROM pdf_pages").fetchone()[0]
             if final_page_count > initial_page_count:
-                print("\n  Rebuilding full-text search indexes...")
+                logger.info("  Rebuilding full-text search indexes...")
                 # FTS5 'rebuild' command repopulates the index from the content
                 # table in a single optimized pass — faster than DELETE+INSERT.
                 conn.execute("INSERT INTO pdf_pages_fts(pdf_pages_fts) VALUES('rebuild')")
@@ -3016,11 +3016,11 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                     END
                 """)
                 conn.commit()
-                print("  FTS5 rebuild complete and triggers recreated")
+                logger.info("  FTS5 rebuild complete and triggers recreated")
             else:
                 _recreate_pdf_fts_triggers(conn)
                 conn.commit()
-                print("  Skipped FTS5 rebuild (no new pages added)")
+                logger.info("  Skipped FTS5 rebuild (no new pages added)")
 
     # If stopped gracefully during PDF loop, close and exit cleanly
     if _pdf_stopped:
@@ -3029,10 +3029,10 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         return
 
     if skipped_pdf:
-        print(f"\n  Skipped {skipped_pdf} unchanged PDF file(s)")
-    print(f"  Ingested PDF pages: {total_pdf_pages:,}")
+        logger.info("  Skipped %d unchanged PDF file(s)", skipped_pdf)
+    logger.info("  Ingested PDF pages: %s", f"{total_pdf_pages:,}")
     if num_workers > 1:
-        print(f"  Workers used: {num_workers}")
+        logger.info("  Workers used: %d", num_workers)
 
     # ── Detect removed files ───────────────────────────────────────────────
     all_current = {str(f.relative_to(docs_dir)) for f in xlsx_files}
@@ -3046,16 +3046,16 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         if row[0] not in all_current:
             _remove_file_data(conn, row[0], row[1])
             conn.execute("DELETE FROM ingested_files WHERE file_path = ?", (row[0],))
-            print(f"  Removed stale data for: {row[0]}")
+            logger.info("  Removed stale data for: %s", row[0])
             removed_count += 1
 
     if removed_count:
         conn.commit()
-        print(f"  Cleaned up {removed_count} removed file(s)")
+        logger.info("  Cleaned up %d removed file(s)", removed_count)
 
     # ── Create indexes ─────────────────────────────────────────────────────
     _progress("index", 0, 1, "Creating indexes...")
-    print("\nCreating indexes...")
+    logger.info("Creating indexes...")
     conn.executescript("""
         CREATE INDEX IF NOT EXISTS idx_bl_exhibit ON budget_lines(exhibit_type);
         CREATE INDEX IF NOT EXISTS idx_bl_org ON budget_lines(organization_name);
@@ -3161,18 +3161,18 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         f"PDF files: {len(pdf_files)}"
     )
 
-    print(f"\n{'='*60}")
-    print("  BUILD COMPLETE")
-    print(f"{'='*60}")
-    print(f"  Database:           {db_path} ({db_size:.1f} MB)")
-    print(f"  Total budget lines: {total_lines:,}")
-    print(f"  Total PDF pages:    {total_pages:,}")
-    print(f"  Excel files:        {len(xlsx_files)}")
-    print(f"  PDF files:          {len(pdf_files)}")
+    logger.info("=" * 60)
+    logger.info("  BUILD COMPLETE")
+    logger.info("=" * 60)
+    logger.info("  Database:           %s (%.1f MB)", db_path, db_size)
+    logger.info("  Total budget lines: %s", f"{total_lines:,}")
+    logger.info("  Total PDF pages:    %s", f"{total_pages:,}")
+    logger.info("  Excel files:        %d", len(xlsx_files))
+    logger.info("  PDF files:          %d", len(pdf_files))
     if not rebuild:
         new_files = (len(xlsx_files) - skipped_xlsx) + (len(pdf_files) - skipped_pdf)
-        print(f"  New/updated files:  {new_files}")
-        print(f"  Unchanged (skip):   {skipped_xlsx + skipped_pdf}")
+        logger.info("  New/updated files:  %d", new_files)
+        logger.info("  Unchanged (skip):   %d", skipped_xlsx + skipped_pdf)
         summary += f"\nNew/updated: {new_files} | Skipped: {skipped_xlsx + skipped_pdf}"
 
     _progress("done", total_files, total_files, summary,
@@ -3185,8 +3185,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     if _failures:
         with open(_failures_log_path, "w") as _flog:
             json.dump([f.to_dict() for f in _failures], _flog, indent=2)
-        print(f"\n  BUILD-001: {len(_failures)} file(s) failed — logged to {_failures_log_path}")
-        print("  Re-process with: python build_budget_db.py --retry-failures")
+        logger.warning("  BUILD-001: %d file(s) failed — logged to %s",
+                       len(_failures), _failures_log_path)
+        logger.info("  Re-process with: python build_budget_db.py --retry-failures")
     elif _failures_log_path.exists() and not retry_failures:
         # Clear stale failure log after a clean build
         _failures_log_path.unlink()
@@ -3198,19 +3199,18 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         )
         report = generate_quality_report(db_path, print_console=True)
         val = report["validation_summary"]
-        print(
-            f"\n  [QUALITY REPORT] {report['total_budget_lines']:,} budget lines | "
-            f"{val['total_checks']} checks | "
-            f"{val['total_warnings']} warning(s) | "
-            f"{val['total_failures']} failure(s)"
-        )
-        print("  [QUALITY REPORT] Written to data_quality_report.json")
+        logger.info("  [QUALITY REPORT] %s budget lines | %d checks | %d warning(s) | %d failure(s)",
+                    f"{report['total_budget_lines']:,}",
+                    val['total_checks'], val['total_warnings'], val['total_failures'])
+        logger.info("  [QUALITY REPORT] Written to data_quality_report.json")
     except Exception as _val_err:
-        print(f"\n  [VALIDATION] Skipped: {_val_err}")
+        logger.warning("  [VALIDATION] Skipped: %s", _val_err)
 
 
 def main():
     """Parse command-line arguments and run the database build pipeline."""
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
     parser = argparse.ArgumentParser(description="Build DoD budget search database")
     parser.add_argument("--db", type=Path, default=DEFAULT_DB_PATH,
                         help=f"Database path (default: {DEFAULT_DB_PATH})")

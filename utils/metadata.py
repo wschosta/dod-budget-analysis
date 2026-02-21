@@ -46,8 +46,11 @@ def collect_metadata(conn: sqlite3.Connection) -> dict:
         "pe_tags", "pe_lineage", "project_descriptions",
     ]
     for table in known_tables:
+        if not table.isidentifier():
+            tables[table] = None
+            continue
         try:
-            count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            count = conn.execute(f"SELECT COUNT(*) FROM [{table}]").fetchone()[0]
             tables[table] = count
         except sqlite3.OperationalError:
             tables[table] = None  # table doesn't exist
