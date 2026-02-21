@@ -97,11 +97,12 @@ def _make_db() -> sqlite3.Connection:
         CREATE TABLE pe_tags (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             pe_number TEXT NOT NULL,
+            project_number TEXT,
             tag TEXT NOT NULL,
             tag_source TEXT NOT NULL,
             confidence REAL DEFAULT 1.0,
             source_files TEXT,
-            UNIQUE(pe_number, tag, tag_source)
+            UNIQUE(pe_number, project_number, tag, tag_source)
         );
 
         CREATE TABLE pe_lineage (
