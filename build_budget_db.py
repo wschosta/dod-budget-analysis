@@ -926,19 +926,27 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
             mapping.setdefault(f"amount_fy{year}_supplemental", i)
         elif "reconcil" in h:
             mapping.setdefault(f"amount_fy{year}_reconciliation", i)
-        elif "total" in h:
+        # C-1: "FY2026 Authorization Amount" → request for that year
+        elif "authoriz" in h:
+            mapping.setdefault(f"amount_fy{year}_request", i)
+        elif "total" in h or "obligation" in h:
             mapping.setdefault(f"amount_fy{year}_total", i)
         elif "request" in h or "disc" in h:
             mapping.setdefault(f"amount_fy{year}_request", i)
 
-    # Authorization/appropriation amounts (C-1 exhibit)
+    # C-1 fallback: Authorization/appropriation headers WITHOUT FY prefix.
+    # Only applies when Phase 2 regex didn't match (no "FY YYYY" in header).
+    # These are last-resort mappings that use the exhibit's FY context.
+    # Note: C-1 real headers are usually FY-prefixed and caught by Phase 2 above.
     for i, h in enumerate(h_lower):
+        if _FY_RE.search(h):
+            continue  # Already handled by Phase 2
         if "authorization amount" in h:
-            mapping.setdefault("amount_fy2026_request", i)
+            mapping.setdefault("amount_authorization", i)
         elif "appropriation amount" in h:
-            mapping.setdefault("amount_fy2025_enacted", i)
+            mapping.setdefault("amount_appropriation", i)
         elif "total obligation authority" in h:
-            mapping.setdefault("amount_fy2026_total", i)
+            mapping.setdefault("amount_total_obligation", i)
 
     # DONE 1.B2-c: Multi-row header handling implemented.
     #   _merge_header_rows() detects two-row split headers and merges them.
@@ -1029,6 +1037,18 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
             # Both present but disagree — log warning, prefer sheet-derived value
             print(f"  LION-101 WARNING: FY mismatch in {file_path.name}: "
                   f"sheet='{fiscal_year}' vs dir='{dir_fy}' — using sheet value")
+
+        # C-1 fallback: remap generic authorization/appropriation columns to
+        # FY-specific names using the sheet's fiscal year context.
+        _fy_year = re.search(r"(\d{4})", fiscal_year).group(1) if re.search(r"(\d{4})", fiscal_year) else None
+        _c1_remap = {
+            "amount_authorization": f"amount_fy{_fy_year}_request" if _fy_year else None,
+            "amount_appropriation": f"amount_fy{_fy_year}_enacted" if _fy_year else None,
+            "amount_total_obligation": f"amount_fy{_fy_year}_total" if _fy_year else None,
+        }
+        for _gen_key, _fy_key in _c1_remap.items():
+            if _gen_key in col_map and _fy_key:
+                col_map.setdefault(_fy_key, col_map.pop(_gen_key))
 
         # Detect currency year for this sheet (TODO 1.B3-b)
         currency_year = _detect_currency_year(sheet_name, file_path.name)
@@ -1248,6 +1268,19 @@ def _extract_excel_rows(args: tuple) -> dict:
         dir_fy = _extract_fy_from_path(file_path)
         if fiscal_year == sheet_name and dir_fy:
             fiscal_year = dir_fy
+
+        # C-1 fallback: remap generic authorization/appropriation columns to
+        # FY-specific names using the sheet's fiscal year context.
+        _fy_year = re.search(r"(\d{4})", fiscal_year).group(1) if re.search(r"(\d{4})", fiscal_year) else None
+        _c1_remap = {
+            "amount_authorization": f"amount_fy{_fy_year}_request" if _fy_year else None,
+            "amount_appropriation": f"amount_fy{_fy_year}_enacted" if _fy_year else None,
+            "amount_total_obligation": f"amount_fy{_fy_year}_total" if _fy_year else None,
+        }
+        for _gen_key, _fy_key in _c1_remap.items():
+            if _gen_key in col_map and _fy_key:
+                col_map.setdefault(_fy_key, col_map.pop(_gen_key))
+
         currency_year = _detect_currency_year(sheet_name, file_path.name)
         amount_unit = _detect_amount_unit(first_rows, header_idx)
         unit_multiplier = 1000.0 if amount_unit == "millions" else 1.0
