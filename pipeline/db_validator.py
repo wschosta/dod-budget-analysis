@@ -25,11 +25,14 @@ DONE LION-108-val: Validation checks for LION schema changes.
 
 import argparse
 import json
+import logging
 import re
 import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Shared utilities: Import from utils package for consistency across codebase
 from utils import get_connection
@@ -257,8 +260,11 @@ def check_unit_consistency(conn: sqlite3.Connection) -> list[dict]:
             GROUP BY exhibit_type, source_file, amount_unit
             ORDER BY n DESC
         """).fetchall()
-    except Exception:
+    except sqlite3.OperationalError:
         # Column may not exist in pre-1.B3-b databases
+        return []
+    except Exception:
+        logger.debug("validation check failed", exc_info=True)
         return []
 
     for r in rows:
@@ -317,7 +323,10 @@ def check_pe_number_format(conn: sqlite3.Connection) -> list[dict]:
             GROUP BY pe_number, source_file, exhibit_type
             ORDER BY cnt DESC
         """).fetchall()
+    except sqlite3.OperationalError:
+        return []  # Table/column may not exist
     except Exception:
+        logger.debug("validation check failed", exc_info=True)
         return []
 
     malformed = [r for r in rows if not _PE_PATTERN.match(str(r["pe_number"]))]
@@ -363,7 +372,10 @@ def check_negative_amounts(conn: sqlite3.Connection) -> list[dict]:
                 ORDER BY {col}
                 LIMIT 50
             """).fetchall()
+        except sqlite3.OperationalError:
+            continue  # Table/column may not exist
         except Exception:
+            logger.debug("validation check failed", exc_info=True)
             continue
 
         if rows:
@@ -421,7 +433,10 @@ def check_yoy_budget_anomalies(conn: sqlite3.Connection) -> list[dict]:
                 ORDER BY ABS({col_new} - {col_old}) / MAX(ABS({col_old}), 1) DESC
                 LIMIT 50
             """).fetchall()
+        except sqlite3.OperationalError:
+            continue  # Table/column may not exist
         except Exception:
+            logger.debug("validation check failed", exc_info=True)
             continue
 
         if rows:
@@ -460,7 +475,10 @@ def check_appropriation_title_consistency(conn: sqlite3.Connection) -> list[dict
             GROUP BY account
             HAVING title_count > 1
         """).fetchall()
+    except sqlite3.OperationalError:
+        return []  # Table/column may not exist
     except Exception:
+        logger.debug("validation check failed", exc_info=True)
         return []
 
     for r in rows:
@@ -561,8 +579,10 @@ def check_line_item_rollups(conn: sqlite3.Connection) -> list[dict]:
                     "detail_sum": detail_sum,
                     "difference": diff,
                 })
+    except sqlite3.OperationalError:
+        pass  # Table/column may not exist
     except Exception:
-        pass
+        logger.debug("validation check failed", exc_info=True)
 
     return issues
 
@@ -606,9 +626,11 @@ def check_referential_integrity(conn: sqlite3.Connection) -> list[dict]:
                 "missing_value": r["organization_name"],
                 "count": r["cnt"],
             })
-    except Exception:
+    except sqlite3.OperationalError:
         # services_agencies table may not exist
         pass
+    except Exception:
+        logger.debug("validation check failed", exc_info=True)
 
     # Check exhibit_type → exhibit_types
     try:
@@ -635,9 +657,11 @@ def check_referential_integrity(conn: sqlite3.Connection) -> list[dict]:
                 "missing_value": r["exhibit_type"],
                 "count": r["cnt"],
             })
-    except Exception:
+    except sqlite3.OperationalError:
         # exhibit_types table may not exist
         pass
+    except Exception:
+        logger.debug("validation check failed", exc_info=True)
 
     return issues
 
@@ -695,7 +719,10 @@ def check_pdf_extraction_quality(conn: sqlite3.Connection) -> list[dict]:
         total_pages = conn.execute(
             "SELECT COUNT(*) AS c FROM pdf_pages"
         ).fetchone()["c"]
+    except sqlite3.OperationalError:
+        return issues  # Table/column may not exist
     except Exception:
+        logger.debug("validation check failed", exc_info=True)
         return issues
 
     if total_pages == 0:
@@ -708,7 +735,10 @@ def check_pdf_extraction_quality(conn: sqlite3.Connection) -> list[dict]:
             WHERE LENGTH(REPLACE(REPLACE(COALESCE(page_text, ''), ' ', ''),
                          CHAR(10), '')) < 50
         """).fetchone()["c"]
+    except sqlite3.OperationalError:
+        short_pages = 0  # Table/column may not exist
     except Exception:
+        logger.debug("validation check failed", exc_info=True)
         short_pages = 0
 
     # Empty table data pages
@@ -718,7 +748,10 @@ def check_pdf_extraction_quality(conn: sqlite3.Connection) -> list[dict]:
             WHERE has_tables = 1
               AND (table_data IS NULL OR TRIM(table_data) = '')
         """).fetchone()["c"]
+    except sqlite3.OperationalError:
+        empty_table_pages = 0  # Table/column may not exist
     except Exception:
+        logger.debug("validation check failed", exc_info=True)
         empty_table_pages = 0
 
     bad_pages = short_pages + empty_table_pages
@@ -788,7 +821,10 @@ def check_budget_type_values(conn: sqlite3.Connection) -> list[dict]:
             WHERE budget_type IS NOT NULL
             GROUP BY budget_type
         """).fetchall()
+    except sqlite3.OperationalError:
+        return []  # Table/column may not exist
     except Exception:
+        logger.debug("validation check failed", exc_info=True)
         return []
 
     for row in rows:
@@ -818,7 +854,10 @@ def check_pdf_pages_fiscal_year(conn: sqlite3.Connection) -> list[dict]:
         total = conn.execute(
             "SELECT COUNT(*) AS c FROM pdf_pages"
         ).fetchone()["c"]
+    except sqlite3.OperationalError:
+        return []  # Table/column may not exist
     except Exception:
+        logger.debug("validation check failed", exc_info=True)
         return []
 
     if total == 0:
@@ -828,13 +867,16 @@ def check_pdf_pages_fiscal_year(conn: sqlite3.Connection) -> list[dict]:
         null_fy = conn.execute(
             "SELECT COUNT(*) AS c FROM pdf_pages WHERE fiscal_year IS NULL"
         ).fetchone()["c"]
-    except Exception:
+    except sqlite3.OperationalError:
         # Column may not exist in older databases
         return [{
             "check": "pdf_pages_fiscal_year",
             "severity": "warning",
             "detail": "pdf_pages table missing fiscal_year column (LION-100 not applied)",
         }]
+    except Exception:
+        logger.debug("validation check failed", exc_info=True)
+        return []
 
     if null_fy > 0:
         pct = null_fy / total * 100
@@ -880,7 +922,10 @@ def check_pdf_pe_numbers_populated(conn: sqlite3.Connection) -> list[dict]:
                 SELECT COUNT(*) AS c FROM pdf_pages
                 WHERE page_text LIKE '%0_0_____%'
             """).fetchone()["c"]
+        except sqlite3.OperationalError:
+            pe_pages = 0  # Table/column may not exist
         except Exception:
+            logger.debug("validation check failed", exc_info=True)
             pe_pages = 0
 
         if pe_pages > 0:
@@ -919,7 +964,10 @@ def check_pe_tags_source_files(conn: sqlite3.Connection) -> list[dict]:
         total = conn.execute(
             "SELECT COUNT(*) AS c FROM pe_tags"
         ).fetchone()["c"]
+    except sqlite3.OperationalError:
+        return []  # Table/column may not exist
     except Exception:
+        logger.debug("validation check failed", exc_info=True)
         return []
 
     if total == 0:
@@ -929,12 +977,15 @@ def check_pe_tags_source_files(conn: sqlite3.Connection) -> list[dict]:
         null_src = conn.execute(
             "SELECT COUNT(*) AS c FROM pe_tags WHERE source_files IS NULL"
         ).fetchone()["c"]
-    except Exception:
+    except sqlite3.OperationalError:
         return [{
             "check": "pe_tags_source_files",
             "severity": "warning",
             "detail": "pe_tags table missing source_files column (LION-106 not applied)",
         }]
+    except Exception:
+        logger.debug("validation check failed", exc_info=True)
+        return []
 
     if null_src > 0:
         issues.append({
@@ -975,7 +1026,10 @@ def check_budget_activity_consistency(conn: sqlite3.Connection) -> list[dict]:
             ORDER BY title_count DESC
             LIMIT 30
         """).fetchall()
+    except sqlite3.OperationalError:
+        return []  # Table/column may not exist
     except Exception:
+        logger.debug("validation check failed", exc_info=True)
         return []
 
     for r in rows:
@@ -1027,7 +1081,10 @@ def check_extreme_outliers(conn: sqlite3.Connection) -> list[dict]:
                 ORDER BY ABS({col}) DESC
                 LIMIT 20
             """, (threshold,)).fetchall()
+        except sqlite3.OperationalError:
+            continue  # Table/column may not exist
         except Exception:
+            logger.debug("validation check failed", exc_info=True)
             continue
 
         if rows:
@@ -1071,7 +1128,10 @@ def check_pe_org_consistency(conn: sqlite3.Connection) -> list[dict]:
             ORDER BY org_count DESC
             LIMIT 30
         """).fetchall()
+    except sqlite3.OperationalError:
+        return []  # Table/column may not exist
     except Exception:
+        logger.debug("validation check failed", exc_info=True)
         return []
 
     for r in rows:
@@ -1121,7 +1181,10 @@ def check_enrichment_orphans(conn: sqlite3.Connection) -> list[dict]:
                     SELECT 1 FROM pe_index p WHERE p.pe_number = t.{col}
                 )
             """).fetchone()["c"]
+        except sqlite3.OperationalError:
+            continue  # Table/column may not exist
         except Exception:
+            logger.debug("validation check failed", exc_info=True)
             continue
 
         if orphans > 0:
@@ -1161,7 +1224,10 @@ def check_enrichment_staleness(conn: sqlite3.Connection) -> list[dict]:
                   SELECT 1 FROM pe_index p WHERE p.pe_number = b.pe_number
               )
         """).fetchone()
+    except sqlite3.OperationalError:
+        return []  # Table/column may not exist
     except Exception:
+        logger.debug("validation check failed", exc_info=True)
         return []
 
     missing = row["missing_count"]
@@ -1208,7 +1274,10 @@ def check_fy_column_null_rates(conn: sqlite3.Connection) -> list[dict]:
         total_rows = conn.execute(
             "SELECT COUNT(*) AS c FROM budget_lines"
         ).fetchone()["c"]
+    except sqlite3.OperationalError:
+        return []  # Table/column may not exist
     except Exception:
+        logger.debug("validation check failed", exc_info=True)
         return []
 
     if total_rows == 0:
@@ -1219,7 +1288,10 @@ def check_fy_column_null_rates(conn: sqlite3.Connection) -> list[dict]:
             null_count = conn.execute(
                 f"SELECT COUNT(*) AS c FROM budget_lines WHERE {col} IS NULL"
             ).fetchone()["c"]
+        except sqlite3.OperationalError:
+            continue  # Table/column may not exist
         except Exception:
+            logger.debug("validation check failed", exc_info=True)
             continue
 
         pct = round(null_count / total_rows * 100, 1)
@@ -1275,8 +1347,10 @@ def check_duplicate_budget_lines(conn: sqlite3.Connection) -> list[dict]:
                 "source_file": r["source_file"],
                 "duplicate_count": r["cnt"],
             })
+    except sqlite3.OperationalError:
+        pass  # Table/column may not exist
     except Exception:
-        pass
+        logger.debug("validation check failed", exc_info=True)
 
     return issues
 
@@ -1311,8 +1385,10 @@ def check_source_file_tracking(conn: sqlite3.Connection) -> list[dict]:
                 "count": len(untracked),
                 "samples": untracked[:10],
             })
-    except Exception:
+    except sqlite3.OperationalError:
         pass  # ingested_files may not exist
+    except Exception:
+        logger.debug("validation check failed", exc_info=True)
 
     return issues
 
@@ -1352,8 +1428,10 @@ def check_expected_indexes(conn: sqlite3.Connection) -> list[dict]:
                 "count": len(missing),
                 "missing_indexes": sorted(missing),
             })
+    except sqlite3.OperationalError:
+        pass  # Table/column may not exist
     except Exception:
-        pass
+        logger.debug("validation check failed", exc_info=True)
 
     return issues
 

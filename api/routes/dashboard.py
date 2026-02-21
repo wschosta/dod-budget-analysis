@@ -201,7 +201,7 @@ def dashboard_summary(
             "pct_described": round(enrich_row[3] / distinct_pes * 100, 1)
             if distinct_pes > 0 else 0,
         }
-    except Exception:
+    except sqlite3.OperationalError:
         pass  # Enrichment tables may not exist yet
 
     # Budget type distribution — separate query since budget_type
@@ -219,7 +219,7 @@ def dashboard_summary(
             ORDER BY SUM(COALESCE({fy26_col}, 0)) DESC
         """, filter_params).fetchall()
         by_budget_type = [dict(r) for r in bt_rows]
-    except Exception:
+    except sqlite3.OperationalError:
         pass  # budget_type column may not exist
 
     # Exhibit type distribution
@@ -235,8 +235,8 @@ def dashboard_summary(
             ORDER BY SUM(COALESCE({fy26_col}, 0)) DESC
         """, filter_params).fetchall()
         by_exhibit_type = [dict(r) for r in et_rows]
-    except Exception:
-        pass
+    except sqlite3.OperationalError:
+        pass  # exhibit_type column may not exist
 
     # Source file stats — Excel vs PDF file counts and totals
     source_stats: dict = {}
@@ -259,7 +259,7 @@ def dashboard_summary(
                 "pdf_pages": sf_row["pdf_pages"] or 0,
                 "total_files": sf_row["total_files"],
             }
-    except Exception:
+    except sqlite3.OperationalError:
         pass  # ingested_files may not exist
 
     # Data freshness — when was the database last built/updated?
@@ -281,7 +281,7 @@ def dashboard_summary(
         """).fetchone()
         if ds and ds["most_recent"]:
             freshness["data_sources_updated"] = ds["most_recent"]
-    except Exception:
+    except sqlite3.OperationalError:
         pass  # Tables may not exist
 
     result = {

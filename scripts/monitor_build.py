@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Monitor build_budget_db.py progress in real-time."""
 
+import os
 import sqlite3
 import sys
 import time
@@ -9,7 +10,7 @@ from datetime import datetime
 
 def monitor_progress():
     """Display current build progress."""
-    db = Path("../dod_budget.sqlite")
+    db = Path(os.environ.get("APP_DB_PATH", Path(__file__).resolve().parent.parent / "dod_budget.sqlite"))
     if not db.exists():
         print("Database not found - build hasn't started yet")
         return

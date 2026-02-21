@@ -608,16 +608,22 @@ def program_detail(
             detail=exc.detail or f"Program {pe_number} not found",
         ) from exc
 
-    # Also fetch related PE titles for display
+    # Batch-fetch related PE titles to avoid N+1 queries
     related = pe_data.get("related", [])
-    for rel in related:
-        if not rel.get("referenced_title"):
-            title_row = conn.execute(
-                "SELECT display_title FROM pe_index WHERE pe_number = ?",
-                (rel.get("referenced_pe"),),
-            ).fetchone()
-            if title_row:
-                rel["referenced_title"] = title_row["display_title"]
+    missing_pes = [r["referenced_pe"] for r in related
+                   if not r.get("referenced_title") and r.get("referenced_pe")]
+    if missing_pes:
+        ph = ",".join("?" * len(missing_pes))
+        title_map = {
+            r["pe_number"]: r["display_title"]
+            for r in conn.execute(
+                f"SELECT pe_number, display_title FROM pe_index "
+                f"WHERE pe_number IN ({ph})", missing_pes
+            ).fetchall()
+        }
+        for rel in related:
+            if not rel.get("referenced_title") and rel.get("referenced_pe"):
+                rel["referenced_title"] = title_map.get(rel["referenced_pe"])
 
     return _tmpl().TemplateResponse("program-detail.html", {
         "request": request,

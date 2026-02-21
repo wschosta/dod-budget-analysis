@@ -107,7 +107,8 @@ def _build_download_sql(
     sort_col = sort_by if sort_by in _ALLOWED_SORT else "id"
     direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
     sql = (f"SELECT {col_list} FROM budget_lines {where} "
-           f"ORDER BY {sort_col} {direction} LIMIT {limit}")
+           f"ORDER BY {sort_col} {direction} LIMIT ?")
+    params.append(limit)
 
     return sql, params, total
 

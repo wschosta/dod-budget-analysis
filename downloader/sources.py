@@ -8,11 +8,14 @@ browser-based file downloads.
 """
 
 import json
+import logging
 import os
 import re
 import sys
 import time
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 from urllib.parse import urljoin, urlparse, unquote
 
@@ -212,9 +215,9 @@ def _browser_extract_links(url: str, text_filter: str | None = None,
         start = time.time()
         try:
             page.goto(url, timeout=timeout, wait_until="domcontentloaded")
-        except Exception:
-            # If page load times out, proceed with what we have
-            pass
+        except Exception as exc:
+            logger.debug("Page load timeout for %s: %s", url, exc)
+            # Proceed with whatever content loaded so far
         elapsed_ms = int((time.time() - start) * 1000)
         _timeout_mgr.record_time(url, elapsed_ms)
 
@@ -387,7 +390,8 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
             page.close()
             return True
         page.close()
-    except Exception:
+    except Exception as exc:
+        logger.debug("Browser strategy 1 (API fetch) failed for %s: %s", url, exc)
         try:
             page.close()
         except Exception:
@@ -415,7 +419,8 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
         page.close()
         return True
 
-    except Exception:
+    except Exception as exc:
+        logger.debug("Browser strategy 2 (anchor inject) failed for %s: %s", url, exc)
         try:
             page.close()
         except Exception:
@@ -433,7 +438,8 @@ def _browser_download_file(url: str, dest_path: Path, overwrite: bool = False) -
                 page.close()
                 return True
         page.close()
-    except Exception:
+    except Exception as exc:
+        logger.debug("Browser strategy 3 (direct nav) failed for %s: %s", url, exc)
         try:
             page.close()
         except Exception:

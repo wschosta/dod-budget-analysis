@@ -468,54 +468,18 @@ def run_phase2(conn: sqlite3.Connection) -> int:
 
 # ── Phase 3: Generate Tags ────────────────────────────────────────────────────
 
-def _tags_from_structured(pe_number: str, conn: sqlite3.Connection) -> list[tuple]:
-    """Generate tags from structured budget_lines fields for a PE."""
-    tags: list[tuple] = []
-
-    row = conn.execute("""
-        SELECT budget_activity_title, appropriation_title, organization_name
-        FROM budget_lines
-        WHERE pe_number = ?
-        LIMIT 1
-    """, (pe_number,)).fetchone()
-    if not row:
-        return tags
-
-    ba_title, approp_title, org_name = row
-
-    # Budget activity → RDT&E phase tag
-    if ba_title:
-        for pattern, tag in _BUDGET_ACTIVITY_TAGS:
-            if pattern.search(ba_title):
-                tags.append((pe_number, tag, "structured", 1.0))
-                break
-
-    # Appropriation → budget category tag
-    if approp_title:
-        low = approp_title.lower()
-        for key, tag in _APPROP_TAGS.items():
-            if key in low:
-                tags.append((pe_number, tag, "structured", 1.0))
-                break
-
-    # Organization → service tag
-    if org_name:
-        low = org_name.lower()
-        for key, tag in _ORG_TAGS.items():
-            if key in low:
-                tags.append((pe_number, tag, "structured", 1.0))
-                break
-
-    return tags
-
-
 def _tags_from_keywords(pe_number: str, text: str) -> list[tuple]:
-    """Match description text against predefined domain taxonomy."""
+    """Match description text against predefined domain taxonomy.
+
+    Note: run_phase3() inlines an equivalent batch loop with differentiated
+    confidence (0.8 for PDF text, 0.9 for budget_lines text). This standalone
+    version uses 0.9 and is kept for tests and ad-hoc use.
+    """
     tags: list[tuple] = []
     for tag, patterns in _COMPILED_TAXONOMY:
         for pat in patterns:
             if pat.search(text):
-                tags.append((pe_number, tag, "keyword", 1.0))
+                tags.append((pe_number, tag, "keyword", 0.9))
                 break
     return tags
 
