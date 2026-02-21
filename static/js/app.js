@@ -911,6 +911,14 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   });
 
+  // ── Back to top button ───────────────────────────────────────────────
+  var backToTop = document.getElementById("back-to-top");
+  if (backToTop) {
+    window.addEventListener("scroll", function () {
+      backToTop.classList.toggle("visible", window.scrollY > 400);
+    }, { passive: true });
+  }
+
   // ── Search autocomplete ─────────────────────────────────────────────────
   initAutocomplete();
 

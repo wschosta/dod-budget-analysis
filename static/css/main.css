@@ -1686,6 +1686,35 @@ tr:focus-within td {
   border-color: var(--border-color);
 }
 
+/* ── Back to top button ───────────────────────────────────────────────── */
+.back-to-top {
+  position: fixed;
+  bottom: 1.5rem;
+  left: 1.5rem;
+  z-index: 250;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--border-color);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 1.1rem;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s;
+}
+.back-to-top.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.back-to-top:hover {
+  background: var(--clr-blue);
+  color: #fff;
+  border-color: var(--clr-blue);
+}
+
 /* ── Toast notifications ─────────────────────────────────────────────── */
 .toast-container {
   position: fixed;
