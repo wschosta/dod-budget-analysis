@@ -135,6 +135,25 @@ class TestBuildDownloadSql:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# Helpers — EAGLE-6 attribution comment line handling
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+def _strip_csv_comments(text: str) -> str:
+    """Remove EAGLE-6 source attribution comment lines (starting with '#') from CSV text."""
+    lines = text.split("\n")
+    data_lines = [line for line in lines if not line.startswith('"#') and not line.startswith("#")]
+    return "\n".join(data_lines)
+
+
+def _strip_ndjson_metadata(lines: list[str]) -> list[str]:
+    """Remove EAGLE-6 metadata object (first line with _metadata key) from NDJSON lines."""
+    if lines and "_metadata" in lines[0]:
+        return lines[1:]
+    return lines
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # Integration tests — download endpoint streaming via TestClient
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -225,7 +244,7 @@ class TestCSVDownload:
 
     def test_csv_has_correct_headers(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=csv")
-        reader = csv.DictReader(io.StringIO(resp.text))
+        reader = csv.DictReader(io.StringIO(_strip_csv_comments(resp.text)))
         assert reader.fieldnames is not None
         assert "id" in reader.fieldnames
         assert "source_file" in reader.fieldnames
@@ -233,13 +252,13 @@ class TestCSVDownload:
 
     def test_csv_row_count_matches_data(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=csv")
-        reader = csv.DictReader(io.StringIO(resp.text))
+        reader = csv.DictReader(io.StringIO(_strip_csv_comments(resp.text)))
         rows = list(reader)
         assert len(rows) == 20
 
     def test_csv_empty_result_has_header_only(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=csv&service=NonExistentService")
-        reader = csv.DictReader(io.StringIO(resp.text))
+        reader = csv.DictReader(io.StringIO(_strip_csv_comments(resp.text)))
         assert reader.fieldnames is not None
         rows = list(reader)
         assert len(rows) == 0
@@ -259,23 +278,26 @@ class TestNDJSONDownload:
 
     def test_ndjson_valid_json_per_line(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=json")
-        lines = [line for line in resp.text.strip().split("\n") if line]
-        assert len(lines) == 20
-        for line in lines:
+        all_lines = [line for line in resp.text.strip().split("\n") if line]
+        data_lines = _strip_ndjson_metadata(all_lines)
+        assert len(data_lines) == 20
+        for line in data_lines:
             obj = json.loads(line)
             assert isinstance(obj, dict)
 
     def test_ndjson_has_expected_fields(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=json")
-        first_line = resp.text.strip().split("\n")[0]
-        obj = json.loads(first_line)
+        all_lines = [line for line in resp.text.strip().split("\n") if line]
+        data_lines = _strip_ndjson_metadata(all_lines)
+        obj = json.loads(data_lines[0])
         assert "id" in obj
         assert "source_file" in obj
 
     def test_ndjson_empty_result_no_content(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=json&service=NonExistentService")
-        lines = [line for line in resp.text.strip().split("\n") if line]
-        assert len(lines) == 0
+        all_lines = [line for line in resp.text.strip().split("\n") if line]
+        data_lines = _strip_ndjson_metadata(all_lines)
+        assert len(data_lines) == 0
 
 
 # ── Filter parameter tests ───────────────────────────────────────────────────
@@ -283,25 +305,25 @@ class TestNDJSONDownload:
 class TestDownloadFilters:
     def test_service_filter_narrows_results(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=csv&service=Army")
-        reader = csv.DictReader(io.StringIO(resp.text))
+        reader = csv.DictReader(io.StringIO(_strip_csv_comments(resp.text)))
         rows = list(reader)
         assert len(rows) == 10
 
     def test_fiscal_year_filter_narrows_results(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=csv&fiscal_year=FY+2025")
-        reader = csv.DictReader(io.StringIO(resp.text))
+        reader = csv.DictReader(io.StringIO(_strip_csv_comments(resp.text)))
         rows = list(reader)
         assert len(rows) == 5
 
     def test_exhibit_type_filter(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=csv&exhibit_type=p1")
-        reader = csv.DictReader(io.StringIO(resp.text))
+        reader = csv.DictReader(io.StringIO(_strip_csv_comments(resp.text)))
         rows = list(reader)
         assert len(rows) == 20
 
     def test_invalid_exhibit_type_returns_empty(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=csv&exhibit_type=zzz")
-        reader = csv.DictReader(io.StringIO(resp.text))
+        reader = csv.DictReader(io.StringIO(_strip_csv_comments(resp.text)))
         rows = list(reader)
         assert len(rows) == 0
 
@@ -311,18 +333,18 @@ class TestDownloadFilters:
 class TestDownloadLimit:
     def test_limit_caps_output_rows(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=csv&limit=5")
-        reader = csv.DictReader(io.StringIO(resp.text))
+        reader = csv.DictReader(io.StringIO(_strip_csv_comments(resp.text)))
         rows = list(reader)
         assert len(rows) == 5
 
     def test_limit_one(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=csv&limit=1")
-        reader = csv.DictReader(io.StringIO(resp.text))
+        reader = csv.DictReader(io.StringIO(_strip_csv_comments(resp.text)))
         rows = list(reader)
         assert len(rows) == 1
 
     def test_large_limit_returns_all(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=csv&limit=10000")
-        reader = csv.DictReader(io.StringIO(resp.text))
+        reader = csv.DictReader(io.StringIO(_strip_csv_comments(resp.text)))
         rows = list(reader)
         assert len(rows) == 20

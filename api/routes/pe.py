@@ -301,6 +301,43 @@ def get_pe(
         ORDER BY fy2026_total DESC
     """, (pe_number,)).fetchall()
 
+    # EAGLE-3: Project-level descriptions from HAWK's project_descriptions table
+    projects: list[dict] = []
+    has_project_data = False
+    try:
+        _check = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='project_descriptions'"
+        ).fetchone()
+        if _check:
+            proj_rows = conn.execute("""
+                SELECT project_number, project_title, fiscal_year,
+                       section_header, description_text
+                FROM project_descriptions
+                WHERE pe_number = ?
+                ORDER BY project_number, fiscal_year, section_header
+            """, (pe_number,)).fetchall()
+
+            if proj_rows:
+                has_project_data = True
+                # Group by project_number
+                projects_map: dict[str | None, dict] = {}
+                for pr in proj_rows:
+                    pnum = pr["project_number"]
+                    if pnum not in projects_map:
+                        projects_map[pnum] = {
+                            "project_number": pnum,
+                            "project_title": pr["project_title"],
+                            "descriptions": [],
+                        }
+                    projects_map[pnum]["descriptions"].append({
+                        "fiscal_year": pr["fiscal_year"],
+                        "header": pr["section_header"],
+                        "text": pr["description_text"],
+                    })
+                projects = list(projects_map.values())
+    except Exception:
+        pass
+
     return {
         "pe_number": pe_number,
         "index": index,
@@ -308,6 +345,9 @@ def get_pe(
         "tags": [_row_dict(r) for r in tag_rows],
         "related": [_row_dict(r) for r in related_rows],
         "exhibits": [_row_dict(r) for r in exhibit_rows],
+        # EAGLE-3: Project-level data for FALCON template consumption
+        "projects": projects,
+        "has_project_data": has_project_data,
         "summary": {
             "funding_rows": len(funding_rows),
             "tag_count": len(tag_rows),
@@ -315,6 +355,7 @@ def get_pe(
             "related_count": len(related_rows),
             "pdf_page_count": pdf_page_count,
             "exhibit_count": len(exhibit_rows),
+            "project_count": len(projects),
             "total_fy2026_request": sum(
                 r["amount_fy2026_request"] or 0 for r in funding_rows
             ),
