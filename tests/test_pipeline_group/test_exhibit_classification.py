@@ -139,6 +139,36 @@ class TestClassifyExhibitCategory:
         ("vol_1-budget_activity_1.pdf", "detail"),
         ("vol5a.pdf", "detail"),
         ("volume_2.pdf", "detail"),
+        # ── Tier 2: Defense-Wide Procurement → detail ──
+        ("PROC_CBDP_PB_2026.pdf", "detail"),
+        ("PROC_SOCOM_PB_2025.pdf", "detail"),
+        ("PROC_DLA_PB_2026.pdf", "detail"),
+        ("PROC_MDA_VOL2B_PB_2026.pdf", "detail"),
+        ("PB_2026_PDW_VOL_1.pdf", "detail"),
+        # Multi-year procurement
+        ("CH53K_NAVY_MYP_1-4.pdf", "detail"),
+        ("GMLRS_ARMY_MYP_1-4.pdf", "detail"),
+        ("AMRAAM_AIR_FORCE_MYP_1.pdf", "detail"),
+        # ── Tier 2: Defense-Wide O&M → summary ──
+        ("OM_Volume1_Part1.pdf", "summary"),
+        ("OM_Volume1_Part_2.pdf", "summary"),
+        ("PB-15.pdf", "summary"),
+        ("PB-24.pdf", "summary"),
+        ("PB-28.pdf", "summary"),
+        ("PB-31Q.pdf", "summary"),
+        ("PB-61.pdf", "summary"),
+        ("ENV-30.pdf", "summary"),
+        ("PB_2026_DWWCF_Operating_and_Capital_Budget_Estimates.pdf", "summary"),
+        ("DoD_Revolving_Funds_J-Book_FY2026.pdf", "summary"),
+        ("DeCA_PB26_J-Book.pdf", "summary"),
+        ("00-DHP_Vols_I_and_II_PB26.pdf", "summary"),
+        ("Service_Support.pdf", "summary"),
+        ("FY2026_OM_Overview.pdf", "summary"),
+        # ── Tier 2: Defense-Wide MILCON → detail ──
+        ("Military_Construction_Defense-Wide_Consolidated.pdf", "detail"),
+        ("FY2026_BRAC_Overview.pdf", "detail"),
+        ("PB_26_DW_FH_FHIF.pdf", "detail"),
+        ("fy26_NATO_Security_Investment_Program.pdf", "detail"),
         # ── Should remain "other" ──
         ("readme.txt", "other"),
         ("budget_summary.xlsx", "other"),
@@ -146,8 +176,11 @@ class TestClassifyExhibitCategory:
         ("overview.pdf", "other"),
         ("pbhl.pdf", "other"),
         ("1-cover.pdf", "other"),
-        ("disa.pdf", "other"),
         ("green_book.pdf", "other"),
+        ("2-Table_of_Contents.pdf", "other"),
+        ("3-Total_State_Listing.pdf", "other"),
+        ("FY2026_Budget_Request.pdf", "other"),
+        ("FY2026_PPBE_Reform_Activities.pdf", "other"),
     ])
     def test_classification(self, input_val, expected):
         assert classify_exhibit_category(input_val) == expected
@@ -454,3 +487,196 @@ class TestCleanupEmptyDirs:
         removed = _cleanup_empty_dirs(tmp_path)
         assert removed == 1  # Only "remove" dir
         assert (tmp_path / "keep" / "sub" / "file.txt").exists()
+
+
+# ── Navy appropriation → exhibit type detection (builder.py) ─────────────────
+
+class TestNavyExhibitTypeDetection:
+    """Tests for Navy appropriation abbreviation → exhibit type mapping.
+
+    Navy documents use abbreviation-based filenames (APN, RDTEN, OMN, etc.)
+    instead of standard exhibit codes (p1, r2, m1).  The three-tier detection
+    strategy maps these to the correct exhibit types.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _import_detect(self):
+        from pipeline.builder import (
+            _detect_exhibit_type,
+            _detect_pdf_exhibit_type,
+            NAVY_APPROPRIATION_TO_EXHIBIT,
+        )
+        self._detect = _detect_exhibit_type
+        self._detect_pdf = _detect_pdf_exhibit_type
+        self._mapping = NAVY_APPROPRIATION_TO_EXHIBIT
+
+    # ── Procurement → p5 ──
+
+    @pytest.mark.parametrize("filename", [
+        "APN_BA1-4_Book.pdf", "APN_BA5_Book.pdf", "APN_BA6-7_Book.pdf",
+        "apn_ba1-4_book.xlsx",
+    ])
+    def test_apn_maps_to_p5(self, filename):
+        assert self._detect(filename) == "p5"
+
+    @pytest.mark.parametrize("filename", [
+        "WPN_Book.pdf", "wpn_book.xlsx",
+    ])
+    def test_wpn_maps_to_p5(self, filename):
+        assert self._detect(filename) == "p5"
+
+    @pytest.mark.parametrize("filename", [
+        "SCN_Book.pdf", "scn_book.xlsx",
+    ])
+    def test_scn_maps_to_p5(self, filename):
+        assert self._detect(filename) == "p5"
+
+    @pytest.mark.parametrize("filename", [
+        "OPN_BA1_Book.pdf", "OPN_BA2_Book.pdf", "OPN_BA3_Book.pdf",
+        "OPN_BA4_Book.pdf", "OPN_BA5-8_Book.pdf",
+    ])
+    def test_opn_maps_to_p5(self, filename):
+        assert self._detect(filename) == "p5"
+
+    def test_pmc_maps_to_p5(self):
+        assert self._detect("PMC_Book.pdf") == "p5"
+
+    def test_panmc_maps_to_p5(self):
+        assert self._detect("PANMC_Book.pdf") == "p5"
+
+    # ── O&M → o1 ──
+
+    @pytest.mark.parametrize("filename", [
+        "OMN_Book.pdf", "OMN_Vol2_Book.pdf", "omn_book.xlsx",
+    ])
+    def test_omn_maps_to_o1(self, filename):
+        assert self._detect(filename) == "o1"
+
+    @pytest.mark.parametrize("filename", [
+        "OMMC_Book.pdf", "OMMC_Vol2_Book.pdf",
+    ])
+    def test_ommc_maps_to_o1(self, filename):
+        assert self._detect(filename) == "o1"
+
+    def test_omnr_maps_to_o1(self):
+        assert self._detect("OMNR_Book.pdf") == "o1"
+
+    def test_ommcr_maps_to_o1(self):
+        assert self._detect("OMMCR_Book.pdf") == "o1"
+
+    def test_nwcf_maps_to_o1(self):
+        assert self._detect("NWCF_Book.pdf") == "o1"
+
+    # ── Military Personnel → m1 ──
+
+    @pytest.mark.parametrize("filename", [
+        "MPN_Book.pdf", "MPMC_Book.pdf", "RPN_Book.pdf", "RPMC_Book.pdf",
+    ])
+    def test_milpers_maps_to_m1(self, filename):
+        assert self._detect(filename) == "m1"
+
+    # ── RDT&E → r2 ──
+
+    @pytest.mark.parametrize("filename", [
+        "RDTEN_BA1-3_Book.pdf", "RDTEN_BA4_Book.pdf", "RDTEN_BA5_Book.pdf",
+        "RDTEN_BA6_Book.pdf", "RDTEN_BA7-8_Book.pdf",
+    ])
+    def test_rdten_maps_to_r2(self, filename):
+        assert self._detect(filename) == "r2"
+
+    # ── Military Construction → c1 ──
+
+    @pytest.mark.parametrize("filename", [
+        "MCON_Book.pdf", "MCNR_Book.pdf", "BRAC_Book.pdf",
+    ])
+    def test_milcon_maps_to_c1(self, filename):
+        assert self._detect(filename) == "c1"
+
+    # ── PDF function consistency ──
+
+    @pytest.mark.parametrize("filename, expected", [
+        ("APN_BA1-4_Book.pdf", "p5"),
+        ("RDTEN_BA5_Book.pdf", "r2"),
+        ("OMN_Book.pdf", "o1"),
+        ("MPN_Book.pdf", "m1"),
+        ("MCON_Book.pdf", "c1"),
+    ])
+    def test_pdf_detection_matches_excel(self, filename, expected):
+        """_detect_pdf_exhibit_type returns same results as _detect_exhibit_type."""
+        assert self._detect_pdf(filename) == expected
+
+    # ── Standard codes still take priority ──
+
+    def test_standard_code_beats_abbreviation(self):
+        """A file with both a standard code and abbreviation uses the code."""
+        # Hypothetical file that contains both 'r2' and 'apn'
+        assert self._detect("r2_apn_combined.pdf") == "r2"
+
+    # ── Longer abbreviations match first ──
+
+    def test_ommcr_before_ommc(self):
+        """'ommcr' (longer) should match before 'ommc' (shorter)."""
+        assert self._detect("ommcr_book.pdf") == "o1"
+        assert self._detect("ommc_book.pdf") == "o1"
+
+    def test_panmc_before_pmc(self):
+        """'panmc' (longer) should match before 'pmc' (shorter)."""
+        assert self._detect("panmc_book.pdf") == "p5"
+
+    # ── No false positives ──
+
+    def test_unrelated_files_remain_unknown(self):
+        assert self._detect("random_file.xlsx") == "unknown"
+        assert self._detect("budget_summary.pdf") == "unknown"
+        assert self._detect("1-cover.pdf") == "unknown"
+
+
+class TestDefenseWideProcExhibitType:
+    """Tests for Defense-Wide PROC_{agency} → p5 mapping."""
+
+    @pytest.fixture(autouse=True)
+    def _import_detect(self):
+        from pipeline.builder import _detect_exhibit_type, _detect_pdf_exhibit_type
+        self._detect = _detect_exhibit_type
+        self._detect_pdf = _detect_pdf_exhibit_type
+
+    @pytest.mark.parametrize("filename", [
+        "PROC_CBDP_PB_2026.pdf",
+        "PROC_SOCOM_PB_2025.pdf",
+        "PROC_DLA_PB_2026.pdf",
+        "PROC_MDA_VOL2B_PB_2026.pdf",
+        "PROC_CYBERCOM_PB_2026.pdf",
+        "PROC_OSD_PB_2026.pdf",
+    ])
+    def test_defense_wide_proc_maps_to_p5(self, filename):
+        assert self._detect(filename) == "p5"
+        assert self._detect_pdf(filename) == "p5"
+
+
+class TestDownloaderMetadataExhibitType:
+    """Tests that downloader/metadata.py is consistent with builder.py."""
+
+    @pytest.fixture(autouse=True)
+    def _import_detect(self):
+        from downloader.metadata import detect_exhibit_type_from_filename
+        self._detect = detect_exhibit_type_from_filename
+
+    @pytest.mark.parametrize("filename, expected", [
+        # Navy abbreviations
+        ("APN_BA1-4_Book.pdf", "p5"),
+        ("RDTEN_BA1-3_Book.pdf", "r2"),
+        ("OMN_Book.pdf", "o1"),
+        ("MPN_Book.pdf", "m1"),
+        ("MCON_Book.pdf", "c1"),
+        ("WPN_Book.pdf", "p5"),
+        ("NWCF_Book.pdf", "o1"),
+        # Defense-Wide PROC
+        ("PROC_SOCOM_PB_2025.pdf", "p5"),
+        # Standard codes still work
+        ("p1_display.xlsx", "p1"),
+        ("r2_navy.xlsx", "r2"),
+        # Unknown stays unknown
+        ("random_file.pdf", "unknown"),
+    ])
+    def test_metadata_detection(self, filename, expected):
+        assert self._detect(filename) == expected

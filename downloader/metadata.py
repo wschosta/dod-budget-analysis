@@ -32,6 +32,17 @@ _EXHIBIT_TYPES = {
 SUMMARY_EXHIBIT_KEYS = frozenset({"p1", "r1", "o1", "m1", "c1", "rf1", "p1r"})
 DETAIL_EXHIBIT_KEYS = frozenset({"p5", "r2", "r3", "r4"})
 
+# Navy/DoN appropriation justification book → exhibit type mapping.
+# Mirrors NAVY_APPROPRIATION_TO_EXHIBIT in pipeline.builder (kept separate to
+# avoid importing the heavy pipeline module into the downloader).
+_NAVY_APPROPRIATION_TO_EXHIBIT: dict[str, str] = {
+    "apn": "p5", "wpn": "p5", "scn": "p5", "opn": "p5", "pmc": "p5", "panmc": "p5",
+    "omn": "o1", "ommc": "o1", "omnr": "o1", "ommcr": "o1", "nwcf": "o1",
+    "mpn": "m1", "mpmc": "m1", "rpn": "m1", "rpmc": "m1",
+    "rdten": "r2",
+    "mcon": "c1", "mcnr": "c1", "brac": "c1",
+}
+
 # Source label → normalized service name
 _SOURCE_SERVICE_MAP = {
     "us army": "Army",
@@ -69,7 +80,10 @@ _CYCLE_PATTERNS = [
 def detect_exhibit_type_from_filename(filename: str) -> str:
     """Detect the exhibit type from a filename.
 
-    Mirrors pipeline.builder._detect_exhibit_type() logic.
+    Uses a three-tier strategy mirroring pipeline.builder._detect_exhibit_type():
+    1. Standard exhibit codes (p1, r2, …).
+    2. Appropriation book abbreviations (apn→p5, rdten→r2, proc_*→p5).
+    3. Fallback to ``"unknown"``.
 
     Args:
         filename: The filename (not full path), e.g. "p1_display.xlsx".
@@ -78,10 +92,19 @@ def detect_exhibit_type_from_filename(filename: str) -> str:
         Exhibit type key like "p1", "r2", etc., or "unknown".
     """
     name = filename.lower().replace("_display", "").replace(".xlsx", "").replace(".pdf", "")
-    # Sort by length descending so "p1r" matches before "p1"
+    # Tier 1: standard exhibit type codes (longest first so "p1r" matches before "p1")
     for key in sorted(_EXHIBIT_TYPES.keys(), key=len, reverse=True):
         if key in name:
             return key
+    # Tier 2: Navy appropriation book abbreviations
+    for abbr, etype in sorted(
+        _NAVY_APPROPRIATION_TO_EXHIBIT.items(), key=lambda x: len(x[0]), reverse=True
+    ):
+        if abbr in name:
+            return etype
+    # Tier 2b: Defense-Wide PROC_{agency} files → p5
+    if name.startswith("proc_"):
+        return "p5"
     return "unknown"
 
 

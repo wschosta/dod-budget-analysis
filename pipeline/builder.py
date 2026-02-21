@@ -189,6 +189,45 @@ EXHIBIT_TYPES = {
     "r4":  "RDT&E Budget Item Justification (R-4)",
 }
 
+# Navy/DoN appropriation justification book abbreviations → exhibit type mapping.
+# These books use naming conventions based on appropriation titles rather than
+# standard exhibit codes.  This mapping enables Tier-2 exhibit type detection.
+NAVY_APPROPRIATION_TO_EXHIBIT: dict[str, str] = {
+    # Procurement appropriations → P-5 (Detail)
+    "apn":   "p5",   # Aircraft Procurement, Navy
+    "wpn":   "p5",   # Weapons Procurement, Navy
+    "scn":   "p5",   # Shipbuilding & Conversion, Navy
+    "opn":   "p5",   # Other Procurement, Navy
+    "pmc":   "p5",   # Procurement, Marine Corps
+    "panmc": "p5",   # Procurement of Ammunition, Navy & Marine Corps
+    # O&M appropriations → O-1 (Summary)
+    "omn":   "o1",   # Operation & Maintenance, Navy
+    "ommc":  "o1",   # Operation & Maintenance, Marine Corps
+    "omnr":  "o1",   # O&M, Navy Reserve
+    "ommcr": "o1",   # O&M, Marine Corps Reserve
+    "nwcf":  "o1",   # Navy Working Capital Fund
+    # Military Personnel → M-1 (Summary)
+    "mpn":   "m1",   # Military Personnel, Navy
+    "mpmc":  "m1",   # Military Personnel, Marine Corps
+    "rpn":   "m1",   # Reserve Personnel, Navy
+    "rpmc":  "m1",   # Reserve Personnel, Marine Corps
+    # RDT&E → R-2 (Detail)
+    "rdten": "r2",   # Research & Development, Navy
+    # Military Construction → C-1
+    "mcon":  "c1",   # Military Construction
+    "mcnr":  "c1",   # Military Construction, Navy & Marine Corps Reserve
+    "brac":  "c1",   # Base Realignment and Closure
+}
+
+# Defense-Wide agency procurement abbreviations → P-5 (Detail).
+# The Comptroller/Defense-Wide source publishes per-agency procurement
+# justification books named PROC_{AGENCY}_PB_{YEAR}.pdf.
+DEFENSE_WIDE_PROC_AGENCIES = frozenset({
+    "cbdp", "cybercom", "dcsa", "dhra", "disa", "dla", "dmact",
+    "dodea", "dpaa", "dpap", "dtra", "osd", "socom", "tjs", "whs",
+    "mda",
+})
+
 
 # ── BUILD-001: Structured failure log ─────────────────────────────────────────
 
@@ -638,11 +677,27 @@ _safe_float = safe_float
 
 
 def _detect_exhibit_type(filename: str) -> str:
-    """Detect the exhibit type from the filename."""
+    """Detect the exhibit type from the filename.
+
+    Uses a three-tier strategy:
+    1. Standard exhibit codes (p1, r2, m1, …) — highest confidence.
+    2. Appropriation book abbreviations (apn→p5, rdten→r2, …) — Navy/DW.
+    3. Fallback to ``"unknown"``.
+    """
     name = filename.lower().replace("_display", "").replace(".xlsx", "")
+    # Tier 1: standard exhibit type codes
     for key in sorted(EXHIBIT_TYPES.keys(), key=len, reverse=True):
         if key in name:
             return key
+    # Tier 2: Navy appropriation book abbreviations (longest-first)
+    for abbr, etype in sorted(
+        NAVY_APPROPRIATION_TO_EXHIBIT.items(), key=lambda x: len(x[0]), reverse=True
+    ):
+        if abbr in name:
+            return etype
+    # Tier 2b: Defense-Wide PROC_{agency} files → p5
+    if name.startswith("proc_"):
+        return "p5"
     return "unknown"
 
 
@@ -1489,13 +1544,23 @@ def _extract_fy_from_path(file_path: Path) -> str | None:
 def _detect_pdf_exhibit_type(filename: str) -> str:
     """Detect the exhibit type from a PDF filename (LION-100).
 
-    Reuses the same EXHIBIT_TYPES keys used for Excel files.
-    Returns lowercase exhibit code (e.g. 'r2', 'p1') or 'unknown'.
+    Uses the same three-tier strategy as :func:`_detect_exhibit_type`:
+    standard codes → appropriation abbreviations → ``"unknown"``.
     """
     name = filename.lower().replace("_display", "")
+    # Tier 1: standard exhibit type codes
     for key in sorted(EXHIBIT_TYPES.keys(), key=len, reverse=True):
         if key in name:
             return key
+    # Tier 2: Navy appropriation book abbreviations
+    for abbr, etype in sorted(
+        NAVY_APPROPRIATION_TO_EXHIBIT.items(), key=lambda x: len(x[0]), reverse=True
+    ):
+        if abbr in name:
+            return etype
+    # Tier 2b: Defense-Wide PROC_{agency} files → p5
+    if name.startswith("proc_"):
+        return "p5"
     return "unknown"
 
 

@@ -37,6 +37,9 @@ DETAIL_EXHIBIT_KEYS = frozenset({"p5", "r2", "r3", "r4"})
 # which ensures the abbreviation isn't followed by more letters but allows
 # underscores, digits, dots, dashes, etc.
 _END = r"(?![a-zA-Z])"  # "end of abbreviation" — no more letters after this
+# Alternate "start of abbreviation" that matches after _, digits, hyphens, etc.
+# Python's \b treats _ as a word char, so \b fails at _X boundaries.
+_START = r"(?<![a-zA-Z])"  # no letter immediately before
 
 # Procurement appropriations → detail (equivalent to P-5 exhibits)
 _PROCUREMENT_PATTERNS = re.compile(
@@ -58,6 +61,11 @@ _PROCUREMENT_PATTERNS = re.compile(
         r"\bpmc" + _END,           # Procurement Marine Corps
         r"\bprocurement" + _END,
         r"\bshipbuilding" + _END,
+        # Defense-Wide per-agency procurement books (PROC_CBDP, PROC_SOCOM, …)
+        _START + r"proc_",         # PROC_{agency} files — underscore IS the boundary
+        _START + r"pdw" + _END,    # Procurement Defense-Wide (PDW_VOL_1, etc.)
+        # Multi-year procurement justifications
+        _START + r"myp" + _END,    # Multi-Year Procurement (MYP_1-4, etc.)
     ]),
     re.IGNORECASE,
 )
@@ -87,6 +95,16 @@ _OM_PATTERNS = re.compile(
         r"\bo\s+and\s+m" + _END,   # "O and M"
         r"\bo&m" + _END,           # "O&M"
         r"(?<![a-zA-Z])o-1" + _END,  # exhibit O-1 (e.g. "0104_caaf_o-1.pdf")
+        # Defense-Wide O&M volume/exhibit patterns (_START handles _ boundaries)
+        _START + r"om[_-]volume" + _END,   # OM_Volume1_Part1, OM_Volume1_Part_2
+        _START + r"om[_-]overview" + _END, # OM_Overview, FY2026_OM_Overview
+        _START + r"pb-\d+" + _END,   # PB-15, PB-24, PB-28, PB-31Q, PB-61
+        _START + r"env-\d+" + _END,  # ENV-30 (environmental restoration exhibit)
+        _START + r"dwwcf" + _END,    # Defense-Wide Working Capital Fund
+        _START + r"revolving[_\s]*funds?" + _END,  # DoD Revolving Funds J-Book
+        r"\bdeca" + _END,            # Defense Commissary Agency (DeCA J-Book)
+        _START + r"dhp" + _END,      # Defense Health Program
+        _START + r"service[_\s]*support" + _END,  # Service Support exhibit
     ]),
     re.IGNORECASE,
 )
@@ -128,6 +146,10 @@ _MILCON_PATTERNS = re.compile(
         r"\bhoa" + _END,           # Homeowners Assistance
         r"\bhomeowner" + _END,
         r"\bnsip" + _END,          # NATO Security Investment Program
+        _START + r"nato[_\s]*security" + _END,  # NATO Security Investment Program (full)
+        _START + r"military[_\s]*construction.*consolidated",  # DW consolidated MCON
+        _START + r"brac[_\s]*overview" + _END,  # BRAC Overview files
+        _START + r"fhif" + _END,   # Family Housing Improvement Fund
     ]),
     re.IGNORECASE,
 )
