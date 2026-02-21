@@ -34,19 +34,19 @@
 
 {# ── Funding table ────────────────────────────────────────────────────────── #}
 {% if pe_data.funding %}
-<section class="pe-section">
+<section class="pe-section" aria-label="Funding history">
   <h3>Funding History ($K)</h3>
   <div class="table-wrapper">
     <table class="pe-funding-table">
       <thead>
         <tr>
-          <th>FY</th>
-          <th>Exhibit</th>
-          <th>Service</th>
-          <th class="td-amount">FY24 Actual</th>
-          <th class="td-amount">FY25 Enacted</th>
-          <th class="td-amount">FY26 Request</th>
-          <th class="td-amount">Delta</th>
+          <th scope="col">FY</th>
+          <th scope="col">Exhibit</th>
+          <th scope="col">Service</th>
+          <th scope="col" class="td-amount">FY24 Actual</th>
+          <th scope="col" class="td-amount">FY25 Enacted</th>
+          <th scope="col" class="td-amount">FY26 Request</th>
+          <th scope="col" class="td-amount">Delta</th>
         </tr>
       </thead>
       <tbody>
@@ -81,16 +81,16 @@
 {% endif %}
 
 {# ── Funding trend chart ──────────────────────────────────────────────────── #}
-<section class="pe-section">
+<section class="pe-section" aria-label="Funding trend">
   <h3>Funding Trend</h3>
   <div class="chart-card" style="margin-top:0">
-    <canvas id="pe-funding-chart" height="200"></canvas>
+    <canvas id="pe-funding-chart" height="200" role="img" aria-label="Line chart showing program funding trend across fiscal years"></canvas>
   </div>
 </section>
 
 {# ── Related PEs ──────────────────────────────────────────────────────────── #}
 {% if pe_data.related %}
-<section class="pe-section">
+<section class="pe-section" aria-label="Related programs">
   <h3>Related Programs</h3>
   <div class="pe-related-grid">
     {% for rel in pe_data.related %}
@@ -110,7 +110,7 @@
 {% endif %}
 
 {# ── Narrative descriptions (lazy-loaded via HTMX) ───────────────────────── #}
-<section class="pe-section">
+<section class="pe-section" aria-label="Program descriptions">
   <h3>Program Descriptions</h3>
   <div id="pe-descriptions"
        hx-get="/partials/program-descriptions/{{ pe_data.pe_number }}"
@@ -124,7 +124,7 @@
 
 {# ── Tags ─────────────────────────────────────────────────────────────────── #}
 {% if pe_data.tags %}
-<section class="pe-section">
+<section class="pe-section" aria-label="Tags">
   <h3>Tags</h3>
   <div class="pe-card-tags">
     {% for t in pe_data.tags %}

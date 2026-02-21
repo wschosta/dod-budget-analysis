@@ -4,7 +4,7 @@
 
 {% block content %}
 {# ── FALCON-1: Hybrid landing — prominent search + clickable visuals ────── #}
-<section class="hero-search" id="hero-search">
+<section class="hero-search" id="hero-search" aria-label="Search">
   <h1 class="hero-title">DoD Budget Explorer</h1>
   <p class="hero-subtitle">Search and explore U.S. Department of Defense budget data across fiscal years, services, and programs.</p>
   <form class="hero-search-form" role="search" aria-label="Quick search"
@@ -24,15 +24,15 @@
 </section>
 
 {# ── FALCON-1: Clickable summary visuals ─────────────────────────────── #}
-<section class="landing-visuals" id="landing-visuals">
+<section class="landing-visuals" id="landing-visuals" aria-label="Budget overview charts">
   <div class="landing-charts-grid">
     <div class="chart-card landing-chart" id="landing-service-chart-card">
       <h3>Budget by Service</h3>
-      <canvas id="landing-service-chart" height="200"></canvas>
+      <canvas id="landing-service-chart" height="200" role="img" aria-label="Bar chart showing budget totals by military service"></canvas>
     </div>
     <div class="chart-card landing-chart" id="landing-approp-chart-card">
       <h3>By Appropriation Type</h3>
-      <canvas id="landing-approp-chart" height="200"></canvas>
+      <canvas id="landing-approp-chart" height="200" role="img" aria-label="Doughnut chart showing budget by appropriation type"></canvas>
     </div>
   </div>
 </section>
@@ -40,7 +40,7 @@
 <div class="search-layout">
 
   {# ── Filter sidebar (3.A3-a + FALCON-3: collapsible groups) ─────────── #}
-  <aside class="filter-panel" id="filter-panel">
+  <aside class="filter-panel" id="filter-panel" aria-label="Search filters">
     <div class="filter-panel-header">
       <h2>Filters</h2>
       <button type="button" class="filter-collapse-btn" id="filter-collapse-btn"
@@ -127,17 +127,21 @@
         <summary class="filter-section-header">Amount Range</summary>
         {# FE-001: Amount range filters + FALCON-3: dynamic FY column selector #}
         <div class="filter-group">
-          <label data-tooltip="Amount in thousands of dollars ($K). Filter lines where the selected FY column falls within this range.">Amount Range ($K)</label>
-          <div style="display:flex;gap:.4rem;align-items:center">
+          <span id="amount-range-label" data-tooltip="Amount in thousands of dollars ($K). Filter lines where the selected FY column falls within this range.">Amount Range ($K)</span>
+          <div style="display:flex;gap:.4rem;align-items:center" role="group" aria-labelledby="amount-range-label">
+            <label for="min_amount" class="sr-only">Minimum amount ($K)</label>
             <input type="number" id="min_amount" name="min_amount"
                    value="{{ filters.min_amount }}"
                    placeholder="Min"
+                   aria-label="Minimum amount in thousands"
                    style="width:50%"
                    min="0">
-            <span style="font-size:.8rem;color:var(--clr-gray-700)">–</span>
+            <span style="font-size:.8rem;color:var(--clr-gray-700)" aria-hidden="true">–</span>
+            <label for="max_amount" class="sr-only">Maximum amount ($K)</label>
             <input type="number" id="max_amount" name="max_amount"
                    value="{{ filters.max_amount }}"
                    placeholder="Max"
+                   aria-label="Maximum amount in thousands"
                    style="width:50%"
                    min="0">
           </div>
@@ -173,7 +177,7 @@
   </aside>
 
   {# ── Results area ─────────────────────────────────────────────────────── #}
-  <section>
+  <section aria-label="Search results">
     {# LION-008: Print header (visible only when printing) #}
     <div class="print-header">
       <h2>DoD Budget Explorer</h2>

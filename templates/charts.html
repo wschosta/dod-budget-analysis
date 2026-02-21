@@ -26,8 +26,8 @@
   <!-- DONE [Group: LION] LION-006: Chart export buttons added per card below -->
 
   {# VIZ-004: Print button #}
-  <button class="btn btn-secondary btn-sm print-btn" onclick="window.print()" style="margin-left:auto">
-    🖨 Print Charts
+  <button class="btn btn-secondary btn-sm print-btn" onclick="window.print()" style="margin-left:auto" aria-label="Print charts page">
+    <span aria-hidden="true">&#128424;</span> Print Charts
   </button>
 </div>
 
@@ -43,7 +43,7 @@
   <div class="chart-card" id="card-service">
     <h3>FY Request by Service ($M)</h3>
     <div id="err-service" style="display:none" class="empty-state" role="alert"></div>
-    <canvas id="chart-service" height="200"></canvas>
+    <canvas id="chart-service" height="200" role="img" aria-label="Bar chart showing FY budget request by service in millions"></canvas>
     <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-service','service-chart.png')">Download as PNG</button>
   </div>
 
@@ -51,7 +51,7 @@
   <div class="chart-card" id="card-yoy">
     <h3>Year-over-Year Totals by Exhibit Type</h3>
     <div id="err-yoy" style="display:none" class="empty-state" role="alert"></div>
-    <canvas id="chart-yoy" height="200"></canvas>
+    <canvas id="chart-yoy" height="200" role="img" aria-label="Line chart showing year-over-year budget totals by exhibit type"></canvas>
     <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-yoy','yoy-chart.png')">Download as PNG</button>
   </div>
 
@@ -59,7 +59,7 @@
   <div class="chart-card" id="card-topn" style="grid-column: 1 / -1">
     <h3>Top 10 Budget Line Items — FY Request ($M)</h3>
     <div id="err-topn" style="display:none" class="empty-state" role="alert"></div>
-    <canvas id="chart-topn" height="120"></canvas>
+    <canvas id="chart-topn" height="120" role="img" aria-label="Horizontal bar chart showing top 10 budget line items by FY request"></canvas>
     <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-topn','top10-chart.png')">Download as PNG</button>
   </div>
 
@@ -81,7 +81,7 @@
       </label>
     </div>
     <div id="err-compare" style="display:none" class="empty-state" role="alert"></div>
-    <canvas id="chart-compare" height="120"></canvas>
+    <canvas id="chart-compare" height="120" role="img" aria-label="Grouped bar chart comparing budgets between two selected services"></canvas>
     <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-compare','comparison-chart.png')">Download as PNG</button>
   </div>
 
@@ -89,7 +89,7 @@
   <div class="chart-card" id="card-treemap" style="grid-column: 1 / -1">
     <h3>Budget Hierarchy: Service &gt; Appropriation</h3>
     <div id="err-treemap" style="display:none" class="empty-state" role="alert"></div>
-    <canvas id="chart-treemap" height="300"></canvas>
+    <canvas id="chart-treemap" height="300" role="img" aria-label="Treemap chart showing budget hierarchy by service and appropriation"></canvas>
     <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-treemap','treemap.png')">Download as PNG</button>
   </div>
 
@@ -97,7 +97,7 @@
   <div class="chart-card" id="card-approp-pie">
     <h3>Appropriation Breakdown</h3>
     <div id="err-approp-pie" style="display:none" class="empty-state" role="alert"></div>
-    <canvas id="chart-approp-pie" height="250"></canvas>
+    <canvas id="chart-approp-pie" height="250" role="img" aria-label="Doughnut chart showing appropriation type breakdown"></canvas>
     <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-approp-pie','appropriation-pie.png')">Download as PNG</button>
   </div>
 
@@ -105,7 +105,7 @@
   <div class="chart-card" id="card-delta">
     <h3>Year-over-Year Change by Service (%)</h3>
     <div id="err-delta" style="display:none" class="empty-state" role="alert"></div>
-    <canvas id="chart-delta" height="200"></canvas>
+    <canvas id="chart-delta" height="200" role="img" aria-label="Bar chart showing year-over-year percentage change by service"></canvas>
     <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-delta','yoy-delta.png')">Download as PNG</button>
   </div>
 
