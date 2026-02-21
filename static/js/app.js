@@ -11,6 +11,21 @@
 
 "use strict";
 
+// ── Toast notifications ──────────────────────────────────────────────────────
+
+function showToast(message, type) {
+  type = type || "info";
+  var container = document.getElementById("toast-container");
+  if (!container) return;
+  var toast = document.createElement("div");
+  toast.className = "toast toast-" + type;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(function () {
+    if (toast.parentNode) toast.parentNode.removeChild(toast);
+  }, 3200);
+}
+
 // ── LION-010: Dark mode toggle ──────────────────────────────────────────────
 
 var THEME_KEY = "dod_theme";
@@ -368,7 +383,7 @@ function closeFeedbackModal() {
         if (resp.ok) {
           closeFeedbackModal();
           form.reset();
-          if (typeof showToast === "function") showToast("Feedback submitted. Thank you!", "success");
+          if (typeof showToast === "function") showToast("Feedback submitted — thank you!", "success");
         } else {
           if (typeof showToast === "function") showToast("Failed to submit feedback. Please try again.", "error");
         }
@@ -376,6 +391,7 @@ function closeFeedbackModal() {
         // Endpoint may not exist yet — close anyway since feedback can't be saved
         closeFeedbackModal();
         form.reset();
+        showToast("Feedback saved locally", "info");
       }).finally(function() {
         if (submitBtn) submitBtn.disabled = false;
       });
@@ -414,7 +430,7 @@ function copyShareURL() {
     document.execCommand("copy");
     document.body.removeChild(ta);
   }
-  // Show "Copied!" tooltip and toast
+  // Show "Copied!" tooltip + toast
   var btn = document.getElementById("share-btn");
   if (btn) {
     btn.classList.add("copied");
@@ -875,6 +891,14 @@ document.addEventListener("DOMContentLoaded", function () {
     dlBtn.removeAttribute("onclick");
     dlBtn.addEventListener("click", openDownloadModal);
   }
+
+  // Toast on download link clicks
+  document.querySelectorAll("#dl-csv, #dl-json, #dl-xlsx").forEach(function (el) {
+    el.addEventListener("click", function () {
+      var fmt = el.id.replace("dl-", "").toUpperCase();
+      showToast("Downloading " + fmt + "…", "info");
+    });
+  });
 
   // ── Search autocomplete ─────────────────────────────────────────────────
   initAutocomplete();
