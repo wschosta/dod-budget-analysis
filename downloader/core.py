@@ -620,6 +620,84 @@ def _extract_zip(zip_path: Path, dest_dir: Path):
         print(f"    [ZIP] Bad ZIP, skipping extraction of {zip_path.name}: {e}")
 
 
+# ---- Cross-source deduplication ----
+
+def deduplicate_across_sources(
+    all_files: dict[str, dict[str, list[dict]]],
+    output_dir: Path | None = None,
+) -> dict[str, int]:
+    """Remove duplicate files that appear in multiple sources for the same year.
+
+    When the same filename is discovered by more than one source (e.g. both
+    ``navy`` and ``navy-archive`` list ``APN_BA1-4_Book.pdf`` for FY2026),
+    keep only the first occurrence and drop the rest.  Source ordering follows
+    insertion order of the dict (typically alphabetical by label).
+
+    If *output_dir* is supplied the function also checks for files already on
+    disk under a *different* source directory for the same FY/budget-cycle.
+    This catches duplicates left over from prior download runs.
+
+    Mutates *all_files* in place.
+
+    Returns:
+        Dict with keys ``removed`` and ``disk_dedup`` (counts).
+    """
+    stats = {"removed": 0, "disk_dedup": 0}
+
+    for year, sources in all_files.items():
+        # Pass 1: cross-source dedup within discovery results
+        seen_filenames: set[str] = set()
+        for source_label, files in list(sources.items()):
+            kept: list[dict] = []
+            for f in files:
+                fname = f["filename"].lower()
+                if fname in seen_filenames:
+                    stats["removed"] += 1
+                else:
+                    seen_filenames.add(fname)
+                    kept.append(f)
+            sources[source_label] = kept
+
+        # Pass 2: check disk for files already downloaded by another source
+        if output_dir is not None:
+            fy_dir = output_dir / f"FY{year}"
+            if fy_dir.exists():
+                # Build a set of filenames already on disk (all sources)
+                existing: set[str] = set()
+                for fp in fy_dir.rglob("*"):
+                    if fp.is_file():
+                        existing.add(fp.name.lower())
+
+                for source_label, files in list(sources.items()):
+                    safe_label = source_label.replace(" ", "_")
+                    kept = []
+                    for f in files:
+                        fname = f["filename"].lower()
+                        # Build this source's expected dest to check if
+                        # the file exists under a DIFFERENT source
+                        budget_cycle = detect_budget_cycle(
+                            source_label,
+                            f.get("url", ""),
+                            f.get("name", ""),
+                        ).upper()
+                        exhibit_cat = classify_exhibit_category(f["filename"])
+                        dest = (
+                            fy_dir / budget_cycle / safe_label
+                            / exhibit_cat / f["filename"]
+                        )
+                        if dest.exists():
+                            # File exists in THIS source — not a cross-source dup
+                            kept.append(f)
+                        elif fname in existing:
+                            # File exists under a different source — skip
+                            stats["disk_dedup"] += 1
+                        else:
+                            kept.append(f)
+                    sources[source_label] = kept
+
+    return stats
+
+
 # ---- Display ----
 
 def list_files(all_files: dict[str, dict[str, list[dict]]]) -> None:
@@ -1028,6 +1106,14 @@ def main():
             "updates without re-downloading unchanged files. (1.A4-b)"
         ),
     )
+    parser.add_argument(
+        "--no-dedup", action="store_true", dest="no_dedup",
+        help=(
+            "Disable cross-source deduplication. By default, files with "
+            "the same filename from multiple sources (e.g. navy and "
+            "navy-archive) are downloaded only once."
+        ),
+    )
     args = parser.parse_args()
 
     # Optimization: Set global flag for cache refresh
@@ -1178,6 +1264,21 @@ def main():
                 browser_labels.add(label)
 
             time.sleep(args.delay)
+
+    # -- Cross-source deduplication --
+    if not args.no_dedup:
+        dedup_stats = deduplicate_across_sources(
+            all_files,
+            output_dir=None if args.list_only else args.output,
+        )
+        dedup_total = dedup_stats["removed"] + dedup_stats["disk_dedup"]
+        if dedup_total:
+            parts = []
+            if dedup_stats["removed"]:
+                parts.append(f"{dedup_stats['removed']} cross-source")
+            if dedup_stats["disk_dedup"]:
+                parts.append(f"{dedup_stats['disk_dedup']} already on disk")
+            print(f"  Deduplicated: {dedup_total} file(s) ({', '.join(parts)})")
 
     # -- List mode --
     if args.list_only:
