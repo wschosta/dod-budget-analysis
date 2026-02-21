@@ -130,15 +130,13 @@
        title="Download this line item as CSV">
       ↓ Download This Item
     </a>
-    {% if item.source_file %}
     <a href="https://comptroller.defense.gov/Budget-Materials/"
        class="btn btn-secondary btn-sm"
        target="_blank"
        rel="noopener"
-       title="Source: {{ item.source_file }}">
-      ↗ Source Document
+       title="Browse official DoD budget justification documents{% if item.source_file %} (extracted from {{ item.source_file }}){% endif %}">
+      ↗ Browse DoD Budget Materials
     </a>
-    {% endif %}
   </div>
 </div>
 {% endif %}
