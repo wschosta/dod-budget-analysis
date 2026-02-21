@@ -107,6 +107,65 @@ function selectRow(tr) {
   tr.setAttribute("aria-expanded", "true");
 }
 
+// ── FALCON-2: Keyboard navigation for search results ────────────────────────
+
+var DENSITY_KEY = "dod_density";
+
+function initResultsKeyboardNav() {
+  var container = document.getElementById("results-container");
+  if (!container) return;
+
+  container.addEventListener("keydown", function(e) {
+    var rows = Array.from(container.querySelectorAll("tbody tr[tabindex]"));
+    if (!rows.length) return;
+
+    var current = document.activeElement;
+    var idx = rows.indexOf(current);
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      var next = idx < rows.length - 1 ? rows[idx + 1] : rows[0];
+      next.focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      var prev = idx > 0 ? rows[idx - 1] : rows[rows.length - 1];
+      prev.focus();
+    } else if (e.key === "Enter" || e.key === " ") {
+      if (current && rows.includes(current)) {
+        e.preventDefault();
+        selectRow(current);
+        htmx.trigger(current, "click");
+      }
+    } else if (e.key === "Escape") {
+      var detail = document.getElementById("detail-container");
+      if (detail && detail.innerHTML.trim()) {
+        detail.innerHTML = "";
+        if (current && rows.includes(current)) current.focus();
+      }
+    }
+  });
+}
+
+// FALCON-2: Density toggle
+function setDensity(level) {
+  var wrapper = document.getElementById("results-container");
+  if (!wrapper) return;
+  wrapper.classList.remove("density-compact", "density-spacious");
+  if (level === "compact") wrapper.classList.add("density-compact");
+  else if (level === "spacious") wrapper.classList.add("density-spacious");
+  // comfortable = default (no class)
+  localStorage.setItem(DENSITY_KEY, level);
+  // Update toggle button states
+  document.querySelectorAll(".density-btn").forEach(function(btn) {
+    btn.classList.toggle("active", btn.getAttribute("data-density") === level);
+  });
+}
+
+function restoreDensity() {
+  var saved = localStorage.getItem(DENSITY_KEY);
+  if (saved) setDensity(saved);
+}
+
 // ── URL query params → filter state (3.A3-b) ──────────────────────────────────
 // On page load, read URL params and pre-populate form fields.
 
@@ -399,6 +458,7 @@ document.addEventListener("htmx:afterSwap", function (evt) {
     applyHiddenCols(getHiddenCols());
     updateDownloadLinks();
     restorePageSize();
+    restoreDensity();
   }
 
   // JS-004: focus detail panel heading after it loads
@@ -632,6 +692,8 @@ document.addEventListener("DOMContentLoaded", function () {
   applyHiddenCols(getHiddenCols());
   updateDownloadLinks();
   restorePageSize();
+  restoreDensity();
+  initResultsKeyboardNav();
 
   // FALCON-7: Fetch metadata for footer
   loadFooterMetadata();

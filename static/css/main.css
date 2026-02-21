@@ -1218,13 +1218,39 @@ tr:focus-within td {
   :root:not([data-theme="light"]) .theme-toggle .icon-moon { display: none; }
 }
 
-/* ── Data density options ─────────────────────────────────────────────────── */
+/* ── Data density options (FALCON-2) ─────────────────────────────────────── */
 /* Three density levels for table rows. Default: comfortable.                 */
 /* Applied via class on a parent container: density-compact, density-spacious */
 .density-compact td { padding: .3rem .5rem; font-size: .8rem; }
 .density-compact th { padding: .35rem .5rem; font-size: .72rem; }
 .density-spacious td { padding: .75rem 1rem; font-size: .9rem; }
 .density-spacious th { padding: .7rem 1rem; font-size: .82rem; }
+
+/* FALCON-2: Density toggle buttons */
+.density-toggles {
+  display: flex;
+  gap: .25rem;
+  align-items: center;
+}
+.density-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: .2rem .4rem;
+  font-size: .75rem;
+  color: var(--text-secondary);
+  min-width: 28px;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.density-btn.active {
+  background: var(--clr-blue);
+  color: #fff;
+  border-color: var(--clr-blue);
+}
 
 /* ── Reduced motion ──────────────────────────────────────────────────────── */
 /* Respect prefers-reduced-motion for accessibility (decision 5.4)            */
