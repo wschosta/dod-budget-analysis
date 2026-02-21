@@ -193,5 +193,7 @@ class TestDownload:
         resp = client.get("/api/v1/download", params={"fmt": "csv", "limit": 5})
         assert resp.status_code == 200
         lines = resp.text.splitlines()
+        # EAGLE-6: Skip source attribution comment rows (start with "# or #)
+        data_lines = [ln for ln in lines if not ln.startswith('"#') and not ln.startswith("#")]
         # header + up to 5 data rows = at most 6 lines
-        assert len(lines) <= 6
+        assert len(data_lines) <= 6

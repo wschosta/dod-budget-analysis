@@ -27,7 +27,6 @@ from utils.query import (
     build_where_clause,
     validate_amount_column,
     FISCAL_YEAR_COLUMN_LABELS,
-    VALID_AMOUNT_COLUMNS,
     DEFAULT_AMOUNT_COLUMN,
 )
 from utils import sanitize_fts5_query

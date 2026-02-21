@@ -203,7 +203,7 @@ def download(
             buf = io.StringIO()
             # EAGLE-6: Source attribution header rows
             writer_raw = csv.writer(buf)
-            writer_raw.writerow([f"# Source: DoD Budget Explorer"])
+            writer_raw.writerow(["# Source: DoD Budget Explorer"])
             writer_raw.writerow([f"# Export Date: {export_date}"])
             writer_raw.writerow([f"# Filters: {filter_summary}"])
             writer_raw.writerow([f"# URL: {export_url}"])
