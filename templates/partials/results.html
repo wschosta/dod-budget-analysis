@@ -62,6 +62,13 @@
               onclick="quickExport('json')" title="Download JSON">JSON</button>
     </div>
 
+    {# FALCON-9: Amount format toggle #}
+    <div class="density-toggles" aria-label="Amount format">
+      <button class="amt-fmt-btn density-btn active" data-fmt="K" onclick="setAmountFormat('K')" title="Thousands ($K)">$K</button>
+      <button class="amt-fmt-btn density-btn" data-fmt="M" onclick="setAmountFormat('M')" title="Millions ($M)">$M</button>
+      <button class="amt-fmt-btn density-btn" data-fmt="B" onclick="setAmountFormat('B')" title="Billions ($B)">$B</button>
+    </div>
+
     {# FALCON-2: Density toggle #}
     <div class="density-toggles" aria-label="Table density">
       <button class="density-btn" data-density="compact" onclick="setDensity('compact')" title="Compact">&#9776;</button>
@@ -172,11 +179,12 @@
           </td>
           <td class="col-account" style="font-size:.8rem">{{ item.account or "—" }}</td>
           <td class="col-pe" style="font-size:.8rem;font-family:monospace">{{ item.pe_number or "—" }}</td>
-          <td class="col-fy24 td-amount">{{ item.amount_fy2024_actual | fmt_amount if item.amount_fy2024_actual is not none else "—" }}</td>
-          <td class="col-fy25 td-amount">{{ item.amount_fy2025_enacted | fmt_amount if item.amount_fy2025_enacted is not none else "—" }}</td>
-          <td class="col-fy25tot td-amount" style="display:none">{{ item.amount_fy2025_total | fmt_amount if item.amount_fy2025_total is not none else "—" }}</td>
-          <td class="col-fy26 td-amount">{{ item.amount_fy2026_request | fmt_amount if item.amount_fy2026_request is not none else "—" }}</td>
-          <td class="col-fy26tot td-amount" style="display:none">{{ item.amount_fy2026_total | fmt_amount if item.amount_fy2026_total is not none else "—" }}</td>
+          {# FALCON-9: data-raw attribute enables client-side $K/$M/$B reformatting #}
+          <td class="col-fy24 td-amount" {% if item.amount_fy2024_actual is not none %}data-raw="{{ item.amount_fy2024_actual }}"{% endif %}>{{ item.amount_fy2024_actual | fmt_amount if item.amount_fy2024_actual is not none else "—" }}</td>
+          <td class="col-fy25 td-amount" {% if item.amount_fy2025_enacted is not none %}data-raw="{{ item.amount_fy2025_enacted }}"{% endif %}>{{ item.amount_fy2025_enacted | fmt_amount if item.amount_fy2025_enacted is not none else "—" }}</td>
+          <td class="col-fy25tot td-amount" style="display:none" {% if item.amount_fy2025_total is not none %}data-raw="{{ item.amount_fy2025_total }}"{% endif %}>{{ item.amount_fy2025_total | fmt_amount if item.amount_fy2025_total is not none else "—" }}</td>
+          <td class="col-fy26 td-amount" {% if item.amount_fy2026_request is not none %}data-raw="{{ item.amount_fy2026_request }}"{% endif %}>{{ item.amount_fy2026_request | fmt_amount if item.amount_fy2026_request is not none else "—" }}</td>
+          <td class="col-fy26tot td-amount" style="display:none" {% if item.amount_fy2026_total is not none %}data-raw="{{ item.amount_fy2026_total }}"{% endif %}>{{ item.amount_fy2026_total | fmt_amount if item.amount_fy2026_total is not none else "—" }}</td>
           <td class="col-source" style="display:none;font-size:.75rem;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ item.source_file or '' }}">{{ item.source_file or "—" }}</td>
         </tr>
         {% endfor %}

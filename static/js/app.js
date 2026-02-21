@@ -51,6 +51,7 @@ function updateChartTheme() {
 
 const COL_KEY = "dod_hidden_cols";
 const PAGE_SIZE_KEY = "dod_page_size";
+var AMT_FMT_KEY = "dod_amt_fmt";
 
 function toggleCol(btn, cssClass) {
   btn.classList.toggle("active");
@@ -529,6 +530,8 @@ document.addEventListener("htmx:afterSwap", function (evt) {
     updateDownloadLinks();
     restorePageSize();
     restoreDensity();
+    restoreAmountFormat();
+    if (currentAmtFmt !== "K") applyAmountFormat();
   }
 
   // JS-004: focus detail panel heading after it loads
@@ -609,6 +612,57 @@ function removeToast(toast) {
   setTimeout(function() {
     if (toast.parentNode) toast.parentNode.removeChild(toast);
   }, 200);
+}
+
+// ── FALCON-9: Amount formatting toggle ($K / $M / $B) ───────────────────────
+
+var currentAmtFmt = localStorage.getItem(AMT_FMT_KEY) || "K";
+
+/**
+ * Format amount in $K to the selected display unit.
+ * @param {number} valK - Amount in thousands of dollars
+ * @returns {string} Formatted string
+ */
+function formatAmount(valK) {
+  if (valK == null || isNaN(valK)) return "\u2014";
+  var fmt = currentAmtFmt;
+  if (fmt === "M") {
+    return "$" + (valK / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 }) + "M";
+  } else if (fmt === "B") {
+    return "$" + (valK / 1000000).toLocaleString(undefined, { maximumFractionDigits: 2 }) + "B";
+  }
+  // Default: $K
+  return "$" + Number(valK).toLocaleString(undefined, { maximumFractionDigits: 0 }) + "K";
+}
+
+function setAmountFormat(fmt) {
+  currentAmtFmt = fmt;
+  localStorage.setItem(AMT_FMT_KEY, fmt);
+  // Update toggle button states
+  document.querySelectorAll(".amt-fmt-btn").forEach(function(btn) {
+    btn.classList.toggle("active", btn.getAttribute("data-fmt") === fmt);
+  });
+  // Re-format all visible amounts in the results table
+  applyAmountFormat();
+}
+
+function applyAmountFormat() {
+  document.querySelectorAll(".td-amount[data-raw]").forEach(function(el) {
+    var raw = parseFloat(el.getAttribute("data-raw"));
+    if (!isNaN(raw)) {
+      el.textContent = formatAmount(raw);
+    }
+  });
+}
+
+function restoreAmountFormat() {
+  var saved = localStorage.getItem(AMT_FMT_KEY);
+  if (saved) {
+    currentAmtFmt = saved;
+    document.querySelectorAll(".amt-fmt-btn").forEach(function(btn) {
+      btn.classList.toggle("active", btn.getAttribute("data-fmt") === saved);
+    });
+  }
 }
 
 // ── FALCON-7: Footer metadata ────────────────────────────────────────────────
@@ -763,6 +817,7 @@ document.addEventListener("DOMContentLoaded", function () {
   updateDownloadLinks();
   restorePageSize();
   restoreDensity();
+  restoreAmountFormat();
   initResultsKeyboardNav();
 
   // FALCON-7: Fetch metadata for footer
