@@ -12,7 +12,7 @@ DoD Budget Analysis is a Python toolkit for downloading, parsing, normalizing, a
 - **FastAPI REST API** with rate limiting, CORS, ETag caching, and OpenAPI docs
 - **Web frontend** using Jinja2 templates, HTMX, Chart.js, and custom JavaScript
 - **Validation/reconciliation framework** with 10+ data quality checks
-- **Data enrichment pipeline** for PE index, descriptions, tags, and lineage
+- **Data enrichment pipeline** for PE index, descriptions, tags, lineage, and project-level decomposition
 
 ## Quick Reference
 
@@ -21,7 +21,7 @@ DoD Budget Analysis is a Python toolkit for downloading, parsing, normalizing, a
 pip install -r requirements-dev.txt
 python -m playwright install chromium
 
-# Run tests (75 test files)
+# Run tests (82 test files)
 python -m pytest tests/ -v
 
 # Run with coverage (80% minimum on api/ and utils/)
@@ -78,7 +78,7 @@ dod-budget-analysis/
 │   ├── search_parser.py          # Search query parsing and tokenization
 │   ├── strings.py                # safe_float, normalize_whitespace, sanitize_fts5_query
 │   └── validation.py             # ValidationIssue, ValidationResult, ValidationRegistry
-├── tests/                        # pytest test suite (75 test files)
+├── tests/                        # pytest test suite (82 test files)
 │   ├── conftest.py               # Session-scoped fixtures: test DBs, Excel/PDF fixtures
 │   ├── fixtures/                 # Static test fixture data (Excel files, expected outputs)
 │   └── optimization_validation/  # Advanced optimization tests
@@ -169,7 +169,7 @@ dod-budget-analysis/
 ├── build_budget_db.py            # Main data ingestion (Excel + PDF parsing)
 ├── build_budget_gui.py           # tkinter GUI for build_budget_db
 ├── dod_budget_downloader.py      # Multi-source document downloader
-├── enrich_budget_db.py           # PE enrichment (index, descriptions, tags, lineage)
+├── enrich_budget_db.py           # PE enrichment (index, descriptions, tags, lineage, project decomposition)
 ├── exhibit_catalog.py            # 9 exhibit types: P-1, P-5, R-1, R-2, O-1, etc.
 ├── exhibit_type_inventory.py     # Exhibit type discovery and inventory
 ├── refresh_data.py               # Scheduled data refresh with rollback
@@ -200,7 +200,7 @@ build_budget_db.py        ->  dod_budget.sqlite  (SQLite + FTS5)
 validate_budget_data.py   ->  data_quality_report.json
         |
         v
-enrich_budget_db.py       ->  pe_index, pe_descriptions, pe_tags, pe_lineage
+enrich_budget_db.py       ->  pe_index, pe_descriptions, pe_tags, pe_lineage, project_descriptions
         |
         v
 api/app.py (FastAPI)      ->  Browser (HTMX + Chart.js)
@@ -366,11 +366,12 @@ The primary tables in `dod_budget.sqlite`:
 
 - `budget_lines` — Flat fact table with all parsed budget line items
 - `pdf_pages` — Extracted PDF page text and table data
-- `ingested_files` — File manifest (hash, size, type, exhibit_type, budget_cycle, service_org, ingestion time)
+- `ingested_files` — File manifest (path, type, size, modified time, status, exhibit_type, budget_cycle, download_timestamp, service_org)
 - `pdf_pe_numbers` — PE-to-PDF page junction table for direct joins
 - `budget_lines_fts` / `pdf_pages_fts` — FTS5 virtual tables for full-text search
 - Reference tables: `services_agencies`, `exhibit_types`, `appropriation_titles`, `budget_cycles`
-- Enrichment tables: `pe_index`, `pe_descriptions`, `pe_tags`, `pe_lineage`
+- Enrichment tables: `pe_index`, `pe_descriptions`, `pe_tags`, `pe_lineage`, `project_descriptions`
+  - `pe_tags` confidence levels: 1.0 (structured field match), 0.9 (budget_lines keyword match), 0.85 (project-level keyword), 0.8 (PDF narrative keyword), 0.7 (LLM-generated); includes `source_files` JSON column for provenance tracking
 
 Schema is versioned via `schema_version` table with a `migrate()` function in `schema_design.py`.
 

@@ -19,29 +19,17 @@ Usage:
 LION TODOs — Enrichment Alignment & Tag Quality
 ──────────────────────────────────────────────────────────────────────────────
 
-LION-104: Include budget_lines text fields in keyword tagging.
-    Phase 3 currently only applies keyword tags from pe_descriptions text
-    (PDF narratives). Many PEs have no PDF description but DO have descriptive
-    text in budget_lines.line_item_title, budget_activity_title, and
-    account_title. Fix: when building the combined text for keyword matching,
-    also concatenate these budget_lines text fields. This ensures PEs without
-    PDF coverage still receive appropriate keyword tags.
+LION-104 [DONE]: Include budget_lines text fields in keyword tagging.
+    run_phase3() concatenates line_item_title, budget_activity_title, and
+    account_title from budget_lines into the keyword matching text.
 
-LION-105: Differentiate confidence scoring by tag source.
-    All tags currently get confidence=1.0 regardless of source quality.
-    Fix: use 1.0 for structured tags (direct field match), 0.9 for keyword
-    matches from budget_lines title fields (high signal, short text), 0.8
-    for keyword matches from PDF narrative text (longer text, more context
-    noise), and 0.7 for LLM-generated tags. This enables the GUI to rank
-    and filter tags by reliability.
+LION-105 [DONE]: Differentiate confidence scoring by tag source.
+    Confidence levels: 1.0 (structured), 0.9 (budget_lines keywords),
+    0.8 (PDF narrative keywords), 0.7 (LLM-generated tags).
 
-LION-106: Add source_files tracking to pe_tags table.
-    pe_tags has no provenance — cannot trace which source file(s) contributed
-    a given tag. Fix: add a source_files TEXT column (JSON array of filenames)
-    to pe_tags. During structured tagging, record the budget_lines source_file.
-    During keyword tagging, record the pe_descriptions source_file(s). This
-    enables data lineage auditing and selective tag invalidation when source
-    data is corrected.
+LION-106 [DONE]: Add source_files tracking to pe_tags table.
+    source_files TEXT column (JSON array) tracks provenance from both
+    structured and keyword tagging sources.
 
 """
 

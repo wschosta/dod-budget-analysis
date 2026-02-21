@@ -16,7 +16,7 @@ The tool downloads PDFs, Excel spreadsheets (`.xlsx`, `.xls`), ZIP archives, and
 
 ## Features
 
-- **Multi-source discovery** across five DoD budget data sources
+- **Multi-source discovery** across six DoD budget data sources (incl. Navy archive)
 - **Automated browser downloads** for WAF-protected and SharePoint sites using Playwright (Chromium)
 - **Smart file skipping** - previously downloaded files (>1 KB) are skipped instantly without network requests
 - **GUI progress window** (tkinter) with:
@@ -27,7 +27,11 @@ The tool downloads PDFs, Excel spreadsheets (`.xlsx`, `.xls`), ZIP archives, and
 - **Terminal-only mode** (`--no-gui`) with ASCII progress bars
 - **Failure logging** - timestamped `.txt` log with URLs for any failed downloads
 - **Configurable** - filter by fiscal year, source, and file type
-- **⚡ Optimized for Speed** - 5-15x faster with 10 performance enhancements (see [docs/wiki/optimizations](docs/wiki/optimizations/))
+- **Cross-source deduplication** - identical files from multiple sources (e.g. navy and navy-archive) downloaded only once
+- **Navy exhibit type mapping** - automatic classification of Navy appropriation book filenames to exhibit types
+- **Defense-Wide classification** - pattern-based classification of Defense-Wide agency documents
+- **Parquet staging** - optional intermediate Parquet format decouples parsing from DB loading
+- **Optimized for Speed** - 5-15x faster with 10 performance enhancements (see [docs/wiki/optimizations](docs/wiki/optimizations/))
 
 ## Requirements
 
@@ -87,18 +91,19 @@ python dod_budget_downloader.py --years 2026 --overwrite
 | Argument | Description |
 |---|---|
 | `--years` | Fiscal years to download (e.g., `2026 2025`) or `all` |
-| `--sources` | Sources: `comptroller`, `defense-wide`, `army`, `navy`, `airforce`, or `all` |
+| `--sources` | Sources: `comptroller`, `defense-wide`, `army`, `navy`, `navy-archive`, `airforce`, or `all` |
 | `--output` | Output directory (default: `DoD_Budget_Documents`) |
 | `--list` | List available files without downloading |
 | `--types` | Filter by file type (e.g., `pdf xlsx`) |
 | `--overwrite` | Re-download files even if they already exist |
 | `--no-gui` | Disable GUI window, use terminal-only progress |
 | `--refresh-cache` | Ignore cache and refresh discovery from source |
-| `--delay` | Seconds to wait between requests (default: 0.5) |
+| `--delay` | Per-domain seconds between requests (default: 0.1) |
 | `--extract-zips` | Extract ZIP archives after downloading them |
 | `--no-dedup` | Disable cross-source file deduplication |
-| `--reclassify` | Reclassify files into summary/detail/other folders |
-| `--navy-archive` | Include Navy historical archive source |
+| `--retry-failures` | Re-download only previously failed files |
+| `--since YYYY-MM-DD` | Skip files already downloaded on or after this date |
+| `--workers N` | Number of concurrent HTTP download threads (default: 4) |
 
 ## Output Structure
 
@@ -167,7 +172,7 @@ See [docs/wiki/optimizations/START_HERE.md](docs/wiki/optimizations/START_HERE.m
 
 | Component | File(s) | Lines | Status |
 |-----------|---------|-------|--------|
-| **Document downloader** | `dod_budget_downloader.py` | 2,442 | ✅ Functional — 5 sources, Playwright automation, parallel downloads |
+| **Document downloader** | `dod_budget_downloader.py` | 2,442 | ✅ Functional — 6 sources (incl. navy-archive), Playwright automation, parallel downloads, cross-source dedup |
 | **Database builder (CLI)** | `build_budget_db.py` | 1,957 | ✅ Functional — Excel/PDF parsing, incremental updates |
 | **Database builder (GUI)** | `build_budget_gui.py` | 497 | ✅ Functional — tkinter interface with progress/ETA |
 | **Schema & migrations** | `schema_design.py` | 482 | ✅ Complete — versioned migrations, reference table seeding |
@@ -176,8 +181,8 @@ See [docs/wiki/optimizations/START_HERE.md](docs/wiki/optimizations/START_HERE.m
 | **Data reconciliation** | `scripts/reconcile_budget_data.py` | 481 | ✅ Complete — cross-service + cross-exhibit reconciliation |
 | **Search interface** | `search_budget.py` | 582 | ✅ Functional — FTS5 full-text search, results display, export |
 | **REST API** | `api/` (6 route modules, 11 Pydantic models) | 1,239 | ✅ Complete — FastAPI with search, budget-lines, aggregations, download, reference |
-| **Utility libraries** | `utils/` (11 modules) | 2,093 | ✅ Complete — config, database, HTTP, patterns, strings, validation |
-| **Test suite** | `tests/` (49 test files) | — | ✅ **1,183 tests** passing |
+| **Utility libraries** | `utils/` (16 modules) | 2,093 | ✅ Complete — config, database, HTTP, patterns, strings, validation, formatting, cache, and more |
+| **Test suite** | `tests/` (82 test files) | — | ✅ Tests passing |
 | **Performance optimizations** | `docs/wiki/optimizations/` | — | ✅ Complete — 5-15x speedup with 13 optimizations |
 
 ### Remaining TODOs (20 items)
@@ -239,12 +244,12 @@ python validate_budget_db.py
 ## Testing
 
 ```bash
-# Run all 1,183 tests
+# Run all tests
 python -m pytest
 
 # Run specific test modules
-python -m pytest tests/test_parsing.py
-python -m pytest tests/test_api_models.py
+python -m pytest tests/test_pipeline_group/test_parsing.py
+python -m pytest tests/test_web_group/test_api_models.py
 
 # Run with coverage
 python -m pytest --cov=. --cov-report=term-missing

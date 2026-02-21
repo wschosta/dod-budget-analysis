@@ -287,12 +287,6 @@ def _query_results(
                 if af.op in (">", "<", ">=", "<="):
                     extra_field_conditions.append(f"{amt_col} {af.op} ?")
                     extra_field_params.append(af.value)
-        except ImportError:
-            # HAWK-4 not merged yet — treat entire query as free-text
-            parsed_query = {
-                "raw": q, "fts_terms": q,
-                "field_filters": [], "amount_filters": [],
-            }
         except Exception:
             parsed_query = {
                 "raw": q, "fts_terms": q,
