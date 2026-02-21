@@ -6,8 +6,15 @@
 <div class="search-layout">
 
   {# ── Filter sidebar (3.A3-a) ─────────────────────────────────────────── #}
-  <aside class="filter-panel">
-    <h2>Filters</h2>
+  <aside class="filter-panel" id="filter-panel">
+    <button type="button" class="filter-toggle" id="filter-toggle"
+            aria-expanded="false" aria-controls="filter-body"
+            onclick="toggleFilterPanel()">
+      <h2 style="margin:0">Filters</h2>
+      <span class="filter-toggle-icon">&#9660;</span>
+    </button>
+    <h2 class="filter-title-desktop">Filters</h2>
+    <div id="filter-body" class="filter-body">
     <form id="filter-form"
           role="search"
           aria-label="Budget data filters"
@@ -133,6 +140,7 @@
       </h3>
       <div id="saved-searches-list"></div>
     </div>
+    </div>{# /filter-body #}
   </aside>
 
   {# ── Results area ─────────────────────────────────────────────────────── #}

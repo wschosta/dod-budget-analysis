@@ -112,6 +112,17 @@ function applyHiddenCols(hidden) {
   });
 }
 
+// ── Mobile filter drawer toggle ──────────────────────────────────────────────
+
+function toggleFilterPanel() {
+  var toggle = document.getElementById("filter-toggle");
+  var body = document.getElementById("filter-body");
+  if (!toggle || !body) return;
+  var expanded = toggle.getAttribute("aria-expanded") === "true";
+  toggle.setAttribute("aria-expanded", String(!expanded));
+  body.classList.toggle("open");
+}
+
 // ── Row selection (3.A6-a) ─────────────────────────────────────────────────────
 
 function selectRow(tr) {
