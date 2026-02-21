@@ -18,6 +18,20 @@
   {% endif %}
 </div>
 
+{# FALCON-12: Enrichment status and data coverage summary #}
+<div class="pe-enrichment-status">
+  {% if pe_data.funding %}
+  <span class="enrichment-badge enrichment-complete" title="Funding data available">Funding data</span>
+  {% endif %}
+  {% if pe_data.tags %}
+  <span class="enrichment-badge enrichment-complete" title="Tags assigned">Tags ({{ pe_data.tags | length }})</span>
+  {% endif %}
+  {% if pe_data.related %}
+  <span class="enrichment-badge enrichment-complete" title="Related programs linked">Related ({{ pe_data.related | length }})</span>
+  {% endif %}
+  <span class="enrichment-badge" id="pe-desc-status" title="Checking descriptions...">Descriptions</span>
+</div>
+
 {# ── Funding table ────────────────────────────────────────────────────────── #}
 {% if pe_data.funding %}
 <section class="pe-section">

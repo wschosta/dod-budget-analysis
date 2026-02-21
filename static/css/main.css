@@ -1154,6 +1154,46 @@ tr:focus-within td {
 }
 .saved-search-item:last-child { border-bottom: none; }
 
+/* ── FALCON-12: Programs intro ────────────────────────────────────────────── */
+.programs-intro {
+  margin-bottom: 1.25rem;
+}
+.programs-intro h2 { margin-bottom: .35rem; }
+.programs-subtitle {
+  font-size: .9rem;
+  color: var(--text-secondary);
+  margin-bottom: .5rem;
+  max-width: 600px;
+}
+.programs-stats {
+  font-size: .8rem;
+  color: var(--text-secondary);
+}
+
+/* FALCON-12: Enrichment badges */
+.pe-enrichment-status {
+  display: flex;
+  gap: .35rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.enrichment-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .2rem;
+  padding: .15rem .5rem;
+  border-radius: 99px;
+  font-size: .72rem;
+  background: var(--clr-gray-100);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+.enrichment-badge.enrichment-complete {
+  background: var(--clr-sky);
+  border-color: var(--clr-blue);
+  color: var(--clr-navy);
+}
+
 /* ── Program Explorer ─────────────────────────────────────────────────────── */
 .programs-layout {
   display: grid;
