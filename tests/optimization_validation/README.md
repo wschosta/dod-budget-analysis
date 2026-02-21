@@ -104,8 +104,8 @@ Advanced functionality and edge case tests:
 ## Documentation
 
 Detailed test results and performance analysis:
-- [TEST_RESULTS.md](../../docs/wiki/optimizations/TEST_RESULTS.md) - Technical analysis
-- [TEST_REPORT_EXECUTIVE_SUMMARY.txt](../../docs/wiki/optimizations/TEST_REPORT_EXECUTIVE_SUMMARY.txt) - Executive summary
+- [TEST_RESULTS.md](../../docs/archive/optimizations/TEST_RESULTS.md) - Technical analysis
+- [TEST_REPORT_EXECUTIVE_SUMMARY.txt](../../docs/archive/optimizations/TEST_REPORT_EXECUTIVE_SUMMARY.txt) - Executive summary
 
 ## Running Tests
 

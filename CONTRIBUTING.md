@@ -1,6 +1,6 @@
-# Contributing to DoD Budget Explorer
+# Contributing to DoD Budget Analysis
 
-Thank you for your interest in contributing.  This guide covers everything you need to get started: prerequisites, development setup, code standards, testing, and the pull-request process.
+Thank you for your interest in contributing. This guide covers prerequisites, development setup, code standards, testing, and the pull-request process.
 
 ---
 
@@ -37,15 +37,16 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 # 3. Install production + dev dependencies
 pip install -r requirements-dev.txt
 
-# 4. (Optional) Build a local test database
-#    Downloads and processes ~50 MB of public DoD budget spreadsheets.
-python build_budget_db.py --help
-python build_budget_db.py        # writes dod_budget.sqlite in the project root
+# 4. Install Playwright for browser-based downloads
+python -m playwright install chromium
 
-# 5. (Optional) Install pre-commit hook
+# 5. (Optional) Build a local test database
+python build_budget_db.py
+
+# 6. (Optional) Install pre-commit hook
 cp scripts/hooks/pre-commit-hook.py .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 
-# 6. Start the development API server
+# 7. Start the development API server
 uvicorn api.app:app --reload --port 8000
 # Open http://localhost:8000 in your browser
 # OpenAPI docs: http://localhost:8000/docs
@@ -58,6 +59,19 @@ docker compose up --build        # starts the API with hot-reload
 docker compose down              # stop
 ```
 
+### Getting test data
+
+```bash
+# Download a small slice for development
+python dod_budget_downloader.py --sources comptroller --years 2026
+
+# Build the database
+python build_budget_db.py
+
+# Verify
+python validate_budget_db.py --verbose
+```
+
 ---
 
 ## Project Structure
@@ -66,45 +80,27 @@ docker compose down              # stop
 dod-budget-analysis/
 ├── api/                    # FastAPI application
 │   ├── app.py              # App factory, middleware, /health endpoints
-│   ├── database.py         # DB path resolution
+│   ├── database.py         # DB path resolution, connection pool
+│   ├── models.py           # Pydantic request/response models
 │   └── routes/             # One file per router group
-│       ├── aggregations.py # /api/v1/aggregations
-│       ├── budget_lines.py # /api/v1/budget-lines
-│       ├── download.py     # /api/v1/download
-│       ├── frontend.py     # GET /, /charts, /partials/*
-│       ├── reference.py    # /api/v1/reference/*
-│       └── search.py       # /api/v1/search
-├── build_budget_db.py      # Download + ingest pipeline (Excel + PDF)
-├── refresh_data.py         # Scheduled data refresh with rollback
-├── scripts/
-│   └── backup_db.py        # SQLite online backup script
-├── static/css/             # main.css
+├── utils/                  # Shared utility library (16 modules)
+├── tests/                  # pytest test suite (75 test files)
+│   ├── conftest.py         # Shared fixtures
+│   └── fixtures/           # Static test fixture data
 ├── templates/              # Jinja2 HTML templates
-│   ├── base.html
-│   ├── index.html          # Search page
-│   ├── charts.html         # Visualizations page
-│   └── partials/           # HTMX partial responses
-├── tests/                  # pytest test suite
-├── utils/                  # Shared utilities
-├── docker/                 # Staging/multistage Docker configs
-├── docs/                   # Documentation, roadmaps, agent instructions
-│   ├── instructions/       # Agent instruction files (LION, TIGER, BEAR, OH MY)
-│   └── wiki/               # Extended documentation
+├── static/                 # CSS, JavaScript
+├── scripts/                # Operational scripts
+├── docs/                   # Documentation
+│   ├── user-guide/         # End-user documentation
+│   ├── developer/          # Developer documentation
+│   ├── decisions/          # Architecture Decision Records
+│   └── archive/            # Historical development docs
+├── build_budget_db.py      # Main data ingestion pipeline
+├── dod_budget_downloader.py # Multi-source document downloader
+├── run_pipeline.py         # Full pipeline orchestrator
+├── refresh_data.py         # Scheduled data refresh
 ├── docker-compose.yml      # Development Docker config
 └── Dockerfile
-```
-
-### Data Flow
-
-```
-DoD Comptroller websites
-        │
-        ▼
-build_budget_db.py  ──►  dod_budget.sqlite  ──►  api/app.py  ──►  Browser
-  (ingest XLSX/PDF)       (SQLite + FTS5)         (FastAPI)        (HTMX + Chart.js)
-        │
-        ▼
-refresh_data.py  (weekly scheduled refresh with automatic rollback)
 ```
 
 ---
@@ -124,13 +120,13 @@ black .
 **ruff** is used for fast linting:
 
 ```bash
-ruff check . --select=E,W,F --ignore=E501
+ruff check . --select=E,W,F --ignore=E501 --exclude=DoD_Budget_Documents
 ruff check . --fix          # auto-fix safe issues
 ```
 
 ### Type Hints
 
-New functions and methods should have type annotations.  We use **mypy** for static type checking:
+New functions and methods should have type annotations. We use **mypy** for static type checking:
 
 ```bash
 mypy api/ utils/ --ignore-missing-imports
@@ -138,12 +134,13 @@ mypy api/ utils/ --ignore-missing-imports
 
 ### General Guidelines
 
-- Follow PEP 8 naming conventions.
-- Keep functions small and focused (single responsibility).
-- Prefer `Path` objects over raw strings for file paths.
-- Use `sqlite3` directly — no ORM.  Raw SQL is fine and intentional here.
-- Do not add external dependencies without discussing in the issue first.
-- Avoid `print()` in library code; use `logging`.
+- Follow PEP 8 naming conventions
+- Keep functions small and focused (single responsibility)
+- Prefer `Path` objects over raw strings for file paths
+- Use `sqlite3` directly — no ORM. Raw SQL is intentional
+- Do not add external dependencies without discussing in an issue first
+- Use `logging` module instead of `print()` in library code
+- Use CSS variables for colors/theming (no hardcoded color values)
 
 ---
 
@@ -152,62 +149,49 @@ mypy api/ utils/ --ignore-missing-imports
 ### Run the full test suite
 
 ```bash
-pytest tests/ -v
+python -m pytest tests/ -v
 ```
 
 ### Run with coverage
 
 ```bash
-pytest tests/ --cov=. --cov-report=term-missing
+python -m pytest tests/ --cov=api --cov=utils --cov-report=term-missing --cov-fail-under=80
 ```
 
-### Run a specific test file
+### Run specific tests
 
 ```bash
-pytest tests/test_charts_data.py -v
-pytest tests/test_rate_limiter.py::TestSearchRateLimit -v
+python -m pytest tests/test_api.py -v
+python -m pytest tests/test_rate_limiter.py::TestSearchRateLimit -v
+```
+
+### Skip GUI and optimization tests (as CI does)
+
+```bash
+python -m pytest tests/ --ignore=tests/test_gui_tracker.py --ignore=tests/optimization_validation
 ```
 
 ### Writing New Tests
 
-1. Create `tests/test_<module>.py`.
-2. Use the shared fixtures in `tests/conftest.py` where possible.
-3. For API tests, create an in-memory or `tmp_path`-backed SQLite DB, build
-   the schema with `executescript()`, and wrap it with `create_app(db_path=...)`.
-4. Rate-limiter tests must clear `api.app._rate_counters` between cases
-   (use an `autouse=True` fixture).
-5. Module-scoped `client` fixtures are efficient but share global DB-path state —
-   if a test changes the DB path, put it in a separate module.
+1. Create `tests/test_<module>.py`
+2. Use shared fixtures from `tests/conftest.py` where possible
+3. For API tests: create an in-memory or `tmp_path`-backed SQLite DB, build the schema with `executescript()`, and wrap with `TestClient(create_app(db_path=...))`
+4. Rate-limiter tests must clear `api.app._rate_counters` between cases (use `autouse=True` fixture)
+5. Module-scoped `client` fixtures share global DB-path state — if a test changes the DB path, put it in a separate module
+6. Use `test_db_excel_only` instead of `test_db` when tests only need Excel data (avoids pdfplumber PanicException)
 
-```python
-import sqlite3
-import api.app as app_module
-from fastapi.testclient import TestClient
-from api.app import create_app
-
-@pytest.fixture(scope="module")
-def client(tmp_path_factory):
-    db = tmp_path_factory.mktemp("mytest") / "test.sqlite"
-    conn = sqlite3.connect(str(db))
-    conn.executescript("CREATE TABLE budget_lines (...); ...")
-    conn.close()
-    return TestClient(create_app(db_path=db))
-
-@pytest.fixture(autouse=True)
-def clear_rate_counters():
-    app_module._rate_counters.clear()
-    yield
-    app_module._rate_counters.clear()
-```
+See [docs/developer/testing.md](docs/developer/testing.md) for the full testing guide.
 
 ### Fixtures Overview
 
 | Fixture | Scope | Description |
 |---------|-------|-------------|
-| `test_db_excel_only` | session | 200-row DB with Excel data only |
-| `test_db` | session | 200-row DB with Excel + PDF data |
-| `client` (conftest) | session | `TestClient` backed by `test_db` |
-| *per-file fixtures* | module | Test-specific DBs created in `tmp_path` |
+| `fixtures_dir` | session | Temp directory with Excel + PDF fixture files |
+| `fixtures_dir_excel_only` | session | Temp directory with only Excel fixtures |
+| `test_db` | session | Pre-built SQLite DB from all fixtures |
+| `test_db_excel_only` | session | Pre-built SQLite DB from Excel-only fixtures |
+| `bad_excel` | session | Intentionally malformed Excel file |
+| `tmp_db` | function | Empty SQLite DB for unit tests |
 
 ---
 
@@ -225,7 +209,7 @@ docs/<short-description>                 # documentation only
 ### Commit message format
 
 ```
-<TYPE>: <short imperative summary (≤72 chars)>
+<TYPE>: <short imperative summary (<=72 chars)>
 
 <optional body explaining the "why", wrapped at 100 chars>
 ```
@@ -237,29 +221,63 @@ Example:
 ```
 feat: add --pdf-timeout flag to build_budget_db.py
 
-PDF extraction can hang indefinitely on malformed files.  Added a
+PDF extraction can hang indefinitely on malformed files. Added a
 configurable subprocess timeout (default 30 s) that kills stalled workers
 and logs them as failures in failed_downloads.json.
 ```
 
-### Review checklist
+### Pre-PR checklist
 
 Before submitting a PR, ensure:
 
-- [ ] `pytest tests/ -v` passes locally
-- [ ] `ruff check .` reports no errors
+- [ ] `python -m pytest tests/ -v` passes locally
+- [ ] `ruff check . --select=E,W,F --ignore=E501 --exclude=DoD_Budget_Documents` reports no errors
 - [ ] `mypy api/ utils/ --ignore-missing-imports` passes
 - [ ] New public functions have type annotations
 - [ ] Any new endpoint has a corresponding test
-- [ ] `docs/REMAINING_TODOS.md` updated if a TODO was completed
+- [ ] No hardcoded colors (use CSS variables)
 - [ ] No secrets, credentials, or large binary files committed
 
 ---
 
-## Getting Help
+## Pre-commit Hook
 
-- Open an issue at <https://github.com/wschosta/dod-budget-analysis/issues>
-- Check `docs/wiki/` for extended documentation on the API, data model,
-  and architecture decisions
-- Review `docs/design/deployment_design.py` and the `TODO` comments in each source file
-  for planned-but-not-yet-implemented features
+A pre-commit hook (`scripts/hooks/pre-commit-hook.py`) runs checks before each commit:
+- Module import checks
+- Syntax validation
+- Code quality (no debug statements)
+- Security (no hardcoded secrets)
+- Database schema consistency
+- Required files check
+
+Install it:
+
+```bash
+cp scripts/hooks/pre-commit-hook.py .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+```
+
+Or run manually:
+
+```bash
+python scripts/run_precommit_checks.py
+```
+
+---
+
+## Reporting Issues
+
+When reporting issues, include:
+
+- **Bug reports:** Steps to reproduce, expected behavior, actual behavior, Python/OS version, and relevant log output
+- **Data quality issues:** Source file path, exhibit type, specific field(s), expected vs actual values, and `python validate_budget_db.py --verbose` output
+- **Feature requests:** Use case, proposed approach, alternatives considered
+
+Open an issue at <https://github.com/wschosta/dod-budget-analysis/issues>.
+
+---
+
+## Further Reading
+
+- [Developer Documentation](docs/developer/) — Architecture, API reference, testing, deployment
+- [User Guide](docs/user-guide/) — Data sources, exhibit types, data dictionary, FAQ
+- [Architecture Decisions](docs/decisions/) — ADRs for key technology choices

@@ -2,25 +2,22 @@
 
 How data is collected, parsed, and loaded into the DoD Budget Analysis database.
 
-> **Current Status:** Core methodology implemented and documented. Ongoing hardening
-> planned in Phase 1 (Steps 1.A–1.B).
-
 ---
 
 ## Data Collection Process
 
 The download pipeline (`dod_budget_downloader.py`) follows these steps:
 
-1. **Discover fiscal years** — scrape the DoD Comptroller budget materials index page to
+1. **Discover fiscal years** -- scrape the DoD Comptroller budget materials index page to
    find all available fiscal year links
-2. **Discover files per source** — for each selected source and fiscal year, crawl the
+2. **Discover files per source** -- for each selected source and fiscal year, crawl the
    relevant page and extract links to downloadable files (`.xlsx`, `.pdf`, `.zip`, `.xls`,
    `.csv`)
-3. **Check existing files** — compare remote file sizes against local files; skip if
+3. **Check existing files** -- compare remote file sizes against local files; skip if
    already current (avoids re-downloading unchanged documents)
-4. **Download** — fetch new or changed files; browser-based downloads use Playwright for
+4. **Download** -- fetch new or changed files; browser-based downloads use Playwright for
    WAF-protected sites
-5. **Log and manifest** — record download status and generate a `manifest.json` for
+5. **Log and manifest** -- record download status and generate a `manifest.json` for
    provenance tracking
 
 Files are organized under `DoD_Budget_Documents/` by source name and fiscal year:
@@ -53,30 +50,30 @@ The database builder (`build_budget_db.py`) processes two file types differently
 ### Excel Files (`.xlsx`)
 
 1. **Open workbook** with `openpyxl` in read-only mode for memory efficiency
-2. **Detect exhibit type** from the filename using `_detect_exhibit_type()` — maps filename
+2. **Detect exhibit type** from the filename using `_detect_exhibit_type()` -- maps filename
    patterns (e.g., `p1`, `r1_display`, `m1`) to exhibit type codes
-3. **Find header row** — scan the first 15 rows of each sheet; a row containing "Account"
+3. **Find header row** -- scan the first 15 rows of each sheet; a row containing "Account"
    or similar known column headers is the header row
-4. **Map columns** with `_map_columns()` — fuzzy match header text against ~40 canonical
+4. **Map columns** with `_map_columns()` -- fuzzy match header text against ~40 canonical
    column name patterns to produce a `{field_name: column_index}` mapping; unknown columns
    are stored in the `extra_fields` JSON blob
-5. **Extract data rows** — iterate rows below the header; skip blank/subtotal rows; convert
+5. **Extract data rows** -- iterate rows below the header; skip blank/subtotal rows; convert
    currency cells with `safe_float()` (handles commas, dollar signs, None)
-6. **Detect organization** — map the `organization` column value (A, N, F, S, D, M, J)
+6. **Detect organization** -- map the `organization` column value (A, N, F, S, D, M, J)
    to a full organization name via `ORG_MAP`
-7. **Extract PE numbers** — extract Program Element numbers from line_item and account
+7. **Extract PE numbers** -- extract Program Element numbers from line_item and account
    fields using the regex `\d{7}[A-Z]{1,2}`
-8. **Batch insert** into `budget_lines` — rows are buffered and inserted in batches of
+8. **Batch insert** into `budget_lines` -- rows are buffered and inserted in batches of
    1000 for performance
-9. **Update FTS5 index** — triggers automatically sync `budget_lines_fts` after each insert
+9. **Update FTS5 index** -- triggers automatically sync `budget_lines_fts` after each insert
 
 ### PDF Files (`.pdf`)
 
 1. **Open** with `pdfplumber`
-2. **Per-page extraction** — for each page, extract raw text via `page.extract_text()`
-3. **Table detection** — attempt `page.extract_tables()` to identify structured tables;
+2. **Per-page extraction** -- for each page, extract raw text via `page.extract_text()`
+3. **Table detection** -- attempt `page.extract_tables()` to identify structured tables;
    pages with tables set `has_tables=1` and store extracted table JSON in `table_data`
-4. **Timeout protection** — table extraction runs with a 10-second timeout to prevent
+4. **Timeout protection** -- table extraction runs with a 10-second timeout to prevent
    hanging on complex layouts
 5. **Insert** one row per page into `pdf_pages`; FTS5 trigger syncs `pdf_pages_fts`
 
@@ -110,7 +107,7 @@ The `_map_columns()` function attempts to match worksheet headers to canonical f
 The matching priority is:
 
 1. **Exact match** (case-insensitive) on known header strings
-2. **Partial match** — the header contains a known keyword
+2. **Partial match** -- the header contains a known keyword
 3. **Positional fallback** for well-known exhibit types with stable layouts
 
 Canonical fields and their common header variations:
@@ -171,8 +168,7 @@ delay between file downloads.
 **Monetary unit consistency**
 Most DoD exhibits denominate amounts in thousands of dollars, but a small number use
 whole dollars or millions. The parser assumes thousands by default. If a particular
-exhibit uses a different unit, values will be misinterpreted. Manual unit auditing
-(TODO 1.B3-a) is planned.
+exhibit uses a different unit, values will be misinterpreted.
 
 **Currency year**
 The database does not yet distinguish between then-year dollars and constant dollars.

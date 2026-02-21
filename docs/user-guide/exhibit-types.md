@@ -26,13 +26,15 @@ code for each type is used in the `exhibit_type` column of the database.
 
 ---
 
-## Summary Exhibits
+## Procurement Exhibits
 
-**DB key:** `p1`  
-**Description:** Summary procurement budget exhibit — funding requests for procurement
+### P-1 -- Procurement Summary
+
+**DB key:** `p1`
+**Description:** Summary procurement budget exhibit -- funding requests for procurement
 of weapons, vehicles, aircraft, ships, and other equipment.
 
-### Column Layout
+#### Column Layout
 
 | Field | Header Patterns | Data Type | Description |
 |-------|----------------|-----------|-------------|
@@ -45,64 +47,7 @@ of weapons, vehicles, aircraft, ships, and other equipment.
 | `amount_fy2025_enacted` | Current Year, CurYBud | Currency (thousands) | Current year enacted amount |
 | `amount_fy2026_request` | Budget Estimate, BudEst | Currency (thousands) | President's budget estimate |
 
-### Known Variations
-
-- Navy/USMC versions may use "PE/BLI" header instead of separate Program Element column
-- Army versions sometimes include "SLI" (Sub-Line Item) designation
-- Column order may vary by service; the parser uses header patterns for robust matching
-
----
-
-**Description:** Summary procurement exhibit — funding requests for procurement of
-weapons systems, vehicles, and equipment.
-
-**DB key:** `p1r`  
-**Description:** Procurement reserves budget — unfunded requirements and contingency funds
-for Reserve component.
-
-### Column Layout
-
-| Field | Header Patterns | Data Type | Description |
-|-------|----------------|-----------|-------------|
-| `reserve_type` | Reserve Type, Type | Text | Type of reserve (unfunded requirement, contingency) |
-| `line_item_title` | Description, Title | Text | Description of the reserve |
-| `amount_fy2024_actual` | Prior Year | Currency (thousands) | Prior year amount |
-| `amount_fy2025_enacted` | Current Year | Currency (thousands) | Current year amount |
-| `amount_fy2026_request` | Estimate | Currency (thousands) | Budget estimate |
-| `extra_fields.justification` | Justification, Rationale | Text | Justification for the reserve |
-
----
-
-## P-5 — Procurement Detail
-
-**DB key:** `p5`  
-**Description:** Detailed procurement line items — provides per-item quantities and unit
-costs within procurement accounts. Supplements the P-1 summary.
-
-### Column Layout
-
-| Field | Header Patterns | Data Type | Description |
-|-------|----------------|-----------|-------------|
-| `account` | Account | Text | Procurement account code |
-| `program_element` | PE, Program Element | Text | Program Element number |
-| `line_item` | LIN, Line Item, Item Number | Text | Line Item Number (unique within account) |
-| `line_item_title` | Title, Item Title | Text | Description of the procurement item |
-| `extra_fields.unit` | Unit, UOM, Unit of Measure | Text | Unit of measure (Each, Lot, Program) |
-| `quantity_fy2024` | Prior Year Quantity, PY Qty | Integer | Prior year quantity |
-| `extra_fields.prior_year_unit_cost` | Prior Year Unit Cost | Currency (thousands) | Prior year unit cost |
-| `quantity_fy2025` | Current Year Quantity, CY Qty | Integer | Current year quantity |
-| `extra_fields.current_year_unit_cost` | Current Year Unit Cost | Currency (thousands) | Current year unit cost |
-| `quantity_fy2026_request` | Estimate Quantity, Est Qty | Integer | Budget estimate quantity |
-| `amount_fy2026_request` | Estimate Unit Cost | Currency (thousands) | Budget estimate unit cost |
-| `extra_fields.justification` | Justification | Text | Narrative justification |
-
-### Known Variations
-
-- Quantity and unit cost may be combined into a single "total amount" column for
-  items with unit=Program
-- Some exhibits show APUC (Average Procurement Unit Cost) instead of unit cost
-
----
+#### Canonical Column Names
 
 | Field | Source Header | Type |
 |-------|--------------|------|
@@ -119,11 +64,73 @@ costs within procurement accounts. Supplements the P-1 summary.
 | `amount_fyYYYY_request` | `FY{YYYY} Request Amount` | real (thousands) |
 | `amount_fyYYYY_total` | `FY{YYYY} Total Amount` | real (thousands) |
 
-**DB key:** `r1`  
-**Description:** Research, Development, Test & Evaluation summary — funding for military
+#### Known Variations
+
+- Navy/USMC versions may use "PE/BLI" header instead of separate Program Element column
+- Army versions sometimes include "SLI" (Sub-Line Item) designation
+- Column order may vary by service; the parser uses header patterns for robust matching
+
+---
+
+### P-1R -- Procurement (Reserves)
+
+**DB key:** `p1r`
+**Description:** Procurement reserves budget -- unfunded requirements and contingency funds
+for Reserve component. Column mapping is identical to P-1 (shared `_map_columns()` heuristics).
+
+#### Column Layout
+
+| Field | Header Patterns | Data Type | Description |
+|-------|----------------|-----------|-------------|
+| `reserve_type` | Reserve Type, Type | Text | Type of reserve (unfunded requirement, contingency) |
+| `line_item_title` | Description, Title | Text | Description of the reserve |
+| `amount_fy2024_actual` | Prior Year | Currency (thousands) | Prior year amount |
+| `amount_fy2025_enacted` | Current Year | Currency (thousands) | Current year amount |
+| `amount_fy2026_request` | Estimate | Currency (thousands) | Budget estimate |
+| `extra_fields.justification` | Justification, Rationale | Text | Justification for the reserve |
+
+---
+
+### P-5 -- Procurement Detail
+
+**DB key:** `p5`
+**Description:** Detailed procurement line items -- provides per-item quantities and unit
+costs within procurement accounts. Supplements the P-1 summary.
+
+#### Column Layout
+
+| Field | Header Patterns | Data Type | Description |
+|-------|----------------|-----------|-------------|
+| `account` | Account | Text | Procurement account code |
+| `program_element` | PE, Program Element | Text | Program Element number |
+| `line_item` | LIN, Line Item, Item Number | Text | Line Item Number (unique within account) |
+| `line_item_title` | Title, Item Title | Text | Description of the procurement item |
+| `extra_fields.unit` | Unit, UOM, Unit of Measure | Text | Unit of measure (Each, Lot, Program) |
+| `quantity_fy2024` | Prior Year Quantity, PY Qty | Integer | Prior year quantity |
+| `extra_fields.prior_year_unit_cost` | Prior Year Unit Cost | Currency (thousands) | Prior year unit cost |
+| `quantity_fy2025` | Current Year Quantity, CY Qty | Integer | Current year quantity |
+| `extra_fields.current_year_unit_cost` | Current Year Unit Cost | Currency (thousands) | Current year unit cost |
+| `quantity_fy2026_request` | Estimate Quantity, Est Qty | Integer | Budget estimate quantity |
+| `amount_fy2026_request` | Estimate Unit Cost | Currency (thousands) | Budget estimate unit cost |
+| `extra_fields.justification` | Justification | Text | Narrative justification |
+
+#### Known Variations
+
+- Quantity and unit cost may be combined into a single "total amount" column for
+  items with unit=Program
+- Some exhibits show APUC (Average Procurement Unit Cost) instead of unit cost
+
+---
+
+## RDT&E Exhibits
+
+### R-1 -- RDT&E Summary
+
+**DB key:** `r1`
+**Description:** Research, Development, Test & Evaluation summary -- funding for military
 technology development programs organized by Program Element.
 
-### Column Layout
+#### Column Layout
 
 | Field | Header Patterns | Data Type | Description |
 |-------|----------------|-----------|-------------|
@@ -131,12 +138,26 @@ technology development programs organized by Program Element.
 | `account_title` | Account Title, Title | Text | Full account title |
 | `program_element` | PE, Program Element | Text | Program Element number |
 | `appropriation` | Appropriation | Text | Appropriation category (RDT&E) |
-| `budget_activity` | BA, Budget Activity | Text | Budget Activity code (6.1–6.7) |
+| `budget_activity` | BA, Budget Activity | Text | Budget Activity code (6.1--6.7) |
 | `amount_fy2024_actual` | Prior Year, PriorYBud | Currency (thousands) | Prior year enacted |
 | `amount_fy2025_enacted` | Current Year, CurYBud | Currency (thousands) | Current year enacted |
 | `amount_fy2026_request` | Budget Estimate, BudEst | Currency (thousands) | President's budget estimate |
 
-### Budget Activity Codes (RDT&E)
+#### Canonical Column Names
+
+| Field | Source Header | Type |
+|-------|--------------|------|
+| `account` | `Account` | text |
+| `account_title` | `Account Title` | text |
+| `organization` | `Organization` | text |
+| `budget_activity` | `Budget Activity` | text |
+| `budget_activity_title` | `Budget Activity Title` | text |
+| `line_item` | `PE/BLI` | text |
+| `line_item_title` | `Program Element/Budget Line Item (BLI) Title` | text |
+| `pe_number` | extracted from line_item | text |
+| `amount_fyYYYY_*` | `FY{YYYY} {Type} Amount` | real (thousands) |
+
+#### Budget Activity Codes (RDT&E)
 
 | Code | Description |
 |------|-------------|
@@ -148,15 +169,19 @@ technology development programs organized by Program Element.
 | 6.6 | RDT&E Management Support |
 | 6.7 | Operational System Development |
 
+#### Known Variations
+
+- Budget activity codes follow DoD RDT&E taxonomy (6.1=Basic Research, 6.2=Applied, etc.)
+
 ---
 
-## R-2 — RDT&E Schedule
+### R-2 -- RDT&E Schedule
 
-**DB key:** `r2`  
+**DB key:** `r2`
 **Description:** RDT&E line-item schedule with milestone and achievement data for research
 programs. Provides more detail than R-1.
 
-### Column Layout
+#### Column Layout
 
 | Field | Header Patterns | Data Type | Description |
 |-------|----------------|-----------|-------------|
@@ -170,20 +195,20 @@ programs. Provides more detail than R-1.
 | `extra_fields.current_achievement` | Current Achievement, Achievement | Text | Current year achievement or status |
 | `extra_fields.planned_achievement` | Planned Achievement, Planned | Text | Planned achievement for budget year |
 
-### Known Variations
+#### Known Variations
 
 - R-2 often includes narrative justification sections below tabular data
 - Performance metrics vary significantly by research program domain
 
 ---
 
-## R-3 — RDT&E Project
+### R-3 -- RDT&E Project
 
-**DB key:** `r3`  
+**DB key:** `r3`
 **Description:** RDT&E project-level schedule showing development approach, schedule,
 and cost estimate growth.
 
-### Column Layout
+#### Column Layout
 
 | Field | Header Patterns | Data Type | Description |
 |-------|----------------|-----------|-------------|
@@ -198,12 +223,12 @@ and cost estimate growth.
 
 ---
 
-## R-4 — RDT&E Budget Item Justification
+### R-4 -- RDT&E Budget Item Justification
 
-**DB key:** `r4`  
+**DB key:** `r4`
 **Description:** Detailed justification for RDT&E budget items with technical narrative.
 
-### Column Layout
+#### Column Layout
 
 | Field | Header Patterns | Data Type | Description |
 |-------|----------------|-----------|-------------|
@@ -214,70 +239,15 @@ and cost estimate growth.
 
 ---
 
----
+## O&M and Personnel Exhibits
 
-### P-1R — Procurement (Reserves)
+### O-1 -- Operation & Maintenance
 
-**Description:** Reserve component procurement — same structure as P-1.
-
-Column mapping is identical to P-1 (shared `_map_columns()` heuristics).
-
----
-
-### R-1 — RDT&E
-
-**Description:** Research, Development, Test & Evaluation — funding for military
-technology development programs.
-
-**Canonical column names:**
-
-| Field | Source Header | Type |
-|-------|--------------|------|
-| `account` | `Account` | text |
-| `account_title` | `Account Title` | text |
-| `organization` | `Organization` | text |
-| `budget_activity` | `Budget Activity` | text |
-| `budget_activity_title` | `Budget Activity Title` | text |
-| `line_item` | `PE/BLI` | text |
-| `line_item_title` | `Program Element/Budget Line Item (BLI) Title` | text |
-| `pe_number` | extracted from line_item | text |
-| `amount_fyYYYY_*` | `FY{YYYY} {Type} Amount` | real (thousands) |
-
-**Known variations:**
-- Budget activity codes follow DoD RDT&E taxonomy (6.1=Basic Research, 6.2=Applied, etc.)
-
----
-
-### O-1 — Operation & Maintenance
-
-**Description:** Operation and maintenance funding — personnel operations, sustainment, training.
-
-**Canonical column names:**
-
-| Field | Source Header | Type |
-|-------|--------------|------|
-| `account` | `Account` | text |
-| `account_title` | `Account Title` | text |
-| `organization` | `Organization` | text |
-| `budget_activity` | `Budget Activity` | text |
-| `budget_activity_title` | `Budget Activity Title` | text |
-| `sub_activity` | `BSA` or `AG/BSA` | text |
-| `sub_activity_title` | `Budget SubActivity Title` | text |
-| `amount_fyYYYY_*` | `FY{YYYY} {Type} Amount` | real (thousands) |
-
----
-
-### M-1 — Military Personnel
-
-**Description:** Military personnel funding — active duty, reserves, National Guard pay.
-
-Same column layout as O-1 (uses BSA/sub-activity structure).
-
-**DB key:** `o1`  
-**Description:** Operation and Maintenance summary — funding for personnel, operations,
+**DB key:** `o1`
+**Description:** Operation and Maintenance summary -- funding for personnel, operations,
 sustainment, and training activities.
 
-### Column Layout
+#### Column Layout
 
 | Field | Header Patterns | Data Type | Description |
 |-------|----------------|-----------|-------------|
@@ -290,19 +260,33 @@ sustainment, and training activities.
 | `amount_fy2025_enacted` | Current Year, CurYBud | Currency (thousands) | Current year enacted |
 | `amount_fy2026_request` | Budget Estimate, BudEst | Currency (thousands) | President's budget estimate |
 
-### Known Variations
+#### Canonical Column Names
+
+| Field | Source Header | Type |
+|-------|--------------|------|
+| `account` | `Account` | text |
+| `account_title` | `Account Title` | text |
+| `organization` | `Organization` | text |
+| `budget_activity` | `Budget Activity` | text |
+| `budget_activity_title` | `Budget Activity Title` | text |
+| `sub_activity` | `BSA` or `AG/BSA` | text |
+| `sub_activity_title` | `Budget SubActivity Title` | text |
+| `amount_fyYYYY_*` | `FY{YYYY} {Type} Amount` | real (thousands) |
+
+#### Known Variations
 
 - O-1 often has service-specific column headers for type-of-activity breakdowns
 
 ---
 
-**Canonical column names:**
+### M-1 -- Military Personnel
 
-**DB key:** `m1`  
-**Description:** Military Personnel summary — funding for active duty, reserves, and
-National Guard personnel pay, allowances, and benefits.
+**DB key:** `m1`
+**Description:** Military Personnel summary -- funding for active duty, reserves, and
+National Guard personnel pay, allowances, and benefits. Uses the same column layout
+as O-1 (BSA/sub-activity structure).
 
-### Column Layout
+#### Column Layout
 
 | Field | Header Patterns | Data Type | Description |
 |-------|----------------|-----------|-------------|
@@ -315,21 +299,23 @@ National Guard personnel pay, allowances, and benefits.
 | `amount_fy2025_enacted` | Current Year, CurYBud | Currency (thousands) | Current year enacted |
 | `amount_fy2026_request` | Budget Estimate, BudEst | Currency (thousands) | President's budget estimate |
 
-### Known Variations
+#### Known Variations
 
 - M-1 may include "strength" (headcount) alongside budget amounts
 - Some versions separate Officer and Enlisted personnel on different rows
 
 ---
 
-**Note:** C-1 uses authorization/appropriation semantics, not enacted/request.
+## Construction and Revolving Fund Exhibits
 
-**DB key:** `c1`  
-**Description:** Military Construction budget — facility projects and real property
+### C-1 -- Military Construction
+
+**DB key:** `c1`
+**Description:** Military Construction budget -- facility projects and real property
 acquisitions. Uses authorization/appropriation columns instead of the standard
 request/enacted pattern.
 
-### Column Layout
+#### Column Layout
 
 | Field | Header Patterns | Data Type | Description |
 |-------|----------------|-----------|-------------|
@@ -341,20 +327,20 @@ request/enacted pattern.
 | `amount_fy2025_enacted` | Appropriation, Approp Amount | Currency (thousands) | Appropriation amount |
 | `amount_fy2026_request` | Estimate, Est Amount | Currency (thousands) | Budget estimate |
 
-### Known Variations
+#### Known Variations
 
 - C-1 uses authorization/appropriation instead of prior/current enacted pattern
 - May include project duration or completion date fields
 
 ---
 
-## RF-1 — Revolving Funds
+### RF-1 -- Revolving Funds
 
-**DB key:** `rf1`  
-**Description:** Revolving Fund budget — working capital funds and enterprise funds.
+**DB key:** `rf1`
+**Description:** Revolving Fund budget -- working capital funds and enterprise funds.
 Shows revenue and expenses rather than budget authority like other exhibits.
 
-### Column Layout
+#### Column Layout
 
 | Field | Header Patterns | Data Type | Description |
 |-------|----------------|-----------|-------------|
@@ -367,7 +353,7 @@ Shows revenue and expenses rather than budget authority like other exhibits.
 | `extra_fields.estimate_revenue` | Estimate Revenue | Currency (thousands) | Budget estimate revenue |
 | `extra_fields.estimate_expenses` | Estimate Expenses | Currency (thousands) | Budget estimate expenses |
 
-### Known Variations
+#### Known Variations
 
 - RF-1 exhibits revenue and expenses rather than budget authority
 - Revolving fund structure varies by fund type (working capital, service/support)
@@ -377,9 +363,11 @@ Shows revenue and expenses rather than budget authority like other exhibits.
 ## Monetary Convention
 
 - **Canonical unit:** Thousands of dollars (as stored in source documents)
-- **Display toggle:** The planned UI will support toggling to millions of dollars
+- **Display:** The web UI supports toggling between thousands and millions of dollars
 - **Budget cycles:** FY2024 Actual, FY2025 Enacted, FY2025 Supplemental,
   FY2025 Total, FY2026 Request, FY2026 Reconciliation, FY2026 Total
+
+---
 
 ## Extra Fields
 
@@ -391,3 +379,8 @@ SELECT json_extract(extra_fields, '$.justification') AS justification
 FROM budget_lines
 WHERE exhibit_type = 'p5' AND line_item_title LIKE '%Apache%';
 ```
+
+---
+
+See also [Data Dictionary](data-dictionary.md) for full field definitions, and
+[Data Sources](data-sources.md) for information about where exhibits are downloaded from.
