@@ -229,3 +229,60 @@ def test_find_matching_columns_c1_authorization():
     fields = set(matched.values())
     assert "authorization_amount" in fields
     assert "appropriation_amount" in fields
+
+
+# ── Legacy header pattern tests ─────────────────────────────────────────────
+# Verify catalog patterns match FY2012-FY2023 header variants.
+
+class TestCatalogLegacyHeaders:
+    """Tests that old header variants are recognized by the catalog."""
+
+    def test_p1_old_line_item_pattern(self):
+        """P-1 catalog recognizes 'Line Item' (legacy) not just 'Budget Line Item'."""
+        headers = ["Account", "Account Title", "Organization",
+                   "Budget Activity", "Line Item", "Line Item Title",
+                   "BSA Title", "Cost Type", "Add/ Non-Add"]
+        matched = find_matching_columns("p1", headers)
+        fields = set(matched.values())
+        assert "budget_line_item" in fields or "bli_title" in fields, (
+            "P-1 catalog should match 'Line Item' or 'Line Item Title'"
+        )
+
+    def test_r1_old_pe_pattern(self):
+        """R-1 catalog recognizes bare 'PE' (FY2015) and 'PE / BLI' (FY2016-2023)."""
+        # Bare PE
+        headers_bare = ["Account", "PE", "Program Element Title"]
+        matched = find_matching_columns("r1", headers_bare)
+        fields = set(matched.values())
+        assert "pe_bli" in fields, "R-1 catalog should match bare 'PE'"
+
+        # Spaced PE / BLI
+        headers_spaced = ["Account", "PE / BLI",
+                          "Program Element / Budget Line Item (BLI) Title"]
+        matched2 = find_matching_columns("r1", headers_spaced)
+        fields2 = set(matched2.values())
+        assert "pe_bli" in fields2, "R-1 catalog should match 'PE / BLI'"
+
+    def test_o1_old_sag_ag_patterns(self):
+        """O-1 catalog recognizes 'SAG', 'SAG Title', 'AG Title', 'AG / BSA'."""
+        headers = ["Account", "SAG", "SAG Title", "AG Title", "AG / BSA"]
+        matched = find_matching_columns("o1", headers)
+        fields = set(matched.values())
+        assert "sag_bli" in fields, "O-1 catalog should match 'SAG'"
+        assert "ag_bsa" in fields or "ag_bsa_title" in fields, (
+            "O-1 catalog should match 'AG / BSA' or 'AG Title'"
+        )
+
+    def test_rf1_old_sag_ag_patterns(self):
+        """RF-1 catalog recognizes the same SAG/AG patterns as O-1."""
+        headers = ["Account", "SAG", "SAG Title", "AG Title"]
+        matched = find_matching_columns("rf1", headers)
+        fields = set(matched.values())
+        assert "sag_bli" in fields, "RF-1 catalog should match 'SAG'"
+
+    def test_p1_add_non_add_variant(self):
+        """P-1 catalog recognizes 'Add/ Non-Add' (legacy spacing)."""
+        headers = ["Account", "Add/ Non-Add"]
+        matched = find_matching_columns("p1", headers)
+        fields = set(matched.values())
+        assert "add_non_add" in fields, "P-1 catalog should match 'Add/ Non-Add'"

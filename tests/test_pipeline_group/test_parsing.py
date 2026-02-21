@@ -83,6 +83,7 @@ def test_safe_float(val, expected):
 # ── DONE 1.C2-d: _determine_category ─────────────────────────────────────────
 
 @pytest.mark.parametrize("path_str, expected", [
+    # Old flat layout: FY{year}/{source}/file
     ("DoD_Budget_Documents/FY2026/Comptroller/file.pdf", "Comptroller"),
     ("DoD_Budget_Documents/FY2026/US_Army/file.xlsx", "Army"),
     ("DoD_Budget_Documents/FY2026/Defense_Wide/file.pdf", "Defense-Wide"),
@@ -93,6 +94,12 @@ def test_safe_float(val, expected):
     ("DoD_Budget_Documents/FY2026/Marine_Corps/file.pdf", "Marine Corps"),
     ("DoD_Budget_Documents/FY2026/marines/file.xlsx", "Marine Corps"),
     ("DoD_Budget_Documents/FY2026/SomeOther/file.xlsx", "Other"),
+    # New nested layout: FY{year}/{cycle}/{source}/{category}/file
+    ("DoD_Budget_Documents/FY2026/PB/Comptroller/summary/p1_display.xlsx", "Comptroller"),
+    ("DoD_Budget_Documents/FY2026/PB/US_Army/detail/r2_army.xlsx", "Army"),
+    ("DoD_Budget_Documents/FY2026/ENACTED/Navy/summary/o1_navy.xlsx", "Navy"),
+    ("DoD_Budget_Documents/FY2026/PB/Air_Force/other/readme.txt", "Air Force"),
+    ("DoD_Budget_Documents/FY2026/PB/Defense_Wide/detail/p5.xlsx", "Defense-Wide"),
 ])
 def test_determine_category(path_str, expected):
     assert _determine_category(Path(path_str)) == expected
@@ -741,3 +748,246 @@ class TestMapColumnsWithCatalogMerge:
         mapping = _map_columns(headers, "r3")
         assert "project_number" in mapping
         assert "development_approach" in mapping
+
+
+# ── Legacy header format tests (FY2012-FY2023) ──────────────────────────────
+# These tests verify that _map_columns() correctly handles the older header
+# naming conventions used in pre-FY2024 Excel files.
+
+
+class TestMapColumnsLegacyHeaders:
+    """Tests for _map_columns() with FY2012-FY2023 header variants."""
+
+    def test_p1_old_headers(self):
+        """P-1 FY2012-FY2023: 'Line Item', 'Line Item Title', 'BSA Title',
+        'Cost Type', 'Cost Type Title', 'Add/ Non-Add'."""
+        headers = [
+            "Account", "Account Title", "Organization",
+            "Budget Activity", "Budget Activity Title",
+            "BSA Title",
+            "Line Item", "Line Item Title",
+            "Cost Type", "Cost Type Title", "Add/ Non-Add",
+            "FY2020 Actual\nAmount", "FY2021 Request\nAmount",
+        ]
+        mapping = _map_columns(headers, "p1")
+        assert "account" in mapping
+        assert "line_item" in mapping, "P-1 'Line Item' should map to line_item"
+        assert "line_item_title" in mapping, "P-1 'Line Item Title' should map to line_item_title"
+        assert "sub_activity_title" in mapping, "'BSA Title' should map to sub_activity_title"
+        assert "cost_type" in mapping, "'Cost Type' should map to cost_type"
+        assert "cost_type_title" in mapping, "'Cost Type Title' should map to cost_type_title"
+        assert "add_non_add" in mapping, "'Add/ Non-Add' should map to add_non_add"
+
+    def test_p1_old_line_item_not_confused_with_r4(self):
+        """'Line Item' in P-1 context maps to line_item (not just R-4)."""
+        headers = [
+            "Account", "Account Title", "Organization",
+            "Budget Activity", "Line Item",
+            "FY2018 Actual\nAmount",
+        ]
+        mapping = _map_columns(headers, "p1")
+        assert mapping.get("line_item") is not None
+
+    def test_p1r_old_headers(self):
+        """P-1R also uses 'Line Item' in legacy files."""
+        headers = [
+            "Account", "Account Title", "Organization",
+            "Budget Activity", "Line Item", "Line Item Title",
+            "FY2019 Actual\nAmount",
+        ]
+        mapping = _map_columns(headers, "p1r")
+        assert "line_item" in mapping
+        assert "line_item_title" in mapping
+
+    def test_r1_old_pe_header_fy2015(self):
+        """R-1 FY2015: bare 'PE' header maps to line_item."""
+        headers = [
+            "Account", "Account Title", "Organization",
+            "Budget Activity", "Budget Activity Title",
+            "PE", "Program Element Title",
+            "FY2014 Actual\nAmount", "FY2015 Request\nAmount",
+        ]
+        mapping = _map_columns(headers, "r1")
+        assert "line_item" in mapping, "R-1 bare 'PE' should map to line_item"
+        assert "line_item_title" in mapping, "'Program Element Title' should map to line_item_title"
+
+    def test_r1_old_pe_bli_spaced_fy2016_2023(self):
+        """R-1 FY2016-FY2023: 'PE / BLI' (with spaces) maps to line_item."""
+        headers = [
+            "Account", "Account Title", "Organization",
+            "Budget Activity", "Budget Activity Title",
+            "PE / BLI",
+            "Program Element / Budget Line Item (BLI) Title",
+            "FY2020 Actual\nAmount", "FY2021 Request\nAmount",
+        ]
+        mapping = _map_columns(headers, "r1")
+        assert "line_item" in mapping, "'PE / BLI' should map to line_item"
+        assert "line_item_title" in mapping, (
+            "'Program Element / Budget Line Item (BLI) Title' should map to line_item_title"
+        )
+
+    def test_o1_old_sag_headers(self):
+        """O-1 FY2012-FY2015: 'SAG', 'SAG Title', 'AG Title'."""
+        headers = [
+            "Account", "Account Title", "Organization",
+            "Budget Activity", "Budget Activity Title",
+            "AG Title",
+            "SAG", "SAG Title",
+            "FY2014 Actual\nAmount", "FY2015 Request\nAmount",
+        ]
+        mapping = _map_columns(headers, "o1")
+        assert "line_item" in mapping, "'SAG' should map to line_item"
+        assert "line_item_title" in mapping, "'SAG Title' should map to line_item_title"
+        assert "sub_activity_title" in mapping, "'AG Title' should map to sub_activity_title"
+
+    def test_o1_old_sag_bli_spaced(self):
+        """O-1 FY2016-FY2023: 'SAG / BLI', 'AG / BSA' (spaced variants)."""
+        headers = [
+            "Account", "Account Title", "Organization",
+            "Budget Activity", "Budget Activity Title",
+            "AG / BSA",
+            "AG / Budget SubActivity (BSA) Title",
+            "SAG / BLI",
+            "SAG / Budget Line Item (BLI) Title",
+            "FY2020 Actual\nAmount",
+        ]
+        mapping = _map_columns(headers, "o1")
+        assert "sub_activity" in mapping, "'AG / BSA' should map to sub_activity"
+        assert "sub_activity_title" in mapping
+        assert "line_item" in mapping, "'SAG / BLI' should map to line_item"
+        assert "line_item_title" in mapping
+
+    def test_rf1_old_sag_headers(self):
+        """RF-1 uses the same SAG/AG patterns as O-1."""
+        headers = [
+            "Account", "Account Title", "Organization",
+            "Budget Activity", "Budget Activity Title",
+            "AG Title",
+            "SAG", "SAG Title",
+            "FY2016 Actual\nAmount",
+        ]
+        mapping = _map_columns(headers, "rf1")
+        assert "line_item" in mapping, "'SAG' should map to line_item for RF-1"
+        assert "line_item_title" in mapping
+        assert "sub_activity_title" in mapping
+
+    def test_m1_budget_sub_activity_with_space(self):
+        """M-1 FY2012-FY2023: 'Budget Sub Activity' (with space, not 'SubActivity')."""
+        headers = [
+            "Account", "Account Title", "Organization",
+            "Budget Activity", "Budget Activity Title",
+            "Budget Sub Activity", "Budget Sub Activity Title",
+            "FY2018 Actual\nAmount",
+        ]
+        mapping = _map_columns(headers, "m1")
+        assert "sub_activity" in mapping, (
+            "'Budget Sub Activity' (with space) should map to sub_activity"
+        )
+        assert "sub_activity_title" in mapping, (
+            "'Budget Sub Activity Title' should map to sub_activity_title"
+        )
+
+    def test_add_non_add_variants(self):
+        """All Add/Non-Add spelling variants are recognized."""
+        for variant in ("Add/ Non-Add", "Add/Non-Add", "Add / Non-Add"):
+            headers = [
+                "Account", "Account Title", variant,
+                "FY2020 Actual\nAmount",
+            ]
+            mapping = _map_columns(headers, "p1")
+            assert "add_non_add" in mapping, f"'{variant}' should map to add_non_add"
+
+    def test_cost_type_not_confused_with_cost_type_title(self):
+        """'Cost Type' and 'Cost Type Title' map to separate fields."""
+        headers = [
+            "Account", "Account Title",
+            "Cost Type", "Cost Type Title",
+            "FY2020 Actual\nAmount",
+        ]
+        mapping = _map_columns(headers, "p1")
+        assert "cost_type" in mapping
+        assert "cost_type_title" in mapping
+        assert mapping["cost_type"] != mapping["cost_type_title"]
+
+
+class TestMapColumnsRegressionFY2024:
+    """Regression tests ensuring FY2024+ headers still work after legacy changes."""
+
+    def test_p1_new_headers_still_work(self):
+        """FY2024+ P-1 headers with 'Budget Line Item' still map correctly."""
+        headers = [
+            "Account", "Account Title", "Organization",
+            "Budget Activity", "Budget Activity Title",
+            "Budget SubActivity (BSA) Title",
+            "Budget Line Item",
+            "Program Element/Budget Line Item (BLI) Title",
+            "Cost Type", "Cost Type Title", "Add/Non-Add",
+            "FY2024 Actual\nAmount", "FY2025 Enacted\nAmount",
+            "FY2026 Request\nAmount",
+        ]
+        mapping = _map_columns(headers, "p1")
+        assert "account" in mapping
+        assert "line_item" in mapping
+        assert "line_item_title" in mapping
+        assert "sub_activity_title" in mapping
+        assert "cost_type" in mapping
+        assert "cost_type_title" in mapping
+        assert "add_non_add" in mapping
+        assert "amount_fy2024_actual" in mapping
+        assert "amount_fy2026_request" in mapping
+
+    def test_r1_new_headers_still_work(self):
+        """FY2024+ R-1 headers with 'PE/BLI' still map correctly."""
+        headers = [
+            "Account", "Account Title", "Organization",
+            "Budget Activity", "Budget Activity Title",
+            "PE/BLI",
+            "Program Element/Budget Line Item (BLI) Title",
+            "FY2024 Actual\nAmount", "FY2025 Enacted\nAmount",
+            "FY2026 Request\nAmount",
+        ]
+        mapping = _map_columns(headers, "r1")
+        assert "line_item" in mapping
+        assert "line_item_title" in mapping
+        assert "amount_fy2024_actual" in mapping
+
+    def test_o1_new_headers_still_work(self):
+        """FY2024+ O-1 headers with 'AG/BSA', 'SAG/BLI' still map correctly."""
+        headers = [
+            "Account", "Account Title", "Organization",
+            "Budget Activity", "Budget Activity Title",
+            "AG/BSA",
+            "AG/Budget SubActivity (BSA) Title",
+            "SAG/BLI",
+            "SAG/Budget Line Item (BLI) Title",
+            "FY2024 Actual\nAmount", "FY2025 Enacted\nAmount",
+        ]
+        mapping = _map_columns(headers, "o1")
+        assert "sub_activity" in mapping
+        assert "sub_activity_title" in mapping
+        assert "line_item" in mapping
+        assert "line_item_title" in mapping
+
+    def test_m1_new_headers_still_work(self):
+        """FY2024+ M-1 headers with 'BSA' still map correctly."""
+        headers = [
+            "Account", "Account Title", "Organization",
+            "Budget Activity", "Budget Activity Title",
+            "BSA", "Budget SubActivity (BSA) Title",
+            "FY2024 Actual\nAmount",
+        ]
+        mapping = _map_columns(headers, "m1")
+        assert "sub_activity" in mapping
+        assert "sub_activity_title" in mapping
+
+    def test_setdefault_preserves_first_match(self):
+        """When multiple headers could match the same field, the first one wins."""
+        # 'Budget Line Item' appears before a hypothetical second line_item match
+        headers = [
+            "Account", "Account Title",
+            "Budget Line Item",  # index 2 -- should win
+            "Line Item",         # index 3 -- should NOT override
+            "FY2024 Actual\nAmount",
+        ]
+        mapping = _map_columns(headers, "p1")
+        assert mapping["line_item"] == 2, "First match should be preserved by setdefault"

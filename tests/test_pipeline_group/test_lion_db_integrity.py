@@ -98,6 +98,18 @@ class TestFYExtraction:
         p = Path("/data/documents/file.pdf")
         assert _extract_fy_from_path(p) is None
 
+    def test_extract_fy_from_path_new_layout(self):
+        """New nested layout: FY{year}/{cycle}/{source}/{category}/file."""
+        from build_budget_db import _extract_fy_from_path
+        p = Path("/data/DoD_Budget_Documents/FY2026/PB/Comptroller/summary/p1.xlsx")
+        assert _extract_fy_from_path(p) == "FY 2026"
+
+    def test_extract_fy_from_path_new_layout_enacted(self):
+        """New nested layout with ENACTED cycle."""
+        from build_budget_db import _extract_fy_from_path
+        p = Path("/data/DoD_Budget_Documents/FY2025/ENACTED/Navy/detail/r2.xlsx")
+        assert _extract_fy_from_path(p) == "FY 2025"
+
     def test_normalise_fiscal_year_passthrough(self):
         from build_budget_db import _normalise_fiscal_year
         assert _normalise_fiscal_year("FY 2026") == "FY 2026"

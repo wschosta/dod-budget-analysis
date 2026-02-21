@@ -265,6 +265,19 @@ def _migrate_add_columns(conn: sqlite3.Connection) -> None:
             ("project_number", "TEXT"),
             ("source_files", "TEXT"),
         ],
+        # Procurement-specific fields (P-1, P-1R, P-5)
+        "budget_lines": [
+            ("cost_type", "TEXT"),
+            ("cost_type_title", "TEXT"),
+            ("add_non_add", "TEXT"),
+        ],
+        # Manifest metadata enrichment: capture download-time metadata
+        "ingested_files": [
+            ("exhibit_type", "TEXT"),
+            ("budget_cycle", "TEXT"),
+            ("download_timestamp", "TEXT"),
+            ("service_org", "TEXT"),
+        ],
     }
 
     for table, columns in migrations.items():
@@ -317,6 +330,10 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             line_item TEXT,
             line_item_title TEXT,
             classification TEXT,
+            -- Procurement-specific fields (P-1, P-1R, P-5)
+            cost_type TEXT,
+            cost_type_title TEXT,
+            add_non_add TEXT,
             -- DESIGN NOTE: Fiscal year columns are denormalized (FY2024-2026 hardcoded).
             -- When new budget years are released, update:
             --   1. This CREATE TABLE schema
@@ -862,6 +879,11 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
         elif h == "classification":
             mapping["classification"] = i
 
+        # R-1 summary exhibits: "PE" or "PE / BLI" maps to line_item
+        # (must precede the R-2/R-3/R-4 clause which maps PE to account)
+        elif h in ("pe", "pe / bli") and exhibit_type in ("r1",):
+            mapping.setdefault("line_item", i)
+
         # R-2/R-3/R-4 detail exhibits: use PE as anchor mapped to account
         # so these exhibits pass the "account" gate in header detection.
         elif h in ("pe", "program element") and exhibit_type in ("r2", "r3", "r4"):
@@ -874,37 +896,57 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
             mapping.setdefault("line_item", i)
         elif h == "project title" and exhibit_type in ("r3",):
             mapping.setdefault("line_item_title", i)
-        elif h in ("line item", "item") and exhibit_type in ("r4",):
+        elif h in ("line item", "item") and exhibit_type in ("p1", "p1r", "r4"):
             mapping.setdefault("line_item", i)
+        elif h == "line item title":
+            mapping.setdefault("line_item_title", i)
         elif h in ("narrative", "justification") and exhibit_type in ("r4",):
             mapping.setdefault("line_item_title", i)
 
         # Sub-activity / line item fields
-        elif h in ("bsa", "ag/bsa"):
-            mapping["sub_activity"] = i
-        elif "budget subactivity" in h and "title" in h:
-            mapping["sub_activity_title"] = i
+        elif h in ("bsa", "ag/bsa", "ag / bsa"):
+            mapping.setdefault("sub_activity", i)
+        elif ("budget subactivity" in h or "budget sub activity" in h) and "title" in h:
+            mapping.setdefault("sub_activity_title", i)
+        elif ("budget subactivity" in h or "budget sub activity" in h) and "title" not in h:
+            mapping.setdefault("sub_activity", i)
         elif h == "ag/budget subactivity (bsa) title":
-            mapping["sub_activity_title"] = i
+            mapping.setdefault("sub_activity_title", i)
+        elif h in ("ag / budget subactivity (bsa) title", "ag title"):
+            mapping.setdefault("sub_activity_title", i)
+        elif h in ("bsa title", "budget sub activity (bsa) title"):
+            mapping.setdefault("sub_activity_title", i)
         elif h == "budget line item" and "title" not in h:
-            mapping["line_item"] = i
+            mapping.setdefault("line_item", i)
         elif h in ("budget line item (bli) title",
-                    "program element/budget line item (bli) title"):
-            mapping["line_item_title"] = i
-        elif h == "pe/bli":
-            mapping["line_item"] = i
-        elif h in ("sag/bli",):
-            mapping["line_item"] = i
-        elif h == "sag/budget line item (bli) title":
-            mapping["line_item_title"] = i
+                    "program element/budget line item (bli) title",
+                    "program element / budget line item (bli) title",
+                    "program element title"):
+            mapping.setdefault("line_item_title", i)
+        elif h in ("pe/bli", "pe / bli"):
+            mapping.setdefault("line_item", i)
+        elif h in ("sag/bli", "sag / bli", "sag"):
+            mapping.setdefault("line_item", i)
+        elif h in ("sag/budget line item (bli) title",
+                    "sag / budget line item (bli) title",
+                    "sag title"):
+            mapping.setdefault("line_item_title", i)
         elif h == "construction project title":
-            mapping["line_item_title"] = i
+            mapping.setdefault("line_item_title", i)
         elif h == "construction project":
-            mapping["line_item"] = i
+            mapping.setdefault("line_item", i)
         elif h == "location title":
             mapping.setdefault("sub_activity_title", i)
         elif h == "facility category title":
             mapping.setdefault("sub_activity", i)
+
+        # Procurement-specific fields (P-1, P-1R, P-5)
+        elif h == "cost type" and "title" not in h:
+            mapping.setdefault("cost_type", i)
+        elif h == "cost type title":
+            mapping.setdefault("cost_type_title", i)
+        elif h in ("add/ non-add", "add/non-add", "add / non-add"):
+            mapping.setdefault("add_non_add", i)
 
     # Amount columns — year-agnostic regex detection (Step 1.B2-a).
     # Matches any "FY YYYY" or "FYXXXX" header and classifies by sub-type
@@ -964,12 +1006,31 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
     # The heuristic mapping wins for any field it already identified; the catalog
     # fills in gaps for exhibit types with well-defined column specs (p5, r2, r3, r4,
     # and the summary exhibits already handled above).
+    # Translate catalog field names to canonical schema field names.
+    # The catalog uses its own naming (e.g. "budget_line_item", "pe_bli")
+    # which must be mapped to the budget_lines schema names.
+    _CATALOG_TO_SCHEMA: dict[str, str] = {
+        "budget_line_item": "line_item",
+        "pe_bli": "line_item",
+        "bli_title": "line_item_title",
+        "pe_bli_title": "line_item_title",
+        "bsa": "sub_activity",
+        "bsa_title": "sub_activity_title",
+        "ag_bsa": "sub_activity",
+        "ag_bsa_title": "sub_activity_title",
+        "sag_bli": "line_item",
+        "sag_bli_title": "line_item_title",
+        "cost_type": "cost_type",
+        "cost_type_title": "cost_type_title",
+        "add_non_add": "add_non_add",
+    }
     catalog_mapping = _catalog_find_matching_columns(exhibit_type, list(headers))
-    # catalog_mapping: col_index → field_name; invert to field_name → col_index
-    already_mapped_fields = set(mapping.values())
+    # catalog_mapping: col_index -> catalog field_name
+    already_mapped_fields = set(mapping.keys())
     for col_idx, field_name in catalog_mapping.items():
-        if field_name not in already_mapped_fields:
-            mapping.setdefault(field_name, col_idx)
+        canonical = _CATALOG_TO_SCHEMA.get(field_name, field_name)
+        if canonical not in already_mapped_fields:
+            mapping.setdefault(canonical, col_idx)
 
     return mapping
 
@@ -1158,6 +1219,9 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
                 line_item_val,
                 get_str(row, "line_item_title"),
                 get_str(row, "classification"),
+                get_str(row, "cost_type"),
+                get_str(row, "cost_type_title"),
+                get_str(row, "add_non_add"),
                 *fy_values,    # dynamic FY columns (BUILD-002)
                 # LION-102: Store additional PE numbers in extra_fields JSON
                 json.dumps({"additional_pe_numbers": additional_pes}) if additional_pes else None,
@@ -1177,7 +1241,8 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
                 "account, account_title, organization, organization_name, "
                 "budget_activity, budget_activity_title, "
                 "sub_activity, sub_activity_title, "
-                "line_item, line_item_title, classification"
+                "line_item, line_item_title, classification, "
+                "cost_type, cost_type_title, add_non_add"
             )
             _fy_col_str = ", ".join(_fy_cols_in_map) if _fy_cols_in_map else ""
             _tail_cols = (
@@ -1360,6 +1425,9 @@ def _extract_excel_rows(args: tuple) -> dict:
                 _get_str(row, "sub_activity"), _get_str(row, "sub_activity_title"),
                 line_item_val, line_item_title_val,
                 _get_str(row, "classification"),
+                _get_str(row, "cost_type"),
+                _get_str(row, "cost_type_title"),
+                _get_str(row, "add_non_add"),
             )
             tail = (
                 # LION-102: additional PEs in extra_fields
@@ -1832,25 +1900,58 @@ def _recreate_pdf_fts_triggers(conn: sqlite3.Connection):
     """)
 
 
+_KNOWN_BUDGET_CYCLES = {"PB", "ENACTED", "NDAA", "SUPPLEMENTAL", "AMENDMENT", "APPROPRIATION"}
+
+
 def _register_data_source(conn: sqlite3.Connection, docs_dir: Path):
-    """Auto-register data sources from directory structure."""
+    """Auto-register data sources from directory structure.
+
+    Supports both the old flat layout and the new nested layout:
+      Old: FY{year}/{source}/...
+      New: FY{year}/{cycle}/{source}/{category}/...
+
+    Detection: if a FY subdirectory name matches a known budget cycle
+    (PB, ENACTED, etc.) it is treated as the cycle level and traversed
+    one level deeper.
+    """
     for fy_dir in sorted(docs_dir.iterdir()):
         if not fy_dir.is_dir() or not fy_dir.name.startswith("FY"):
             continue
         fiscal_year = fy_dir.name
-        for src_dir in sorted(fy_dir.iterdir()):
-            if not src_dir.is_dir():
+        for child_dir in sorted(fy_dir.iterdir()):
+            if not child_dir.is_dir():
                 continue
-            source_id = f"{fiscal_year}/{src_dir.name}"
-            file_count = sum(1 for _ in src_dir.rglob("*") if _.is_file())
-            conn.execute("""
-                INSERT INTO data_sources (source_id, source_name, fiscal_year,
-                    last_checked, file_count)
-                VALUES (?, ?, ?, datetime('now'), ?)
-                ON CONFLICT(source_id) DO UPDATE SET
-                    last_checked = datetime('now'),
-                    file_count = excluded.file_count
-            """, (source_id, src_dir.name, fiscal_year, file_count))
+            # New layout: FY{year}/{cycle}/{source}/{category}/
+            if child_dir.name.upper() in _KNOWN_BUDGET_CYCLES:
+                for src_dir in sorted(child_dir.iterdir()):
+                    if not src_dir.is_dir():
+                        continue
+                    source_id = f"{fiscal_year}/{src_dir.name}"
+                    file_count = sum(
+                        1 for _ in src_dir.rglob("*") if _.is_file()
+                    )
+                    conn.execute("""
+                        INSERT INTO data_sources (source_id, source_name,
+                            fiscal_year, last_checked, file_count)
+                        VALUES (?, ?, ?, datetime('now'), ?)
+                        ON CONFLICT(source_id) DO UPDATE SET
+                            last_checked = datetime('now'),
+                            file_count = excluded.file_count
+                    """, (source_id, src_dir.name, fiscal_year, file_count))
+            else:
+                # Old layout: FY{year}/{source}/...
+                source_id = f"{fiscal_year}/{child_dir.name}"
+                file_count = sum(
+                    1 for _ in child_dir.rglob("*") if _.is_file()
+                )
+                conn.execute("""
+                    INSERT INTO data_sources (source_id, source_name,
+                        fiscal_year, last_checked, file_count)
+                    VALUES (?, ?, ?, datetime('now'), ?)
+                    ON CONFLICT(source_id) DO UPDATE SET
+                        last_checked = datetime('now'),
+                        file_count = excluded.file_count
+                """, (source_id, child_dir.name, fiscal_year, file_count))
     conn.commit()
 
 
@@ -2236,7 +2337,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                         "account, account_title, organization, organization_name, "
                         "budget_activity, budget_activity_title, "
                         "sub_activity, sub_activity_title, "
-                        "line_item, line_item_title, classification"
+                        "line_item, line_item_title, classification, "
+                        "cost_type, cost_type_title, add_non_add"
                     )
                     _fy_c = ", ".join(sorted(fy_cols)) if fy_cols else ""
                     _tail_c = (

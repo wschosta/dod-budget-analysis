@@ -137,13 +137,24 @@ def check_database_stats(conn: sqlite3.Connection) -> dict:
 
 
 def check_duplicate_rows(conn: sqlite3.Connection) -> dict:
-    """1.B6-b: Detect rows with identical key fields (likely parsing bugs)."""
-    cur = conn.execute("""
+    """1.B6-b: Detect rows with identical key fields (likely parsing bugs).
+
+    Includes cost_type in the key (when available) so that P-1
+    multi-cost-type rows (e.g. 'Weapon System Cost' vs 'Advance
+    Procurement') are not flagged as duplicates.
+    """
+    # Check if cost_type column exists (may be absent in older databases)
+    _cols = {row[1] for row in conn.execute("PRAGMA table_info(budget_lines)")}
+    _has_cost_type = "cost_type" in _cols
+    _cost_type_sel = ", cost_type" if _has_cost_type else ""
+    _cost_type_grp = ", cost_type" if _has_cost_type else ""
+    cur = conn.execute(f"""
         SELECT source_file, exhibit_type, account, organization,
-               budget_activity, line_item, sheet_name, COUNT(*) as cnt
+               budget_activity, line_item{_cost_type_sel}, sheet_name,
+               COUNT(*) as cnt
         FROM budget_lines
         GROUP BY source_file, exhibit_type, account, organization,
-                 budget_activity, line_item, sheet_name
+                 budget_activity, line_item{_cost_type_grp}, sheet_name
         HAVING cnt > 1
         ORDER BY cnt DESC
         LIMIT 50

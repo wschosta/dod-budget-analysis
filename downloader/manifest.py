@@ -92,11 +92,21 @@ def write_manifest(output_dir: Path, all_files: dict, manifest_path: Path) -> No
     global _manifest, _manifest_path
     _manifest_path = manifest_path
 
+    # Import metadata enrichment (lightweight, no heavy deps)
+    from downloader.metadata import enrich_file_metadata
+
     entries: dict[str, dict] = {}
     for year, sources in all_files.items():
         for source_label, files in sources.items():
             for f in files:
                 key = f["url"]
+                # Enrich with exhibit type, category, budget cycle, service
+                meta = enrich_file_metadata(
+                    filename=f["filename"],
+                    url=f["url"],
+                    source_label=source_label,
+                    link_text=f.get("name", ""),
+                )
                 entries[key] = {
                     "url": f["url"],
                     "filename": f["filename"],
@@ -107,6 +117,12 @@ def write_manifest(output_dir: Path, all_files: dict, manifest_path: Path) -> No
                     "file_size": None,
                     "sha256": None,
                     "downloaded_at": None,
+                    # Enriched metadata fields
+                    "exhibit_type": meta["exhibit_type"],
+                    "exhibit_category": meta["exhibit_category"],
+                    "budget_cycle": meta["budget_cycle"],
+                    "service_org": meta["service_org"],
+                    "link_text": meta["link_text"],
                 }
 
     _manifest = entries

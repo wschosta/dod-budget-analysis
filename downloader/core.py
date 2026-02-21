@@ -46,6 +46,8 @@ from downloader.sources import (
     discover_fiscal_years,
 )
 from downloader.gui import GuiProgressTracker
+from downloader.metadata import detect_budget_cycle, enrich_file_metadata
+from utils.config import classify_exhibit_category
 
 
 # ---- Configuration ----
@@ -813,14 +815,26 @@ def download_all(
 
             use_browser = source_label in browser_labels
             safe_label = source_label.replace(" ", "_")
-            dest_dir = output_dir / f"FY{year}" / safe_label
+            base_dir = output_dir / f"FY{year}"
             method = "browser" if use_browser else "direct"
             print(f"  FY{year} / {source_label} "
-                  f"({len(files)} files, {method}) -> {dest_dir}")
+                  f"({len(files)} files, {method})")
 
             # Pre-filter: skip files that already exist locally (non-empty)
             _tracker.set_source(year, source_label)
             for file_info in files:
+                # Per-file dest with budget cycle + exhibit category
+                budget_cycle = detect_budget_cycle(
+                    source_label,
+                    file_info.get("url", ""),
+                    file_info.get("name", ""),
+                ).upper()
+                exhibit_cat = classify_exhibit_category(
+                    file_info["filename"],
+                )
+                dest_dir = (
+                    base_dir / budget_cycle / safe_label / exhibit_cat
+                )
                 dest = dest_dir / file_info["filename"]
                 if not overwrite and dest.exists() and dest.stat().st_size > 0:
                     size = dest.stat().st_size

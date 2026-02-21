@@ -51,6 +51,17 @@ from downloader.sources import (
 # ---- GUI ----
 from downloader.gui import GuiProgressTracker
 
+# ---- Metadata enrichment ----
+from downloader.metadata import (
+    detect_exhibit_type_from_filename,
+    classify_exhibit_category,
+    detect_budget_cycle,
+    map_source_to_service,
+    enrich_file_metadata,
+    SUMMARY_EXHIBIT_KEYS,
+    DETAIL_EXHIBIT_KEYS,
+)
+
 # ---- Manifest ----
 from downloader.manifest import (
     _compute_sha256,
@@ -124,6 +135,14 @@ __all__ = [
     "_save_cache",
     # GUI
     "GuiProgressTracker",
+    # Metadata enrichment
+    "detect_exhibit_type_from_filename",
+    "classify_exhibit_category",
+    "detect_budget_cycle",
+    "map_source_to_service",
+    "enrich_file_metadata",
+    "SUMMARY_EXHIBIT_KEYS",
+    "DETAIL_EXHIBIT_KEYS",
     # Manifest
     "_compute_sha256",
     "load_manifest_ok_urls",

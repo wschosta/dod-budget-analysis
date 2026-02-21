@@ -17,6 +17,35 @@ from typing import Dict, Optional, Any
 import json
 
 
+# ── Exhibit Classification Constants ─────────────────────────────────────────
+# Used by both downloader (folder layout) and pipeline (data source registration).
+# Canonical source; downloader.metadata duplicates for import isolation.
+
+SUMMARY_EXHIBIT_KEYS = frozenset({"p1", "r1", "o1", "m1", "c1", "rf1", "p1r"})
+DETAIL_EXHIBIT_KEYS = frozenset({"p5", "r2", "r3", "r4"})
+
+
+def classify_exhibit_category(filename_or_exhibit_type: str) -> str:
+    """Classify a filename or exhibit type as summary, detail, or other.
+
+    Accepts either a full filename (e.g. "p1_display.xlsx") or a bare
+    exhibit type key (e.g. "p1").  The classification works by checking
+    if any known exhibit key appears in the lowercased input.
+
+    Returns:
+        "summary", "detail", or "other".
+    """
+    name = filename_or_exhibit_type.lower()
+    # Check detail first (longer keys like "r2" before "r1")
+    for key in sorted(DETAIL_EXHIBIT_KEYS, key=len, reverse=True):
+        if key in name:
+            return "detail"
+    for key in sorted(SUMMARY_EXHIBIT_KEYS, key=len, reverse=True):
+        if key in name:
+            return "summary"
+    return "other"
+
+
 class Config:
     """Base configuration class for organizing application settings."""
 

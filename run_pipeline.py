@@ -42,6 +42,7 @@ def _find_python() -> str:
 
 PYTHON = _find_python()
 
+STEP_STAGE    = HERE / "stage_budget_data.py"
 STEP_BUILD    = HERE / "build_budget_db.py"
 STEP_VALIDATE = HERE / "validate_budget_data.py"
 STEP_ENRICH   = HERE / "enrich_budget_db.py"
@@ -78,6 +79,24 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument(
         "--db", default="dod_budget.sqlite",
         help="Database path (default: dod_budget.sqlite)",
+    )
+
+    # Staging options
+    p.add_argument(
+        "--use-staging", action="store_true",
+        help="Use Parquet staging layer (Stage → Load → Validate → Enrich)",
+    )
+    p.add_argument(
+        "--staging-dir", default="staging",
+        help="Staging directory for Parquet files (default: staging)",
+    )
+    p.add_argument(
+        "--stage-only", action="store_true",
+        help="Only run staging (Phase 1: parse → Parquet); skip DB build",
+    )
+    p.add_argument(
+        "--load-only", action="store_true",
+        help="Only run load (Phase 2: Parquet → SQLite); skip file parsing",
     )
 
     # build_budget_db options
@@ -137,6 +156,25 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def _stage_cmd(args: argparse.Namespace) -> list[str]:
+    """Build command for stage_budget_data.py."""
+    cmd = [PYTHON, str(STEP_STAGE)]
+    cmd += ["--staging-dir", args.staging_dir]
+    cmd += ["--db", args.db]
+    if args.docs:
+        cmd += ["--docs-dir", args.docs]
+    if args.workers is not None:
+        cmd += ["--workers", str(args.workers)]
+    if args.rebuild:
+        cmd.append("--force")
+        cmd.append("--rebuild")
+    if args.stage_only:
+        cmd.append("--stage-only")
+    if args.load_only:
+        cmd.append("--load-only")
+    return cmd
+
+
 def _build_cmd(args: argparse.Namespace) -> list[str]:
     cmd = [PYTHON, str(STEP_BUILD), "--db", args.db]
     if args.docs:
@@ -176,9 +214,20 @@ def main() -> int:
     args = _parse_args()
 
     pipeline_start = time.monotonic()
+    use_staging = args.use_staging or args.stage_only or args.load_only
+    staging_mode = " [staging]" if use_staging else ""
+
     print("\nDoD Budget Pipeline")
     print(f"  Database : {args.db}")
     print(f"  Rebuild  : {'yes (full)' if args.rebuild else 'no (incremental)'}")
+    if use_staging:
+        print(f"  Staging  : {args.staging_dir}")
+        if args.stage_only:
+            print(f"  Mode     : stage-only (Phase 1)")
+        elif args.load_only:
+            print(f"  Mode     : load-only (Phase 2)")
+        else:
+            print(f"  Mode     : full staging (Phase 1 + 2)")
     validate_mode = " [pedantic]" if args.pedantic else " [strict]" if args.strict else ""
     print(
         f"  Validate : {'skip' if args.skip_validate else 'yes'}"
@@ -190,11 +239,22 @@ def main() -> int:
         + (" [+LLM]" if args.with_llm else "")
     )
 
-    # Step 1: Build
-    rc = _run("Step 1 / 3 -- Build database", _build_cmd(args))
+    # Step 1: Build (or Stage)
+    if use_staging:
+        step_label = "Step 1 / 3 -- Stage & load data"
+        rc = _run(step_label, _stage_cmd(args))
+    else:
+        rc = _run("Step 1 / 3 -- Build database", _build_cmd(args))
+
     if rc != 0:
         print(f"\nPipeline aborted: build step failed (exit {rc}).", flush=True)
         return rc
+
+    if args.stage_only:
+        total = time.monotonic() - pipeline_start
+        _banner(f"Staging complete -- {total:.1f}s total")
+        print(f"Staged data in: {Path(args.staging_dir).resolve()}", flush=True)
+        return 0
 
     # Step 2: Validate
     if not args.skip_validate:
