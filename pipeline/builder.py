@@ -2707,7 +2707,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 "DELETE FROM pdf_pe_numbers WHERE source_file IN "
                 "(SELECT path FROM _pdf_preclean)"
             )
-        except Exception:
+        except sqlite3.OperationalError:
             pass  # Table may not exist in older schemas
         conn.execute("DROP TABLE _pdf_preclean")
         conn.commit()

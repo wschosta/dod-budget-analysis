@@ -108,7 +108,7 @@ def _get_services(conn: sqlite3.Connection) -> list[dict]:
             "WHERE b.organization_name IS NOT NULL AND b.organization_name != '' "
             "ORDER BY b.organization_name"
         ).fetchall()
-    except Exception:
+    except sqlite3.OperationalError:
         rows = conn.execute(
             "SELECT DISTINCT organization_name AS code, "
             "organization_name AS full_name "
@@ -132,7 +132,7 @@ def _get_exhibit_types(conn: sqlite3.Connection) -> list[dict]:
         ).fetchall()
         result = [dict(r) for r in rows]
         _exhibit_types_cache.set(cache_key, result)  # only cache stable reference table
-    except Exception:
+    except sqlite3.OperationalError:
         rows = conn.execute(
             "SELECT DISTINCT exhibit_type AS code FROM budget_lines "
             "WHERE exhibit_type IS NOT NULL ORDER BY exhibit_type"

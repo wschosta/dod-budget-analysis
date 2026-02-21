@@ -53,6 +53,9 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 
+# Maximum characters to store for a PE narrative text block (no section headers).
+_MAX_NARRATIVE_TEXT_CHARS = 4000
+
 # ── Domain taxonomy for keyword tagging ───────────────────────────────────────
 # Each entry: (tag_name, [search_terms_regex])
 # Terms are matched case-insensitively as whole words against description text.
@@ -425,7 +428,7 @@ def run_phase2(conn: sqlite3.Connection) -> int:
                         ))
                 else:
                     # No recognised section headers — store full text under blank header
-                    text = run["text"][:4000]  # cap at 4KB
+                    text = run["text"][:_MAX_NARRATIVE_TEXT_CHARS]
                     if text.strip():
                         insert_buf.append((
                             pe, fy, source_file,
@@ -651,7 +654,7 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
               AND description_text IS NOT NULL
         """, to_tag).fetchall():
             project_texts.setdefault(row[0], []).append((row[1], row[2]))
-    except Exception:
+    except sqlite3.OperationalError:
         pass  # project_descriptions table may not exist yet
 
     for pe in to_tag:
@@ -862,7 +865,7 @@ def run_phase4(conn: sqlite3.Connection) -> int:
             FROM budget_lines
             WHERE extra_fields IS NOT NULL AND pe_number IS NOT NULL
         """).fetchall()
-    except Exception:
+    except sqlite3.OperationalError:
         xref_rows = []
 
     for primary_pe, extra_json, src_file, fy in xref_rows:
@@ -1098,7 +1101,7 @@ def enrich(
         try:
             n = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             logger.info("  %s: %s rows", table, f"{n:,}")
-        except Exception:
+        except sqlite3.OperationalError:
             logger.info("  %s: (table not found)", table)
 
     conn.close()

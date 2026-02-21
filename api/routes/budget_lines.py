@@ -7,7 +7,6 @@ GET /api/v1/budget-lines/{id} single-item endpoint.
 """
 
 import sqlite3
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -41,23 +40,6 @@ _SELECT_ALL_COLUMNS = """
 
 # Backward-compatible alias — canonical definition lives in utils/query.py
 _ALLOWED_SORT = ALLOWED_SORT_COLUMNS
-
-
-def _build_where(
-    fiscal_year: list[str] | None,
-    service: list[str] | None,
-    exhibit_type: list[str] | None,
-    pe_number: list[str] | None,
-    appropriation_code: list[str] | None,
-) -> tuple[str, list[Any]]:
-    """Build WHERE clause — delegates to shared utils/query.py builder."""
-    return build_where_clause(
-        fiscal_year=fiscal_year,
-        service=service,
-        exhibit_type=exhibit_type,
-        pe_number=pe_number,
-        appropriation_code=appropriation_code,
-    )
 
 
 @router.get("", response_model=PaginatedResponse, summary="List budget lines")
