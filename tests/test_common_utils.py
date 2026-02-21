@@ -95,7 +95,7 @@ class TestGetConnection:
         assert row["val"] == 1
         result.close()
 
-    def test_missing_db_exits(self, tmp_path):
+    def test_missing_db_raises_file_not_found(self, tmp_path):
         missing = tmp_path / "nonexistent.sqlite"
-        with pytest.raises(SystemExit):
+        with pytest.raises(FileNotFoundError):
             get_connection(missing)

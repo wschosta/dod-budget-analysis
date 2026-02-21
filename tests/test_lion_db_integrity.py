@@ -124,9 +124,9 @@ class TestPDFExhibitTypeDetection:
         from build_budget_db import _detect_pdf_exhibit_type
         assert _detect_pdf_exhibit_type("P1_Budget_Summary.pdf") == "p1"
 
-    def test_detect_none_for_generic(self):
+    def test_detect_unknown_for_generic(self):
         from build_budget_db import _detect_pdf_exhibit_type
-        assert _detect_pdf_exhibit_type("budget_overview.pdf") is None
+        assert _detect_pdf_exhibit_type("budget_overview.pdf") == "unknown"
 
 
 # ── Schema Tests: New Columns and Tables ─────────────────────────────────────

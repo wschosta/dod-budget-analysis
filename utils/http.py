@@ -8,10 +8,13 @@ Provides reusable functions for:
 """
 
 import json
+import logging
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 import requests  # type: ignore[import-untyped]
+
+logger = logging.getLogger(__name__)
 from requests.adapters import HTTPAdapter  # type: ignore[import-untyped]
 from urllib3.util.retry import Retry as URLRetry
 
@@ -264,7 +267,7 @@ class CacheManager:
             with open(cache_file, "w") as f:
                 json.dump(cache_data, f, indent=2)
         except OSError as e:
-            print(f"Warning: Failed to write cache file {cache_file}: {e}")
+            logger.warning("Failed to write cache file %s: %s", cache_file, e)
 
     def clear(self) -> None:
         """Clear all cached items."""

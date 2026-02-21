@@ -421,6 +421,6 @@ def _add_to_json(cls):
 
 
 # Monkey-patch ValidationResult with to_json()
-ValidationResult.to_json = lambda self, indent=2: _json.dumps(  # type: ignore[method-assign, attr-defined]
+ValidationResult.to_json = lambda self, indent=2: _json.dumps(  # type: ignore
     self.to_dict(), indent=indent, default=str
 )

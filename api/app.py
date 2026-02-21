@@ -44,7 +44,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from api.database import get_db_path
+from api.database import get_db_path, _make_conn
 from utils.database import get_slow_queries, get_query_stats
 from api.routes import aggregations, budget_lines, dashboard, download, feedback, metadata, pe, reference, search
 from api.routes import frontend as frontend_routes
@@ -475,7 +475,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         db_ok = db_path.exists()
         if db_ok:
             try:
-                conn = sqlite3.connect(str(db_path))
+                conn = _make_conn(db_path, read_only=True)
                 count = conn.execute("SELECT COUNT(*) FROM budget_lines").fetchone()[0]
                 conn.close()
                 return {"status": "ok", "database": str(db_path), "budget_lines": count}
@@ -515,7 +515,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             )
 
         try:
-            conn = sqlite3.connect(str(db_path))
+            conn = _make_conn(db_path, read_only=True)
             budget_count = conn.execute(
                 "SELECT COUNT(*) FROM budget_lines"
             ).fetchone()[0]
@@ -529,7 +529,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 content={"status": "degraded", "error": str(exc)},
             )
 
-        db_size = os.path.getsize(str(db_path))
+        db_size = db_path.stat().st_size
 
         rts = _metrics["response_times_ms"]
         avg_rt = round(sum(rts) / len(rts), 2) if rts else 0.0

@@ -236,8 +236,13 @@ def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
             VALUES (new.id, new.pe_number, new.section_header, new.description_text);
         END;
         CREATE TRIGGER IF NOT EXISTS pe_desc_fts_ad AFTER DELETE ON pe_descriptions BEGIN
-            INSERT INTO pe_descriptions_fts(pe_descriptions_fts, rowid, pe_number, section_header, description_text)
-            VALUES ('delete', old.id, old.pe_number, old.section_header, old.description_text);
+            INSERT INTO pe_descriptions_fts(
+                pe_descriptions_fts, rowid, pe_number,
+                section_header, description_text
+            ) VALUES (
+                'delete', old.id, old.pe_number,
+                old.section_header, old.description_text
+            );
         END;
 
         CREATE TABLE IF NOT EXISTS pe_tags (

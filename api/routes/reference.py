@@ -31,7 +31,7 @@ def list_services(conn: sqlite3.Connection = Depends(get_db)) -> JSONResponse:
             "SELECT code, full_name, category FROM services_agencies ORDER BY code"
         ).fetchall()
         data = [dict(r) for r in rows]
-    except Exception:
+    except sqlite3.OperationalError:
         # Fall back to distinct values from flat budget_lines table
         rows = conn.execute(
             "SELECT DISTINCT organization_name as code FROM budget_lines "
@@ -55,7 +55,7 @@ def list_exhibit_types(conn: sqlite3.Connection = Depends(get_db)) -> JSONRespon
             "FROM exhibit_types ORDER BY code"
         ).fetchall()
         data = [dict(r) for r in rows]
-    except Exception:
+    except sqlite3.OperationalError:
         rows = conn.execute(
             "SELECT DISTINCT exhibit_type as code FROM budget_lines "
             "WHERE exhibit_type IS NOT NULL ORDER BY exhibit_type"
@@ -119,6 +119,6 @@ def list_budget_types(conn: sqlite3.Connection = Depends(get_db)) -> JSONRespons
         ).fetchall()
         data = [{"budget_type": r["budget_type"], "row_count": r["row_count"]}
                 for r in rows]
-    except Exception:
+    except sqlite3.OperationalError:
         data = []
     return JSONResponse(content=data, headers=_CACHE_HEADER)

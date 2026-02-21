@@ -1046,7 +1046,8 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
 
         # C-1 fallback: remap generic authorization/appropriation columns to
         # FY-specific names using the sheet's fiscal year context.
-        _fy_year = re.search(r"(\d{4})", fiscal_year).group(1) if re.search(r"(\d{4})", fiscal_year) else None
+        _fy_match = re.search(r"(\d{4})", fiscal_year)
+        _fy_year = _fy_match.group(1) if _fy_match else None
         _c1_remap = {
             "amount_authorization": f"amount_fy{_fy_year}_request" if _fy_year else None,
             "amount_appropriation": f"amount_fy{_fy_year}_enacted" if _fy_year else None,
@@ -1277,7 +1278,8 @@ def _extract_excel_rows(args: tuple) -> dict:
 
         # C-1 fallback: remap generic authorization/appropriation columns to
         # FY-specific names using the sheet's fiscal year context.
-        _fy_year = re.search(r"(\d{4})", fiscal_year).group(1) if re.search(r"(\d{4})", fiscal_year) else None
+        _fy_match = re.search(r"(\d{4})", fiscal_year)
+        _fy_year = _fy_match.group(1) if _fy_match else None
         _c1_remap = {
             "amount_authorization": f"amount_fy{_fy_year}_request" if _fy_year else None,
             "amount_appropriation": f"amount_fy{_fy_year}_enacted" if _fy_year else None,
@@ -2072,7 +2074,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             f for f in pdf_files
             if str(f.relative_to(docs_dir_resolved)) in _retry_only
         ]
-        print(f"  BUILD-001: Filtered to {len(xlsx_files)} Excel + {len(pdf_files)} PDF retry files")
+        print(f"  BUILD-001: Filtered to {len(xlsx_files)} Excel "
+              f"+ {len(pdf_files)} PDF retry files")
 
     total_files = len(xlsx_files) + len(pdf_files)
 

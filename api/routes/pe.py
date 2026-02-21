@@ -17,6 +17,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import logging
 import re
 import sqlite3
 import zipfile
@@ -28,6 +29,8 @@ from fastapi.responses import Response
 
 from api.database import get_db
 from utils.strings import sanitize_fts5_query
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/pe", tags=["pe"])
 
@@ -287,8 +290,8 @@ def get_pe(
             "SELECT COUNT(*) FROM pdf_pe_numbers WHERE pe_number = ?",
             (pe_number,),
         ).fetchone()[0]
-    except Exception:
-        pass
+    except sqlite3.OperationalError:
+        pass  # Table may not exist
 
     # Exhibit type breakdown — which exhibits have data for this PE
     exhibit_rows = conn.execute("""
@@ -335,8 +338,8 @@ def get_pe(
                         "text": pr["description_text"],
                     })
                 projects = list(projects_map.values())
-    except Exception:
-        pass
+    except sqlite3.OperationalError:
+        pass  # project_descriptions table may not exist
 
     return {
         "pe_number": pe_number,
@@ -903,8 +906,8 @@ def list_pes(
                 f"WHERE source_pe IN ({ph})", pe_numbers,
             ).fetchall():
                 related_pes.add(r2[0])
-        except Exception:
-            pass
+        except sqlite3.OperationalError:
+            pass  # pe_lineage table may not exist
         # Latest-year and prior-year funding totals for sorting/display
         for r2 in conn.execute(
             f"SELECT pe_number, "
@@ -927,8 +930,8 @@ def list_pes(
                 f"GROUP BY pe_number", pe_numbers,
             ).fetchall():
                 pdf_pages_by_pe[r2[0]] = r2[1]
-        except Exception:
-            pass  # Table may not exist
+        except sqlite3.OperationalError:
+            pass  # pdf_pe_numbers table may not exist
 
     items = []
     for r in rows:

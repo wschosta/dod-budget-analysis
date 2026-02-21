@@ -53,6 +53,9 @@
   --text-secondary: var(--clr-gray-700);
   --border-color: var(--clr-gray-200);
   --chart-text:  var(--clr-gray-700);
+  --text-on-primary: #fff;
+  --bg-btn-secondary: #fff;
+  --clr-blue-hover: #1449b5;
 }
 
 /* LION-010: Dark mode via data-theme attribute
@@ -86,6 +89,9 @@
   --shadow-sm:   0 1px 2px rgba(0,0,0,.3);
   --shadow:      0 2px 8px rgba(0,0,0,.4);
   --chart-text:  #b0b8c8;
+  --text-on-primary: #e4e7ec;
+  --bg-btn-secondary: #1e2238;
+  --clr-blue-hover: #7ab3f7;
 }
 /* LION-010: Respect prefers-color-scheme as default when no preference saved */
 @media (prefers-color-scheme: dark) {
@@ -111,6 +117,9 @@
     --shadow-sm:   0 1px 2px rgba(0,0,0,.3);
     --shadow:      0 2px 8px rgba(0,0,0,.4);
     --chart-text:  #b0b8c8;
+    --text-on-primary: #e4e7ec;
+    --bg-btn-secondary: #1e2238;
+    --clr-blue-hover: #7ab3f7;
   }
 }
 
@@ -146,7 +155,7 @@ a:hover { text-decoration: underline; }
 /* ── Header ───────────────────────────────────────────────────────────────── */
 .site-header {
   background: var(--bg-header);
-  color: #fff;
+  color: var(--text-on-primary);
   padding: .75rem 0;
   position: sticky;
   top: 0;
@@ -164,7 +173,7 @@ a:hover { text-decoration: underline; }
   font-weight: 700;
   font-size: 1.1rem;
   letter-spacing: .04em;
-  color: #fff;
+  color: var(--text-on-primary);
   white-space: nowrap;
 }
 .site-title:hover { text-decoration: none; }
@@ -178,12 +187,13 @@ a:hover { text-decoration: underline; }
   align-items: center;
 }
 .nav-links a {
-  color: rgba(255,255,255,.85);
+  color: var(--text-on-primary);
+  opacity: .85;
   margin-left: 1.25rem;
   font-size: .9rem;
 }
 .nav-links a.active,
-.nav-links a:hover { color: #fff; text-decoration: none; }
+.nav-links a:hover { color: var(--text-on-primary); opacity: 1; text-decoration: none; }
 
 /* Hamburger button — hidden on desktop */
 .hamburger {
@@ -199,7 +209,7 @@ a:hover { text-decoration: underline; }
   display: block;
   width: 20px;
   height: 2px;
-  background: #fff;
+  background: var(--text-on-primary);
   border-radius: 2px;
   transition: transform .2s, opacity .2s;
 }
@@ -411,11 +421,11 @@ a:hover { text-decoration: underline; }
 }
 .btn-primary {
   background: var(--clr-blue);
-  color: #fff;
+  color: var(--text-on-primary);
 }
-.btn-primary:hover { background: #1449b5; text-decoration: none; color: #fff; }
+.btn-primary:hover { background: var(--clr-blue-hover); text-decoration: none; color: var(--text-on-primary); }
 .btn-secondary {
-  background: #fff;
+  background: var(--bg-btn-secondary);
   color: var(--clr-gray-700);
   border-color: var(--clr-gray-200);
 }
@@ -467,12 +477,12 @@ a:hover { text-decoration: underline; }
   border-radius: 99px;
   border: 1px solid var(--clr-gray-200);
   cursor: pointer;
-  background: #fff;
+  background: var(--bg-btn-secondary);
   color: var(--clr-gray-700);
   transition: background .1s;
   min-height: 28px;
 }
-.col-toggle.active { background: var(--clr-blue); color: #fff; border-color: var(--clr-blue); }
+.col-toggle.active { background: var(--clr-blue); color: var(--text-on-primary); border-color: var(--clr-blue); }
 
 /* ── Table ────────────────────────────────────────────────────────────────── */
 .table-wrapper { overflow-x: auto; }
@@ -531,14 +541,14 @@ tr.selected td { background: var(--clr-sky); }
   padding: .3rem .6rem;
   border-radius: var(--radius);
   border: 1px solid var(--clr-gray-200);
-  background: #fff;
+  background: var(--bg-btn-secondary);
   font-size: .85rem;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
-.page-btn.active { background: var(--clr-blue); color: #fff; border-color: var(--clr-blue); }
+.page-btn.active { background: var(--clr-blue); color: var(--text-on-primary); border-color: var(--clr-blue); }
 .page-btn:disabled { opacity: .4; cursor: not-allowed; }
 
 /* ── Detail panel ─────────────────────────────────────────────────────────── */
@@ -621,7 +631,7 @@ tr.selected td { background: var(--clr-sky); }
   left: 50%;
   transform: translateX(-50%);
   background: var(--clr-gray-900);
-  color: #fff;
+  color: var(--text-on-primary);
   font-size: .75rem;
   padding: .2rem .5rem;
   border-radius: var(--radius);
@@ -909,7 +919,7 @@ tr:focus-within td {
   overflow: hidden;
   z-index: 1000;
   background: var(--clr-navy);
-  color: #fff;
+  color: var(--text-on-primary);
   padding: .5rem 1rem;
   border-radius: var(--radius);
   font-weight: 600;
@@ -974,7 +984,7 @@ tr:focus-within td {
   width: max-content;
   max-width: 260px;
   background: var(--clr-gray-900);
-  color: #fff;
+  color: var(--text-on-primary);
   font-size: .75rem;
   font-weight: 400;
   line-height: 1.4;
@@ -1460,7 +1470,7 @@ tr:focus-within td {
 .theme-toggle {
   background: transparent;
   border: 1px solid rgba(255,255,255,.3);
-  color: #fff;
+  color: var(--text-on-primary);
   cursor: pointer;
   padding: .3rem .6rem;
   border-radius: var(--radius);
@@ -1514,7 +1524,7 @@ tr:focus-within td {
 }
 .density-btn.active {
   background: var(--clr-blue);
-  color: #fff;
+  color: var(--text-on-primary);
   border-color: var(--clr-blue);
 }
 
@@ -1646,9 +1656,9 @@ tr:focus-within td {
 [data-theme="dark"] .glossary-list dd {
   border-left-color: var(--clr-blue);
 }
-/* FALCON-8: Ensure .btn-primary stays white text in dark mode */
-[data-theme="dark"] .btn-primary { color: #fff; }
-[data-theme="dark"] .btn-primary:hover { color: #fff; }
+/* FALCON-8: Ensure .btn-primary stays legible text in dark mode */
+[data-theme="dark"] .btn-primary { color: var(--text-on-primary); }
+[data-theme="dark"] .btn-primary:hover { color: var(--text-on-primary); }
 
 /* FALCON-8: System dark mode overrides for same components */
 @media (prefers-color-scheme: dark) {
@@ -1711,7 +1721,7 @@ tr:focus-within td {
 }
 .back-to-top:hover {
   background: var(--clr-blue);
-  color: #fff;
+  color: var(--text-on-primary);
   border-color: var(--clr-blue);
 }
 
@@ -1729,7 +1739,7 @@ tr:focus-within td {
 .toast {
   pointer-events: auto;
   background: var(--clr-gray-900);
-  color: #fff;
+  color: var(--text-on-primary);
   padding: .6rem 1rem;
   border-radius: var(--radius);
   font-size: .85rem;
