@@ -28,8 +28,8 @@ code for each type is used in the `exhibit_type` column of the database.
 
 ## Summary Exhibits
 
-**DB key:** `p1`  
-**Description:** Summary procurement budget exhibit — funding requests for procurement
+**DB key:** `p1`
+**Description:** Summary procurement budget exhibit -- funding requests for procurement
 of weapons, vehicles, aircraft, ships, and other equipment.
 
 ### Column Layout
@@ -53,11 +53,11 @@ of weapons, vehicles, aircraft, ships, and other equipment.
 
 ---
 
-**Description:** Summary procurement exhibit — funding requests for procurement of
+**Description:** Summary procurement exhibit -- funding requests for procurement of
 weapons systems, vehicles, and equipment.
 
-**DB key:** `p1r`  
-**Description:** Procurement reserves budget — unfunded requirements and contingency funds
+**DB key:** `p1r`
+**Description:** Procurement reserves budget -- unfunded requirements and contingency funds
 for Reserve component.
 
 ### Column Layout
@@ -73,10 +73,10 @@ for Reserve component.
 
 ---
 
-## P-5 — Procurement Detail
+## P-5 -- Procurement Detail
 
-**DB key:** `p5`  
-**Description:** Detailed procurement line items — provides per-item quantities and unit
+**DB key:** `p5`
+**Description:** Detailed procurement line items -- provides per-item quantities and unit
 costs within procurement accounts. Supplements the P-1 summary.
 
 ### Column Layout
@@ -119,8 +119,8 @@ costs within procurement accounts. Supplements the P-1 summary.
 | `amount_fyYYYY_request` | `FY{YYYY} Request Amount` | real (thousands) |
 | `amount_fyYYYY_total` | `FY{YYYY} Total Amount` | real (thousands) |
 
-**DB key:** `r1`  
-**Description:** Research, Development, Test & Evaluation summary — funding for military
+**DB key:** `r1`
+**Description:** Research, Development, Test & Evaluation summary -- funding for military
 technology development programs organized by Program Element.
 
 ### Column Layout
@@ -131,7 +131,7 @@ technology development programs organized by Program Element.
 | `account_title` | Account Title, Title | Text | Full account title |
 | `program_element` | PE, Program Element | Text | Program Element number |
 | `appropriation` | Appropriation | Text | Appropriation category (RDT&E) |
-| `budget_activity` | BA, Budget Activity | Text | Budget Activity code (6.1–6.7) |
+| `budget_activity` | BA, Budget Activity | Text | Budget Activity code (6.1--6.7) |
 | `amount_fy2024_actual` | Prior Year, PriorYBud | Currency (thousands) | Prior year enacted |
 | `amount_fy2025_enacted` | Current Year, CurYBud | Currency (thousands) | Current year enacted |
 | `amount_fy2026_request` | Budget Estimate, BudEst | Currency (thousands) | President's budget estimate |
@@ -150,9 +150,9 @@ technology development programs organized by Program Element.
 
 ---
 
-## R-2 — RDT&E Schedule
+## R-2 -- RDT&E Schedule
 
-**DB key:** `r2`  
+**DB key:** `r2`
 **Description:** RDT&E line-item schedule with milestone and achievement data for research
 programs. Provides more detail than R-1.
 
@@ -177,9 +177,9 @@ programs. Provides more detail than R-1.
 
 ---
 
-## R-3 — RDT&E Project
+## R-3 -- RDT&E Project
 
-**DB key:** `r3`  
+**DB key:** `r3`
 **Description:** RDT&E project-level schedule showing development approach, schedule,
 and cost estimate growth.
 
@@ -198,9 +198,9 @@ and cost estimate growth.
 
 ---
 
-## R-4 — RDT&E Budget Item Justification
+## R-4 -- RDT&E Budget Item Justification
 
-**DB key:** `r4`  
+**DB key:** `r4`
 **Description:** Detailed justification for RDT&E budget items with technical narrative.
 
 ### Column Layout
@@ -216,17 +216,17 @@ and cost estimate growth.
 
 ---
 
-### P-1R — Procurement (Reserves)
+### P-1R -- Procurement (Reserves)
 
-**Description:** Reserve component procurement — same structure as P-1.
+**Description:** Reserve component procurement -- same structure as P-1.
 
 Column mapping is identical to P-1 (shared `_map_columns()` heuristics).
 
 ---
 
-### R-1 — RDT&E
+### R-1 -- RDT&E
 
-**Description:** Research, Development, Test & Evaluation — funding for military
+**Description:** Research, Development, Test & Evaluation -- funding for military
 technology development programs.
 
 **Canonical column names:**
@@ -248,9 +248,9 @@ technology development programs.
 
 ---
 
-### O-1 — Operation & Maintenance
+### O-1 -- Operation & Maintenance
 
-**Description:** Operation and maintenance funding — personnel operations, sustainment, training.
+**Description:** Operation and maintenance funding -- personnel operations, sustainment, training.
 
 **Canonical column names:**
 
@@ -267,14 +267,14 @@ technology development programs.
 
 ---
 
-### M-1 — Military Personnel
+### M-1 -- Military Personnel
 
-**Description:** Military personnel funding — active duty, reserves, National Guard pay.
+**Description:** Military personnel funding -- active duty, reserves, National Guard pay.
 
 Same column layout as O-1 (uses BSA/sub-activity structure).
 
-**DB key:** `o1`  
-**Description:** Operation and Maintenance summary — funding for personnel, operations,
+**DB key:** `o1`
+**Description:** Operation and Maintenance summary -- funding for personnel, operations,
 sustainment, and training activities.
 
 ### Column Layout
@@ -298,8 +298,8 @@ sustainment, and training activities.
 
 **Canonical column names:**
 
-**DB key:** `m1`  
-**Description:** Military Personnel summary — funding for active duty, reserves, and
+**DB key:** `m1`
+**Description:** Military Personnel summary -- funding for active duty, reserves, and
 National Guard personnel pay, allowances, and benefits.
 
 ### Column Layout
@@ -324,8 +324,8 @@ National Guard personnel pay, allowances, and benefits.
 
 **Note:** C-1 uses authorization/appropriation semantics, not enacted/request.
 
-**DB key:** `c1`  
-**Description:** Military Construction budget — facility projects and real property
+**DB key:** `c1`
+**Description:** Military Construction budget -- facility projects and real property
 acquisitions. Uses authorization/appropriation columns instead of the standard
 request/enacted pattern.
 
@@ -348,10 +348,10 @@ request/enacted pattern.
 
 ---
 
-## RF-1 — Revolving Funds
+## RF-1 -- Revolving Funds
 
-**DB key:** `rf1`  
-**Description:** Revolving Fund budget — working capital funds and enterprise funds.
+**DB key:** `rf1`
+**Description:** Revolving Fund budget -- working capital funds and enterprise funds.
 Shows revenue and expenses rather than budget authority like other exhibits.
 
 ### Column Layout
@@ -377,7 +377,7 @@ Shows revenue and expenses rather than budget authority like other exhibits.
 ## Monetary Convention
 
 - **Canonical unit:** Thousands of dollars (as stored in source documents)
-- **Display toggle:** The planned UI will support toggling to millions of dollars
+- **Display toggle:** The UI supports toggling to millions of dollars
 - **Budget cycles:** FY2024 Actual, FY2025 Enacted, FY2025 Supplemental,
   FY2025 Total, FY2026 Request, FY2026 Reconciliation, FY2026 Total
 

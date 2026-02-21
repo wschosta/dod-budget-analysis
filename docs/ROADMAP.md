@@ -42,7 +42,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | **1.A2** | Expand fiscal-year coverage | Ensure the downloader can discover and retrieve documents for all publicly available fiscal years (currently dynamic discovery works for recent years; verify historical reach back to at least FY2017). | 🔄 In Progress — FY2025-2026 confirmed; historical reach needs network verification (TODO 1.A2-a/b/c) |
 | **1.A3** | Harden download reliability | Improve retry logic, handle WAF/CAPTCHA changes on government sites, add checksum or size verification for downloaded files, and implement a manifest of expected vs. actual downloads. | ✅ Partially Complete — Smart file skipping, 3-attempt retry with exponential backoff, WAF/bot detection helper; hash verification stub remaining |
 | **1.A4** | Automate download scheduling | Create a repeatable, scriptable download pipeline (CLI-only, no GUI dependency) that can be run via cron or CI to keep data current when new fiscal-year documents are published. | ✅ **Complete** — CLI `--no-gui` mode, `scripts/scheduled_download.py` orchestrator with dry-run support |
-| **1.A5** | Document all data sources | Create a `DATA_SOURCES.md` file listing every URL pattern, document type, file format, and fiscal-year availability for each service and agency. | 🔄 In Progress — `DATA_SOURCES.md` exists; coverage matrix needs live audit (depends on 1.A1) |
+| **1.A5** | Document all data sources | Create a data sources reference listing every URL pattern, document type, file format, and fiscal-year availability for each service and agency. | 🔄 In Progress — `docs/user-guide/data-sources.md` exists; coverage matrix needs live audit (depends on 1.A1) |
 | **1.A6** | Retry failed downloads | Write a structured failure log (`failed_downloads.json`) with URL, dest path, and browser flag for each failed file. Add a `--retry-failures` CLI flag that reads the log and re-attempts only those files. Update the GUI completion dialog to show failure URLs and a copy-retry-command button. | ⚠️ Not started |
 
 ### 1.B — Parsing & Normalization
@@ -130,12 +130,12 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 
 | ID | Task | Details | Status |
 |----|------|---------|--------|
-| **3.C1** | Write a "Getting Started" guide | A plain-language guide explaining what the tool does, what data is included, and how to perform a basic search and download. | ✅ **Complete** — `docs/getting_started.md` (205 lines) written for staffers, journalists, and researchers |
-| **3.C2** | Write a data dictionary | Define every field visible in the UI and API: what it means, where it comes from, and known caveats (e.g., fiscal-year transitions, restated figures). | ✅ **Complete** — `docs/data_dictionary.md` (573 lines) with all fields, reference tables, naming conventions, and 8 data quality caveats |
-| **3.C3** | Write an FAQ | Address common questions: data freshness, coverage gaps, unit of measure (thousands of dollars), difference between PB/enacted/request, etc. | ✅ **Complete** — `docs/faq.md` (181 lines) covering data currency, missing years, $K meaning, PB vs enacted, reconciliation, and more |
-| **3.C4** | Write API documentation | If the API is publicly accessible, provide OpenAPI/Swagger docs with example requests and responses. | ✅ **Complete** — `docs/wiki/API-Reference.md` (528 lines) with all endpoints, parameters, response schemas, and curl examples; OpenAPI metadata in `api/app.py` |
+| **3.C1** | Write a "Getting Started" guide | A plain-language guide explaining what the tool does, what data is included, and how to perform a basic search and download. | ✅ **Complete** — `docs/user-guide/getting-started.md` written for staffers, journalists, and researchers |
+| **3.C2** | Write a data dictionary | Define every field visible in the UI and API: what it means, where it comes from, and known caveats (e.g., fiscal-year transitions, restated figures). | ✅ **Complete** — `docs/user-guide/data-dictionary.md` with all fields, reference tables, naming conventions, and data quality caveats |
+| **3.C3** | Write an FAQ | Address common questions: data freshness, coverage gaps, unit of measure (thousands of dollars), difference between PB/enacted/request, etc. | ✅ **Complete** — `docs/user-guide/faq.md` covering data currency, missing years, $K meaning, PB vs enacted, reconciliation, and more |
+| **3.C4** | Write API documentation | If the API is publicly accessible, provide OpenAPI/Swagger docs with example requests and responses. | ✅ **Complete** — `docs/developer/api-reference.md` with all endpoints, parameters, response schemas, and curl examples; OpenAPI metadata in `api/app.py` |
 | **3.C5** | Add contextual help to the UI | Tooltips, info icons, and inline explanations on the search/filter page so users understand each filter without leaving the page. | ✅ **Complete** — CSS-based data-tooltip attributes on all filter labels and column headers in templates |
-| **3.C6** | Write a methodology & limitations page | Explain how data is collected, parsed, and loaded; known limitations (e.g., PDF extraction accuracy); and how to report errors. | ✅ **Complete** — `docs/methodology.md` (207 lines) with data sources, collection process, parsing approach, 8 known limitations, and error reporting |
+| **3.C6** | Write a methodology & limitations page | Explain how data is collected, parsed, and loaded; known limitations (e.g., PDF extraction accuracy); and how to report errors. | ✅ **Complete** — `docs/user-guide/methodology.md` with data sources, collection process, parsing approach, known limitations, and error reporting |
 
 ---
 
@@ -152,7 +152,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | **4.A3** | Set up CI/CD pipeline | Configure GitHub Actions (or equivalent) to run tests, build the container, and deploy on push to the main branch. | ✅ Partially Complete — CI pipeline done (`ci.yml`: matrix testing, ruff, pytest+coverage, mypy, Docker build); CD deployment workflow pending (needs hosting platform) |
 | **4.A4** | Configure a custom domain & TLS | Register or configure a domain name and set up HTTPS with automatic certificate renewal. | ⚠️ Not started — requires domain registration |
 | **4.A5** | Set up monitoring & alerting | Implement uptime monitoring, error tracking (e.g., Sentry), and basic usage analytics (privacy-respecting) to detect problems early. | ✅ **Complete** — `/health` + `/health/detailed` endpoints with uptime, request/error counts, DB metrics, response time tracking; structured access logging middleware; rate limiting with per-IP tracking |
-| **4.A6** | Implement backup & recovery | Automate database backups and document the recovery procedure. | ✅ **Complete** — `scripts/backup_db.py` with SQLite online backup API, `--keep N` pruning; staging docker-compose backup sidecar (6-hour cycle); `docs/deployment.md` documents recovery procedure |
+| **4.A6** | Implement backup & recovery | Automate database backups and document the recovery procedure. | ✅ **Complete** — `scripts/backup_db.py` with SQLite online backup API, `--keep N` pruning; staging docker-compose backup sidecar (6-hour cycle); `docs/developer/deployment.md` documents recovery procedure |
 
 ### 4.B — Launch & Outreach
 
@@ -171,7 +171,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | **4.C2** | Implement high-priority improvements | Address the most impactful issues identified during the soft launch and public feedback rounds. | ⚠️ Not started — depends on user feedback |
 | **4.C3** | Automate annual data refresh | When new President's Budget or enacted appropriations are published, the pipeline should detect and ingest them with minimal manual intervention. | ✅ **Complete** — `refresh_data.py` with 4-stage pipeline (download → build → validate → report), automatic rollback, progress tracking, `--schedule` flag; `.github/workflows/refresh-data.yml` with weekly cron |
 | **4.C4** | Performance optimization | Profile and optimize slow queries, large downloads, and page-load times based on real usage patterns. | ✅ Mostly Complete — Connection pooling, FTS5 indexing, rate limiting, pagination, in-memory TTL cache, streaming exports, BM25 relevance scoring; profiling-based tuning pending real traffic |
-| **4.C5** | Ongoing documentation updates | Keep the data dictionary, FAQ, and methodology page current as the data and features evolve. | ✅ Mostly Complete — Comprehensive docs in `docs/` and `docs/wiki/` (20+ files); ongoing updates needed as features evolve |
+| **4.C5** | Ongoing documentation updates | Keep the data dictionary, FAQ, and methodology page current as the data and features evolve. | ✅ Mostly Complete — Comprehensive docs in `docs/user-guide/` and `docs/developer/` (20+ files); ongoing updates needed as features evolve |
 | **4.C6** | Community contribution guidelines | If the project attracts contributors, publish `CONTRIBUTING.md` with development setup, coding standards, and PR process. | ✅ **Complete** — `CONTRIBUTING.md` (261 lines) with prerequisites, dev setup, code standards, testing guide, PR process, and architecture overview |
 
 ---
@@ -237,9 +237,9 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 
 | Group | Focus | Count | Est. Tokens | Instruction File |
 |-------|-------|-------|-------------|------------------|
-| **LION** | Frontend polish, UX, documentation | 10 | ~17,000 | `docs/instructions/LION_INSTRUCTIONS.md` |
-| **TIGER** | Data quality validation, API enhancements | 11 | ~20,500 | `docs/instructions/TIGER_INSTRUCTIONS.md` |
-| **BEAR** | Test suites, CI/CD, infrastructure | 12 | ~26,000 | `docs/instructions/BEAR_INSTRUCTIONS.md` |
+| **LION** | Frontend polish, UX, documentation | 10 | ~17,000 | `docs/archive/instructions/LION_INSTRUCTIONS.md` |
+| **TIGER** | Data quality validation, API enhancements | 11 | ~20,500 | `docs/archive/instructions/TIGER_INSTRUCTIONS.md` |
+| **BEAR** | Test suites, CI/CD, infrastructure | 12 | ~26,000 | `docs/archive/instructions/BEAR_INSTRUCTIONS.md` |
 
 **Items requiring external resources (12 items):**
 
@@ -250,9 +250,9 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | Hosting & Deployment (4.A) | 3 | Cloud account + domain + secrets |
 | Accessibility Audit (3.A) | 1 | Running UI + Lighthouse/axe-core |
 | Launch & Feedback (4.B) | 2 | Deployed application + community |
-| **Total** | **12** | See `docs/instructions/OH_MY_INSTRUCTIONS.md` |
+| **Total** | **12** | See `docs/archive/instructions/OH_MY_INSTRUCTIONS.md` |
 
-See [REMAINING_TODOS.md](REMAINING_TODOS.md) for detailed descriptions.
+See [REMAINING_TODOS.md](archive/implementation-logs/REMAINING_TODOS.md) for detailed descriptions.
 Each LION/TIGER/BEAR instruction file is prompt-ready: open a new branch and run `execute the LION instructions`.
 
 ---

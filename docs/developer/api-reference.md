@@ -21,15 +21,16 @@ All data endpoints are under the `/api/v1` prefix.
 
 ## Authentication
 
-No authentication required.  The API is publicly readable.
+No authentication required. The API is publicly readable.
 
-**Rate limits** are enforced per IP address (fixed 60-second window):
+**Rate limits** are enforced per IP address (fixed 60-second window). Limits are
+configurable via environment variables (see [Deployment](deployment.md)).
 
-| Endpoint | Limit |
-|----------|-------|
-| `GET /api/v1/search` | 60 requests / minute |
-| `GET /api/v1/download` | 10 requests / minute |
-| All other endpoints | 120 requests / minute |
+| Endpoint | Limit | Environment Variable |
+|----------|-------|----------------------|
+| `GET /api/v1/search` | 60 requests / minute | `RATE_LIMIT_SEARCH` |
+| `GET /api/v1/download` | 10 requests / minute | `RATE_LIMIT_DOWNLOAD` |
+| All other endpoints | 120 requests / minute | `RATE_LIMIT_DEFAULT` |
 
 When a limit is exceeded the server returns `429 Too Many Requests` with a
 `Retry-After: 60` header.
@@ -39,8 +40,8 @@ When a limit is exceeded the server returns `429 Too Many Requests` with a
 ## Common Response Fields
 
 All amounts are in **thousands of dollars ($K)** unless `amount_unit` says
-otherwise.  DoD fiscal years run **October 1 – September 30**
-(FY2026 = Oct 2025 – Sep 2026).
+otherwise. DoD fiscal years run **October 1 -- September 30**
+(FY2026 = Oct 2025 -- Sep 2026).
 
 ---
 
@@ -67,7 +68,26 @@ All errors return JSON with a consistent structure:
 
 ---
 
-## Endpoints
+## Endpoint Summary
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/search` | GET | Full-text search (FTS5 + BM25 ranking) |
+| `/api/v1/budget-lines` | GET | Filtered, paginated budget line items |
+| `/api/v1/budget-lines/{id}` | GET | Single budget line item detail |
+| `/api/v1/aggregations` | GET | GROUP BY summaries for charts/dashboards |
+| `/api/v1/download` | GET | Streaming CSV/NDJSON export |
+| `/api/v1/reference/{type}` | GET | Reference data (services, exhibit types, FYs) |
+| `/api/v1/metadata` | GET | Database and dataset metadata |
+| `/api/v1/feedback` | POST | User feedback submission |
+| `/health` | GET | Health check (DB connectivity) |
+| `/health/detailed` | GET | Detailed metrics (uptime, counters, query stats) |
+
+**Frontend HTML routes:** `/` (search), `/charts`, `/dashboard`, `/about`, `/programs`, `/programs/{pe_number}`, `/partials/*` (HTMX partials).
+
+---
+
+## Data Endpoints
 
 ---
 
@@ -80,9 +100,9 @@ FTS5 with BM25 relevance ranking.
 
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `q` | string | **yes** | — | Search query string (min length 1). Use quotes for exact phrases: `"hypersonic missile"`. |
+| `q` | string | **yes** | -- | Search query string (min length 1). Use quotes for exact phrases: `"hypersonic missile"`. |
 | `type` | string | no | `both` | Result type filter: `excel`, `pdf`, or `both`. |
-| `limit` | integer | no | `20` | Max results per type (1–100). |
+| `limit` | integer | no | `20` | Max results per type (1--100). |
 | `offset` | integer | no | `0` | Pagination offset. |
 
 #### Response Schema
@@ -112,7 +132,7 @@ FTS5 with BM25 relevance ranking.
 }
 ```
 
-> Note: `score` is a BM25 score — **more negative = more relevant**.
+> Note: `score` is a BM25 score -- **more negative = more relevant**.
 
 #### Example
 
@@ -140,14 +160,14 @@ List, filter, sort, and paginate budget line items.
 
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `fiscal_year` | string (multi) | no | — | Filter by fiscal year(s). Repeat for multiple: `?fiscal_year=FY+2025&fiscal_year=FY+2026` |
-| `service` | string (multi) | no | — | Filter by service/agency name (e.g., `Army`, `Navy`). |
-| `exhibit_type` | string (multi) | no | — | Filter by exhibit type code (e.g., `p1`, `r1`, `r2`, `p5`). |
-| `pe_number` | string (multi) | no | — | Filter by program element number(s). |
-| `appropriation_code` | string (multi) | no | — | Filter by appropriation code. |
+| `fiscal_year` | string (multi) | no | -- | Filter by fiscal year(s). Repeat for multiple: `?fiscal_year=FY+2025&fiscal_year=FY+2026` |
+| `service` | string (multi) | no | -- | Filter by service/agency name (e.g., `Army`, `Navy`). |
+| `exhibit_type` | string (multi) | no | -- | Filter by exhibit type code (e.g., `p1`, `r1`, `r2`, `p5`). |
+| `pe_number` | string (multi) | no | -- | Filter by program element number(s). |
+| `appropriation_code` | string (multi) | no | -- | Filter by appropriation code. |
 | `sort_by` | string | no | `id` | Column to sort by (e.g., `amount_fy2026_request`, `organization_name`). |
 | `sort_dir` | string | no | `asc` | Sort direction: `asc` or `desc`. |
-| `limit` | integer | no | `25` | Max items per page (1–500). |
+| `limit` | integer | no | `25` | Max items per page (1--500). |
 | `offset` | integer | no | `0` | Pagination offset. |
 
 #### Response Schema
@@ -247,10 +267,10 @@ GROUP BY summaries of budget amounts for charts and dashboards.
 
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `group_by` | string | **yes** | — | Dimension to group by: `service`, `fiscal_year`, or `exhibit_type`. |
-| `fiscal_year` | string (multi) | no | — | Pre-filter by fiscal year(s) before aggregating. |
-| `service` | string (multi) | no | — | Pre-filter by service name(s). |
-| `exhibit_type` | string (multi) | no | — | Pre-filter by exhibit type(s). |
+| `group_by` | string | **yes** | -- | Dimension to group by: `service`, `fiscal_year`, or `exhibit_type`. |
+| `fiscal_year` | string (multi) | no | -- | Pre-filter by fiscal year(s) before aggregating. |
+| `service` | string (multi) | no | -- | Pre-filter by service name(s). |
+| `exhibit_type` | string (multi) | no | -- | Pre-filter by exhibit type(s). |
 
 #### Response Schema
 
@@ -302,16 +322,16 @@ Bulk export of filtered budget lines as streaming CSV or newline-delimited JSON.
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | `fmt` | string | no | `csv` | Output format: `csv` or `json` (newline-delimited JSON, one record per line). |
-| `fiscal_year` | string (multi) | no | — | Filter by fiscal year(s). |
-| `service` | string (multi) | no | — | Filter by service name(s). |
-| `exhibit_type` | string (multi) | no | — | Filter by exhibit type(s). |
-| `pe_number` | string (multi) | no | — | Filter by PE number(s). |
-| `limit` | integer | no | `10000` | Max rows to export (1–100000). |
+| `fiscal_year` | string (multi) | no | -- | Filter by fiscal year(s). |
+| `service` | string (multi) | no | -- | Filter by service name(s). |
+| `exhibit_type` | string (multi) | no | -- | Filter by exhibit type(s). |
+| `pe_number` | string (multi) | no | -- | Filter by PE number(s). |
+| `limit` | integer | no | `10000` | Max rows to export (1--100000). |
 
 #### Response
 
 - **CSV** (`fmt=csv`): `Content-Type: text/csv; charset=utf-8`
-  Streams rows with a header line.  Filename: `dod_budget.csv`.
+  Streams rows with a header line. Filename: `dod_budget.csv`.
 
 - **JSON** (`fmt=json`): `Content-Type: application/x-ndjson`
   One JSON object per line (newline-delimited JSON / NDJSON format).
@@ -335,6 +355,82 @@ curl "http://localhost:8000/api/v1/download?fmt=json&limit=500"
 curl -o rdte.csv \
   "http://localhost:8000/api/v1/download?fmt=csv&exhibit_type=r1&exhibit_type=r2&limit=100000"
 ```
+
+---
+
+### `GET /api/v1/metadata`
+
+Returns metadata about the database and dataset, including row counts,
+file counts, fiscal years covered, and database file size. Useful for
+dashboard displays and monitoring.
+
+#### Response Schema
+
+```json
+{
+  "database_path": "/app/dod_budget.sqlite",
+  "database_size_bytes": 52428800,
+  "budget_lines_count": 14823,
+  "pdf_pages_count": 3201,
+  "ingested_files_count": 342,
+  "fiscal_years": ["FY 2024", "FY 2025", "FY 2026"],
+  "services": ["Army", "Navy", "Air Force", "Marine Corps", "Defense-Wide"],
+  "exhibit_types": ["p1", "p5", "r1", "r2", "o1"]
+}
+```
+
+#### Example
+
+```bash
+curl "http://localhost:8000/api/v1/metadata"
+```
+
+---
+
+### `POST /api/v1/feedback`
+
+Submit user feedback about search results, data quality, or general
+application experience. Feedback is stored for review by project maintainers.
+
+#### Request Body
+
+```json
+{
+  "category": "data_quality",
+  "message": "The FY2025 Army R-1 totals appear to be missing.",
+  "context": {
+    "page": "/api/v1/search",
+    "query": "Army R-1 FY2025"
+  }
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `category` | string | no | Feedback category (e.g., `data_quality`, `feature_request`, `bug`, `general`). |
+| `message` | string | **yes** | The feedback text. |
+| `context` | object | no | Optional context such as the page URL or search query. |
+
+#### Response
+
+```json
+{
+  "status": "ok",
+  "message": "Feedback received. Thank you."
+}
+```
+
+#### Example
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/feedback" \
+  -H "Content-Type: application/json" \
+  -d '{"category": "bug", "message": "Search returns no results for F-35"}'
+```
+
+---
+
+## Reference Endpoints
 
 ---
 
@@ -420,9 +516,37 @@ curl "http://localhost:8000/api/v1/reference/fiscal-years"
 
 ---
 
+## Dashboard and PE Endpoints
+
+The API includes additional endpoints that power the web frontend's dashboard
+and program element (PE) views. These are implemented in `api/routes/dashboard.py`
+and `api/routes/pe.py`.
+
+### Dashboard Endpoints
+
+Dashboard data endpoints provide pre-aggregated data for the `/dashboard`
+frontend page, including spending summaries, trend data, and top-level
+statistics. See the interactive docs at `/docs` for full parameter details.
+
+### PE Endpoints
+
+Program element endpoints provide PE-centric views of the budget data:
+
+- **PE listing** -- Browse and filter program elements
+- **PE funding detail** -- Funding history and projections for a specific PE
+- **PE sub-elements** -- Breakdown of sub-elements within a PE
+
+These endpoints power the `/programs` and `/programs/{pe_number}` frontend pages.
+
+---
+
+## Health Endpoints
+
+---
+
 ### `GET /health`
 
-Basic health check.  Returns `200 OK` if the API is running and can reach
+Basic health check. Returns `200 OK` if the API is running and can reach
 the database; `503 Service Unavailable` otherwise.
 
 #### Response Schema
@@ -454,8 +578,8 @@ curl -sf http://localhost:8000/health && echo "healthy"
 
 ### `GET /health/detailed`
 
-Detailed operational metrics for monitoring dashboards.  Counters reset on
-process restart (stateless — no persistence).
+Detailed operational metrics for monitoring dashboards. Counters reset on
+process restart (stateless -- no persistence).
 
 #### Response Schema
 
@@ -516,6 +640,23 @@ clients can compute the number of pages: `pages = ceil(total / limit)`.
 
 ---
 
+## Caching
+
+API responses include `ETag` headers for conditional request support. Clients
+can send `If-None-Match` headers with subsequent requests to receive a
+`304 Not Modified` response when data has not changed, reducing bandwidth
+and processing time.
+
+---
+
+## CORS
+
+Cross-Origin Resource Sharing is enabled and configurable via the
+`APP_CORS_ORIGINS` environment variable (default: `*`). See
+[Deployment](deployment.md) for configuration details.
+
+---
+
 ## Security Headers
 
 All responses include:
@@ -525,3 +666,40 @@ All responses include:
 | `Content-Security-Policy` | `default-src 'self'; script-src 'self' unpkg.com cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self';` |
 | `X-Content-Type-Options` | `nosniff` |
 | `X-Frame-Options` | `DENY` |
+
+---
+
+## Implementation Details
+
+The API is implemented with FastAPI and organized into route modules under
+`api/routes/`. Each module registers a router that is included in the main
+application factory (`api/app.py`).
+
+| Route Module | Endpoints |
+|-------------|-----------|
+| `api/routes/search.py` | `/api/v1/search` |
+| `api/routes/budget_lines.py` | `/api/v1/budget-lines`, `/api/v1/budget-lines/{id}` |
+| `api/routes/aggregations.py` | `/api/v1/aggregations` |
+| `api/routes/download.py` | `/api/v1/download` |
+| `api/routes/reference.py` | `/api/v1/reference/{type}` |
+| `api/routes/metadata.py` | `/api/v1/metadata` |
+| `api/routes/feedback.py` | `/api/v1/feedback` |
+| `api/routes/dashboard.py` | Dashboard data endpoints |
+| `api/routes/pe.py` | PE-centric views, funding, sub-elements |
+| `api/routes/frontend.py` | HTML routes (`/`, `/charts`, `/dashboard`, `/about`, `/programs`, `/partials/*`) |
+
+Pydantic v2 models for request validation and response serialization are
+defined in `api/models.py`. Database access uses the `Depends(get_db)`
+dependency from `api/database.py`.
+
+For architecture decisions behind the API framework choice, see
+[ADR 001: API Framework](../decisions/001-api-framework.md).
+
+---
+
+## Related Documentation
+
+- [Architecture Overview](architecture.md) -- System design and component interactions
+- [Database Schema](database-schema.md) -- Table definitions and relationships
+- [Deployment](deployment.md) -- Environment variables, Docker, and operational runbook
+- [Testing](testing.md) -- How to write and run API tests

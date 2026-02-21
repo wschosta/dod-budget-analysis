@@ -1,8 +1,6 @@
 # Getting Started
 
-A guide to searching, filtering, and downloading DoD budget data using the command-line tools.
-
-> **Current Status:** CLI tools are fully functional. Web UI is planned for Phase 3.
+A guide to downloading, building, browsing, searching, and exporting DoD budget data.
 
 ---
 
@@ -20,6 +18,7 @@ PDF documents.
 - Parse Excel exhibits (P-1, R-1, O-1, M-1, C-1, RF-1, P-1R, P-5, R-2, R-3, R-4) into a
   structured SQLite database with FTS5 full-text search
 - Extract text and table data from budget-justification PDFs
+- Browse and search via a web interface with charts and dashboards
 - Search by keyword, organization, fiscal year, exhibit type, or a combination
 - Export search results to CSV or JSON
 - Validate data quality after ingestion
@@ -31,13 +30,13 @@ PDF documents.
 | Dimension | Details |
 |-----------|---------|
 | **Services** | Army, Navy, Marine Corps, Air Force, Space Force, Defense-Wide, Joint Staff |
-| **Fiscal Years** | FY2024–FY2026 (downloaded); historical years available on source sites |
+| **Fiscal Years** | FY2024--FY2026 (downloaded); historical years available on source sites |
 | **Exhibit Types** | P-1, P-1R, P-5, R-1, R-2, R-3, R-4, O-1, M-1, C-1, RF-1 |
-| **Formats** | Excel (.xlsx) → `budget_lines` table; PDF → `pdf_pages` table |
+| **Formats** | Excel (.xlsx) -> `budget_lines` table; PDF -> `pdf_pages` table |
 | **Dollar Unit** | Thousands of dollars (as published in source documents) |
-| **Classification** | Unclassified only — classified programs are excluded from public documents |
+| **Classification** | Unclassified only -- classified programs are excluded from public documents |
 
-> See [Exhibit Types](Exhibit-Types.md) and [Data Sources](Data-Sources.md) for complete details.
+> See [Exhibit Types](exhibit-types.md) and [Data Sources](data-sources.md) for complete details.
 
 ---
 
@@ -52,7 +51,7 @@ PDF documents.
   ```bash
   playwright install chromium
   ```
-- Disk space: ~2–5 GB for a full download of multiple fiscal years
+- Disk space: ~2--5 GB for a full download of multiple fiscal years
 
 ### Optional: Development dependencies
 
@@ -125,6 +124,41 @@ The builder:
 
 ---
 
+## Web UI
+
+The project includes a full web interface for browsing, searching, and visualizing budget data.
+
+### Starting the server
+
+```bash
+# Start the API server in development mode
+uvicorn api.app:app --reload --port 8000
+```
+
+Then open [http://localhost:8000](http://localhost:8000) in your browser.
+
+Alternatively, use Docker:
+
+```bash
+docker compose up --build
+```
+
+### Features
+
+- **Full-text search** -- search budget line items and PDF documents by keyword with BM25 ranking
+- **Filters** -- narrow results by service/organization, exhibit type, fiscal year, and budget activity
+- **Results table** -- sortable, paginated table of matching budget line items
+- **Detail view** -- click any row to see the full record with all fields and amounts
+- **Charts** -- interactive Chart.js visualizations at `/charts`
+- **Dashboard** -- summary dashboard with aggregations at `/dashboard`
+- **Programs** -- browse all program elements at `/programs`, with per-program detail pages at `/programs/{pe_number}`
+- **Dark mode** -- toggle between light and dark themes (preference is persisted)
+- **CSV/JSON export** -- download filtered results as CSV or NDJSON via the `/api/v1/download` endpoint
+
+For API documentation, visit `/docs` (OpenAPI/Swagger UI) or `/redoc` (ReDoc) while the server is running. See the [API Reference](../developer/api-reference.md) for full endpoint details.
+
+---
+
 ## Searching the Database
 
 ```bash
@@ -186,13 +220,13 @@ python validate_budget_data.py --json
 ```
 
 The validator runs 7 automated checks:
-1. **Missing fiscal years** — services missing expected coverage years
-2. **Duplicate rows** — identical key tuples (possible parsing bug)
-3. **Zero-amount line items** — rows where all dollar columns are NULL/zero
-4. **Column alignment** — rows with account code but no organization
-5. **Unknown exhibit types** — exhibit codes not in the known set
-6. **Ingestion errors** — files that errored during parsing
-7. **Empty files** — files successfully ingested but producing zero rows
+1. **Missing fiscal years** -- services missing expected coverage years
+2. **Duplicate rows** -- identical key tuples (possible parsing bug)
+3. **Zero-amount line items** -- rows where all dollar columns are NULL/zero
+4. **Column alignment** -- rows with account code but no organization
+5. **Unknown exhibit types** -- exhibit codes not in the known set
+6. **Ingestion errors** -- files that errored during parsing
+7. **Empty files** -- files successfully ingested but producing zero rows
 
 ---
 

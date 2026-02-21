@@ -41,7 +41,7 @@ the `dod_budget.sqlite` database built by `build_budget_db.py`.
 | `currency_year` | TEXT | Dollar type: `"then-year"` (nominal) or `"constant"` dollars |
 | `appropriation_code` | TEXT | Leading numeric code from account_title (e.g. `"2035"` for Aircraft Procurement, Army) |
 | `appropriation_title` | TEXT | Appropriation name without the leading code |
-| `amount_unit` | TEXT | Unit of stored dollar amounts — always `"thousands"` after normalization; non-thousands values indicate a missed conversion |
+| `amount_unit` | TEXT | Unit of stored dollar amounts -- always `"thousands"` after normalization; non-thousands values indicate a missed conversion |
 | `budget_type` | TEXT | Broad budget category derived from exhibit type: `MilPers`, `O&M`, `Procurement`, `RDT&E`, `Construction`, `Revolving`, or NULL |
 
 ---
@@ -76,7 +76,7 @@ the `dod_budget.sqlite` database built by `build_budget_db.py`.
 
 ### Exhibit Types
 
-See [Exhibit Types](Exhibit-Types.md) for the full catalog.
+See [Exhibit Types](exhibit-types.md) for the full catalog.
 
 ---
 
@@ -91,7 +91,7 @@ See [Exhibit Types](Exhibit-Types.md) for the full catalog.
 - **NULL values:** NULL in an amount column means the value was not present in
   the source document (distinct from zero)
 - **PE numbers:** Program Element numbers follow the pattern `DDDDDDDLL`
-  (7 digits + 1–2 uppercase letters, e.g. `0602702E`). They are searchable
+  (7 digits + 1--2 uppercase letters, e.g. `0602702E`). They are searchable
   via the `pe_number` column index and the FTS5 full-text search index.
 
 ---
@@ -186,7 +186,7 @@ ORDER BY bts.rank;
 
 ## Schema Design Notes
 
-The current schema uses **denormalized fiscal year columns** (FY2024–FY2026 hardcoded)
+The current schema uses **denormalized fiscal year columns** (FY2024--FY2026 hardcoded)
 for simplicity and query performance. When a new fiscal year's budget materials are
 published:
 
