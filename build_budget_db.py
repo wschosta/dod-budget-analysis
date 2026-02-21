@@ -748,8 +748,11 @@ _EXHIBIT_BUDGET_TYPE: dict[str, str] = {
     "o1": "O&M",
     "p1": "Procurement",
     "p1r": "Procurement",
+    "p5": "Procurement",
     "r1": "RDT&E",
     "r2": "RDT&E",
+    "r3": "RDT&E",
+    "r4": "RDT&E",
     "rf1": "Revolving",
     "c1": "Construction",
 }
@@ -763,8 +766,11 @@ _EXHIBIT_AMOUNT_TYPE: dict[str, str] = {
     "o1": "budget_authority",
     "p1": "budget_authority",
     "p1r": "budget_authority",
+    "p5": "budget_authority",
     "r1": "budget_authority",
     "r2": "budget_authority",
+    "r3": "budget_authority",
+    "r4": "budget_authority",
     "rf1": "budget_authority",
 }
 

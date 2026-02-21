@@ -46,7 +46,7 @@ AMOUNT_COLUMNS = [
     "amount_fy2026_total",
 ]
 
-KNOWN_EXHIBIT_TYPES = {"m1", "o1", "p1", "p1r", "r1", "rf1", "c1"}
+KNOWN_EXHIBIT_TYPES = {"m1", "o1", "p1", "p1r", "p5", "r1", "r2", "r3", "r4", "rf1", "c1"}
 
 
 # ── Individual checks ────────────────────────────────────────────────────────
