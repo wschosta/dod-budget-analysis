@@ -506,6 +506,111 @@ function loadFooterMetadata() {
     .catch(function() { /* silently ignore — footer just stays empty */ });
 }
 
+// ── FALCON-1: Landing page summary visuals ──────────────────────────────────
+
+var LANDING_COLORS = [
+  "#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed",
+  "#0891b2", "#c2410c", "#065f46", "#92400e", "#1e1b4b"
+];
+
+function loadLandingVisuals() {
+  var svcCanvas = document.getElementById("landing-service-chart");
+  var appCanvas = document.getElementById("landing-approp-chart");
+  if (!svcCanvas && !appCanvas) return; // not on landing page
+
+  // Load service breakdown chart
+  if (svcCanvas) {
+    fetch("/api/v1/aggregations?group_by=service")
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (!data || !data.rows || !data.rows.length) return;
+        var cols = Object.keys(data.rows[0]).filter(function(k) { return /^total_fy\d+/.test(k); }).sort();
+        var reqCol = cols.find(function(c) { return c.includes("request"); }) || cols[cols.length - 1];
+        if (!reqCol) return;
+
+        var labels = data.rows.filter(function(r) { return r[reqCol]; }).map(function(r) { return r.group_value || "Unknown"; });
+        var amounts = data.rows.filter(function(r) { return r[reqCol]; }).map(function(r) { return (r[reqCol] || 0) / 1000; });
+
+        new Chart(svcCanvas, {
+          type: "bar",
+          data: {
+            labels: labels,
+            datasets: [{
+              label: "FY Request ($M)",
+              data: amounts,
+              backgroundColor: LANDING_COLORS,
+              borderRadius: 4
+            }]
+          },
+          options: {
+            indexAxis: "y",
+            plugins: { legend: { display: false } },
+            scales: { x: { ticks: { callback: function(v) { return "$" + v.toLocaleString() + "M"; } } } },
+            onHover: function(e, el) { e.native.target.style.cursor = el.length ? "pointer" : "default"; },
+            onClick: function(e, el) {
+              if (el.length) {
+                var idx = el[0].index;
+                window.location.href = "/?service=" + encodeURIComponent(labels[idx]);
+              }
+            }
+          }
+        });
+      })
+      .catch(function() {});
+  }
+
+  // Load appropriation stacked bar chart
+  if (appCanvas) {
+    fetch("/api/v1/aggregations?group_by=appropriation")
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (!data || !data.rows || !data.rows.length) return;
+        var cols = Object.keys(data.rows[0]).filter(function(k) { return /^total_fy\d+/.test(k); }).sort();
+        var reqCol = cols.find(function(c) { return c.includes("request"); }) || cols[cols.length - 1];
+        if (!reqCol) return;
+
+        var labels = data.rows.map(function(r) { return r.group_value || "Unknown"; });
+        var amounts = data.rows.map(function(r) { return (r[reqCol] || 0) / 1000; });
+
+        new Chart(appCanvas, {
+          type: "doughnut",
+          data: {
+            labels: labels,
+            datasets: [{
+              data: amounts,
+              backgroundColor: LANDING_COLORS.slice(0, labels.length),
+              borderWidth: 2,
+              borderColor: getComputedStyle(document.documentElement).getPropertyValue("--bg-surface").trim() || "#fff"
+            }]
+          },
+          options: {
+            plugins: {
+              legend: { position: "right", labels: { boxWidth: 12, font: { size: 11 } } },
+              tooltip: {
+                callbacks: {
+                  label: function(ctx) {
+                    var total = ctx.dataset.data.reduce(function(a, b) { return a + b; }, 0);
+                    var pct = total > 0 ? (ctx.parsed / total * 100).toFixed(1) : 0;
+                    return ctx.label + ": $" + ctx.parsed.toLocaleString() + "M (" + pct + "%)";
+                  }
+                }
+              }
+            },
+            onHover: function(e, el) { e.native.target.style.cursor = el.length ? "pointer" : "default"; },
+            onClick: function(e, el) {
+              if (el.length) {
+                var idx = el[0].index;
+                var approp = data.rows[idx].group_value;
+                if (approp) window.location.href = "/?appropriation_code=" + encodeURIComponent(approp);
+              }
+            }
+          }
+        });
+      })
+      .catch(function() {});
+  }
+}
+
 // ── Initialise ─────────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", function () {
@@ -530,6 +635,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // FALCON-7: Fetch metadata for footer
   loadFooterMetadata();
+
+  // FALCON-1: Load landing page summary visuals
+  loadLandingVisuals();
 
   // OPT-JS-001: Debounce filter form changes — add delay:300ms to multi-selects
   // HTMX hx-trigger delay is set on the q input already; for selects we use

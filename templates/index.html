@@ -3,6 +3,35 @@
 {% block title %}Search — DoD Budget Explorer{% endblock %}
 
 {% block content %}
+{# ── FALCON-1: Hybrid landing — prominent search + clickable visuals ────── #}
+<section class="hero-search" id="hero-search">
+  <h1 class="hero-title">DoD Budget Explorer</h1>
+  <p class="hero-subtitle">Search and explore U.S. Department of Defense budget data across fiscal years, services, and programs.</p>
+  <form class="hero-search-form" role="search" aria-label="Quick search"
+        action="/" method="get">
+    <input type="text" name="q" class="hero-search-input"
+           value="{{ filters.q }}"
+           placeholder="Search programs, PE numbers, keywords..."
+           aria-label="Search budget data"
+           autocomplete="off">
+    <button type="submit" class="btn btn-primary hero-search-btn">Search</button>
+  </form>
+</section>
+
+{# ── FALCON-1: Clickable summary visuals ─────────────────────────────── #}
+<section class="landing-visuals" id="landing-visuals">
+  <div class="landing-charts-grid">
+    <div class="chart-card landing-chart" id="landing-service-chart-card">
+      <h3>Budget by Service</h3>
+      <canvas id="landing-service-chart" height="200"></canvas>
+    </div>
+    <div class="chart-card landing-chart" id="landing-approp-chart-card">
+      <h3>By Appropriation Type</h3>
+      <canvas id="landing-approp-chart" height="200"></canvas>
+    </div>
+  </div>
+</section>
+
 <div class="search-layout">
 
   {# ── Filter sidebar (3.A3-a) ─────────────────────────────────────────── #}
