@@ -10,6 +10,7 @@ _ul*
 
 # Python
 __pycache__/
+*.pyc
 *.py[cod]
 *$py.class
 *.egg-info/
@@ -28,6 +29,10 @@ htmlcov/
 # IDE
 .vscode/
 .idea/
+
+# Environment
+.env
+.env.*
 
 # OS
 .DS_Store

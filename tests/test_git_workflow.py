@@ -154,7 +154,8 @@ class TestCIWorkflow:
         with open(ci_path) as f:
             data = yaml.safe_load(f)
         assert "jobs" in data, "CI workflow must define jobs"
-        assert "on" in data, "CI workflow must define triggers"
+        # YAML parses unquoted `on` key as boolean True
+        assert "on" in data or True in data, "CI workflow must define triggers"
 
     def test_ci_tests_python_matrix(self):
         """CI should test on multiple Python versions."""
