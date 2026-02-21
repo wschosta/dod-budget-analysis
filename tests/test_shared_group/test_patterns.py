@@ -74,6 +74,9 @@ class TestFiscalYear:
         ("FY 2025", "FY 2025"),
         ("fy2024", "fy2024"),
         ("Budget for 2026", "2026"),
+        ("FY1999", "FY1999"),       # Navy archive historical
+        ("FY 1998", "FY 1998"),     # Navy archive historical
+        ("1990", "1990"),           # Lower bound
     ])
     def test_matches_valid(self, text, expected):
         m = FISCAL_YEAR.search(text)
@@ -81,7 +84,7 @@ class TestFiscalYear:
         assert m.group() == expected
 
     def test_no_match(self):
-        assert not FISCAL_YEAR.search("FY1999")
+        assert not FISCAL_YEAR.search("FY1899")
         assert not FISCAL_YEAR.search("no year here")
 
 

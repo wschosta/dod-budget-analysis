@@ -99,6 +99,25 @@ dod-budget-analysis/
 │   ├── smoke_test.py             # Post-deploy smoke tests
 │   ├── verify_optimization.py    # Optimization verification
 │   └── test_edge_cases.py        # Edge case test script
+├── pipeline/                     # Data pipeline modules
+│   ├── backfill.py               # Reference table backfill logic
+│   ├── builder.py                # Database build orchestration
+│   ├── db_validator.py           # Database-level validation
+│   ├── enricher.py               # PE enrichment logic
+│   ├── exhibit_catalog.py        # Exhibit type catalog
+│   ├── exhibit_inventory.py      # Exhibit type discovery
+│   ├── gui.py                    # tkinter GUI for pipeline
+│   ├── refresh.py                # Data refresh with rollback
+│   ├── schema.py                 # Schema management
+│   ├── search.py                 # CLI search interface
+│   ├── staging.py                # Parquet staging layer (decouple parsing from DB loading)
+│   └── validator.py              # Data quality validation
+├── downloader/                   # Document downloader modules
+│   ├── core.py                   # Core download logic
+│   ├── gui.py                    # tkinter GUI for downloader
+│   ├── manifest.py               # File manifest tracking
+│   ├── metadata.py               # Download-time metadata detection (exhibit type, cycle, service)
+│   └── sources.py                # Source discovery and configuration
 ├── templates/                    # Jinja2 HTML templates
 │   ├── base.html                 # Base layout template
 │   ├── index.html                # Search page
@@ -155,6 +174,7 @@ dod-budget-analysis/
 ├── exhibit_type_inventory.py     # Exhibit type discovery and inventory
 ├── refresh_data.py               # Scheduled data refresh with rollback
 ├── run_pipeline.py               # Full pipeline: build -> validate -> enrich
+├── stage_budget_data.py          # Parquet staging CLI (parse -> Parquet -> SQLite)
 ├── schema_design.py              # DB schema, migrations, reference table seeding
 ├── search_budget.py              # CLI full-text search interface
 ├── validate_budget_data.py       # Data quality validation checks
@@ -169,6 +189,9 @@ DoD websites (Comptroller, Army, Navy, Air Force, Defense-Wide)
         |
         v
 dod_budget_downloader.py  ->  DoD_Budget_Documents/  (PDFs, XLSX, CSV, ZIP)
+        |
+        v  (optional: --use-staging)
+stage_budget_data.py      ->  staging/  (Parquet files + metadata)
         |
         v
 build_budget_db.py        ->  dod_budget.sqlite  (SQLite + FTS5)
@@ -313,7 +336,6 @@ docs/<short-description>                 # documentation only
 | `RATE_LIMIT_DOWNLOAD` | `10` | Download requests per minute per IP |
 | `RATE_LIMIT_DEFAULT` | `120` | Default requests per minute per IP |
 | `TRUSTED_PROXIES` | (empty) | Comma-separated trusted proxy IPs |
-| `SUPPORTED_FISCAL_YEARS` | `2024,2025,2026` | Supported fiscal years |
 
 ## API Endpoints
 
@@ -344,7 +366,8 @@ The primary tables in `dod_budget.sqlite`:
 
 - `budget_lines` — Flat fact table with all parsed budget line items
 - `pdf_pages` — Extracted PDF page text and table data
-- `ingested_files` — File manifest (hash, size, type, row count, ingestion time)
+- `ingested_files` — File manifest (hash, size, type, exhibit_type, budget_cycle, service_org, ingestion time)
+- `pdf_pe_numbers` — PE-to-PDF page junction table for direct joins
 - `budget_lines_fts` / `pdf_pages_fts` — FTS5 virtual tables for full-text search
 - Reference tables: `services_agencies`, `exhibit_types`, `appropriation_titles`, `budget_cycles`
 - Enrichment tables: `pe_index`, `pe_descriptions`, `pe_tags`, `pe_lineage`

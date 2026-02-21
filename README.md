@@ -96,23 +96,31 @@ python dod_budget_downloader.py --years 2026 --overwrite
 | `--refresh-cache` | Ignore cache and refresh discovery from source |
 | `--delay` | Seconds to wait between requests (default: 0.5) |
 | `--extract-zips` | Extract ZIP archives after downloading them |
+| `--no-dedup` | Disable cross-source file deduplication |
+| `--reclassify` | Reclassify files into summary/detail/other folders |
+| `--navy-archive` | Include Navy historical archive source |
 
 ## Output Structure
 
 ```
 DoD_Budget_Documents/
   FY2026/
-    Comptroller/
-      FY2026_Budget_Overview.pdf
-      ...
-    Defense_Wide/
-      ...
-    US_Army/
-      ...
-    US_Navy/
-      ...
-    US_Air_Force/
-      ...
+    PB/
+      Comptroller/
+        summary/
+          p1_display.xlsx
+          r1_display.xlsx
+        detail/
+          p5_display.xlsx
+          r2_display.xlsx
+        other/
+          ...
+      US_Army/
+        summary/
+        detail/
+        other/
+      US_Navy/
+        ...
   FY2025/
     ...
 ```

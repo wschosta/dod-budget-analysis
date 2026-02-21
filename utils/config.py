@@ -487,7 +487,6 @@ class ColumnMapping:
             return ""
         normalized = str(header).lower().replace("\n", " ").strip()
         # Collapse multiple spaces
-        import re
         normalized = re.sub(r'\s+', ' ', normalized)
         return normalized
 
@@ -516,7 +515,6 @@ class FilePatterns:
         Returns:
             True if matches budget document naming
         """
-        import re
         filename_lower = filename.lower()
         patterns = [
             r"budget.*justification",
@@ -537,10 +535,9 @@ class FilePatterns:
             filename: Filename to parse
 
         Returns:
-            Fiscal year (2000-2099) or None
+            Fiscal year (1990-2099) or None
         """
-        import re
-        match = re.search(r'20\d{2}', filename)
+        match = re.search(r'(?:19|20)\d{2}', filename)
         if match:
             try:
                 return int(match.group())

@@ -520,7 +520,11 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             ingested_at TEXT DEFAULT (datetime('now')),
             row_count INTEGER,
             status TEXT DEFAULT 'ok',
-            source_url TEXT
+            source_url TEXT,
+            exhibit_type TEXT,
+            budget_cycle TEXT,
+            download_timestamp TEXT,
+            service_org TEXT
         );
 
         -- Data source registry
@@ -769,15 +773,16 @@ def _detect_currency_year(sheet_name: str, filename: str) -> str:
 def _normalise_fiscal_year(raw: str) -> str:
     """Normalise a raw fiscal-year string to canonical "FY YYYY" format (Step 1.B2-d).
 
-    Handles the three common variants that appear in DoD spreadsheet sheet names:
+    Handles the common variants that appear in DoD spreadsheet sheet names:
       - "2026"     → "FY 2026"
       - "FY2026"   → "FY 2026"
       - "FY 2026"  → "FY 2026"  (already canonical, returned as-is)
+      - "1998"     → "FY 1998"  (Navy archive historical data)
 
     If the input contains no recognisable 4-digit year, it is returned unchanged
     so that callers always get a deterministic result.
     """
-    m = re.search(r"(20\d{2})", raw)
+    m = re.search(r"((?:19|20)\d{2})", raw)
     if m:
         return f"FY {m.group(1)}"
     return raw
@@ -1792,13 +1797,16 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
 
     except Exception as e:
         print(f"  ERROR processing {file_path.name}: {e}")
+        _et, _bc, _so = _derive_ingest_metadata(relative_path, "pdf")
         conn.execute(
             "INSERT OR REPLACE INTO ingested_files "
             "(file_path, file_type, file_size, file_modified,"
-            " ingested_at, row_count, status) "
-            "VALUES (?,?,?,?,datetime('now'),?,?)",
+            " ingested_at, row_count, status,"
+            " exhibit_type, budget_cycle, service_org) "
+            "VALUES (?,?,?,?,datetime('now'),?,?,?,?,?)",
             (relative_path, "pdf", file_path.stat().st_size,
-             file_path.stat().st_mtime, 0, f"error: {e}")
+             file_path.stat().st_mtime, 0, f"error: {e}",
+             _et, _bc, _so)
         )
         return 0, 0
 
@@ -1934,6 +1942,57 @@ def _file_needs_update(conn: sqlite3.Connection, rel_path: str,
     if row[0] != stat.st_size or abs((row[1] or 0) - stat.st_mtime) > 1:
         return True  # Modified file
     return False
+
+
+def _derive_ingest_metadata(rel_path: str, file_type: str) -> tuple[str, str | None, str | None]:
+    """Derive exhibit_type, budget_cycle, and service_org from a relative path.
+
+    Parses the directory structure to populate ingested_files metadata columns
+    that were previously left NULL.
+
+    Args:
+        rel_path: Relative path from docs_dir (e.g. "FY2026/PB/US_Army/summary/p1.xlsx")
+        file_type: "xlsx" or "pdf"
+
+    Returns:
+        Tuple of (exhibit_type, budget_cycle, service_org).
+    """
+    p = Path(rel_path)
+    filename = p.name
+
+    # Exhibit type from filename
+    if file_type == "pdf":
+        exhibit_type = _detect_pdf_exhibit_type(filename)
+    else:
+        exhibit_type = _detect_exhibit_type(filename)
+
+    # Budget cycle from path: FY{year}/{cycle}/... where cycle in _KNOWN_BUDGET_CYCLES
+    budget_cycle = None
+    parts = list(p.parts)
+    for i, part in enumerate(parts):
+        if part.upper() in _KNOWN_BUDGET_CYCLES:
+            budget_cycle = part.upper()
+            break
+
+    # Service org from path via _determine_category logic
+    service_org = None
+    parts_lower = [part.lower() for part in parts]
+    if "comptroller" in parts_lower:
+        service_org = "Comptroller"
+    elif "defense_wide" in parts_lower:
+        service_org = "Defense-Wide"
+    elif "us_army" in parts_lower or "army" in parts_lower:
+        service_org = "Army"
+    elif "navy" in parts_lower or "us_navy" in parts_lower:
+        service_org = "Navy"
+    elif "air_force" in parts_lower or "airforce" in parts_lower:
+        service_org = "Air Force"
+    elif "space_force" in parts_lower or "spaceforce" in parts_lower:
+        service_org = "Space Force"
+    elif "marine_corps" in parts_lower or "marines" in parts_lower:
+        service_org = "Marine Corps"
+
+    return exhibit_type, budget_cycle, service_org
 
 
 def _remove_file_data(conn: sqlite3.Connection, rel_path: str, file_type: str):
@@ -2373,13 +2432,15 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                         error_type=type(_xl_err).__name__,
                         error_detail=str(_xl_err),
                     ))
+                    _et, _bc, _so = _derive_ingest_metadata(rel_path, "xlsx")
                     conn.execute(
                         "INSERT OR REPLACE INTO ingested_files "
                         "(file_path, file_type, file_size, file_modified,"
-                        " ingested_at, row_count, status) "
-                        "VALUES (?,?,?,?,datetime('now'),?,?)",
+                        " ingested_at, row_count, status,"
+                        " exhibit_type, budget_cycle, service_org) "
+                        "VALUES (?,?,?,?,datetime('now'),?,?,?,?,?)",
                         (rel_path, "xlsx", xl.stat().st_size, xl.stat().st_mtime,
-                         0, f"error: {_xl_err}"))
+                         0, f"error: {_xl_err}", _et, _bc, _so))
                     continue
 
                 if result.get("error"):
@@ -2419,12 +2480,15 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                     _metrics["rows"] = total_budget_rows
 
                 stat = xl.stat()
+                _et, _bc, _so = _derive_ingest_metadata(rel_path, "xlsx")
                 conn.execute(
                     "INSERT OR REPLACE INTO ingested_files "
                     "(file_path, file_type, file_size, file_modified,"
-                    " ingested_at, row_count, status) "
-                    "VALUES (?,?,?,?,datetime('now'),?,?)",
-                    (rel_path, "xlsx", stat.st_size, stat.st_mtime, len(rows), "ok"))
+                    " ingested_at, row_count, status,"
+                    " exhibit_type, budget_cycle, service_org) "
+                    "VALUES (?,?,?,?,datetime('now'),?,?,?,?,?)",
+                    (rel_path, "xlsx", stat.st_size, stat.st_mtime, len(rows), "ok",
+                     _et, _bc, _so))
                 _mark_file_processed(conn, session_id, rel_path, "excel", rows_count=len(rows))
                 elapsed = time.time() - t_excel_start
                 excel_file_times.append(elapsed / max(xi + 1, 1))
@@ -2491,13 +2555,15 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 error_type=type(_xl_err).__name__,
                 error_detail=str(_xl_err),
             ))
+            _et, _bc, _so = _derive_ingest_metadata(rel_path, "xlsx")
             conn.execute(
                 "INSERT OR REPLACE INTO ingested_files "
                 "(file_path, file_type, file_size, file_modified,"
-                " ingested_at, row_count, status) "
-                "VALUES (?,?,?,?,datetime('now'),?,?)",
+                " ingested_at, row_count, status,"
+                " exhibit_type, budget_cycle, service_org) "
+                "VALUES (?,?,?,?,datetime('now'),?,?,?,?,?)",
                 (rel_path, "xlsx", xlsx.stat().st_size, xlsx.stat().st_mtime,
-                 0, f"error: {_xl_err}")
+                 0, f"error: {_xl_err}", _et, _bc, _so)
             )
             files_done_total += 1
             continue
@@ -2510,12 +2576,15 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         excel_file_times.append(file_elapsed)
 
         stat = xlsx.stat()
+        _et, _bc, _so = _derive_ingest_metadata(rel_path, "xlsx")
         conn.execute(
             "INSERT OR REPLACE INTO ingested_files "
             "(file_path, file_type, file_size, file_modified,"
-            " ingested_at, row_count, status) "
-            "VALUES (?,?,?,?,datetime('now'),?,?)",
-            (rel_path, "xlsx", stat.st_size, stat.st_mtime, rows, "ok")
+            " ingested_at, row_count, status,"
+            " exhibit_type, budget_cycle, service_org) "
+            "VALUES (?,?,?,?,datetime('now'),?,?,?,?,?)",
+            (rel_path, "xlsx", stat.st_size, stat.st_mtime, rows, "ok",
+             _et, _bc, _so)
         )
         total_budget_rows += rows
         files_done_total += 1
@@ -2714,13 +2783,15 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                     except Exception as e:
                         print(f"  ERROR: {pdf.name}: {e}")
                         stat = pdf.stat()
+                        _et, _bc, _so = _derive_ingest_metadata(rel_path, "pdf")
                         conn.execute(
                             "INSERT OR REPLACE INTO ingested_files "
                             "(file_path, file_type, file_size, file_modified,"
-                            " ingested_at, row_count, status) "
-                            "VALUES (?,?,?,?,datetime('now'),?,?)",
+                            " ingested_at, row_count, status,"
+                            " exhibit_type, budget_cycle, service_org) "
+                            "VALUES (?,?,?,?,datetime('now'),?,?,?,?,?)",
                             (rel_path, "pdf", stat.st_size, stat.st_mtime,
-                             0, f"error: {e}"))
+                             0, f"error: {e}", _et, _bc, _so))
                         _failures.append(FailedFileEntry(
                             file_path=rel_path,
                             error_type=type(e).__name__,
@@ -2737,13 +2808,15 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                     if error:
                         print(f"  ERROR: {pdf.name}: {error}")
                         stat = pdf.stat()
+                        _et, _bc, _so = _derive_ingest_metadata(rel_path, "pdf")
                         conn.execute(
                             "INSERT OR REPLACE INTO ingested_files "
                             "(file_path, file_type, file_size, file_modified,"
-                            " ingested_at, row_count, status) "
-                            "VALUES (?,?,?,?,datetime('now'),?,?)",
+                            " ingested_at, row_count, status,"
+                            " exhibit_type, budget_cycle, service_org) "
+                            "VALUES (?,?,?,?,datetime('now'),?,?,?,?,?)",
                             (rel_path, "pdf", stat.st_size, stat.st_mtime,
-                             0, f"error: {error}"))
+                             0, f"error: {error}", _et, _bc, _so))
                         _failures.append(FailedFileEntry(
                             file_path=rel_path,
                             error_type="ExtractionError",
@@ -2797,13 +2870,15 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
                     file_status = "ok_with_issues" if issues else "ok"
                     stat = pdf.stat()
+                    _et, _bc, _so = _derive_ingest_metadata(rel_path, "pdf")
                     conn.execute(
                         "INSERT OR REPLACE INTO ingested_files "
                         "(file_path, file_type, file_size, file_modified,"
-                        " ingested_at, row_count, status) "
-                        "VALUES (?,?,?,?,datetime('now'),?,?)",
+                        " ingested_at, row_count, status,"
+                        " exhibit_type, budget_cycle, service_org) "
+                        "VALUES (?,?,?,?,datetime('now'),?,?,?,?,?)",
                         (rel_path, "pdf", stat.st_size, stat.st_mtime,
-                         pages, file_status))
+                         pages, file_status, _et, _bc, _so))
 
                     total_pdf_pages += pages
                     _metrics["pages"] = total_pdf_pages
@@ -2903,13 +2978,15 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             file_status = "ok_with_issues" if issue_count > 0 else "ok"
 
             stat = pdf.stat()
+            _et, _bc, _so = _derive_ingest_metadata(rel_path, "pdf")
             conn.execute(
                 "INSERT OR REPLACE INTO ingested_files "
                 "(file_path, file_type, file_size, file_modified,"
-                " ingested_at, row_count, status) "
-                "VALUES (?,?,?,?,datetime('now'),?,?)",
+                " ingested_at, row_count, status,"
+                " exhibit_type, budget_cycle, service_org) "
+                "VALUES (?,?,?,?,datetime('now'),?,?,?,?,?)",
                 (rel_path, "pdf", stat.st_size, stat.st_mtime, pages,
-                 file_status))
+                 file_status, _et, _bc, _so))
             total_pdf_pages += pages
             _metrics["pages"] = total_pdf_pages
 
