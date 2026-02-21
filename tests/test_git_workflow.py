@@ -50,6 +50,8 @@ class TestBranchNaming:
         if result.returncode != 0:
             pytest.skip("Not in a git repository")
         branch = result.stdout.strip()
+        if branch == "HEAD":
+            pytest.skip("Detached HEAD (e.g. CI PR checkout)")
         assert any(p.match(branch) for p in self.VALID_PATTERNS), (
             f"Branch '{branch}' does not match any allowed pattern: "
             f"main, develop, claude/<id>-<desc>, feat/<desc>, fix/<desc>, "
