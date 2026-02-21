@@ -33,9 +33,12 @@ RUN pip install --no-cache-dir --upgrade pip==24.3.1 && \
 # Copy application source (exclude test/dev files via .dockerignore)
 COPY api/           api/
 COPY utils/         utils/
+COPY downloader/    downloader/
+COPY pipeline/      pipeline/
 # DOCKER-001: Add frontend templates and static assets
 COPY templates/     templates/
 COPY static/        static/
+# Backward-compatible shims (root-level entry points)
 COPY schema_design.py       .
 COPY exhibit_catalog.py     .
 COPY validate_budget_data.py .

@@ -25,6 +25,12 @@ class ManifestEntry:
         file_size: Optional[int] = None,
         sha256_hash: Optional[str] = None,
         status: str = "pending",
+        # Enriched metadata fields (optional for backward compatibility)
+        exhibit_type: Optional[str] = None,
+        exhibit_category: Optional[str] = None,
+        budget_cycle: Optional[str] = None,
+        service_org: Optional[str] = None,
+        link_text: Optional[str] = None,
     ):
         self.url = url
         self.filename = filename
@@ -34,10 +40,16 @@ class ManifestEntry:
         self.file_size = file_size
         self.sha256_hash = sha256_hash
         self.status = status  # pending, skipped, ok, corrupted, error
+        # Enriched metadata
+        self.exhibit_type = exhibit_type
+        self.exhibit_category = exhibit_category
+        self.budget_cycle = budget_cycle
+        self.service_org = service_org
+        self.link_text = link_text
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert entry to dictionary for JSON serialization."""
-        return {
+        d = {
             "url": self.url,
             "filename": self.filename,
             "source": self.source,
@@ -47,10 +59,26 @@ class ManifestEntry:
             "sha256_hash": self.sha256_hash,
             "status": self.status,
         }
+        # Include enriched fields only when present (backward-compat)
+        if self.exhibit_type is not None:
+            d["exhibit_type"] = self.exhibit_type
+        if self.exhibit_category is not None:
+            d["exhibit_category"] = self.exhibit_category
+        if self.budget_cycle is not None:
+            d["budget_cycle"] = self.budget_cycle
+        if self.service_org is not None:
+            d["service_org"] = self.service_org
+        if self.link_text is not None:
+            d["link_text"] = self.link_text
+        return d
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ManifestEntry":
-        """Create entry from dictionary."""
+        """Create entry from dictionary.
+
+        Uses .get() for enriched fields for backward compatibility
+        with old manifests that don't have them.
+        """
         return cls(
             url=data["url"],
             filename=data["filename"],
@@ -60,6 +88,11 @@ class ManifestEntry:
             file_size=data.get("file_size"),
             sha256_hash=data.get("sha256_hash"),
             status=data.get("status", "pending"),
+            exhibit_type=data.get("exhibit_type"),
+            exhibit_category=data.get("exhibit_category"),
+            budget_cycle=data.get("budget_cycle"),
+            service_org=data.get("service_org"),
+            link_text=data.get("link_text"),
         )
 
 

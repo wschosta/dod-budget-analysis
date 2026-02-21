@@ -18,7 +18,7 @@ from fastapi import Query as FQuery
 from api.database import get_db
 from api.models import AggregationResponse, AggregationRow
 from utils.cache import TTLCache
-from utils.database import get_amount_columns
+from utils.database import _validate_identifier, get_amount_columns
 from utils.query import build_where_clause
 
 router = APIRouter(prefix="/aggregations", tags=["aggregations"])
@@ -107,6 +107,8 @@ def aggregate(
     amount_cols = get_amount_columns(conn)
     if not amount_cols:
         amount_cols = ["amount_fy2024_actual", "amount_fy2025_enacted", "amount_fy2026_request"]
+    for c in amount_cols:
+        _validate_identifier(c, "column name")
 
     sum_exprs = ",\n            ".join(
         f"SUM({c}) AS {c}" for c in amount_cols

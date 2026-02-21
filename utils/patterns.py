@@ -24,8 +24,8 @@ PE_NUMBER = re.compile(r'\b\d{7}[A-Z]{1,2}\b')
 FTS5_SPECIAL_CHARS = re.compile(r'[\"()*:^+]')
 
 # Fiscal year patterns in various formats
-# Matches: "FY2026", "FY 2026", "2026", etc.
-FISCAL_YEAR = re.compile(r'(FY\s*)?20\d{2}', re.IGNORECASE)
+# Matches: "FY2026", "FY 2026", "2026", "FY1998", etc.
+FISCAL_YEAR = re.compile(r'(FY\s*)?(?:19|20)\d{2}', re.IGNORECASE)
 
 # Account code and title: "1234 Aircraft Procurement, Air Force"
 # Captures the code (group 1) and title (group 2)

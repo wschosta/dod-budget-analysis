@@ -43,6 +43,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.responses import Response
 
 from api.database import get_db_path, _make_conn
 from utils.database import get_slow_queries, get_query_stats
@@ -306,7 +307,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         return _etag_value
 
     @app.middleware("http")
-    async def cache_control_middleware(request: Request, call_next):
+    async def cache_control_middleware(request: Request, call_next) -> Response:
         """Add Cache-Control headers and handle ETag/If-None-Match."""
         path = request.url.path
 
@@ -319,7 +320,6 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             if etag:
                 if_none_match = request.headers.get("If-None-Match")
                 if if_none_match and if_none_match == etag:
-                    from starlette.responses import Response
                     return Response(status_code=304, headers={"ETag": etag})
 
         response = await call_next(request)
@@ -347,7 +347,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     # ── Request logging + rate limiting middleware (4.C3-a, 4.C4-a) ──────────
 
     @app.middleware("http")
-    async def log_and_rate_limit(request: Request, call_next):
+    async def log_and_rate_limit(request: Request, call_next) -> Response:
         """Log each request, enforce per-IP rate limits, and record metrics."""
         # APP-003: Generate request ID for tracing
         request_id = str(uuid.uuid4())[:8]
@@ -428,7 +428,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     # ── Content Security Policy + security headers (DEPLOY-003) ──────────────
 
     @app.middleware("http")
-    async def security_headers(request: Request, call_next):
+    async def security_headers(request: Request, call_next) -> Response:
         """Add Content-Security-Policy, X-Content-Type-Options, and X-Frame-Options."""
         response = await call_next(request)
         # CSP: allow self + CDN origins used by HTMX and Chart.js.
@@ -448,7 +448,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     # ── Error handling middleware (2.C5-b) ────────────────────────────────────
 
     @app.exception_handler(Exception)
-    async def generic_exception_handler(request: Request, exc: Exception):
+    async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         """Catch unhandled exceptions and return JSON instead of HTML traceback."""
         return JSONResponse(
             status_code=500,
@@ -460,7 +460,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         )
 
     @app.exception_handler(ValueError)
-    async def value_error_handler(request: Request, exc: ValueError):
+    async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse:
         return JSONResponse(
             status_code=400,
             content={"error": "Bad request", "detail": str(exc), "status_code": 400},
@@ -468,8 +468,8 @@ def create_app(db_path: Path | None = None) -> FastAPI:
 
     # ── Health check ──────────────────────────────────────────────────────────
 
-    @app.get("/health", tags=["meta"], summary="Health check")
-    def health():
+    @app.get("/health", tags=["meta"], summary="Health check", response_model=None)
+    def health() -> dict | JSONResponse:
         """Return 200 OK if the API is running and can reach the database."""
         db_path = get_db_path()
         db_ok = db_path.exists()
@@ -496,8 +496,9 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         tags=["meta"],
         summary="Detailed health metrics",
         response_description="Operational metrics for monitoring dashboards",
+        response_model=None,
     )
-    def health_detailed():
+    def health_detailed() -> dict | JSONResponse:
         """Return detailed operational metrics for monitoring dashboards.
 
         Includes uptime, request/error counters, database statistics,
@@ -561,7 +562,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         summary="Slow query log",
         response_description="Last 50 slow queries for performance monitoring",
     )
-    def health_queries():
+    def health_queries() -> dict:
         """Return the last 50 slow queries (>100ms) for performance monitoring."""
         return {
             "stats": get_query_stats(),
@@ -596,17 +597,11 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         templates = Jinja2Templates(directory=str(templates_dir))
 
         # OPT-FMT-001: Use shared format_amount from utils.formatting
-        def fmt_amount(value) -> str:
+        def fmt_amount(value: object) -> str:
             """Jinja filter: format dollar amount in $K with comma separators."""
             try:
-                v = float(value)
+                return f"{float(value):,.1f}"
             except (TypeError, ValueError):
-                return "—"
-            # For the template display we show value as-is with comma formatting
-            # (values are already in $K)
-            try:
-                return f"{v:,.1f}"
-            except Exception:
                 return "—"
 
         # FE-003: Custom filter to remove a single key=value from query params

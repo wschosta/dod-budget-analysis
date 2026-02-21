@@ -11,7 +11,7 @@ addopts = "-v --tb=short"
 
 # DONE [Group: BEAR] BEAR-006: Coverage threshold enforcement
 [tool.coverage.run]
-source = ["api", "utils"]
+source = ["api", "utils", "downloader", "pipeline"]
 
 [tool.coverage.report]
 fail_under = 80

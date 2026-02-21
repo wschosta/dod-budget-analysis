@@ -7,13 +7,12 @@ GET /api/v1/budget-lines/{id} single-item endpoint.
 """
 
 import sqlite3
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.database import get_db
 from api.models import BudgetLineDetailOut, BudgetLineOut, PaginatedResponse
-from utils.query import build_where_clause
+from utils.query import ALLOWED_SORT_COLUMNS, build_where_clause
 from utils.strings import sanitize_fts5_query
 
 router = APIRouter(prefix="/budget-lines", tags=["budget-lines"])
@@ -39,28 +38,8 @@ _SELECT_ALL_COLUMNS = """
     quantity_fy2026_request, quantity_fy2026_total
 """
 
-_ALLOWED_SORT = {
-    "id", "source_file", "exhibit_type", "fiscal_year",
-    "organization_name", "account", "account_title", "pe_number",
-    "amount_fy2026_request", "amount_fy2025_enacted", "amount_fy2024_actual",
-}
-
-
-def _build_where(
-    fiscal_year: list[str] | None,
-    service: list[str] | None,
-    exhibit_type: list[str] | None,
-    pe_number: list[str] | None,
-    appropriation_code: list[str] | None,
-) -> tuple[str, list[Any]]:
-    """Build WHERE clause — delegates to shared utils/query.py builder."""
-    return build_where_clause(
-        fiscal_year=fiscal_year,
-        service=service,
-        exhibit_type=exhibit_type,
-        pe_number=pe_number,
-        appropriation_code=appropriation_code,
-    )
+# Backward-compatible alias — canonical definition lives in utils/query.py
+_ALLOWED_SORT = ALLOWED_SORT_COLUMNS
 
 
 @router.get("", response_model=PaginatedResponse, summary="List budget lines")
@@ -71,7 +50,7 @@ def list_budget_lines(
     pe_number: list[str] | None = Query(None, description="Filter by PE number(s)"),
     appropriation_code: list[str] | None = Query(None, description="Filter by appropriation"),
     budget_type: list[str] | None = Query(None, description="Filter by budget type (RDT&E, Procurement, etc.)"),
-    q: str | None = Query(None, description="Free-text search across account/line-item titles"),
+    q: str | None = Query(None, max_length=500, description="Free-text search across account/line-item titles"),
     min_amount: float | None = Query(None, description="Min FY2026 request amount (thousands)"),
     max_amount: float | None = Query(None, description="Max FY2026 request amount (thousands)"),
     sort_by: str = Query("id", description="Column to sort by"),
@@ -98,7 +77,7 @@ def list_budget_lines(
                     (safe_q,),
                 ).fetchall()
                 fts_ids = [r[0] for r in fts_rows]
-            except Exception:
+            except (sqlite3.OperationalError, sqlite3.DatabaseError):
                 fts_ids = []  # FTS table missing → no matches
 
     where, params = build_where_clause(
