@@ -8,7 +8,7 @@ import sqlite3
 
 import pytest
 
-from utils.pdf_sections import detect_project_boundaries, parse_narrative_sections
+from utils.pdf_sections import detect_project_boundaries
 
 
 # ── detect_project_boundaries tests ──────────────────────────────────────────

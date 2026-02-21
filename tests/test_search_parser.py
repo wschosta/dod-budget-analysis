@@ -3,9 +3,7 @@
 Tests the structured query parsing in utils/search_parser.py.
 """
 
-import pytest
-
-from utils.search_parser import ParsedQuery, parse_search_query, apply_parsed_filters
+from utils.search_parser import parse_search_query, apply_parsed_filters
 
 
 class TestParseSearchQuery:
