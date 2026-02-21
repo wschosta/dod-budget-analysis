@@ -17,7 +17,14 @@
 
 <div class="programs-layout">
 
-  <aside class="filter-panel" aria-label="Program filters">
+  {# FALCON-14: Mobile filter drawer toggle #}
+  <button type="button" class="filter-drawer-toggle" id="pe-filter-drawer-toggle"
+          aria-expanded="false" aria-controls="pe-filter-panel"
+          onclick="toggleFilterDrawer('pe-filter-panel','pe-filter-drawer-toggle')">
+    Filters &amp; Search Options
+  </button>
+
+  <aside class="filter-panel" id="pe-filter-panel" aria-label="Program filters">
     <h2>Program Filters</h2>
     <form id="pe-filter-form"
           role="search"

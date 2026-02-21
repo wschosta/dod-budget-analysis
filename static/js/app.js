@@ -182,6 +182,20 @@ function toggleFilterPanel() {
   }
 }
 
+// ── FALCON-14: Filter drawer toggle for mobile viewports ──────────────────────
+function toggleFilterDrawer(panelId, btnId) {
+  panelId = panelId || "filter-panel";
+  btnId = btnId || "filter-drawer-toggle";
+  var panel = document.getElementById(panelId);
+  var btn = document.getElementById(btnId);
+  if (!panel) return;
+  var isOpen = panel.classList.toggle("drawer-open");
+  if (btn) {
+    btn.classList.toggle("open", isOpen);
+    btn.setAttribute("aria-expanded", String(isOpen));
+  }
+}
+
 // ── URL query params → filter state (3.A3-b) ──────────────────────────────────
 // On page load, read URL params and pre-populate form fields.
 

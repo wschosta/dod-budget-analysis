@@ -741,7 +741,46 @@ tr.selected td { background: var(--clr-sky); }
   flex-wrap: wrap;
 }
 
-/* ── Responsive (3.A7-a) ──────────────────────────────────────────────────── */
+/* ── Responsive (3.A7-a + FALCON-14) ─────────────────────────────────────── */
+
+/* FALCON-14: Filter drawer toggle button (hidden on desktop) */
+.filter-drawer-toggle {
+  display: none;
+  width: 100%;
+  padding: .6rem 1rem;
+  margin-bottom: .75rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  font-size: .85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+.filter-drawer-toggle::after {
+  content: "\25BC";
+  float: right;
+  font-size: .7rem;
+  transition: transform .2s;
+}
+.filter-drawer-toggle.open::after {
+  transform: rotate(180deg);
+}
+
+/* FALCON-14: Horizontal scroll hint for tables on touch devices */
+.table-wrapper {
+  -webkit-overflow-scrolling: touch;
+  position: relative;
+}
+.table-scroll-hint {
+  display: none;
+  text-align: center;
+  font-size: .75rem;
+  color: var(--text-secondary);
+  padding: .25rem 0;
+}
+
 @media (max-width: 768px) {
   .hamburger { display: flex; }
   .nav-links {
@@ -758,17 +797,49 @@ tr.selected td { background: var(--clr-sky); }
   }
   .nav-links.open { display: flex; }
   .nav-links a { margin-left: 0; padding: .5rem 0; }
+
+  /* FALCON-14: Filter drawer behavior */
   .search-layout {
     grid-template-columns: 1fr;
   }
+  .filter-drawer-toggle { display: block; }
   .filter-panel {
     order: -1;
+    display: none;
   }
+  .filter-panel.drawer-open {
+    display: block;
+  }
+
+  /* FALCON-14: Programs filter drawer */
+  .programs-layout {
+    grid-template-columns: 1fr;
+  }
+
   .charts-grid {
     grid-template-columns: 1fr;
   }
   .col-toggles { display: none; }  /* hide column toggles on mobile */
   td, th { padding: .45rem .5rem; font-size: .8rem; }
+
+  /* FALCON-14: Table scroll hint on narrow screens */
+  .table-scroll-hint { display: block; }
+  .table-wrapper table { min-width: 640px; }
+
+  /* FALCON-14: Chart responsive sizing */
+  .chart-card canvas { max-height: 250px; }
+  .chart-card { padding: .75rem; }
+  .chart-export-btn { font-size: .75rem; padding: .25rem .5rem; }
+
+  /* FALCON-14: Footer responsive */
+  .footer-content { flex-direction: column; gap: .5rem; text-align: center; }
+  .footer-links { justify-content: center; }
+
+  /* FALCON-14: PE detail responsive */
+  .pe-meta { flex-wrap: wrap; }
+  .pe-enrichment-status { flex-wrap: wrap; }
+  .pe-actions { flex-direction: column; }
+  .pe-actions .btn { width: 100%; text-align: center; }
 }
 
 /* ── Tablet breakpoint (~600px) ────────────────────────────────────────────── */
@@ -776,11 +847,40 @@ tr.selected td { background: var(--clr-sky); }
   .charts-grid { grid-template-columns: 1fr; }
   .dashboard-stats { grid-template-columns: repeat(2, 1fr); }
   .pe-card-grid { grid-template-columns: 1fr; }
+  .pe-related-grid { grid-template-columns: 1fr; }
+
+  /* FALCON-14: Compact filter groups at tablet */
+  .filter-group label { font-size: .75rem; }
+  .filter-group select,
+  .filter-group input { font-size: .8rem; }
+
+  /* FALCON-14: Landing charts single-column */
+  .landing-charts-grid { grid-template-columns: 1fr; }
+  .hero-search-form { flex-direction: column; }
+  .hero-title { font-size: 1.4rem; }
+
+  /* FALCON-14: Advanced search compact */
+  .adv-condition-row { flex-wrap: wrap; }
+  .adv-field, .adv-op { flex: 1 1 100%; }
+
+  /* FALCON-14: Results header stacking */
+  .results-header { flex-wrap: wrap; gap: .5rem; }
+  .export-btn-group { order: 10; }
 }
 
 @media (max-width: 480px) {
   .results-header { flex-direction: column; align-items: flex-start; }
   .dashboard-stats { grid-template-columns: 1fr; }
+
+  /* FALCON-14: Very small screen tweaks */
+  .container { padding: 0 .5rem; }
+  .main-content { padding: .75rem .5rem; }
+  .hero-search { padding: 1.5rem .5rem; }
+  .hero-subtitle { font-size: .85rem; }
+  .stat-card { padding: .75rem; }
+  .stat-label { font-size: .7rem; }
+  .stat-value { font-size: 1.2rem; }
+  .breadcrumb { font-size: .8rem; }
 }
 
 /* ── CSS-001: Focus-visible styles for keyboard navigation ───────────────── */
@@ -1139,10 +1239,7 @@ tr:focus-within td {
   margin-top: .75rem;
   text-align: center;
 }
-@media (max-width: 640px) {
-  .adv-condition-row { flex-wrap: wrap; }
-  .adv-field, .adv-op { flex: 1 1 100%; }
-}
+/* FALCON-14: adv-condition responsive now consolidated in 600px block */
 
 /* ── Saved searches ──────────────────────────────────────────────────────── */
 .saved-search-item {
@@ -1269,11 +1366,7 @@ tr:focus-within td {
 .pe-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
 .pe-related-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .75rem; }
 
-@media (max-width: 768px) {
-  .programs-layout { grid-template-columns: 1fr; }
-  .pe-card-grid { grid-template-columns: 1fr; }
-  .pe-related-grid { grid-template-columns: 1fr; }
-}
+/* FALCON-14: programs-layout responsive now consolidated in main 768px block above */
 
 /* ── Dashboard ────────────────────────────────────────────────────────────── */
 .dashboard-stats {
@@ -1579,4 +1672,16 @@ tr:focus-within td {
     color: var(--text-primary);
     border-color: var(--border-color);
   }
+  :root:not([data-theme="light"]) .filter-drawer-toggle {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+  }
+}
+
+/* FALCON-14: Dark mode filter drawer toggle */
+[data-theme="dark"] .filter-drawer-toggle {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-color: var(--border-color);
 }
