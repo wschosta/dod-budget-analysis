@@ -71,7 +71,7 @@ class ProgressTracker:
     records the correct metadata for failure entries.
     """
 
-    def __init__(self, total_files: int):
+    def __init__(self, total_files: int) -> None:
         """Initialize counters, timers, and terminal width for progress rendering.
 
         Args:
@@ -104,7 +104,7 @@ class ProgressTracker:
         filled = int(width * fraction)
         return f"[{'#' * filled}{'-' * (width - filled)}]"
 
-    def set_source(self, year: str, source: str):
+    def set_source(self, year: str, source: str) -> None:
         """Update the current fiscal year and source label.
 
         Uses thread-local storage so concurrent workers each track their own
@@ -116,7 +116,7 @@ class ProgressTracker:
         self.current_year = year
         self.current_source = source
 
-    def print_overall(self):
+    def print_overall(self) -> None:
         """Print the overall progress line."""
         with self._lock:
             frac = self.processed / self.total_files if self.total_files else 0
@@ -136,7 +136,7 @@ class ProgressTracker:
             print(f"{line:<{self.term_width}}", end="", flush=True)
 
     def print_file_progress(self, filename: str, downloaded: int, total: int,
-                            file_start: float):
+                            file_start: float) -> None:
         """Print per-file download progress with speed."""
         # Throttle updates to at most every 0.25 seconds
         now = time.time()
@@ -173,7 +173,7 @@ class ProgressTracker:
             )
             print(f"{line:<{self.term_width}}", end="", flush=True)
 
-    def file_done(self, filename: str, size: int, status: str):
+    def file_done(self, filename: str, size: int, status: str) -> None:
         """Record a completed file and print result."""
         with self._lock:
             tag = {"ok": "OK", "skip": "SKIP", "redownload": "OK",
@@ -226,7 +226,7 @@ class DomainRateLimiter:
     serialised with the configured delay.
     """
 
-    def __init__(self, delay: float):
+    def __init__(self, delay: float) -> None:
         self._delay = delay
         self._meta_lock = threading.Lock()
         self._domain_locks: dict[str, threading.Lock] = {}
@@ -290,7 +290,7 @@ def get_session() -> requests.Session:
     return _global_session
 
 
-def _close_session():
+def _close_session() -> None:
     """Close global session and cleanup."""
     global _global_session
     if _global_session:
@@ -609,7 +609,7 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
     return False
 
 
-def _extract_zip(zip_path: Path, dest_dir: Path):
+def _extract_zip(zip_path: Path, dest_dir: Path) -> None:
     """Extract a ZIP archive into dest_dir and log the result."""
     try:
         with zipfile.ZipFile(zip_path, "r") as zf:
@@ -1035,7 +1035,7 @@ def download_all(
 
 # ---- Main ----
 
-def main():
+def main() -> None:
     """Parse CLI arguments and run the interactive or unattended download pipeline."""
     parser = argparse.ArgumentParser(
         description="Download budget documents from DoD Comptroller and service websites."

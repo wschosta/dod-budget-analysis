@@ -19,6 +19,7 @@ from enrich_budget_db import (
     run_phase2,
     run_phase3,
     run_phase4,
+    run_phase5,
     _extract_fy_from_path,
     _context_window,
     _tags_from_keywords,
@@ -117,6 +118,23 @@ def _make_db() -> sqlite3.Connection:
             confidence REAL DEFAULT 0.5,
             UNIQUE(source_pe, referenced_pe, link_type, fiscal_year)
         );
+
+        CREATE TABLE project_descriptions (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            pe_number        TEXT NOT NULL,
+            project_number   TEXT,
+            project_title    TEXT,
+            fiscal_year      TEXT,
+            section_header   TEXT NOT NULL,
+            description_text TEXT NOT NULL,
+            source_file      TEXT,
+            page_start       INTEGER,
+            page_end         INTEGER,
+            created_at       TEXT DEFAULT (datetime('now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_proj_desc_pe ON project_descriptions(pe_number);
+        CREATE INDEX IF NOT EXISTS idx_proj_desc_proj ON project_descriptions(project_number);
+        CREATE INDEX IF NOT EXISTS idx_proj_desc_fy ON project_descriptions(fiscal_year);
     """)
     return conn
 
@@ -445,3 +463,361 @@ class TestHelpers:
         tags = _tags_from_keywords("0602120A", "submarine warfare and undersea systems")
         tag_names = [t[1] for t in tags]
         assert "submarine" in tag_names
+
+
+# ── Phase 5 tests ─────────────────────────────────────────────────────────────
+
+class TestPhase5:
+    """Tests for Phase 5: project-level narrative decomposition."""
+
+    def _setup_pe(self, conn, pe_number="0602120A"):
+        """Insert a budget line and build pe_index for a PE."""
+        _insert_budget_line(conn, pe_number=pe_number)
+        run_phase1(conn)
+
+    def _insert_pe_description(self, conn, pe_number="0602120A",
+                                fiscal_year="2026",
+                                source_file="army/FY2026/r2.pdf",
+                                page_start=1, page_end=3,
+                                section_header="Description",
+                                description_text="Sample description."):
+        """Insert a pe_descriptions row for Phase 5 to consume."""
+        conn.execute("""
+            INSERT INTO pe_descriptions
+                (pe_number, fiscal_year, source_file, page_start, page_end,
+                 section_header, description_text)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (pe_number, fiscal_year, source_file, page_start, page_end,
+              section_header, description_text))
+        conn.commit()
+
+    # ── Empty / missing data edge cases ───────────────────────────────────
+
+    def test_empty_pe_descriptions(self, conn):
+        """Phase 5 returns 0 when pe_descriptions is empty."""
+        self._setup_pe(conn)
+        count = run_phase5(conn)
+        assert count == 0
+
+    def test_null_description_text_skipped(self, conn):
+        """Rows with NULL description_text are skipped (WHERE clause)."""
+        self._setup_pe(conn)
+        conn.execute("""
+            INSERT INTO pe_descriptions
+                (pe_number, fiscal_year, source_file, page_start, page_end,
+                 section_header, description_text)
+            VALUES ('0602120A', '2026', 'army/r2.pdf', 1, 1, 'Header', NULL)
+        """)
+        conn.commit()
+        count = run_phase5(conn)
+        assert count == 0
+
+    def test_whitespace_only_description_skipped(self, conn):
+        """Descriptions containing only whitespace produce no rows."""
+        self._setup_pe(conn)
+        self._insert_pe_description(conn, description_text="   \n  \t  ")
+        count = run_phase5(conn)
+        assert count == 0
+
+    # ── PE-level fallback (no project boundaries detected) ────────────────
+
+    def test_pe_level_fallback_no_projects(self, conn):
+        """When no project boundaries are found, text is stored with
+        project_number=NULL as a PE-level fallback."""
+        self._setup_pe(conn)
+        text = (
+            "This program develops advanced radar technology for tactical "
+            "applications. The system provides 360-degree coverage with "
+            "electronic scanning capabilities."
+        )
+        self._insert_pe_description(conn, description_text=text)
+        count = run_phase5(conn)
+        assert count > 0
+
+        rows = conn.execute("""
+            SELECT pe_number, project_number, project_title, description_text
+            FROM project_descriptions
+            WHERE pe_number = '0602120A'
+        """).fetchall()
+        assert len(rows) >= 1
+        # All rows should have NULL project_number (PE-level fallback)
+        for row in rows:
+            assert row["project_number"] is None
+            assert row["project_title"] is None
+
+    def test_pe_fallback_preserves_section_header(self, conn):
+        """PE-level fallback uses the original section_header or defaults
+        to 'Description' when section_header is NULL."""
+        self._setup_pe(conn)
+        # Text without narrative section headers or project boundaries
+        text = "General radar capability development and testing program."
+        self._insert_pe_description(
+            conn, description_text=text, section_header=None,
+        )
+        count = run_phase5(conn)
+        assert count > 0
+        row = conn.execute("""
+            SELECT section_header FROM project_descriptions
+            WHERE pe_number = '0602120A'
+        """).fetchone()
+        assert row is not None
+        assert row["section_header"] == "Description"
+
+    def test_pe_fallback_with_narrative_sections(self, conn):
+        """When no project boundaries are found but narrative section headers
+        exist, individual narrative sections are stored at PE level."""
+        self._setup_pe(conn)
+        text = (
+            "Accomplishments/Planned Programs\n"
+            "In FY2026, the program completed radar prototype testing and "
+            "demonstrated 95% detection rate against low-observable targets. "
+            "The advanced phased array antenna design exceeded requirements.\n"
+            "Acquisition Strategy\n"
+            "The program uses competitive prototyping through two prime "
+            "contractors selected during the Milestone B competition phase. "
+            "Full rate production decision expected in FY2028."
+        )
+        self._insert_pe_description(conn, description_text=text)
+        count = run_phase5(conn)
+        assert count >= 2
+
+        rows = conn.execute("""
+            SELECT section_header, project_number FROM project_descriptions
+            WHERE pe_number = '0602120A'
+            ORDER BY id
+        """).fetchall()
+        headers = [r["section_header"] for r in rows]
+        assert any("Accomplishments" in h for h in headers)
+        assert any("Acquisition" in h for h in headers)
+        # All should be PE-level (NULL project_number)
+        for r in rows:
+            assert r["project_number"] is None
+
+    # ── Project decomposition (splitting into per-project entries) ─────────
+
+    def test_project_decomposition_single_project(self, conn):
+        """A single project boundary is detected and stored with its
+        project_number and project_title."""
+        self._setup_pe(conn)
+        text = (
+            "Project Number: P101   Project Title: Advanced Targeting System\n"
+            "This project develops next-generation targeting systems for "
+            "precision engagement. The system integrates electro-optical "
+            "and infrared sensors for all-weather operations."
+        )
+        self._insert_pe_description(conn, description_text=text)
+        count = run_phase5(conn)
+        assert count > 0
+
+        rows = conn.execute("""
+            SELECT pe_number, project_number, project_title, description_text
+            FROM project_descriptions
+            WHERE pe_number = '0602120A'
+        """).fetchall()
+        assert len(rows) >= 1
+        proj_rows = [r for r in rows if r["project_number"] is not None]
+        assert len(proj_rows) >= 1
+        assert proj_rows[0]["project_number"] == "P101"
+        assert "Advanced Targeting System" in (proj_rows[0]["project_title"] or "")
+
+    def test_project_decomposition_multiple_projects(self, conn):
+        """Multiple project boundaries result in separate rows per project."""
+        self._setup_pe(conn)
+        text = (
+            "Project Number: P101   Project Title: Advanced Targeting System\n"
+            "This project develops next-generation targeting for precision "
+            "engagement with electro-optical sensors and radar integration.\n\n"
+            "Project Number: P202   Project Title: Defensive Countermeasures\n"
+            "This project focuses on electronic warfare countermeasures "
+            "and active protection systems for ground vehicles."
+        )
+        self._insert_pe_description(conn, description_text=text)
+        count = run_phase5(conn)
+        assert count >= 2
+
+        rows = conn.execute("""
+            SELECT project_number, project_title FROM project_descriptions
+            WHERE pe_number = '0602120A' AND project_number IS NOT NULL
+            ORDER BY project_number
+        """).fetchall()
+        proj_nums = [r["project_number"] for r in rows]
+        assert "P101" in proj_nums
+        assert "P202" in proj_nums
+
+    def test_project_with_narrative_subsections(self, conn):
+        """Projects containing recognized narrative section headers are
+        decomposed into multiple rows per project."""
+        self._setup_pe(conn)
+        text = (
+            "Project Number: P101   Project Title: Advanced Targeting System\n"
+            "Accomplishments/Planned Programs\n"
+            "In FY2026, the project completed prototype testing and full "
+            "system integration for the targeting pod modification program. "
+            "Testing demonstrated improved detection at extended ranges.\n"
+            "Acquisition Strategy\n"
+            "The project uses sole-source contracting with the original "
+            "equipment manufacturer for production and sustainment support. "
+            "Engineering change proposals are evaluated competitively."
+        )
+        self._insert_pe_description(conn, description_text=text)
+        count = run_phase5(conn)
+        assert count >= 2
+
+        rows = conn.execute("""
+            SELECT project_number, section_header FROM project_descriptions
+            WHERE pe_number = '0602120A' AND project_number = 'P101'
+            ORDER BY id
+        """).fetchall()
+        headers = [r["section_header"] for r in rows]
+        assert any("Accomplishments" in h for h in headers)
+        assert any("Acquisition" in h for h in headers)
+
+    def test_project_colon_format(self, conn):
+        """'Project: 1234 - Title' format is correctly parsed."""
+        self._setup_pe(conn)
+        text = (
+            "Project: ABC1 — Hypersonic Glide Vehicle\n"
+            "This project researches hypersonic glide body aerodynamics "
+            "and thermal protection systems for next-generation strike."
+        )
+        self._insert_pe_description(conn, description_text=text)
+        count = run_phase5(conn)
+        assert count > 0
+
+        row = conn.execute("""
+            SELECT project_number, project_title FROM project_descriptions
+            WHERE pe_number = '0602120A' AND project_number IS NOT NULL
+        """).fetchone()
+        assert row is not None
+        assert row["project_number"] == "ABC1"
+
+    # ── Table schema validation ───────────────────────────────────────────
+
+    def test_schema_columns_exist(self, conn):
+        """project_descriptions table has all expected columns."""
+        self._setup_pe(conn)
+        self._insert_pe_description(
+            conn,
+            description_text="Radar technology for tactical engagement.",
+        )
+        run_phase5(conn)
+
+        # Read column names from pragma
+        cols_info = conn.execute(
+            "PRAGMA table_info(project_descriptions)"
+        ).fetchall()
+        col_names = {c[1] for c in cols_info}
+        expected = {
+            "id", "pe_number", "project_number", "project_title",
+            "fiscal_year", "section_header", "description_text",
+            "source_file", "page_start", "page_end", "created_at",
+        }
+        assert expected.issubset(col_names)
+
+    def test_fiscal_year_propagated(self, conn):
+        """Fiscal year from pe_descriptions is propagated to project_descriptions."""
+        self._setup_pe(conn)
+        self._insert_pe_description(
+            conn, fiscal_year="2027",
+            description_text="Advanced radar prototype development and testing.",
+        )
+        run_phase5(conn)
+
+        rows = conn.execute("""
+            SELECT fiscal_year FROM project_descriptions
+            WHERE pe_number = '0602120A'
+        """).fetchall()
+        assert len(rows) >= 1
+        assert all(r["fiscal_year"] == "2027" for r in rows)
+
+    def test_source_file_propagated(self, conn):
+        """Source file from pe_descriptions is propagated to project_descriptions."""
+        self._setup_pe(conn)
+        self._insert_pe_description(
+            conn, source_file="navy/FY2026/r2_navy.pdf",
+            description_text="Submarine combat system integration and testing.",
+        )
+        run_phase5(conn)
+
+        row = conn.execute("""
+            SELECT source_file FROM project_descriptions
+            WHERE pe_number = '0602120A'
+        """).fetchone()
+        assert row is not None
+        assert row["source_file"] == "navy/FY2026/r2_navy.pdf"
+
+    def test_page_range_propagated(self, conn):
+        """Page start/end from pe_descriptions are propagated."""
+        self._setup_pe(conn)
+        self._insert_pe_description(
+            conn, page_start=5, page_end=8,
+            description_text="Electronic warfare system development program.",
+        )
+        run_phase5(conn)
+
+        row = conn.execute("""
+            SELECT page_start, page_end FROM project_descriptions
+            WHERE pe_number = '0602120A'
+        """).fetchone()
+        assert row is not None
+        assert row["page_start"] == 5
+        assert row["page_end"] == 8
+
+    # ── Incremental / idempotent behavior ─────────────────────────────────
+
+    def test_incremental_skips_done_source_files(self, conn):
+        """Phase 5 skips source files that are already in project_descriptions."""
+        self._setup_pe(conn)
+        self._insert_pe_description(
+            conn,
+            description_text="Radar technology research and development.",
+        )
+        count1 = run_phase5(conn)
+        assert count1 > 0
+        rows1 = conn.execute(
+            "SELECT COUNT(*) FROM project_descriptions"
+        ).fetchone()[0]
+
+        # Second run should skip the same source file
+        count2 = run_phase5(conn)
+        rows2 = conn.execute(
+            "SELECT COUNT(*) FROM project_descriptions"
+        ).fetchone()[0]
+        assert rows1 == rows2
+
+    # ── Description text truncation ───────────────────────────────────────
+
+    def test_long_description_truncated(self, conn):
+        """Descriptions over 4000 chars are truncated for the fallback path."""
+        self._setup_pe(conn)
+        long_text = "A" * 5000
+        self._insert_pe_description(conn, description_text=long_text)
+        count = run_phase5(conn)
+        assert count > 0
+
+        row = conn.execute("""
+            SELECT description_text FROM project_descriptions
+            WHERE pe_number = '0602120A'
+        """).fetchone()
+        assert row is not None
+        assert len(row["description_text"]) <= 4000
+
+    def test_creates_table_if_not_exists(self, conn):
+        """Phase 5 creates project_descriptions table if it does not exist."""
+        # Drop the table that _make_db created
+        conn.execute("DROP TABLE IF EXISTS project_descriptions")
+        conn.commit()
+
+        self._setup_pe(conn)
+        self._insert_pe_description(
+            conn,
+            description_text="Autonomous unmanned system development.",
+        )
+        count = run_phase5(conn)
+        assert count > 0
+
+        # Verify the table was recreated
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+        assert "project_descriptions" in tables
