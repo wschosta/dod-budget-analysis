@@ -840,22 +840,20 @@ document.addEventListener("DOMContentLoaded", function () {
   // FALCON-1: Load landing page summary visuals
   loadLandingVisuals();
 
-  // OPT-JS-001: Debounce filter form changes — add delay:300ms to multi-selects
-  // HTMX hx-trigger delay is set on the q input already; for selects we use
-  // a manual debounce on the form change event
+  // OPT-JS-001: Debounce filter form changes — multi-selects get a 300ms
+  // debounce before firing HTMX. The form's hx-trigger listens for a custom
+  // "filter-debounced" event (not raw "change") so rapid clicks don't cause
+  // duplicate requests. Number inputs also debounce on change.
   let debounceTimer = null;
   const form = document.getElementById("filter-form");
   if (form) {
     form.addEventListener("change", function (e) {
       updateDownloadLinks();
-      // Selects (multi-select filters) get debounced; text inputs fire via HTMX
       const tag = e.target.tagName;
-      if (tag === "SELECT") {
+      if (tag === "SELECT" || e.target.type === "number") {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(function () {
-          // HTMX will handle the actual form submission via hx-trigger="change"
-          // This debounce prevents rapid multi-select clicks firing many requests.
-          // We manually trigger htmx on the form with the delay already elapsed.
+          htmx.trigger(form, "filter-debounced");
         }, 300);
       }
     });

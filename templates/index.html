@@ -59,7 +59,7 @@
           aria-label="Budget data filters"
           hx-get="/partials/results"
           hx-target="#results-container"
-          hx-trigger="change, search"
+          hx-trigger="submit, search, filter-debounced"
           hx-push-url="true"
           hx-indicator="#loading-indicator">
 
