@@ -1625,15 +1625,17 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                     issues_batch)
 
               # LION-103: Populate pdf_pe_numbers junction table by scanning
-              # inserted pages for PE number mentions.
+              # inserted pages for PE number mentions in both text and tables.
               pe_junction_rows = []
               for row in conn.execute(
-                  "SELECT id, page_number, page_text FROM pdf_pages "
-                  "WHERE source_file = ? AND page_text IS NOT NULL",
+                  "SELECT id, page_number, page_text, table_data FROM pdf_pages "
+                  "WHERE source_file = ?",
                   (relative_path,)
               ):
-                  page_id, page_num, page_text = row
-                  found_pes = _extract_all_pe_numbers(page_text)
+                  page_id, page_num, page_text, table_data = row
+                  # Scan both page_text and table_data for PE numbers
+                  combined = f"{page_text or ''} {table_data or ''}"
+                  found_pes = _extract_all_pe_numbers(combined)
                   for pe in found_pes:
                       pe_junction_rows.append((
                           page_id, pe, page_num, relative_path, pdf_fiscal_year))
@@ -1733,8 +1735,9 @@ def _extract_pdf_data(args):
                         1 if tables else 0,
                         table_text if table_text else None,
                     ))
-                    # LION-103: Extract PE numbers for junction table
-                    found_pes = _extract_all_pe_numbers(text)
+                    # LION-103: Extract PE numbers from both text and tables
+                    combined = f"{text} {table_text}" if table_text else text
+                    found_pes = _extract_all_pe_numbers(combined)
                     for pe in found_pes:
                         pe_mentions.append((pe, page_num))
             finally:
