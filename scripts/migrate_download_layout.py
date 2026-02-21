@@ -130,12 +130,18 @@ def migrate_fy_directory(
 
 
 def _cleanup_empty_dirs(root: Path) -> int:
-    """Remove empty directories under root (bottom-up). Returns count removed."""
+    """Remove empty directories under root (bottom-up). Returns count removed.
+
+    Tolerates PermissionError (e.g. OneDrive-locked directories on Windows).
+    """
     removed = 0
     for dirpath in sorted(root.rglob("*"), reverse=True):
         if dirpath.is_dir() and not any(dirpath.iterdir()):
-            dirpath.rmdir()
-            removed += 1
+            try:
+                dirpath.rmdir()
+                removed += 1
+            except PermissionError:
+                pass  # OneDrive or antivirus lock; harmless
     return removed
 
 
