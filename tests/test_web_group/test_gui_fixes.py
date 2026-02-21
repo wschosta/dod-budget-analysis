@@ -236,7 +236,7 @@ class TestFix004CSSNumberInputs:
     """FIX-004: Number inputs should be styled in filter panel."""
 
     def test_css_includes_number_input_selector(self):
-        css_path = Path(__file__).resolve().parent.parent / "static" / "css" / "main.css"
+        css_path = Path(__file__).resolve().parent.parent.parent / "static" / "css" / "main.css"
         css = css_path.read_text()
         assert 'input[type="number"]' in css
 

@@ -9,8 +9,8 @@ from pathlib import Path
 
 
 # Add both the scripts dir and the repo root to the path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "scripts"))
 
 from exhibit_audit import (
     _find_header_row,

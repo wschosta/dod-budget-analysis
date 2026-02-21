@@ -22,7 +22,7 @@ from exhibit_catalog import find_matching_columns  # noqa: E402
 
 import openpyxl  # noqa: E402
 
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
+FIXTURES_DIR = Path(__file__).parent.parent / "fixtures"
 EXPECTED_DIR = FIXTURES_DIR / "expected"
 
 
