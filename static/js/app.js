@@ -33,12 +33,13 @@ function toggleTheme() {
 }
 
 function updateChartTheme() {
-  // Update Chart.js defaults color for theme
+  // FALCON-8: Use CSS custom properties for chart theme colors
   if (typeof Chart !== "undefined") {
+    var style = getComputedStyle(document.documentElement);
+    var textColor = style.getPropertyValue("--chart-text").trim() || style.getPropertyValue("--text-secondary").trim() || "#374151";
     var isDark = document.documentElement.getAttribute("data-theme") === "dark" ||
       (!document.documentElement.getAttribute("data-theme") &&
        window.matchMedia("(prefers-color-scheme: dark)").matches);
-    var textColor = isDark ? "#c4c4d4" : "#374151";
     var gridColor = isDark ? "rgba(255,255,255,.1)" : "rgba(0,0,0,.1)";
     Chart.defaults.color = textColor;
     Chart.defaults.borderColor = gridColor;

@@ -1488,3 +1488,55 @@ tr:focus-within td {
   border-color: var(--border-color);
   color: var(--text-primary);
 }
+
+/* FALCON-8: Dark mode overrides for new FALCON components */
+[data-theme="dark"] .density-btn {
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border-color: var(--border-color);
+}
+[data-theme="dark"] .advanced-search {
+  background: var(--bg-surface);
+  border-color: var(--border-color);
+}
+[data-theme="dark"] .adv-condition-row select,
+[data-theme="dark"] .adv-condition-row input {
+  background: var(--bg-body);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+[data-theme="dark"] .hero-search-input {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border-color: var(--border-color);
+}
+[data-theme="dark"] .glossary-list dd {
+  border-left-color: var(--clr-blue);
+}
+/* FALCON-8: Ensure .btn-primary stays white text in dark mode */
+[data-theme="dark"] .btn-primary { color: #fff; }
+[data-theme="dark"] .btn-primary:hover { color: #fff; }
+
+/* FALCON-8: System dark mode overrides for same components */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .density-btn {
+    background: var(--bg-surface);
+    color: var(--text-secondary);
+    border-color: var(--border-color);
+  }
+  :root:not([data-theme="light"]) .advanced-search {
+    background: var(--bg-surface);
+    border-color: var(--border-color);
+  }
+  :root:not([data-theme="light"]) .adv-condition-row select,
+  :root:not([data-theme="light"]) .adv-condition-row input {
+    background: var(--bg-body);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+  }
+  :root:not([data-theme="light"]) .hero-search-input {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+  }
+}
