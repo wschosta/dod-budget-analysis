@@ -43,6 +43,10 @@ data_quality_report.json
 refresh_progress.json
 failed_downloads.json
 profile_report.json
+pipeline_progress.json
+
+# Pipeline run logs
+logs/
 
 # Claude Code
 .claude/
