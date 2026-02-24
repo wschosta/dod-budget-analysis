@@ -68,6 +68,11 @@
         }
       }
     });
+
+    // A4.3: Add export button for funding trend chart
+    if (typeof addChartExportButton === "function") {
+      addChartExportButton("pe-funding-chart", "program-" + pe + "-funding-trend.png");
+    }
   } catch (e) {
     // Silently fail — chart is a nice-to-have enhancement
   }

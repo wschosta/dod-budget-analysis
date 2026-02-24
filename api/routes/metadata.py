@@ -11,6 +11,7 @@ Useful for:
 
 import logging
 import sqlite3
+from typing import Any
 
 from fastapi import APIRouter, Depends
 
@@ -20,6 +21,70 @@ from utils.metadata import collect_metadata
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/metadata", tags=["metadata"])
+
+
+def _safe_scalar(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> Any:
+    """Execute a scalar query, returning None if the table doesn't exist."""
+    try:
+        row = conn.execute(sql, params).fetchone()
+        return row[0] if row else None
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
+        return None
+
+
+def _collect_timestamps(conn: sqlite3.Connection) -> dict:
+    """Collect last-build and last-enrichment timestamps plus key counts.
+
+    Returns a dict with:
+        - last_build_time: Most recent ingestion timestamp
+        - last_enrichment_time: Most recent enrichment timestamp
+        - total_budget_lines: Row count of budget_lines table
+        - total_pe_count: Row count of pe_index table
+        - total_pdf_pages: Row count of pdf_pages table
+
+    Each query is wrapped in try/except so missing tables return None.
+    """
+    result: dict[str, Any] = {}
+
+    # last_build_time: prefer data_changelog, fall back to ingested_files
+    last_build = _safe_scalar(
+        conn,
+        "SELECT MAX(timestamp) FROM data_changelog "
+        "WHERE action IN ('insert', 'refresh')",
+    )
+    if not last_build:
+        last_build = _safe_scalar(
+            conn, "SELECT MAX(ingested_at) FROM ingested_files"
+        )
+    if not last_build:
+        last_build = _safe_scalar(
+            conn, "SELECT MAX(updated_at) FROM ingested_files"
+        )
+    result["last_build_time"] = last_build
+
+    # last_enrichment_time: prefer data_changelog, fall back to pe_index.updated_at
+    last_enrich = _safe_scalar(
+        conn,
+        "SELECT MAX(timestamp) FROM data_changelog WHERE action = 'enrich'",
+    )
+    if not last_enrich:
+        last_enrich = _safe_scalar(
+            conn, "SELECT MAX(updated_at) FROM pe_index"
+        )
+    result["last_enrichment_time"] = last_enrich
+
+    # Key counts
+    result["total_budget_lines"] = _safe_scalar(
+        conn, "SELECT COUNT(*) FROM budget_lines"
+    ) or 0
+    result["total_pe_count"] = _safe_scalar(
+        conn, "SELECT COUNT(*) FROM pe_index"
+    ) or 0
+    result["total_pdf_pages"] = _safe_scalar(
+        conn, "SELECT COUNT(*) FROM pdf_pages"
+    ) or 0
+
+    return result
 
 
 @router.get(
@@ -33,9 +98,11 @@ def get_metadata(
     """Return comprehensive metadata about the budget database.
 
     Includes table row counts, distinct fiscal years, services, exhibit types,
-    enrichment coverage statistics, and amount summaries.
+    enrichment coverage statistics, amount summaries, and timestamp information.
     """
-    return collect_metadata(conn)
+    meta = collect_metadata(conn)
+    meta.update(_collect_timestamps(conn))
+    return meta
 
 
 def _safe_count(conn: sqlite3.Connection, sql: str, params: tuple = ()) -> int:

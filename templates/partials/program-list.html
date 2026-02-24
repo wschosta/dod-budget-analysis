@@ -50,10 +50,19 @@
 {% endif %}
 
 {% else %}
+{# A4.2: Enhanced empty state with helpful guidance #}
 <div class="empty-state">
   <div class="empty-state-icon" aria-hidden="true">&#128203;</div>
   <p><strong>No programs match your filters.</strong></p>
-  <p style="font-size:.85rem">Try broadening your search or clearing filters.</p>
+  <p style="font-size:.85rem;max-width:480px;margin:0 auto">
+    No Program Elements found for the selected criteria. Available data covers FY2024&ndash;FY2026
+    across all military services and defense agencies.
+  </p>
+  <ul style="font-size:.82rem;text-align:left;max-width:360px;margin:.75rem auto 0;color:var(--text-secondary);list-style:disc;padding-left:1.5rem">
+    <li>Try a different keyword (e.g., "F-35", "cyber", "missile")</li>
+    <li>Select "All Services" to broaden results</li>
+    <li>Remove tag filters to see more programs</li>
+  </ul>
   <div style="margin-top:1rem">
     <a href="/programs" class="btn btn-primary btn-sm">Clear all filters</a>
   </div>

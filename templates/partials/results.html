@@ -235,12 +235,24 @@
 </div>
 
 {% else %}
-{# LION-004: Enhanced empty state with clear-filters action #}
+{# LION-004 + A4.2: Enhanced empty state with clear-filters action and data coverage info #}
 <div class="results-panel">
   <div class="empty-state">
     <div class="empty-state-icon" aria-hidden="true">&#128269;</div>
-    <p><strong>No budget items match your filters.</strong></p>
-    <p style="font-size:.85rem">Try broadening your search or clearing some filters.</p>
+    <p><strong>No data found for the selected filters.</strong></p>
+    <p style="font-size:.85rem;max-width:480px;margin:0 auto">
+      {% if filters is defined and (filters.q or filters.fiscal_year or filters.service or filters.exhibit_type or filters.appropriation_code or filters.min_amount or filters.max_amount) %}
+      Your current filters returned no results. Available data covers FY2024&ndash;FY2026
+      across all military services and defense agencies.
+      {% else %}
+      No budget data is loaded. Run <code>python build_budget_db.py</code> to ingest data.
+      {% endif %}
+    </p>
+    <ul style="font-size:.82rem;text-align:left;max-width:360px;margin:.75rem auto 0;color:var(--text-secondary);list-style:disc;padding-left:1.5rem">
+      <li>Check spelling of keywords or PE numbers</li>
+      <li>Try fewer filters or broader search terms</li>
+      <li>Remove amount range constraints</li>
+    </ul>
     <div style="margin-top:1rem">
       <a href="/"
          hx-get="/partials/results"

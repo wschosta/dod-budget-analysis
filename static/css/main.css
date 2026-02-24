@@ -240,6 +240,26 @@ a:hover { text-decoration: underline; }
 }
 .footer-content { display: flex; flex-direction: column; gap: .35rem; align-items: center; }
 .footer-meta { font-size: .72rem; color: var(--text-secondary); }
+/* A4.1: Data freshness indicator */
+.data-freshness {
+  font-size: .72rem;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+}
+.data-freshness:empty { display: none; }
+.data-freshness-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--clr-green);
+  flex-shrink: 0;
+}
+.data-freshness-dot.stale {
+  background: var(--clr-amber);
+}
 .footer-links { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; justify-content: center; }
 .footer-links a { font-size: .8rem; }
 
@@ -1426,6 +1446,74 @@ tr:focus-within td {
   transition: border-color .15s, opacity .15s;
 }
 .tag-chip:hover { border-color: var(--clr-blue); opacity: 1 !important; }
+
+/* A4.4: Tag cloud browse view */
+.tag-cloud-section {
+  margin-bottom: 1.25rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.tag-cloud-toggle {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .75rem 1rem;
+  cursor: pointer;
+  font-size: .9rem;
+  font-weight: 600;
+  font-family: var(--font-heading);
+  color: var(--text-primary);
+  list-style: none;
+  user-select: none;
+}
+.tag-cloud-toggle::-webkit-details-marker { display: none; }
+.tag-cloud-toggle::after {
+  content: "\25B6";
+  font-size: .6rem;
+  color: var(--text-secondary);
+  margin-left: auto;
+  transition: transform .15s;
+}
+.tag-cloud-section[open] > .tag-cloud-toggle::after {
+  transform: rotate(90deg);
+}
+.tag-cloud-count {
+  font-size: .72rem;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+.tag-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .4rem;
+  padding: 0 1rem 1rem;
+  align-items: center;
+  justify-content: center;
+}
+.tag-cloud-item {
+  display: inline-block;
+  padding: .2rem .6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  color: var(--clr-blue);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, transform .1s;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+.tag-cloud-item:hover {
+  background: var(--clr-sky);
+  border-color: var(--clr-blue);
+  text-decoration: none;
+  transform: scale(1.05);
+}
+.tag-cloud-item:focus-visible {
+  outline: 2px solid var(--clr-blue);
+  outline-offset: 2px;
+}
 
 /* FALCON-14: programs-layout responsive now consolidated in main 768px block above */
 

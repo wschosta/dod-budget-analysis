@@ -409,7 +409,7 @@ function closeFeedbackModal() {
   });
 })();
 
-// ── LION-006: Chart export (PNG download) ───────────────────────────────────
+// ── LION-006 + A4.3: Chart export (PNG download) ────────────────────────────
 
 function downloadChartAsPNG(canvasId, filename) {
   var canvas = document.getElementById(canvasId);
@@ -421,6 +421,30 @@ function downloadChartAsPNG(canvasId, filename) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+}
+
+/**
+ * A4.3: Reusable helper to add an "Export as PNG" button next to a chart canvas.
+ * Inserts the button after the canvas inside its parent container.
+ * @param {string} canvasId - The id of the canvas element
+ * @param {string} filename - The download filename (e.g. "service-chart.png")
+ */
+function addChartExportButton(canvasId, filename) {
+  var canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  // Avoid adding duplicate buttons
+  var parent = canvas.parentElement;
+  if (!parent) return;
+  if (parent.querySelector('.chart-export-btn[data-canvas="' + canvasId + '"]')) return;
+
+  var btn = document.createElement("button");
+  btn.className = "btn btn-secondary btn-sm chart-export-btn";
+  btn.setAttribute("data-canvas", canvasId);
+  btn.textContent = "Export as PNG";
+  btn.addEventListener("click", function() {
+    downloadChartAsPNG(canvasId, filename || canvasId + ".png");
+  });
+  parent.appendChild(btn);
 }
 
 // ── LION-007: Copy shareable URL with current filters ───────────────────────
@@ -726,8 +750,44 @@ function loadFooterMetadata() {
         parts.push(data.fiscal_years.join(", "));
       }
       if (parts.length) el.textContent = parts.join(" \u00B7 ");
+
+      // A4.1: Populate data freshness indicator
+      populateDataFreshness(data);
     })
     .catch(function() { /* silently ignore — footer just stays empty */ });
+}
+
+// ── A4.1: Data freshness indicator ──────────────────────────────────────────
+
+function populateDataFreshness(data) {
+  var el = document.getElementById("data-freshness");
+  if (!el) return;
+
+  var dateStr = data.last_refresh || data.last_build_time || data.build_date;
+  if (!dateStr) {
+    el.textContent = "";
+    return;
+  }
+
+  var dateOnly = dateStr.slice(0, 10);
+  var refreshDate = new Date(dateOnly);
+  var now = new Date();
+  var daysDiff = Math.floor((now - refreshDate) / (1000 * 60 * 60 * 24));
+
+  // Green dot if fresh (within 7 days), amber if stale
+  var dot = document.createElement("span");
+  dot.className = "data-freshness-dot" + (daysDiff > 7 ? " stale" : "");
+  dot.setAttribute("aria-hidden", "true");
+
+  var text = document.createElement("span");
+  text.textContent = "Data last updated: " + dateOnly;
+  if (daysDiff > 7) {
+    text.textContent += " (" + daysDiff + " days ago)";
+  }
+
+  el.innerHTML = "";
+  el.appendChild(dot);
+  el.appendChild(text);
 }
 
 // ── FALCON-1: Landing page summary visuals ──────────────────────────────────

@@ -401,6 +401,24 @@ CREATE TRIGGER IF NOT EXISTS pe_descriptions_au AFTER UPDATE ON pe_descriptions 
 END;
         """,
     ),
+    (
+        4,
+        "004_data_changelog: data update tracking table for audit trail",
+        """
+CREATE TABLE IF NOT EXISTS data_changelog (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action TEXT NOT NULL,  -- 'insert', 'update', 'delete', 'refresh', 'enrich'
+    table_name TEXT NOT NULL,
+    record_count INTEGER,
+    source_file TEXT,
+    timestamp TEXT DEFAULT (datetime('now')),
+    notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_changelog_ts ON data_changelog(timestamp);
+CREATE INDEX IF NOT EXISTS idx_changelog_action ON data_changelog(action);
+        """,
+    ),
 ]
 
 

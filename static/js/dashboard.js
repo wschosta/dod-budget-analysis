@@ -96,6 +96,10 @@ function showDashError(id, canvasId, msg) {
           }
         }
       });
+      // A4.3: Add export button for service chart
+      if (typeof addChartExportButton === "function") {
+        addChartExportButton("dash-service-chart", "dashboard-service-chart.png");
+      }
     } else {
       showDashError("err-dash-service", "dash-service-chart", "No service data available.");
     }
@@ -148,6 +152,10 @@ function showDashError(id, canvasId, msg) {
           }
         }
       });
+      // A4.3: Add export button for appropriation chart
+      if (typeof addChartExportButton === "function") {
+        addChartExportButton("dash-approp-chart", "dashboard-appropriation-chart.png");
+      }
     } else {
       showDashError("err-dash-approp", "dash-approp-chart", "No appropriation data available.");
     }
