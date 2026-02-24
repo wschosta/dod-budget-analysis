@@ -292,13 +292,15 @@ def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
 
 # ── Phase 1: Build pe_index ───────────────────────────────────────────────────
 
-def run_phase1(conn: sqlite3.Connection) -> int:
+def run_phase1(conn: sqlite3.Connection, stop_event: threading.Event | None = None) -> int:
     """Aggregate all distinct PE numbers from budget_lines into pe_index."""
     logger.info("[Phase 1] Building pe_index from budget_lines...")
+    t0 = time.time()
 
     # Use a single aggregation pass to get all fields including most-common org.
     # The correlated subquery was replaced with a pre-aggregated CTE to avoid
     # one COUNT(*) per PE row (which scaled O(N*M) with thousands of PE numbers).
+    logger.info("  Querying budget_lines for distinct PE numbers...")
     rows = conn.execute("""
         WITH org_ranked AS (
             SELECT pe_number,
@@ -336,6 +338,11 @@ def run_phase1(conn: sqlite3.Connection) -> int:
         logger.info("No PE numbers found in budget_lines -- skipping.")
         return 0
 
+    if stop_event and stop_event.is_set():
+        logger.info("  Phase 1 stopped before insert.")
+        return 0
+
+    logger.info("  Inserting %d PE index rows...", len(rows))
     conn.executemany("""
         INSERT OR REPLACE INTO pe_index
             (pe_number, display_title, organization_name, budget_type,
@@ -346,13 +353,13 @@ def run_phase1(conn: sqlite3.Connection) -> int:
         for r in rows
     ])
     conn.commit()
-    logger.info("Indexed %d PE numbers.", len(rows))
+    logger.info("Indexed %d PE numbers in %.1fs.", len(rows), time.time() - t0)
     return len(rows)
 
 
 # ── Phase 2: Link PDFs to PEs ─────────────────────────────────────────────────
 
-def run_phase2(conn: sqlite3.Connection) -> int:
+def run_phase2(conn: sqlite3.Connection, stop_event: threading.Event | None = None) -> int:
     """Scan pdf_pages text for PE number mentions and populate pe_descriptions."""
     logger.info("[Phase 2] Linking PDF pages to PE numbers...")
 
@@ -384,9 +391,13 @@ def run_phase2(conn: sqlite3.Connection) -> int:
     logger.info("Processing %d PDF file(s)...", len(pdf_files))
     total_desc = 0
     insert_buf: list[tuple] = []
+    t0 = time.time()
 
     errors: list[str] = []
     for i, source_file in enumerate(pdf_files, 1):
+        if stop_event and stop_event.is_set():
+            logger.info("  Phase 2 stopped at file %d/%d.", i - 1, len(pdf_files))
+            break
         try:
             fy = _extract_fy_from_path(source_file)
 
@@ -451,7 +462,14 @@ def run_phase2(conn: sqlite3.Connection) -> int:
             conn.commit()
             total_desc += len(insert_buf)
             insert_buf = []
-            logger.info("[%d/%d] %d description rows so far...", i, len(pdf_files), total_desc)
+            elapsed = time.time() - t0
+            pct = i / len(pdf_files) * 100
+            rate = i / elapsed if elapsed > 0 else 0
+            eta = (len(pdf_files) - i) / rate if rate > 0 else 0
+            logger.info(
+                "  [Phase 2] %d / %d files (%.1f%%) — %d descriptions — %.0f files/s — ETA %.0fs",
+                i, len(pdf_files), pct, total_desc, rate, eta,
+            )
 
     if insert_buf:
         conn.executemany("""
@@ -548,7 +566,8 @@ def _tags_from_llm(
         return {}
 
 
-def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
+def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
+               stop_event: threading.Event | None = None) -> int:
     """Generate tags for all PE numbers from multiple sources.
 
     LION-104: Also uses budget_lines text fields for keyword matching.
@@ -658,7 +677,20 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
     except sqlite3.OperationalError:
         pass  # project_descriptions table may not exist yet
 
-    for pe in to_tag:
+    t0 = time.time()
+    for tag_idx, pe in enumerate(to_tag):
+        if stop_event and stop_event.is_set():
+            logger.info("  Phase 3 stopped at PE %d/%d.", tag_idx, len(to_tag))
+            break
+
+        # Progress every 100 PEs
+        if tag_idx > 0 and tag_idx % 100 == 0:
+            elapsed = time.time() - t0
+            logger.info(
+                "  [Phase 3] %d / %d PEs tagged (%.1f%%) — %.1fs elapsed",
+                tag_idx, len(to_tag), tag_idx / len(to_tag) * 100, elapsed,
+            )
+
         # LION-106: Source files for this PE's structured tags
         pe_src_json = json.dumps(structured_sources.get(pe, []))
 
@@ -734,6 +766,9 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
         logger.info("Running LLM tagging in batches of 10...")
         batch_size = 10
         for i in range(0, len(to_tag), batch_size):
+            if stop_event and stop_event.is_set():
+                logger.info("  Phase 3 LLM stopped at batch %d.", i // batch_size)
+                break
             batch_pes = to_tag[i:i + batch_size]
             pe_texts: dict[str, str] = {}
             for pe in batch_pes:
@@ -768,7 +803,7 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False) -> int:
 
 # ── Phase 4: Detect Cross-PE Lineage ─────────────────────────────────────────
 
-def run_phase4(conn: sqlite3.Connection) -> int:
+def run_phase4(conn: sqlite3.Connection, stop_event: threading.Event | None = None) -> int:
     """Scan description text for PE number cross-references and name matches."""
     logger.info("[Phase 4] Detecting cross-PE lineage...")
 
@@ -787,8 +822,11 @@ def run_phase4(conn: sqlite3.Connection) -> int:
     }
 
     # Build title index for name matching (phase 4b)
-    # Only titles with >= 4 words are useful to avoid false positives
-    title_index: list[tuple[str, re.Pattern]] = []
+    # Only titles with >= 4 words are useful to avoid false positives.
+    # Each entry includes lowercase keyword tokens for a fast pre-filter:
+    # skip the expensive regex unless ALL keywords appear in the text.
+    # This eliminates ~95% of regex calls (most titles don't match most texts).
+    title_index: list[tuple[str, tuple[str, ...], re.Pattern]] = []
     for row in conn.execute(
         "SELECT pe_number, display_title FROM pe_index WHERE display_title IS NOT NULL"
     ).fetchall():
@@ -796,11 +834,22 @@ def run_phase4(conn: sqlite3.Connection) -> int:
         words = title.split()
         if len(words) >= 4:
             phrase = r"\s+".join(re.escape(w) for w in words[:4])
-            title_index.append((pe, re.compile(phrase, re.IGNORECASE)))
+            # Pre-filter keywords: the first 4 words, lowered, for fast 'in' check
+            keywords = tuple(w.lower() for w in words[:4])
+            title_index.append((pe, keywords, re.compile(phrase, re.IGNORECASE)))
 
     insert_buf: list[tuple] = []
     total = 0
     CHUNK = 500  # rows per DB fetch to bound memory use
+
+    # Get total row count for progress reporting
+    desc_total = conn.execute(
+        "SELECT COUNT(*) FROM pe_descriptions WHERE description_text IS NOT NULL"
+    ).fetchone()[0]
+    logger.info(
+        "Scanning %s description rows against %d PEs and %d title patterns...",
+        f"{desc_total:,}", len(known_pes), len(title_index),
+    )
 
     # Stream pe_descriptions in chunks instead of fetchall() to avoid loading
     # potentially hundreds of MB of text into RAM at once.
@@ -810,13 +859,32 @@ def run_phase4(conn: sqlite3.Connection) -> int:
         WHERE description_text IS NOT NULL
     """)
 
+    rows_processed = 0
+    skipped = 0
+    t0 = time.time()
     while True:
+        if stop_event and stop_event.is_set():
+            logger.info("  Phase 4 stopped at row %s.", f"{rows_processed:,}")
+            # Flush any pending inserts before stopping
+            if insert_buf:
+                conn.executemany("""
+                    INSERT OR IGNORE INTO pe_lineage
+                        (source_pe, referenced_pe, fiscal_year, source_file,
+                         page_number, context_snippet, link_type, confidence)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, insert_buf)
+                conn.commit()
+                total += len(insert_buf)
+                insert_buf = []
+            break
+
         chunk = cur.fetchmany(CHUNK)
         if not chunk:
             break
 
         for pe_num, fy, source_file, page_start, text in chunk:
             if (pe_num, source_file) in done_pairs:
+                skipped += 1
                 continue
 
             # 4a: Explicit PE number references
@@ -832,9 +900,14 @@ def run_phase4(conn: sqlite3.Connection) -> int:
                     snippet, "explicit_pe_ref", 0.95,
                 ))
 
-            # 4b: Program name matching
-            for ref_pe, pattern in title_index:
+            # 4b: Program name matching (with keyword pre-filter)
+            # Lowercase the text once for all keyword checks
+            text_lower = text.lower()
+            for ref_pe, keywords, pattern in title_index:
                 if ref_pe == pe_num:
+                    continue
+                # Fast pre-filter: skip regex unless all keywords appear
+                if not all(kw in text_lower for kw in keywords):
                     continue
                 m = pattern.search(text)
                 if m:
@@ -844,10 +917,12 @@ def run_phase4(conn: sqlite3.Connection) -> int:
                         snippet, "name_match", 0.6,
                     ))
 
+        rows_processed += len(chunk)
+
         # Flush insert buffer every chunk to keep memory bounded
         if insert_buf:
             conn.executemany("""
-                INSERT INTO pe_lineage
+                INSERT OR IGNORE INTO pe_lineage
                     (source_pe, referenced_pe, fiscal_year, source_file,
                      page_number, context_snippet, link_type, confidence)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -855,6 +930,21 @@ def run_phase4(conn: sqlite3.Connection) -> int:
             conn.commit()
             total += len(insert_buf)
             insert_buf = []
+
+        # Progress every 10,000 rows
+        if rows_processed % 10_000 < CHUNK:
+            elapsed = time.time() - t0
+            pct = rows_processed / desc_total * 100 if desc_total else 0
+            rate = rows_processed / elapsed if elapsed > 0 else 0
+            eta = (desc_total - rows_processed) / rate if rate > 0 else 0
+            logger.info(
+                "  [Phase 4] %s / %s rows (%.1f%%) — %d links found — %.0f rows/s — ETA %.0fs",
+                f"{rows_processed:,}", f"{desc_total:,}", pct, total, rate, eta,
+            )
+
+    elapsed = time.time() - t0
+    if skipped:
+        logger.info("Skipped %s already-processed (PE, file) pairs.", f"{skipped:,}")
 
     # 4c: Extract cross-references from budget_lines.extra_fields JSON.
     # LION-102 stores additional_pe_numbers in extra_fields for rows where
@@ -906,7 +996,7 @@ def run_phase4(conn: sqlite3.Connection) -> int:
 
 # ── Phase 5: Project-Level Narrative Decomposition ────────────────────────────
 
-def run_phase5(conn: sqlite3.Connection) -> int:
+def run_phase5(conn: sqlite3.Connection, stop_event: threading.Event | None = None) -> int:
     """Decompose PE descriptions into project-level sections.
 
     Iterates pe_descriptions, uses detect_project_boundaries() to find
@@ -953,6 +1043,7 @@ def run_phase5(conn: sqlite3.Connection) -> int:
     }
 
     CHUNK = 500
+    logger.info("  Scanning %s description rows for project boundaries...", f"{desc_count:,}")
     cur = conn.execute("""
         SELECT pe_number, fiscal_year, source_file, page_start, page_end,
                section_header, description_text
@@ -963,8 +1054,26 @@ def run_phase5(conn: sqlite3.Connection) -> int:
     insert_buf: list[tuple] = []
     total_rows = 0
     pe_level_fallback = 0
+    rows_processed = 0
+    t0 = time.time()
 
     while True:
+        if stop_event and stop_event.is_set():
+            logger.info("  Phase 5 stopped at row %s.", f"{rows_processed:,}")
+            # Flush any pending inserts before stopping
+            if insert_buf:
+                conn.executemany("""
+                    INSERT INTO project_descriptions
+                        (pe_number, project_number, project_title, fiscal_year,
+                         section_header, description_text, source_file,
+                         page_start, page_end)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, insert_buf)
+                conn.commit()
+                total_rows += len(insert_buf)
+                insert_buf = []
+            break
+
         chunk = cur.fetchmany(CHUNK)
         if not chunk:
             break
@@ -1017,6 +1126,8 @@ def run_phase5(conn: sqlite3.Connection) -> int:
                         ))
                 pe_level_fallback += 1
 
+        rows_processed += len(chunk)
+
         # Flush buffer periodically
         if insert_buf:
             conn.executemany("""
@@ -1029,6 +1140,17 @@ def run_phase5(conn: sqlite3.Connection) -> int:
             conn.commit()
             total_rows += len(insert_buf)
             insert_buf = []
+
+        # Progress every 10,000 rows
+        if rows_processed % 10_000 < CHUNK and desc_count > 0:
+            elapsed = time.time() - t0
+            pct = rows_processed / desc_count * 100
+            rate = rows_processed / elapsed if elapsed > 0 else 0
+            eta = (desc_count - rows_processed) / rate if rate > 0 else 0
+            logger.info(
+                "  [Phase 5] %s / %s rows (%.1f%%) — %d project rows — %.0f rows/s — ETA %.0fs",
+                f"{rows_processed:,}", f"{desc_count:,}", pct, total_rows, rate, eta,
+            )
 
     if insert_buf:
         conn.executemany("""
@@ -1098,11 +1220,11 @@ def enrich(
     stopped_after: int | None = None
 
     _phase_runners = {
-        1: lambda: run_phase1(conn),
-        2: lambda: run_phase2(conn),
-        3: lambda: run_phase3(conn, with_llm=with_llm),
-        4: lambda: run_phase4(conn),
-        5: lambda: run_phase5(conn),
+        1: lambda: run_phase1(conn, stop_event=stop_event),
+        2: lambda: run_phase2(conn, stop_event=stop_event),
+        3: lambda: run_phase3(conn, with_llm=with_llm, stop_event=stop_event),
+        4: lambda: run_phase4(conn, stop_event=stop_event),
+        5: lambda: run_phase5(conn, stop_event=stop_event),
     }
 
     for phase_num in sorted(_phase_runners):

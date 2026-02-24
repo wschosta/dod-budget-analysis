@@ -617,7 +617,6 @@ def main(argv: list[str] | None = None) -> int:
             total = time.monotonic() - pipeline_start
             _banner(f"Staging complete -- {total:.1f}s total")
             print(f"Staged data in: {staging_dir.resolve()}", flush=True)
-            _clear_progress()
             _finalize_pipeline(pl, 0)
             return 0
 
@@ -664,6 +663,9 @@ def main(argv: list[str] | None = None) -> int:
             "pdf_timeout": args.pdf_timeout,
             "progress_callback": _build_progress,
             "stop_event": _stop_event,
+            # Skip the builder's internal quality report when validation will
+            # run as a separate pipeline step (Step 2), avoiding ~50s duplicate.
+            "skip_quality_report": not args.skip_validate,
         }
         if args.checkpoint_interval is not None:
             build_kwargs["checkpoint_interval"] = args.checkpoint_interval
@@ -806,7 +808,6 @@ def main(argv: list[str] | None = None) -> int:
 
     # ── Done ─────────────────────────────────────────────────────────────
     _cleanup_backup(backup)
-    _clear_progress()
 
     total = time.monotonic() - pipeline_start
     _banner(f"Pipeline complete -- {total:.1f}s total")
@@ -817,7 +818,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _finalize_pipeline(pl: PipelineLogger, exit_code: int) -> None:
-    """Write run summary JSON and append to the cross-run ledger."""
+    """Write run summary JSON, append to the cross-run ledger, and clean up."""
+    # Always clear stale progress file on any exit (success, failure, interrupt)
+    _clear_progress()
+
     summary_path = pl.write_summary()
 
     from pipeline.run_ledger import append_to_ledger

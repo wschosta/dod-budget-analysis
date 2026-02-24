@@ -2169,7 +2169,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                    stop_event: Any = None, workers: int = 0,
                    pdf_timeout: int = 30,
                    failures_log: Path | None = None,
-                   retry_failures: bool = False) -> dict:
+                   retry_failures: bool = False,
+                   skip_quality_report: bool = False) -> dict:
     """Build or incrementally update the budget database.
 
     Args:
@@ -3194,18 +3195,23 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         _failures_log_path.unlink()
 
     # 1.B6-h / 2.B3-a: Post-build validation + data-quality JSON report
-    try:
-        from pipeline.validator import (  # noqa: PLC0415
-            generate_quality_report,
-        )
-        report = generate_quality_report(db_path, print_console=True)
-        val = report["validation_summary"]
-        logger.info("  [QUALITY REPORT] %s budget lines | %d checks | %d warning(s) | %d failure(s)",
-                    f"{report['total_budget_lines']:,}",
-                    val['total_checks'], val['total_warnings'], val['total_failures'])
-        logger.info("  [QUALITY REPORT] Written to data_quality_report.json")
-    except Exception as _val_err:
-        logger.warning("  [VALIDATION] Skipped: %s", _val_err)
+    # When called from run_pipeline.py, skip this — validation runs as a
+    # separate pipeline step, avoiding ~50s of redundant work.
+    if skip_quality_report:
+        logger.info("  [QUALITY REPORT] Skipped (will run as separate pipeline step)")
+    else:
+        try:
+            from pipeline.validator import (  # noqa: PLC0415
+                generate_quality_report,
+            )
+            report = generate_quality_report(db_path, print_console=True)
+            val = report["validation_summary"]
+            logger.info("  [QUALITY REPORT] %s budget lines | %d checks | %d warning(s) | %d failure(s)",
+                        f"{report['total_budget_lines']:,}",
+                        val['total_checks'], val['total_warnings'], val['total_failures'])
+            logger.info("  [QUALITY REPORT] Written to data_quality_report.json")
+        except Exception as _val_err:
+            logger.warning("  [VALIDATION] Skipped: %s", _val_err)
 
     # Return structured summary for callers (run_pipeline.py, tests)
     return {

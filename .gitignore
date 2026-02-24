@@ -1,5 +1,6 @@
 # Data files
 *.sqlite
+*.sqlite.bak
 *.sqlite-shm
 *.sqlite-wal
 DoD_Budget_Documents/
@@ -7,6 +8,7 @@ discovery_cache/
 
 # Temp/working directories
 _ul*
+dod-budget-analysis/
 
 # Python
 __pycache__/
