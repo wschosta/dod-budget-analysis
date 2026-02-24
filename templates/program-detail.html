@@ -38,8 +38,11 @@
 {# ── Funding table ────────────────────────────────────────────────────────── #}
 {% if pe_data.funding %}
 <section class="pe-section" aria-label="Funding history">
-  <h3>Funding History ($K)</h3>
-  <div class="table-wrapper">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+    <h3 style="border-bottom:none;padding-bottom:0;margin-bottom:0">Funding History ($K)</h3>
+    <button type="button" id="qty-toggle" class="btn btn-secondary btn-sm" aria-pressed="false">Show Quantities</button>
+  </div>
+  <div class="table-wrapper" style="margin-top:.75rem">
     <table class="pe-funding-table">
       <thead>
         <tr>
@@ -50,6 +53,9 @@
           <th scope="col" class="td-amount">FY25 Enacted</th>
           <th scope="col" class="td-amount">FY26 Request</th>
           <th scope="col" class="td-amount">Delta</th>
+          <th scope="col" class="td-amount qty-col">Qty FY24</th>
+          <th scope="col" class="td-amount qty-col">Qty FY25</th>
+          <th scope="col" class="td-amount qty-col">Qty FY26 Req</th>
         </tr>
       </thead>
       <tbody>
@@ -75,6 +81,9 @@
               </span>
             {% else %}—{% endif %}
           </td>
+          <td class="td-amount qty-col">{{ row.quantity_fy2024 if row.quantity_fy2024 is defined and row.quantity_fy2024 is not none else "—" }}</td>
+          <td class="td-amount qty-col">{{ row.quantity_fy2025 if row.quantity_fy2025 is defined and row.quantity_fy2025 is not none else "—" }}</td>
+          <td class="td-amount qty-col">{{ row.quantity_fy2026 if row.quantity_fy2026 is defined and row.quantity_fy2026 is not none else "—" }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -82,6 +91,23 @@
   </div>
 </section>
 {% endif %}
+
+{# ── Funding Changes (lazy-loaded via HTMX) ──────────────────── #}
+<section class="pe-section" aria-label="Funding changes">
+  <h3>Funding Changes (FY25 → FY26)
+    {% if pe_data.summary.funding_rows > 0 %}
+    <span class="badge" style="font-size:.7rem;vertical-align:middle">YoY</span>
+    {% endif %}
+  </h3>
+  <div id="pe-changes"
+       hx-get="/partials/program-changes/{{ pe_data.pe_number }}"
+       hx-trigger="load"
+       hx-indicator="#changes-loading">
+    <div id="changes-loading" class="htmx-indicator">
+      <span class="spinner"></span> Loading funding changes&hellip;
+    </div>
+  </div>
+</section>
 
 {# ── Funding trend chart ──────────────────────────────────────────────────── #}
 <section class="pe-section" aria-label="Funding trend">
@@ -99,7 +125,7 @@
     {% endif %}
   </h3>
   <div id="pe-related"
-       hx-get="/partials/program-related/{{ pe_data.pe_number }}"
+       hx-get="/partials/program-related/{{ pe_data.pe_number }}?min_confidence=0.6"
        hx-trigger="load"
        hx-indicator="#related-loading">
     <div id="related-loading" class="htmx-indicator">
@@ -120,6 +146,23 @@
     </div>
   </div>
 </section>
+
+{# ── PDF Pages (lazy-loaded via HTMX) ────────────────────────── #}
+{% if pe_data.summary.pdf_page_count > 0 %}
+<section class="pe-section" aria-label="PDF source pages">
+  <h3>PDF Source Pages
+    <span class="badge" style="font-size:.7rem;vertical-align:middle">{{ pe_data.summary.pdf_page_count }}</span>
+  </h3>
+  <div id="pe-pdf-pages"
+       hx-get="/partials/program-pdf-pages/{{ pe_data.pe_number }}"
+       hx-trigger="load"
+       hx-indicator="#pdf-pages-loading">
+    <div id="pdf-pages-loading" class="htmx-indicator">
+      <span class="spinner"></span> Loading PDF pages&hellip;
+    </div>
+  </div>
+</section>
+{% endif %}
 
 {# ── Tags (with confidence and provenance) ─────────────────────────────── #}
 {% if pe_data.tags %}

@@ -253,7 +253,7 @@ async function loadTopNChart(fy) {
             var idx = elements[0].index;
             var item = topItems[idx];
             if (item.pe_number) {
-              window.location.href = '/?q=' + encodeURIComponent(item.pe_number);
+              window.location.href = '/programs/' + encodeURIComponent(item.pe_number);
             } else {
               var q = item.line_item_title || item.account_title || '';
               window.location.href = '/?q=' + encodeURIComponent(q);

@@ -85,8 +85,8 @@ class BudgetLineDetailOut(BudgetLineOut):
 # ── Search result models ──────────────────────────────────────────────────────
 
 class SearchResultItem(BaseModel):
-    """A single search result hit (either from budget lines or PDF pages)."""
-    result_type: str = Field(..., description="'budget_line' or 'pdf_page'", examples=["budget_line"])
+    """A single search result hit (from budget lines, PDF pages, or descriptions)."""
+    result_type: str = Field(..., description="'budget_line', 'pdf_page', or 'description'", examples=["budget_line"])
     id: int = Field(..., description="Row ID in the source table", examples=[1001])
     source_file: str = Field(..., description="Source XLSX or PDF filename")
     snippet: str | None = Field(None, description="Context snippet around the matching text")

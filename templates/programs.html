@@ -15,6 +15,19 @@
   </div>
 </div>
 
+{# A4.4: Tag cloud — collapsible browse-by-tag section #}
+<details class="tag-cloud-section" id="tag-cloud-section">
+  <summary class="tag-cloud-toggle">
+    <span>Browse by Tag</span>
+    <span class="tag-cloud-count" id="tag-cloud-count"></span>
+  </summary>
+  <div class="tag-cloud" id="tag-cloud" role="navigation" aria-label="Tag cloud for filtering programs">
+    <div style="text-align:center;padding:1rem;font-size:.85rem;color:var(--text-secondary)">
+      <span class="spinner"></span> Loading tags&hellip;
+    </div>
+  </div>
+</details>
+
 <div class="programs-layout">
 
   {# FALCON-14: Mobile filter drawer toggle #}
@@ -66,6 +79,16 @@
       </div>
       {% endif %}
 
+      <div class="filter-group">
+        <label for="pe-sort">Sort By</label>
+        <select id="pe-sort" name="sort_by">
+          <option value="pe_number">PE Number</option>
+          <option value="funding">Funding (FY26, desc)</option>
+          <option value="name">Name (A-Z)</option>
+        </select>
+      </div>
+      <input type="hidden" name="sort_dir" id="pe-sort-dir" value="asc">
+
       <div class="filter-actions">
         <button type="submit" class="btn btn-primary btn-sm">Apply</button>
         <a href="/programs" class="btn btn-secondary btn-sm">Reset</a>
@@ -88,6 +111,17 @@
       </div>
     </div>
     {% else %}
+    {% if has_pe_data %}
+    <div id="top-movers"
+         hx-get="/partials/top-changes"
+         hx-trigger="load"
+         hx-indicator="#movers-loading"
+         style="margin-bottom:1rem">
+      <div id="movers-loading" class="htmx-indicator">
+        <span class="spinner"></span> Loading top movers&hellip;
+      </div>
+    </div>
+    {% endif %}
     <div id="pe-loading" class="htmx-indicator" style="margin-bottom:.5rem">
       <span class="spinner"></span> Loading programs&hellip;
     </div>

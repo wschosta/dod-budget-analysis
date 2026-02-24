@@ -1,11 +1,11 @@
-{# HTMX partial: Related programs with confidence filter and pagination #}
+{# HTMX partial: Related programs with confidence filter, link_type grouping, and pagination #}
 {% if related %}
 
 {# Confidence filter controls #}
 <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.75rem;flex-wrap:wrap">
   <label for="confidence-filter" style="font-size:.8rem;color:var(--text-secondary)">Min confidence:</label>
   <select id="confidence-filter"
-          style="font-size:.8rem;padding:.2rem .4rem;border-radius:4px;border:1px solid var(--border);background:var(--bg-surface);color:var(--text-primary)"
+          style="font-size:.8rem;padding:.2rem .4rem;border-radius:4px;border:1px solid var(--border-color);background:var(--bg-surface);color:var(--text-primary)"
           hx-get="/partials/program-related/{{ pe_number }}"
           hx-target="#pe-related"
           hx-include="this"
@@ -21,34 +21,133 @@
   </span>
 </div>
 
-<div class="pe-related-grid">
-  {% for rel in related %}
-  <a href="/programs/{{ rel.referenced_pe }}" class="pe-card pe-card-sm">
-    <span class="badge">{{ rel.referenced_pe }}</span>
-    {% if rel.referenced_title %}
-    <span style="font-size:.85rem">{{ rel.referenced_title }}</span>
-    {% endif %}
-    {% if rel.referenced_org %}
-    <span style="font-size:.75rem;color:var(--text-secondary)">{{ rel.referenced_org }}</span>
-    {% endif %}
-    <span style="font-size:.75rem;color:var(--text-secondary)">
-      {{ rel.link_type | replace("_", " ") }}
-      {% if rel.confidence %}
-      <span class="confidence-indicator" style="
-        display:inline-block;width:1.8rem;height:.4rem;border-radius:2px;vertical-align:middle;margin-left:.3rem;
-        background:linear-gradient(90deg,
-          {% if rel.confidence >= 0.9 %}var(--primary){% elif rel.confidence >= 0.7 %}#d97706{% else %}var(--text-secondary){% endif %}
-          {{ '%.0f' | format(rel.confidence * 100) }}%, var(--border) {{ '%.0f' | format(rel.confidence * 100) }}%);
-      " title="{{ '%.0f' | format(rel.confidence * 100) }}% confidence"></span>
-      {{ "%.0f" | format(rel.confidence * 100) }}%
+{# Group related PEs by link_type #}
+{% set explicit_refs = [] %}
+{% set name_matches = [] %}
+{% set other_refs = [] %}
+{% for rel in related %}
+  {% if rel.link_type == 'explicit_pe_ref' %}
+    {% set _ = explicit_refs.append(rel) %}
+  {% elif rel.link_type == 'name_match' %}
+    {% set _ = name_matches.append(rel) %}
+  {% else %}
+    {% set _ = other_refs.append(rel) %}
+  {% endif %}
+{% endfor %}
+
+{% if explicit_refs %}
+<div style="margin-bottom:1rem">
+  <h4 style="font-size:.82rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin-bottom:.5rem;display:flex;align-items:center;gap:.35rem">
+    <span class="badge" style="background:var(--clr-blue);color:var(--text-on-primary);font-size:.68rem">Explicit Reference</span>
+    <span>{{ explicit_refs | length }} found</span>
+  </h4>
+  <div class="pe-related-grid">
+    {% for rel in explicit_refs %}
+    <a href="/programs/{{ rel.referenced_pe }}" class="pe-card pe-card-sm">
+      <div style="display:flex;gap:.35rem;align-items:center;flex-wrap:wrap">
+        <span class="badge">{{ rel.referenced_pe }}</span>
+        <span class="badge" style="background:var(--clr-blue);color:var(--text-on-primary);font-size:.65rem">Explicit Reference</span>
+      </div>
+      {% if rel.referenced_title %}
+      <span style="font-size:.85rem">{{ rel.referenced_title }}</span>
       {% endif %}
-    </span>
-    {% if rel.mention_count and rel.mention_count > 1 %}
-    <span style="font-size:.7rem;color:var(--text-secondary)">{{ rel.mention_count }} mentions</span>
-    {% endif %}
-  </a>
-  {% endfor %}
+      {% if rel.referenced_org %}
+      <span style="font-size:.75rem;color:var(--text-secondary)">{{ rel.referenced_org }}</span>
+      {% endif %}
+      <span style="font-size:.75rem;color:var(--text-secondary)">
+        {% if rel.confidence %}
+        <span class="confidence-indicator" style="
+          display:inline-block;width:1.8rem;height:.4rem;border-radius:2px;vertical-align:middle;margin-left:.3rem;
+          background:linear-gradient(90deg,
+            {% if rel.confidence >= 0.9 %}var(--clr-blue){% elif rel.confidence >= 0.7 %}#d97706{% else %}var(--text-secondary){% endif %}
+            {{ '%.0f' | format(rel.confidence * 100) }}%, var(--border-color) {{ '%.0f' | format(rel.confidence * 100) }}%);
+        " title="{{ '%.0f' | format(rel.confidence * 100) }}% confidence"></span>
+        {{ "%.0f" | format(rel.confidence * 100) }}%
+        {% endif %}
+      </span>
+      {% if rel.mention_count and rel.mention_count > 1 %}
+      <span style="font-size:.7rem;color:var(--text-secondary)">{{ rel.mention_count }} mentions</span>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </div>
 </div>
+{% endif %}
+
+{% if name_matches %}
+<div style="margin-bottom:1rem">
+  <h4 style="font-size:.82rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin-bottom:.5rem;display:flex;align-items:center;gap:.35rem">
+    <span class="badge" style="background:transparent;color:var(--text-secondary);border:1px solid var(--border-color);font-size:.68rem">Name Match</span>
+    <span>{{ name_matches | length }} found</span>
+  </h4>
+  <div class="pe-related-grid">
+    {% for rel in name_matches %}
+    <a href="/programs/{{ rel.referenced_pe }}" class="pe-card pe-card-sm">
+      <div style="display:flex;gap:.35rem;align-items:center;flex-wrap:wrap">
+        <span class="badge">{{ rel.referenced_pe }}</span>
+        <span class="badge" style="background:transparent;color:var(--text-secondary);border:1px solid var(--border-color);font-size:.65rem">Name Match</span>
+      </div>
+      {% if rel.referenced_title %}
+      <span style="font-size:.85rem">{{ rel.referenced_title }}</span>
+      {% endif %}
+      {% if rel.referenced_org %}
+      <span style="font-size:.75rem;color:var(--text-secondary)">{{ rel.referenced_org }}</span>
+      {% endif %}
+      <span style="font-size:.75rem;color:var(--text-secondary)">
+        {% if rel.confidence %}
+        <span class="confidence-indicator" style="
+          display:inline-block;width:1.8rem;height:.4rem;border-radius:2px;vertical-align:middle;margin-left:.3rem;
+          background:linear-gradient(90deg,
+            {% if rel.confidence >= 0.9 %}var(--clr-blue){% elif rel.confidence >= 0.7 %}#d97706{% else %}var(--text-secondary){% endif %}
+            {{ '%.0f' | format(rel.confidence * 100) }}%, var(--border-color) {{ '%.0f' | format(rel.confidence * 100) }}%);
+        " title="{{ '%.0f' | format(rel.confidence * 100) }}% confidence"></span>
+        {{ "%.0f" | format(rel.confidence * 100) }}%
+        {% endif %}
+      </span>
+      {% if rel.mention_count and rel.mention_count > 1 %}
+      <span style="font-size:.7rem;color:var(--text-secondary)">{{ rel.mention_count }} mentions</span>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if other_refs %}
+<div style="margin-bottom:1rem">
+  <h4 style="font-size:.82rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin-bottom:.5rem">
+    Other Links ({{ other_refs | length }})
+  </h4>
+  <div class="pe-related-grid">
+    {% for rel in other_refs %}
+    <a href="/programs/{{ rel.referenced_pe }}" class="pe-card pe-card-sm">
+      <span class="badge">{{ rel.referenced_pe }}</span>
+      {% if rel.referenced_title %}
+      <span style="font-size:.85rem">{{ rel.referenced_title }}</span>
+      {% endif %}
+      {% if rel.referenced_org %}
+      <span style="font-size:.75rem;color:var(--text-secondary)">{{ rel.referenced_org }}</span>
+      {% endif %}
+      <span style="font-size:.75rem;color:var(--text-secondary)">
+        {{ rel.link_type | replace("_", " ") }}
+        {% if rel.confidence %}
+        <span class="confidence-indicator" style="
+          display:inline-block;width:1.8rem;height:.4rem;border-radius:2px;vertical-align:middle;margin-left:.3rem;
+          background:linear-gradient(90deg,
+            {% if rel.confidence >= 0.9 %}var(--clr-blue){% elif rel.confidence >= 0.7 %}#d97706{% else %}var(--text-secondary){% endif %}
+            {{ '%.0f' | format(rel.confidence * 100) }}%, var(--border-color) {{ '%.0f' | format(rel.confidence * 100) }}%);
+        " title="{{ '%.0f' | format(rel.confidence * 100) }}% confidence"></span>
+        {{ "%.0f" | format(rel.confidence * 100) }}%
+        {% endif %}
+      </span>
+      {% if rel.mention_count and rel.mention_count > 1 %}
+      <span style="font-size:.7rem;color:var(--text-secondary)">{{ rel.mention_count }} mentions</span>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
 
 {# Pagination #}
 {% if total > related | length %}

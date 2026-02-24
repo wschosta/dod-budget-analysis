@@ -222,6 +222,130 @@ def compare_pes(
     return {"count": len(items), "items": items}
 
 
+# ── GET /api/v1/pe/spruill ────────────────────────────────────────────────────
+
+@router.get(
+    "/spruill",
+    summary="Spruill-style comparison table data for multiple PEs",
+)
+def get_spruill_table(
+    pe: list[str] = Query(..., description="PE numbers to compare (2-20)"),
+    detail: bool = Query(False, description="Include sub-element rows per PE"),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> dict:
+    """Return data formatted for a Spruill-style comparison table.
+
+    Each PE gets a subtotal row with aggregated funding amounts. When
+    detail=true, per-line-item rows follow each PE subtotal. The response
+    includes the list of fiscal years present in the data and all rows
+    needed to render a table.
+    """
+    if len(pe) < 2:
+        raise HTTPException(status_code=400, detail="At least 2 PE numbers required")
+    if len(pe) > 20:
+        raise HTTPException(status_code=400, detail="Maximum 20 PE numbers for Spruill table")
+
+    ph = ",".join("?" * len(pe))
+
+    # Get index info for display titles and organizations
+    index_rows = conn.execute(
+        f"SELECT pe_number, display_title, organization_name "
+        f"FROM pe_index WHERE pe_number IN ({ph})", pe,
+    ).fetchall()
+    index_map = {r["pe_number"]: _row_dict(r) for r in index_rows}
+
+    # Get funding aggregates per PE (subtotal rows)
+    funding_rows = conn.execute(f"""
+        SELECT
+            pe_number,
+            SUM(COALESCE(amount_fy2024_actual, 0))  AS fy2024_actual,
+            SUM(COALESCE(amount_fy2025_enacted, 0)) AS fy2025_enacted,
+            SUM(COALESCE(amount_fy2025_total, 0))   AS fy2025_total,
+            SUM(COALESCE(amount_fy2026_request, 0)) AS fy2026_request,
+            SUM(COALESCE(amount_fy2026_total, 0))   AS fy2026_total
+        FROM budget_lines
+        WHERE pe_number IN ({ph})
+        GROUP BY pe_number
+    """, pe).fetchall()
+    funding_map = {r["pe_number"]: _row_dict(r) for r in funding_rows}
+
+    # Optionally get per-line-item detail rows
+    detail_map: dict[str, list[dict]] = {}
+    if detail:
+        detail_rows = conn.execute(f"""
+            SELECT
+                pe_number, line_item_title, exhibit_type,
+                SUM(COALESCE(amount_fy2024_actual, 0))  AS fy2024_actual,
+                SUM(COALESCE(amount_fy2025_enacted, 0)) AS fy2025_enacted,
+                SUM(COALESCE(amount_fy2025_total, 0))   AS fy2025_total,
+                SUM(COALESCE(amount_fy2026_request, 0)) AS fy2026_request,
+                SUM(COALESCE(amount_fy2026_total, 0))   AS fy2026_total
+            FROM budget_lines
+            WHERE pe_number IN ({ph})
+            GROUP BY pe_number, line_item_title, exhibit_type
+            ORDER BY pe_number, exhibit_type, line_item_title
+        """, pe).fetchall()
+        for r in detail_rows:
+            detail_map.setdefault(r["pe_number"], []).append(_row_dict(r))
+
+    # Collect distinct fiscal years from the data
+    fy_set: set[str] = set()
+    for f in funding_map.values():
+        if f.get("fy2024_actual"):
+            fy_set.add("2024")
+        if f.get("fy2025_enacted") or f.get("fy2025_total"):
+            fy_set.add("2025")
+        if f.get("fy2026_request") or f.get("fy2026_total"):
+            fy_set.add("2026")
+    fiscal_years = sorted(fy_set)
+
+    # Build rows in the order requested
+    rows: list[dict] = []
+    for p in pe:
+        info = index_map.get(p, {})
+        funding = funding_map.get(p, {})
+
+        # Subtotal row for this PE
+        rows.append({
+            "pe_number": p,
+            "display_title": info.get("display_title"),
+            "organization_name": info.get("organization_name"),
+            "is_subtotal": True,
+            "amounts": {
+                "fy2024_actual": funding.get("fy2024_actual", 0),
+                "fy2025_enacted": funding.get("fy2025_enacted", 0),
+                "fy2025_total": funding.get("fy2025_total", 0),
+                "fy2026_request": funding.get("fy2026_request", 0),
+                "fy2026_total": funding.get("fy2026_total", 0),
+            },
+        })
+
+        # Detail rows (sub-elements) if requested
+        if detail:
+            for d in detail_map.get(p, []):
+                rows.append({
+                    "pe_number": p,
+                    "display_title": info.get("display_title"),
+                    "organization_name": info.get("organization_name"),
+                    "is_subtotal": False,
+                    "line_item_title": d.get("line_item_title"),
+                    "exhibit_type": d.get("exhibit_type"),
+                    "amounts": {
+                        "fy2024_actual": d.get("fy2024_actual", 0),
+                        "fy2025_enacted": d.get("fy2025_enacted", 0),
+                        "fy2025_total": d.get("fy2025_total", 0),
+                        "fy2026_request": d.get("fy2026_request", 0),
+                        "fy2026_total": d.get("fy2026_total", 0),
+                    },
+                })
+
+    return {
+        "pe_count": len(pe),
+        "fiscal_years": fiscal_years,
+        "rows": rows,
+    }
+
+
 # ── GET /api/v1/pe/{pe_number} ────────────────────────────────────────────────
 
 @router.get(
@@ -419,8 +543,35 @@ def get_pe_changes(
     Compares FY2025 enacted/total vs FY2026 request to surface budget
     increases, decreases, and new/terminated line items. Useful for
     identifying programs gaining or losing funding.
+
+    Edge cases handled:
+    - PE with no FY2025 data: lines labelled as 'new'
+    - PE exists only in PDFs (no budget_lines): returns empty line_items with note
+    - has_budget_lines flag indicates whether any budget_lines exist for this PE
     """
     _validate_pe_number(pe_number)
+
+    # Check if any budget_lines exist for this PE
+    bl_count = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines WHERE pe_number = ?",
+        (pe_number,),
+    ).fetchone()[0]
+    has_budget_lines = bl_count > 0
+
+    if not has_budget_lines:
+        # PE may exist only in PDFs or pe_index — return empty with note
+        return {
+            "pe_number": pe_number,
+            "has_budget_lines": False,
+            "total_fy2025": 0,
+            "total_fy2026_request": 0,
+            "total_delta": 0,
+            "pct_change": None,
+            "note": "No budget line items found for this PE. "
+                    "Data may only be available in PDF documents.",
+            "line_items": [],
+        }
+
     rows = conn.execute("""
         SELECT
             line_item_title,
@@ -460,6 +611,7 @@ def get_pe_changes(
 
     return {
         "pe_number": pe_number,
+        "has_budget_lines": True,
         "total_fy2025": total_fy25,
         "total_fy2026_request": total_fy26,
         "total_delta": total_fy26 - total_fy25,

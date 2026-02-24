@@ -351,6 +351,74 @@ AFTER UPDATE ON budget_line_items BEGIN
 END;
         """,
     ),
+    (
+        3,
+        "003_pe_descriptions_fts: FTS5 virtual table + sync triggers for pe_descriptions",
+        """
+-- Ensure pe_descriptions base table exists before creating FTS5 content table.
+-- The enrichment pipeline creates this table with more columns; this minimal
+-- DDL ensures the migration works on a fresh DB before enrichment runs.
+CREATE TABLE IF NOT EXISTS pe_descriptions (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    pe_number        TEXT NOT NULL,
+    fiscal_year      TEXT,
+    source_file      TEXT,
+    page_start       INTEGER,
+    page_end         INTEGER,
+    section_header   TEXT,
+    description_text TEXT
+);
+
+-- pe_descriptions_fts enables fast topic search across PE narrative text
+-- without expensive LIKE scans. Content table linkage avoids data duplication.
+
+CREATE VIRTUAL TABLE IF NOT EXISTS pe_descriptions_fts USING fts5(
+    pe_number,
+    section_header,
+    description_text,
+    content='pe_descriptions',
+    content_rowid='id'
+);
+
+-- Sync trigger: INSERT
+CREATE TRIGGER IF NOT EXISTS pe_descriptions_ai AFTER INSERT ON pe_descriptions BEGIN
+    INSERT INTO pe_descriptions_fts(rowid, pe_number, section_header, description_text)
+    VALUES (new.id, new.pe_number, new.section_header, new.description_text);
+END;
+
+-- Sync trigger: DELETE
+CREATE TRIGGER IF NOT EXISTS pe_descriptions_ad AFTER DELETE ON pe_descriptions BEGIN
+    INSERT INTO pe_descriptions_fts(pe_descriptions_fts, rowid, pe_number, section_header, description_text)
+    VALUES('delete', old.id, old.pe_number, old.section_header, old.description_text);
+END;
+
+-- Sync trigger: UPDATE
+CREATE TRIGGER IF NOT EXISTS pe_descriptions_au AFTER UPDATE ON pe_descriptions BEGIN
+    INSERT INTO pe_descriptions_fts(pe_descriptions_fts, rowid, pe_number, section_header, description_text)
+    VALUES('delete', old.id, old.pe_number, old.section_header, old.description_text);
+    INSERT INTO pe_descriptions_fts(rowid, pe_number, section_header, description_text)
+    VALUES (new.id, new.pe_number, new.section_header, new.description_text);
+END;
+        """,
+    ),
+    (
+        4,
+        "004_data_changelog: data update tracking table for audit trail",
+        """
+CREATE TABLE IF NOT EXISTS data_changelog (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action TEXT NOT NULL,  -- 'insert', 'update', 'delete', 'refresh', 'enrich'
+    table_name TEXT NOT NULL,
+    record_count INTEGER,
+    source_file TEXT,
+    timestamp TEXT DEFAULT (datetime('now')),
+    notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_changelog_ts ON data_changelog(timestamp);
+CREATE INDEX IF NOT EXISTS idx_changelog_action ON data_changelog(action);
+        """,
+    ),
 ]
 
 

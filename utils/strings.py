@@ -5,7 +5,17 @@ during data ingestion. Using pre-compiled patterns and efficient string operatio
 yields ~10-15% speedup in build_budget_db.py.
 """
 
+import re
+
 from utils.patterns import WHITESPACE, CURRENCY_SYMBOLS, FTS5_SPECIAL_CHARS
+
+# Pre-compiled pattern for fiscal year normalization
+_FY_NORMALIZE_RE = re.compile(
+    r"^(?:FY\s*)?(\d{4})$", re.IGNORECASE
+)
+_FY_SHORT_RE = re.compile(
+    r"^FY\s*(\d{2})$", re.IGNORECASE
+)
 
 
 def safe_float(val, default: float = 0.0) -> float:
@@ -91,3 +101,50 @@ def sanitize_fts5_query(query: str) -> str:
 
     # Wrap each term in double quotes for literal matching
     return " OR ".join(f'"{t}"' for t in terms)
+
+
+def normalize_fiscal_year(value: str) -> str | None:
+    """Normalize a fiscal year string to a consistent 4-digit format.
+
+    Converts various fiscal year representations to a bare 4-digit year string.
+    This is used during data ingestion to ensure fiscal year values are stored
+    consistently in the database.
+
+    Supported formats:
+        "FY 2026"  -> "2026"
+        "FY2026"   -> "2026"
+        "2026"     -> "2026"
+        "FY26"     -> "2026"  (assumes 2000s for 2-digit years)
+        "FY 26"    -> "2026"  (assumes 2000s for 2-digit years)
+
+    Args:
+        value: Raw fiscal year string from spreadsheet or metadata.
+
+    Returns:
+        4-digit year string (e.g. "2026"), or None if input is not
+        a recognizable fiscal year format.
+    """
+    if not value or not isinstance(value, str):
+        return None
+
+    stripped = value.strip()
+    if not stripped:
+        return None
+
+    # Match "FY 2026", "FY2026", or bare "2026"
+    m = _FY_NORMALIZE_RE.match(stripped)
+    if m:
+        year = int(m.group(1))
+        # Sanity check: valid fiscal years are in a reasonable range
+        if 1900 <= year <= 2100:
+            return str(year)
+        return None
+
+    # Match "FY26" or "FY 26" (2-digit year)
+    m = _FY_SHORT_RE.match(stripped)
+    if m:
+        short_year = int(m.group(1))
+        # Assume 2000s for all 2-digit FY values (DoD data is modern)
+        return str(2000 + short_year)
+
+    return None

@@ -642,6 +642,51 @@ def program_detail(
     })
 
 
+@router.get("/compare", response_class=HTMLResponse, include_in_schema=False)
+def spruill_page(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> HTMLResponse:
+    """Spruill-style multi-PE funding comparison page."""
+    params = request.query_params
+    selected_pes = params.getlist("pe")
+    return _tmpl().TemplateResponse("spruill.html", {
+        "request": request,
+        "selected_pes": selected_pes,
+    })
+
+
+@router.get("/partials/spruill-table", response_class=HTMLResponse, include_in_schema=False)
+def spruill_table_partial(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> HTMLResponse:
+    """HTMX partial: Spruill comparison table."""
+    params = request.query_params
+    pe_list = params.getlist("pe")
+    detail = params.get("detail", "false").lower() in ("true", "1", "yes")
+    rows: list[dict] = []
+    fiscal_years: list[str] = []
+    pe_count = 0
+
+    if len(pe_list) >= 2 and _table_exists(conn, "budget_lines"):
+        try:
+            from api.routes.pe import get_spruill_table
+            result = get_spruill_table(pe=pe_list, detail=detail, conn=conn)
+            rows = result.get("rows", [])
+            fiscal_years = result.get("fiscal_years", [])
+            pe_count = result.get("pe_count", 0)
+        except Exception:
+            logger.debug("Failed to load Spruill table data", exc_info=True)
+
+    return _tmpl().TemplateResponse("partials/spruill-table.html", {
+        "request": request,
+        "rows": rows,
+        "fiscal_years": fiscal_years,
+        "pe_count": pe_count,
+    })
+
+
 @router.get("/partials/program-list", response_class=HTMLResponse, include_in_schema=False)
 def program_list_partial(
     request: Request,
@@ -651,17 +696,20 @@ def program_list_partial(
     items: list[dict] = []
     total = 0
 
+    params = request.query_params
+    sort_by = params.get("sort_by") or None
+    sort_dir = params.get("sort_dir") or None
+
     if _table_exists(conn, "pe_index"):
         try:
             from api.routes.pe import list_pes
-            params = request.query_params
             tag_values = params.getlist("tag") or None
             result = list_pes(
                 tag=tag_values,
                 q=params.get("q") or None,
                 service=params.get("service") or None,
                 budget_type=None, approp=None, account=None, ba=None,
-                exhibit=None, fy=None, sort_by=None, sort_dir=None,
+                exhibit=None, fy=None, sort_by=sort_by, sort_dir=sort_dir,
                 count_only=False, limit=25, offset=0, conn=conn,
             )
             items = result.get("items", [])
@@ -673,6 +721,8 @@ def program_list_partial(
         "request": request,
         "items": items,
         "total": total,
+        "sort_by": sort_by or "pe_number",
+        "sort_dir": sort_dir or "asc",
     })
 
 
@@ -773,4 +823,120 @@ def program_projects_partial(
         "request": request,
         "pe_number": pe_number,
         "projects": projects,
+    })
+
+
+@router.get("/partials/program-changes/{pe_number}",
+            response_class=HTMLResponse, include_in_schema=False)
+def program_changes_partial(
+    pe_number: str,
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> HTMLResponse:
+    """HTMX partial: Year-over-year funding changes for a PE."""
+    changes: list[dict] = []
+    summary: dict = {
+        "total_fy2025": 0,
+        "total_fy2026_request": 0,
+        "total_delta": 0,
+        "pct_change": None,
+    }
+
+    if _table_exists(conn, "budget_lines"):
+        try:
+            from api.routes.pe import get_pe_changes
+            result = get_pe_changes(pe_number, conn=conn)
+            raw_items = result.get("line_items", [])
+            # Map API field names to template-expected field names
+            for item in raw_items:
+                item["amount_fy2025"] = item.get("fy2025_total")
+                item["amount_fy2026_request"] = item.get("fy2026_request")
+            changes = raw_items
+            summary = {
+                "total_fy2025": result.get("total_fy2025", 0),
+                "total_fy2026_request": result.get("total_fy2026_request", 0),
+                "total_delta": result.get("total_delta", 0),
+                "pct_change": result.get("pct_change"),
+            }
+        except Exception:
+            logger.debug("Failed to load PE changes for %s", pe_number, exc_info=True)
+
+    return _tmpl().TemplateResponse("partials/program-changes.html", {
+        "request": request,
+        "pe_number": pe_number,
+        "changes": changes,
+        "summary": summary,
+    })
+
+
+@router.get("/partials/program-pdf-pages/{pe_number}",
+            response_class=HTMLResponse, include_in_schema=False)
+def program_pdf_pages_partial(
+    pe_number: str,
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> HTMLResponse:
+    """HTMX partial: PDF pages mentioning a PE."""
+    pages: list[dict] = []
+    total = 0
+
+    params = request.query_params
+    fy = params.get("fy") or None
+    try:
+        limit = min(100, max(1, int(params.get("limit", "20"))))
+    except (ValueError, TypeError):
+        limit = 20
+    try:
+        offset = max(0, int(params.get("offset", "0")))
+    except (ValueError, TypeError):
+        offset = 0
+
+    if _table_exists(conn, "pdf_pe_numbers") or _table_exists(conn, "pdf_pages"):
+        try:
+            from api.routes.pe import get_pe_pdf_pages
+            result = get_pe_pdf_pages(pe_number, fy=fy, limit=limit, offset=offset, conn=conn)
+            pages = result.get("pages", [])
+            total = result.get("total", 0)
+        except Exception:
+            logger.debug("Failed to load PDF pages for %s", pe_number, exc_info=True)
+
+    return _tmpl().TemplateResponse("partials/program-pdf-pages.html", {
+        "request": request,
+        "pe_number": pe_number,
+        "pages": pages,
+        "total": total,
+    })
+
+
+@router.get("/partials/top-changes",
+            response_class=HTMLResponse, include_in_schema=False)
+def top_changes_partial(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> HTMLResponse:
+    """HTMX partial: Top funding increases and decreases."""
+    increases: list[dict] = []
+    decreases: list[dict] = []
+
+    if _table_exists(conn, "budget_lines"):
+        try:
+            from api.routes.pe import get_top_changes
+            inc_result = get_top_changes(
+                direction="increase", service=None, min_delta=None,
+                sort_by=None, limit=5, conn=conn,
+            )
+            increases = inc_result.get("items", [])
+
+            dec_result = get_top_changes(
+                direction="decrease", service=None, min_delta=None,
+                sort_by=None, limit=5, conn=conn,
+            )
+            decreases = dec_result.get("items", [])
+        except Exception:
+            logger.debug("Failed to load top changes", exc_info=True)
+
+    return _tmpl().TemplateResponse("partials/top-changes.html", {
+        "request": request,
+        "increases": increases,
+        "decreases": decreases,
     })

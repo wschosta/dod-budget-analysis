@@ -9,13 +9,25 @@
   <p class="hero-subtitle">Search and explore U.S. Department of Defense budget data across fiscal years, services, and programs.</p>
   <form class="hero-search-form" role="search" aria-label="Quick search"
         action="/" method="get">
-    <input type="text" name="q" class="hero-search-input"
-           value="{{ filters.q }}"
-           placeholder="Search programs, PE numbers, keywords..."
-           aria-label="Search budget data"
-           autocomplete="off">
+    <div class="autocomplete-wrapper">
+      <input type="text" name="q" id="hero-search-input" class="hero-search-input"
+             value="{{ filters.q }}"
+             placeholder="Search programs, PE numbers, keywords..."
+             aria-label="Search budget data"
+             autocomplete="off"
+             role="combobox"
+             aria-autocomplete="list"
+             aria-owns="hero-autocomplete-list"
+             aria-expanded="false">
+      <ul id="hero-autocomplete-list" class="autocomplete-dropdown" role="listbox" hidden></ul>
+    </div>
     <button type="submit" class="btn btn-primary hero-search-btn">Search</button>
   </form>
+  <div class="search-source-toggle" style="margin-top:.5rem;font-size:.8rem;display:flex;gap:.75rem;justify-content:center">
+    <label><input type="radio" name="hero_source" value="budget_lines" checked> Budget Lines</label>
+    <label><input type="radio" name="hero_source" value="descriptions"> Program Descriptions</label>
+    <label><input type="radio" name="hero_source" value="both"> Both</label>
+  </div>
   <div class="hero-actions">
     <button type="button" class="btn btn-secondary btn-sm" onclick="toggleAdvancedSearch()">Advanced Search</button>
   </div>
@@ -73,6 +85,11 @@
                hx-target="#results-container"
                hx-push-url="true"
                hx-include="#filter-form">
+        <div class="search-source-toggle" style="margin-top:.5rem;font-size:.8rem;display:flex;gap:.75rem">
+          <label><input type="radio" name="source" value="budget_lines" {% if not filters.source or filters.source == 'budget_lines' %}checked{% endif %}> Budget Lines</label>
+          <label><input type="radio" name="source" value="descriptions" {% if filters.source == 'descriptions' %}checked{% endif %}> Program Descriptions</label>
+          <label><input type="radio" name="source" value="both" {% if filters.source == 'both' %}checked{% endif %}> Both</label>
+        </div>
       </div>
 
       {# FALCON-3: Collapsible filter sections #}

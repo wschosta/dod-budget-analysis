@@ -323,6 +323,17 @@ def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
                 old.section_header, old.description_text
             );
         END;
+        CREATE TRIGGER IF NOT EXISTS pe_desc_fts_au AFTER UPDATE ON pe_descriptions BEGIN
+            INSERT INTO pe_descriptions_fts(
+                pe_descriptions_fts, rowid, pe_number,
+                section_header, description_text
+            ) VALUES (
+                'delete', old.id, old.pe_number,
+                old.section_header, old.description_text
+            );
+            INSERT INTO pe_descriptions_fts(rowid, pe_number, section_header, description_text)
+            VALUES (new.id, new.pe_number, new.section_header, new.description_text);
+        END;
 
         CREATE TABLE IF NOT EXISTS pe_tags (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -704,6 +715,19 @@ def run_phase2(conn: sqlite3.Connection, stop_event: threading.Event | None = No
             logger.warning("  - %s", err)
         if len(errors) > 5:
             logger.warning("  ... and %d more", len(errors) - 5)
+
+    # Rebuild pe_descriptions_fts index if the table exists.
+    # The triggers keep it in sync for individual inserts, but a full
+    # rebuild after bulk loading ensures the index is complete and
+    # consistent (covers rows inserted before triggers were created).
+    try:
+        conn.execute("SELECT 1 FROM pe_descriptions_fts LIMIT 0")
+        conn.execute("INSERT INTO pe_descriptions_fts(pe_descriptions_fts) VALUES('rebuild')")
+        conn.commit()
+        logger.info("  Rebuilt pe_descriptions_fts index.")
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
+        pass  # pe_descriptions_fts table doesn't exist yet
+
     logger.info("Done. %d description rows inserted.", total_desc)
     return total_desc
 

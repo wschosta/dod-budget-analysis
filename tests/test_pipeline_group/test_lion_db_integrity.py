@@ -187,7 +187,11 @@ class TestExcelIngestion:
     """Test that Excel ingestion captures all required metadata."""
 
     def test_budget_lines_have_fy_format(self, test_db_excel_only):
-        """LION-101: All fiscal_year values should match 'FY YYYY' format."""
+        """LION-101: All fiscal_year values should match a valid year format.
+
+        B4.4 normalization converts to bare 4-digit format ('2026').
+        Accept both 'FY YYYY' (legacy) and 'YYYY' (normalized) formats.
+        """
         conn = _get_conn(test_db_excel_only)
         rows = conn.execute(
             "SELECT DISTINCT fiscal_year FROM budget_lines "
@@ -196,8 +200,8 @@ class TestExcelIngestion:
         conn.close()
         for row in rows:
             fy = row[0]
-            assert re.match(r"^FY \d{4}$", fy), \
-                f"fiscal_year '{fy}' doesn't match 'FY YYYY' format"
+            assert re.match(r"^(FY )?\d{4}$", fy), \
+                f"fiscal_year '{fy}' doesn't match valid year format"
 
     def test_pe_numbers_extracted(self, test_db_excel_only):
         """PE numbers should be extracted from R-1 and P-1 exhibits."""
@@ -402,5 +406,6 @@ class TestFYFallback:
         ).fetchone()
         conn.close()
         assert row is not None, "No budget_lines rows found"
-        assert row[0] == "FY 2026", \
-            f"Expected 'FY 2026' from directory fallback, got '{row[0]}'"
+        # B4.4: After normalization, fiscal_year is bare 4-digit format
+        assert row[0] in ("FY 2026", "2026"), \
+            f"Expected 'FY 2026' or '2026' from directory fallback, got '{row[0]}'"

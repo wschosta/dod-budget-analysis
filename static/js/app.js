@@ -409,7 +409,7 @@ function closeFeedbackModal() {
   });
 })();
 
-// ── LION-006: Chart export (PNG download) ───────────────────────────────────
+// ── LION-006 + A4.3: Chart export (PNG download) ────────────────────────────
 
 function downloadChartAsPNG(canvasId, filename) {
   var canvas = document.getElementById(canvasId);
@@ -421,6 +421,30 @@ function downloadChartAsPNG(canvasId, filename) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+}
+
+/**
+ * A4.3: Reusable helper to add an "Export as PNG" button next to a chart canvas.
+ * Inserts the button after the canvas inside its parent container.
+ * @param {string} canvasId - The id of the canvas element
+ * @param {string} filename - The download filename (e.g. "service-chart.png")
+ */
+function addChartExportButton(canvasId, filename) {
+  var canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  // Avoid adding duplicate buttons
+  var parent = canvas.parentElement;
+  if (!parent) return;
+  if (parent.querySelector('.chart-export-btn[data-canvas="' + canvasId + '"]')) return;
+
+  var btn = document.createElement("button");
+  btn.className = "btn btn-secondary btn-sm chart-export-btn";
+  btn.setAttribute("data-canvas", canvasId);
+  btn.textContent = "Export as PNG";
+  btn.addEventListener("click", function() {
+    downloadChartAsPNG(canvasId, filename || canvasId + ".png");
+  });
+  parent.appendChild(btn);
 }
 
 // ── LION-007: Copy shareable URL with current filters ───────────────────────
@@ -726,8 +750,44 @@ function loadFooterMetadata() {
         parts.push(data.fiscal_years.join(", "));
       }
       if (parts.length) el.textContent = parts.join(" \u00B7 ");
+
+      // A4.1: Populate data freshness indicator
+      populateDataFreshness(data);
     })
     .catch(function() { /* silently ignore — footer just stays empty */ });
+}
+
+// ── A4.1: Data freshness indicator ──────────────────────────────────────────
+
+function populateDataFreshness(data) {
+  var el = document.getElementById("data-freshness");
+  if (!el) return;
+
+  var dateStr = data.last_refresh || data.last_build_time || data.build_date;
+  if (!dateStr) {
+    el.textContent = "";
+    return;
+  }
+
+  var dateOnly = dateStr.slice(0, 10);
+  var refreshDate = new Date(dateOnly);
+  var now = new Date();
+  var daysDiff = Math.floor((now - refreshDate) / (1000 * 60 * 60 * 24));
+
+  // Green dot if fresh (within 7 days), amber if stale
+  var dot = document.createElement("span");
+  dot.className = "data-freshness-dot" + (daysDiff > 7 ? " stale" : "");
+  dot.setAttribute("aria-hidden", "true");
+
+  var text = document.createElement("span");
+  text.textContent = "Data last updated: " + dateOnly;
+  if (daysDiff > 7) {
+    text.textContent += " (" + daysDiff + " days ago)";
+  }
+
+  el.innerHTML = "";
+  el.appendChild(dot);
+  el.appendChild(text);
 }
 
 // ── FALCON-1: Landing page summary visuals ──────────────────────────────────
@@ -835,6 +895,80 @@ function loadLandingVisuals() {
   }
 }
 
+// ── A4.4: Tag cloud on Programs page ─────────────────────────────────────────
+
+function loadTagCloud() {
+  var container = document.getElementById("tag-cloud");
+  var countEl = document.getElementById("tag-cloud-count");
+  if (!container) return;
+
+  fetch("/api/v1/pe/tags/all")
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(data) {
+      if (!data) {
+        container.innerHTML = '<p style="font-size:.85rem;color:var(--text-secondary)">Tags not available.</p>';
+        return;
+      }
+
+      // data is expected to be an array of {tag, pe_count} objects
+      var tags = Array.isArray(data) ? data : (data.tags || data.items || []);
+      if (!tags.length) {
+        container.innerHTML = '<p style="font-size:.85rem;color:var(--text-secondary)">No tags found. Run enrichment to generate tags.</p>';
+        return;
+      }
+
+      if (countEl) countEl.textContent = "(" + tags.length + " tags)";
+
+      // Compute min/max pe_count for proportional sizing
+      var counts = tags.map(function(t) { return t.pe_count || 1; });
+      var minCount = Math.min.apply(null, counts);
+      var maxCount = Math.max.apply(null, counts);
+      var range = maxCount - minCount || 1;
+
+      // Font size scale: 0.72rem to 1.4rem
+      var minSize = 0.72;
+      var maxSize = 1.4;
+
+      container.innerHTML = "";
+      tags.forEach(function(t) {
+        var ratio = (t.pe_count - minCount) / range;
+        var fontSize = minSize + ratio * (maxSize - minSize);
+
+        var link = document.createElement("a");
+        link.className = "tag-cloud-item";
+        link.textContent = t.tag + " (" + t.pe_count + ")";
+        link.style.fontSize = fontSize.toFixed(2) + "rem";
+        link.href = "/programs?tag=" + encodeURIComponent(t.tag);
+        link.title = t.tag + ": " + t.pe_count + " program" + (t.pe_count !== 1 ? "s" : "");
+        link.setAttribute("role", "link");
+
+        // Clicking a tag filters the program list via HTMX
+        link.addEventListener("click", function(e) {
+          e.preventDefault();
+          var tagSelect = document.getElementById("pe-tag");
+          if (tagSelect) {
+            // Select the matching tag option
+            Array.from(tagSelect.options).forEach(function(opt) {
+              opt.selected = (opt.value === t.tag);
+            });
+            // Trigger the filter form
+            var form = document.getElementById("pe-filter-form");
+            if (form && typeof htmx !== "undefined") {
+              htmx.trigger(form, "change");
+            }
+          }
+          // Update URL
+          window.history.pushState({}, "", "/programs?tag=" + encodeURIComponent(t.tag));
+        });
+
+        container.appendChild(link);
+      });
+    })
+    .catch(function() {
+      container.innerHTML = '<p style="font-size:.85rem;color:var(--text-secondary)">Could not load tags.</p>';
+    });
+}
+
 // ── Initialise ─────────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", function () {
@@ -865,6 +999,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // FALCON-1: Load landing page summary visuals
   loadLandingVisuals();
+
+  // A4.4: Load tag cloud on Programs page
+  loadTagCloud();
 
   // OPT-JS-001: Debounce filter form changes — multi-selects get a 300ms
   // debounce before firing HTMX. The form's hx-trigger listens for a custom
@@ -924,6 +1061,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // ── Search autocomplete ─────────────────────────────────────────────────
   initAutocomplete();
+  initHeroAutocomplete();
 
   // ── Saved searches ──────────────────────────────────────────────────────
   renderSavedSearches();
@@ -933,11 +1071,13 @@ document.addEventListener("DOMContentLoaded", function () {
 
 function _escapeHtml(s) {
   if (!s) return "";
+  // Escape characters that are dangerous in both text and attribute contexts
   return s
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function initAutocomplete() {
@@ -997,6 +1137,157 @@ function initAutocomplete() {
     setTimeout(function () { dropdown.style.display = "none"; }, 200);
   });
 }
+
+// ── Hero search autocomplete ─────────────────────────────────────────────────
+
+function initHeroAutocomplete() {
+  var input = document.getElementById("hero-search-input");
+  var dropdown = document.getElementById("hero-autocomplete-list");
+  if (!input || !dropdown) return;
+
+  // Remove hidden attribute since CSS .autocomplete-dropdown uses display:none
+  dropdown.removeAttribute("hidden");
+
+  var acTimer = null;
+  var activeIdx = -1;
+
+  function hideDropdown() {
+    dropdown.innerHTML = "";
+    dropdown.style.display = "none";
+    input.setAttribute("aria-expanded", "false");
+    activeIdx = -1;
+  }
+
+  function renderItems(items) {
+    if (!items || !items.length) {
+      hideDropdown();
+      return;
+    }
+    dropdown.innerHTML = items.map(function(item, i) {
+      return '<li role="option" class="autocomplete-item" data-index="' + i + '" data-value="' + _escapeHtml(item.value) + '">' +
+        '<span class="autocomplete-value">' + _escapeHtml(item.value) + '</span>' +
+        (item.label ? '<span class="autocomplete-label">' + _escapeHtml(item.label) + '</span>' : '') +
+        '</li>';
+    }).join("");
+    dropdown.style.display = "block";
+    input.setAttribute("aria-expanded", "true");
+    activeIdx = -1;
+  }
+
+  function setActive(idx) {
+    var items = dropdown.querySelectorAll("li");
+    items.forEach(function(li) { li.classList.remove("active"); li.removeAttribute("aria-selected"); });
+    if (idx >= 0 && idx < items.length) {
+      items[idx].classList.add("active");
+      items[idx].setAttribute("aria-selected", "true");
+      items[idx].scrollIntoView({ block: "nearest" });
+      activeIdx = idx;
+    } else {
+      activeIdx = -1;
+    }
+  }
+
+  function selectItem(li) {
+    if (!li) return;
+    input.value = li.getAttribute("data-value") || li.querySelector(".autocomplete-value").textContent;
+    hideDropdown();
+    // Submit the hero search form
+    var form = input.closest("form");
+    if (form) form.submit();
+  }
+
+  input.addEventListener("input", function() {
+    clearTimeout(acTimer);
+    var val = input.value.trim();
+    if (val.length < 2) {
+      hideDropdown();
+      return;
+    }
+    acTimer = setTimeout(function() {
+      fetch("/api/v1/search/suggest?q=" + encodeURIComponent(val) + "&limit=5")
+        .then(function(r) { return r.json(); })
+        .then(function(items) { renderItems(items); })
+        .catch(function() { hideDropdown(); });
+    }, 200);
+  });
+
+  input.addEventListener("keydown", function(e) {
+    var items = dropdown.querySelectorAll("li");
+    if (!items.length || dropdown.style.display === "none") return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActive(activeIdx < items.length - 1 ? activeIdx + 1 : 0);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive(activeIdx > 0 ? activeIdx - 1 : items.length - 1);
+    } else if (e.key === "Enter") {
+      if (activeIdx >= 0 && activeIdx < items.length) {
+        e.preventDefault();
+        selectItem(items[activeIdx]);
+      }
+      // Otherwise let the form submit naturally
+    } else if (e.key === "Escape") {
+      hideDropdown();
+    }
+  });
+
+  dropdown.addEventListener("click", function(e) {
+    var li = e.target.closest("li");
+    if (li) selectItem(li);
+  });
+
+  // Close on click outside
+  document.addEventListener("click", function(e) {
+    if (!input.contains(e.target) && !dropdown.contains(e.target)) {
+      hideDropdown();
+    }
+  });
+}
+
+// ── Multi-PE selection for Spruill comparison ────────────────────────────────
+
+function updatePeCompareBar() {
+  var checkboxes = document.querySelectorAll(".pe-select-checkbox:checked");
+  var bar = document.getElementById("pe-compare-bar");
+  var countEl = document.getElementById("pe-compare-count");
+  var linkEl = document.getElementById("pe-compare-link");
+  if (!bar) return;
+  if (checkboxes.length > 0) {
+    bar.hidden = false;
+    countEl.textContent = checkboxes.length;
+    var pes = Array.from(checkboxes).map(function(cb) { return cb.value; });
+    linkEl.href = "/spruill?" + pes.map(function(pe) { return "pe=" + encodeURIComponent(pe); }).join("&");
+  } else {
+    bar.hidden = true;
+  }
+}
+
+function clearPeSelection() {
+  document.querySelectorAll(".pe-select-checkbox:checked").forEach(function(cb) { cb.checked = false; });
+  updatePeCompareBar();
+}
+
+// Delegate click events for checkboxes (works with HTMX swaps)
+document.addEventListener("change", function(e) {
+  if (e.target.classList.contains("pe-select-checkbox")) {
+    updatePeCompareBar();
+  }
+});
+
+// ── Programs page sort direction helper ──────────────────────────────────────
+
+(function() {
+  var sortSelect = document.getElementById("pe-sort");
+  if (sortSelect) {
+    sortSelect.addEventListener("change", function() {
+      var dirInput = document.getElementById("pe-sort-dir");
+      if (dirInput) {
+        dirInput.value = this.value === "funding" ? "desc" : "asc";
+      }
+    });
+  }
+})();
 
 // ── Saved searches (localStorage) ───────────────────────────────────────────
 
