@@ -895,6 +895,80 @@ function loadLandingVisuals() {
   }
 }
 
+// ── A4.4: Tag cloud on Programs page ─────────────────────────────────────────
+
+function loadTagCloud() {
+  var container = document.getElementById("tag-cloud");
+  var countEl = document.getElementById("tag-cloud-count");
+  if (!container) return;
+
+  fetch("/api/v1/pe/tags/all")
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(data) {
+      if (!data) {
+        container.innerHTML = '<p style="font-size:.85rem;color:var(--text-secondary)">Tags not available.</p>';
+        return;
+      }
+
+      // data is expected to be an array of {tag, pe_count} objects
+      var tags = Array.isArray(data) ? data : (data.tags || data.items || []);
+      if (!tags.length) {
+        container.innerHTML = '<p style="font-size:.85rem;color:var(--text-secondary)">No tags found. Run enrichment to generate tags.</p>';
+        return;
+      }
+
+      if (countEl) countEl.textContent = "(" + tags.length + " tags)";
+
+      // Compute min/max pe_count for proportional sizing
+      var counts = tags.map(function(t) { return t.pe_count || 1; });
+      var minCount = Math.min.apply(null, counts);
+      var maxCount = Math.max.apply(null, counts);
+      var range = maxCount - minCount || 1;
+
+      // Font size scale: 0.72rem to 1.4rem
+      var minSize = 0.72;
+      var maxSize = 1.4;
+
+      container.innerHTML = "";
+      tags.forEach(function(t) {
+        var ratio = (t.pe_count - minCount) / range;
+        var fontSize = minSize + ratio * (maxSize - minSize);
+
+        var link = document.createElement("a");
+        link.className = "tag-cloud-item";
+        link.textContent = t.tag + " (" + t.pe_count + ")";
+        link.style.fontSize = fontSize.toFixed(2) + "rem";
+        link.href = "/programs?tag=" + encodeURIComponent(t.tag);
+        link.title = t.tag + ": " + t.pe_count + " program" + (t.pe_count !== 1 ? "s" : "");
+        link.setAttribute("role", "link");
+
+        // Clicking a tag filters the program list via HTMX
+        link.addEventListener("click", function(e) {
+          e.preventDefault();
+          var tagSelect = document.getElementById("pe-tag");
+          if (tagSelect) {
+            // Select the matching tag option
+            Array.from(tagSelect.options).forEach(function(opt) {
+              opt.selected = (opt.value === t.tag);
+            });
+            // Trigger the filter form
+            var form = document.getElementById("pe-filter-form");
+            if (form && typeof htmx !== "undefined") {
+              htmx.trigger(form, "change");
+            }
+          }
+          // Update URL
+          window.history.pushState({}, "", "/programs?tag=" + encodeURIComponent(t.tag));
+        });
+
+        container.appendChild(link);
+      });
+    })
+    .catch(function() {
+      container.innerHTML = '<p style="font-size:.85rem;color:var(--text-secondary)">Could not load tags.</p>';
+    });
+}
+
 // ── Initialise ─────────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", function () {
@@ -925,6 +999,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // FALCON-1: Load landing page summary visuals
   loadLandingVisuals();
+
+  // A4.4: Load tag cloud on Programs page
+  loadTagCloud();
 
   // OPT-JS-001: Debounce filter form changes — multi-selects get a 300ms
   // debounce before firing HTMX. The form's hx-trigger listens for a custom
