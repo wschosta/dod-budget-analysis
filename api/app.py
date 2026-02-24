@@ -528,10 +528,12 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 "SELECT COUNT(*) FROM pdf_pages"
             ).fetchone()[0]
             conn.close()
-        except Exception as exc:
+        except Exception:
+            # Log full exception details server-side without exposing them to the client.
+            logging.exception("health_detailed: database check failed")
             return JSONResponse(
                 status_code=503,
-                content={"status": "degraded", "error": str(exc)},
+                content={"status": "degraded", "error": "database_check_failed"},
             )
 
         db_size = db_path.stat().st_size
