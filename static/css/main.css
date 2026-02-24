@@ -1376,6 +1376,36 @@ tr:focus-within td {
 .pe-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
 .pe-related-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .75rem; }
 
+/* Project description cards (Phase 5 decomposition) */
+.pe-project-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  margin-bottom: .75rem;
+}
+.pe-project-card[open] { border-color: var(--clr-blue); }
+.pe-project-header {
+  display: flex;
+  gap: .5rem;
+  align-items: center;
+  padding: .75rem 1rem;
+  cursor: pointer;
+  font-size: .88rem;
+  flex-wrap: wrap;
+}
+.pe-project-header:hover { background: var(--bg-hover, rgba(0,0,0,.03)); }
+.pe-project-body { padding: 0 1rem 1rem; }
+
+/* Tag chip enhancements (confidence-based styling) */
+.tag-chip {
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: .2rem .6rem;
+  font-size: .8rem;
+  transition: border-color .15s, opacity .15s;
+}
+.tag-chip:hover { border-color: var(--clr-blue); opacity: 1 !important; }
+
 /* FALCON-14: programs-layout responsive now consolidated in main 768px block above */
 
 /* ── Dashboard ────────────────────────────────────────────────────────────── */

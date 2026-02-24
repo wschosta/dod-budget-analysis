@@ -405,7 +405,8 @@ class TestProgramExplorer:
     def test_program_detail_shows_related(self, app_client):
         resp = app_client.get("/programs/0604131A")
         assert "Related Programs" in resp.text
-        assert "0603292N" in resp.text
+        # Related programs are now lazy-loaded via HTMX; check the hx-get target
+        assert "program-related" in resp.text
 
     def test_program_detail_loads_js(self, app_client):
         resp = app_client.get("/programs/0604131A")

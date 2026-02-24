@@ -1,0 +1,70 @@
+{# HTMX partial: Related programs with confidence filter and pagination #}
+{% if related %}
+
+{# Confidence filter controls #}
+<div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.75rem;flex-wrap:wrap">
+  <label for="confidence-filter" style="font-size:.8rem;color:var(--text-secondary)">Min confidence:</label>
+  <select id="confidence-filter"
+          style="font-size:.8rem;padding:.2rem .4rem;border-radius:4px;border:1px solid var(--border);background:var(--bg-surface);color:var(--text-primary)"
+          hx-get="/partials/program-related/{{ pe_number }}"
+          hx-target="#pe-related"
+          hx-include="this"
+          name="min_confidence">
+    <option value="0" {% if not min_confidence or min_confidence == 0 %}selected{% endif %}>All</option>
+    <option value="0.5" {% if min_confidence == 0.5 %}selected{% endif %}>&ge; 50%</option>
+    <option value="0.6" {% if min_confidence == 0.6 %}selected{% endif %}>&ge; 60%</option>
+    <option value="0.8" {% if min_confidence == 0.8 %}selected{% endif %}>&ge; 80%</option>
+    <option value="0.9" {% if min_confidence == 0.9 %}selected{% endif %}>&ge; 90%</option>
+  </select>
+  <span style="font-size:.8rem;color:var(--text-secondary)">
+    Showing {{ related | length }} of {{ total }} related programs
+  </span>
+</div>
+
+<div class="pe-related-grid">
+  {% for rel in related %}
+  <a href="/programs/{{ rel.referenced_pe }}" class="pe-card pe-card-sm">
+    <span class="badge">{{ rel.referenced_pe }}</span>
+    {% if rel.referenced_title %}
+    <span style="font-size:.85rem">{{ rel.referenced_title }}</span>
+    {% endif %}
+    {% if rel.referenced_org %}
+    <span style="font-size:.75rem;color:var(--text-secondary)">{{ rel.referenced_org }}</span>
+    {% endif %}
+    <span style="font-size:.75rem;color:var(--text-secondary)">
+      {{ rel.link_type | replace("_", " ") }}
+      {% if rel.confidence %}
+      <span class="confidence-indicator" style="
+        display:inline-block;width:1.8rem;height:.4rem;border-radius:2px;vertical-align:middle;margin-left:.3rem;
+        background:linear-gradient(90deg,
+          {% if rel.confidence >= 0.9 %}var(--primary){% elif rel.confidence >= 0.7 %}#d97706{% else %}var(--text-secondary){% endif %}
+          {{ '%.0f' | format(rel.confidence * 100) }}%, var(--border) {{ '%.0f' | format(rel.confidence * 100) }}%);
+      " title="{{ '%.0f' | format(rel.confidence * 100) }}% confidence"></span>
+      {{ "%.0f" | format(rel.confidence * 100) }}%
+      {% endif %}
+    </span>
+    {% if rel.mention_count and rel.mention_count > 1 %}
+    <span style="font-size:.7rem;color:var(--text-secondary)">{{ rel.mention_count }} mentions</span>
+    {% endif %}
+  </a>
+  {% endfor %}
+</div>
+
+{# Pagination #}
+{% if total > related | length %}
+<div style="margin-top:.75rem;text-align:center">
+  <button class="btn btn-secondary btn-sm"
+          hx-get="/partials/program-related/{{ pe_number }}?limit={{ limit + 20 }}{% if min_confidence %}&min_confidence={{ min_confidence }}{% endif %}"
+          hx-target="#pe-related"
+          hx-indicator="#related-loading">
+    Load more ({{ total - related | length }} remaining)
+  </button>
+</div>
+{% endif %}
+
+{% else %}
+<p style="color:var(--text-secondary);font-size:.85rem">
+  No related programs detected. Cross-PE references are identified during
+  the enrichment pipeline (Phase 4).
+</p>
+{% endif %}

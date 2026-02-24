@@ -88,26 +88,22 @@
   </div>
 </section>
 
-{# ── Related PEs ──────────────────────────────────────────────────────────── #}
-{% if pe_data.related %}
+{# ── Related PEs (lazy-loaded via HTMX for pagination + confidence filter) ─ #}
 <section class="pe-section" aria-label="Related programs">
-  <h3>Related Programs</h3>
-  <div class="pe-related-grid">
-    {% for rel in pe_data.related %}
-    <a href="/programs/{{ rel.referenced_pe }}" class="pe-card pe-card-sm">
-      <span class="badge">{{ rel.referenced_pe }}</span>
-      {% if rel.referenced_title %}
-      <span style="font-size:.85rem">{{ rel.referenced_title }}</span>
-      {% endif %}
-      <span style="font-size:.75rem;color:var(--text-secondary)">
-        {{ rel.link_type | replace("_", " ") }}
-        {% if rel.confidence %}({{ "%.0f" | format(rel.confidence * 100) }}%){% endif %}
-      </span>
-    </a>
-    {% endfor %}
+  <h3>Related Programs
+    {% if pe_data.summary.related_count > 0 %}
+    <span class="badge" style="font-size:.7rem;vertical-align:middle">{{ pe_data.summary.related_count }}</span>
+    {% endif %}
+  </h3>
+  <div id="pe-related"
+       hx-get="/partials/program-related/{{ pe_data.pe_number }}"
+       hx-trigger="load"
+       hx-indicator="#related-loading">
+    <div id="related-loading" class="htmx-indicator">
+      <span class="spinner"></span> Loading related programs&hellip;
+    </div>
   </div>
 </section>
-{% endif %}
 
 {# ── Narrative descriptions (lazy-loaded via HTMX) ───────────────────────── #}
 <section class="pe-section" aria-label="Program descriptions">
@@ -122,17 +118,37 @@
   </div>
 </section>
 
-{# ── Tags ─────────────────────────────────────────────────────────────────── #}
+{# ── Tags (with confidence and provenance) ─────────────────────────────── #}
 {% if pe_data.tags %}
 <section class="pe-section" aria-label="Tags">
-  <h3>Tags</h3>
+  <h3>Tags <span class="badge" style="font-size:.7rem;vertical-align:middle">{{ pe_data.tags | length }}</span></h3>
   <div class="pe-card-tags">
     {% for t in pe_data.tags %}
-    <span class="filter-chip">
+    <a href="/programs?tag={{ t.tag }}" class="filter-chip tag-chip"
+       title="Source: {{ t.tag_source }} | Confidence: {{ '%.0f' | format((t.confidence or 0) * 100) }}%"
+       style="text-decoration:none;color:inherit;{% if t.confidence and t.confidence >= 0.9 %}border-color:var(--primary);{% elif t.confidence and t.confidence >= 0.7 %}border-color:var(--text-secondary);{% else %}border-color:var(--border);opacity:.8;{% endif %}">
       {{ t.tag }}
-      <span style="font-size:.7rem;color:var(--text-secondary)">({{ t.tag_source }})</span>
-    </span>
+      <span style="font-size:.65rem;color:var(--text-secondary);margin-left:.25rem"
+            >{{ t.tag_source }}{% if t.confidence %} {{ '%.0f' | format(t.confidence * 100) }}%{% endif %}</span>
+    </a>
     {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{# ── Project Descriptions (lazy-loaded via HTMX) ─────────────────────── #}
+{% if pe_data.has_project_data %}
+<section class="pe-section" aria-label="Project descriptions">
+  <h3>Projects
+    <span class="badge" style="font-size:.7rem;vertical-align:middle">{{ pe_data.summary.project_count }}</span>
+  </h3>
+  <div id="pe-projects"
+       hx-get="/partials/program-projects/{{ pe_data.pe_number }}"
+       hx-trigger="load"
+       hx-indicator="#projects-loading">
+    <div id="projects-loading" class="htmx-indicator">
+      <span class="spinner"></span> Loading project descriptions&hellip;
+    </div>
   </div>
 </section>
 {% endif %}
