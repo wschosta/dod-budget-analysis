@@ -924,6 +924,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // ── Search autocomplete ─────────────────────────────────────────────────
   initAutocomplete();
+  initHeroAutocomplete();
 
   // ── Saved searches ──────────────────────────────────────────────────────
   renderSavedSearches();
@@ -993,6 +994,136 @@ function initAutocomplete() {
     setTimeout(function () { dropdown.style.display = "none"; }, 200);
   });
 }
+
+// ── Hero search autocomplete ─────────────────────────────────────────────────
+
+function initHeroAutocomplete() {
+  var input = document.getElementById("hero-search-input");
+  var dropdown = document.getElementById("hero-autocomplete-list");
+  if (!input || !dropdown) return;
+
+  var acTimer = null;
+  var activeIdx = -1;
+
+  function renderItems(items) {
+    if (!items || !items.length) {
+      dropdown.innerHTML = "";
+      dropdown.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+      activeIdx = -1;
+      return;
+    }
+    dropdown.innerHTML = items.map(function(item, i) {
+      return '<li role="option" class="autocomplete-item" data-index="' + i + '" data-value="' + _escapeHtml(item.value) + '">' +
+        '<span class="autocomplete-value">' + _escapeHtml(item.value) + '</span>' +
+        (item.label ? '<span class="autocomplete-label">' + _escapeHtml(item.label) + '</span>' : '') +
+        '</li>';
+    }).join("");
+    dropdown.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+    activeIdx = -1;
+  }
+
+  function setActive(idx) {
+    var items = dropdown.querySelectorAll("li");
+    items.forEach(function(li) { li.classList.remove("active"); li.removeAttribute("aria-selected"); });
+    if (idx >= 0 && idx < items.length) {
+      items[idx].classList.add("active");
+      items[idx].setAttribute("aria-selected", "true");
+      items[idx].scrollIntoView({ block: "nearest" });
+      activeIdx = idx;
+    } else {
+      activeIdx = -1;
+    }
+  }
+
+  function selectItem(li) {
+    if (!li) return;
+    input.value = li.getAttribute("data-value") || li.querySelector(".autocomplete-value").textContent;
+    dropdown.innerHTML = "";
+    dropdown.hidden = true;
+    input.setAttribute("aria-expanded", "false");
+    activeIdx = -1;
+    // Submit the hero search form
+    var form = input.closest("form");
+    if (form) form.submit();
+  }
+
+  input.addEventListener("input", function() {
+    clearTimeout(acTimer);
+    var val = input.value.trim();
+    if (val.length < 2) {
+      dropdown.innerHTML = "";
+      dropdown.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+      activeIdx = -1;
+      return;
+    }
+    acTimer = setTimeout(function() {
+      fetch("/api/v1/search/suggest?q=" + encodeURIComponent(val) + "&limit=5")
+        .then(function(r) { return r.json(); })
+        .then(function(items) { renderItems(items); })
+        .catch(function() {
+          dropdown.innerHTML = "";
+          dropdown.hidden = true;
+          input.setAttribute("aria-expanded", "false");
+        });
+    }, 200);
+  });
+
+  input.addEventListener("keydown", function(e) {
+    var items = dropdown.querySelectorAll("li");
+    if (!items.length || dropdown.hidden) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setActive(activeIdx < items.length - 1 ? activeIdx + 1 : 0);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setActive(activeIdx > 0 ? activeIdx - 1 : items.length - 1);
+    } else if (e.key === "Enter") {
+      if (activeIdx >= 0 && activeIdx < items.length) {
+        e.preventDefault();
+        selectItem(items[activeIdx]);
+      }
+      // Otherwise let the form submit naturally
+    } else if (e.key === "Escape") {
+      dropdown.innerHTML = "";
+      dropdown.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+      activeIdx = -1;
+    }
+  });
+
+  dropdown.addEventListener("click", function(e) {
+    var li = e.target.closest("li");
+    if (li) selectItem(li);
+  });
+
+  // Close on click outside
+  document.addEventListener("click", function(e) {
+    if (!input.contains(e.target) && !dropdown.contains(e.target)) {
+      dropdown.innerHTML = "";
+      dropdown.hidden = true;
+      input.setAttribute("aria-expanded", "false");
+      activeIdx = -1;
+    }
+  });
+}
+
+// ── Programs page sort direction helper ──────────────────────────────────────
+
+(function() {
+  var sortSelect = document.getElementById("pe-sort");
+  if (sortSelect) {
+    sortSelect.addEventListener("change", function() {
+      var dirInput = document.getElementById("pe-sort-dir");
+      if (dirInput) {
+        dirInput.value = this.value === "funding" ? "desc" : "asc";
+      }
+    });
+  }
+})();
 
 // ── Saved searches (localStorage) ───────────────────────────────────────────
 

@@ -9,11 +9,18 @@
   <p class="hero-subtitle">Search and explore U.S. Department of Defense budget data across fiscal years, services, and programs.</p>
   <form class="hero-search-form" role="search" aria-label="Quick search"
         action="/" method="get">
-    <input type="text" name="q" class="hero-search-input"
-           value="{{ filters.q }}"
-           placeholder="Search programs, PE numbers, keywords..."
-           aria-label="Search budget data"
-           autocomplete="off">
+    <div class="autocomplete-wrapper">
+      <input type="text" name="q" id="hero-search-input" class="hero-search-input"
+             value="{{ filters.q }}"
+             placeholder="Search programs, PE numbers, keywords..."
+             aria-label="Search budget data"
+             autocomplete="off"
+             role="combobox"
+             aria-autocomplete="list"
+             aria-owns="hero-autocomplete-list"
+             aria-expanded="false">
+      <ul id="hero-autocomplete-list" class="autocomplete-dropdown" role="listbox" hidden></ul>
+    </div>
     <button type="submit" class="btn btn-primary hero-search-btn">Search</button>
   </form>
   <div class="hero-actions">
