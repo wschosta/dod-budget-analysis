@@ -46,7 +46,7 @@ from downloader.sources import (
     discover_fiscal_years,
 )
 from downloader.gui import GuiProgressTracker
-from downloader.metadata import detect_budget_cycle, enrich_file_metadata
+from downloader.metadata import detect_budget_cycle, enrich_file_metadata, validate_fy_match
 from utils.config import classify_exhibit_category
 
 
@@ -900,6 +900,17 @@ def download_all(
             # Pre-filter: skip files that already exist locally (non-empty)
             _tracker.set_source(year, source_label)
             for file_info in files:
+                # FY validation: skip files whose filename indicates a
+                # different fiscal year (prevents misrouting when source
+                # pages serve content for the wrong FY, e.g. Comptroller
+                # FY1998 page redirecting to FY2026 files).
+                if not validate_fy_match(file_info["filename"], year):
+                    from downloader.metadata import extract_fy_from_filename
+                    detected_fy = extract_fy_from_filename(file_info["filename"])
+                    print(f"    [FY MISMATCH] {file_info['filename']}: "
+                          f"expected FY{year}, detected FY{detected_fy} — skipping")
+                    continue
+
                 # Per-file dest with budget cycle + exhibit category
                 budget_cycle = detect_budget_cycle(
                     source_label,
@@ -1254,6 +1265,16 @@ def main() -> None:
 
             if type_filter:
                 files = [f for f in files if f["extension"] in type_filter]
+
+            # FY validation at discovery: filter out files that clearly
+            # belong to a different fiscal year (e.g. FY2026 files served
+            # on the Comptroller's FY1998 page due to site changes).
+            pre_count = len(files)
+            files = [f for f in files if validate_fy_match(f["filename"], year)]
+            fy_dropped = pre_count - len(files)
+            if fy_dropped:
+                print(f"  [FY FILTER] {source} FY{year}: dropped {fy_dropped} "
+                      f"file(s) with mismatched fiscal year in filename")
 
             label = (SERVICE_PAGE_TEMPLATES[source]["label"]
                      if source != "comptroller" else "Comptroller")

@@ -130,6 +130,13 @@ _SCHEMA_DESCRIPTION = (
 
 import openpyxl  # noqa: E402
 import pdfplumber  # noqa: E402
+
+# Optional: xlrd for legacy .xls files (FY1998-2009 era)
+try:
+    import xlrd  # noqa: E402, F401
+    _HAS_XLRD = True
+except ImportError:
+    _HAS_XLRD = False
 from pipeline.exhibit_catalog import find_matching_columns as _catalog_find_matching_columns  # noqa: E402
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -1667,6 +1674,71 @@ def _extract_table_text(tables: list) -> str:
     return "\n".join(parts)
 
 
+def _convert_xls_to_xlsx(xls_files: list[Path]) -> list[Path]:
+    """Convert legacy .xls files to .xlsx using xlrd + openpyxl.
+
+    Creates .xlsx files alongside the original .xls files (same directory,
+    same base name). Skips files that already have a corresponding .xlsx.
+
+    Returns list of successfully converted .xlsx paths.
+    """
+    converted = []
+    for xls_path in xls_files:
+        xlsx_path = xls_path.with_suffix(".xlsx")
+        if xlsx_path.exists() and xlsx_path.stat().st_size > 0:
+            converted.append(xlsx_path)
+            continue
+        try:
+            # Read with xlrd
+            wb_old = xlrd.open_workbook(str(xls_path))
+            wb_new = openpyxl.Workbook()
+            # Remove the default empty sheet
+            if wb_new.sheetnames:
+                wb_new.remove(wb_new.active)
+
+            for sheet_name in wb_old.sheet_names():
+                old_sheet = wb_old.sheet_by_name(sheet_name)
+                new_sheet = wb_new.create_sheet(title=sheet_name[:31])
+                for row_idx in range(old_sheet.nrows):
+                    for col_idx in range(old_sheet.ncols):
+                        cell = old_sheet.cell(row_idx, col_idx)
+                        # Handle xlrd cell types
+                        if cell.ctype == xlrd.XL_CELL_DATE:
+                            try:
+                                dt = xlrd.xldate_as_datetime(
+                                    cell.value, wb_old.datemode
+                                )
+                                new_sheet.cell(
+                                    row=row_idx + 1, column=col_idx + 1,
+                                    value=dt,
+                                )
+                            except Exception:
+                                new_sheet.cell(
+                                    row=row_idx + 1, column=col_idx + 1,
+                                    value=cell.value,
+                                )
+                        elif cell.ctype == xlrd.XL_CELL_BOOLEAN:
+                            new_sheet.cell(
+                                row=row_idx + 1, column=col_idx + 1,
+                                value=bool(cell.value),
+                            )
+                        else:
+                            new_sheet.cell(
+                                row=row_idx + 1, column=col_idx + 1,
+                                value=cell.value,
+                            )
+
+            wb_new.save(str(xlsx_path))
+            wb_old.release_resources()
+            converted.append(xlsx_path)
+        except Exception as exc:
+            logger.warning("Failed to convert %s: %s", xls_path.name, exc)
+            # Clean up partial file
+            if xlsx_path.exists():
+                xlsx_path.unlink(missing_ok=True)
+    return converted
+
+
 def _extract_fy_from_path(file_path: Path) -> str | None:
     """Extract fiscal year from file path directory structure (LION-100).
 
@@ -2421,6 +2493,23 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
     xlsx_files = sorted(docs_dir.rglob("*.xlsx"))
     pdf_files = sorted(docs_dir.rglob("*.pdf"))
+
+    # Legacy .xls support: convert to .xlsx on-the-fly if xlrd is available.
+    # FY1998-2009 era documents use the older OLE2 .xls format that openpyxl
+    # cannot read directly.
+    xls_files = sorted(docs_dir.rglob("*.xls"))
+    if xls_files:
+        if _HAS_XLRD:
+            converted = _convert_xls_to_xlsx(xls_files)
+            logger.info("Converted %d of %d .xls files to .xlsx",
+                        len(converted), len(xls_files))
+            xlsx_files = sorted(set(xlsx_files) | set(converted))
+        else:
+            logger.warning(
+                "Found %d .xls files (legacy Excel format) but xlrd is not "
+                "installed. These files will be skipped. Install with: "
+                "pip install xlrd>=2.0", len(xls_files)
+            )
 
     # BUILD-001: If retrying only failures, filter file lists
     if _retry_only is not None:

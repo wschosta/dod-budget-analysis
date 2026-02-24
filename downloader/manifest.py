@@ -93,7 +93,7 @@ def write_manifest(output_dir: Path, all_files: dict, manifest_path: Path) -> No
     _manifest_path = manifest_path
 
     # Import metadata enrichment (lightweight, no heavy deps)
-    from downloader.metadata import enrich_file_metadata
+    from downloader.metadata import enrich_file_metadata, extract_fy_from_filename
 
     entries: dict[str, dict] = {}
     for year, sources in all_files.items():
@@ -123,6 +123,7 @@ def write_manifest(output_dir: Path, all_files: dict, manifest_path: Path) -> No
                     "budget_cycle": meta["budget_cycle"],
                     "service_org": meta["service_org"],
                     "link_text": meta["link_text"],
+                    "detected_fy": extract_fy_from_filename(f["filename"]),
                 }
 
     _manifest = entries

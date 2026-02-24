@@ -214,6 +214,44 @@ def _detect_service_from_comptroller_filename(filename: str) -> str | None:
     return "Comptroller"
 
 
+def extract_fy_from_filename(filename: str) -> str | None:
+    """Extract a four-digit fiscal year from a filename.
+
+    Looks for patterns like ``FY2026``, ``fy2026``, ``FY_2026``, or bare
+    ``2026`` in filenames such as ``FY2026_Budget_Request.pdf`` or
+    ``p1_display.xlsx``.
+
+    Returns:
+        Four-digit year string (e.g. "2026") if found, else None.
+    """
+    # Try explicit FY prefix first (most reliable).
+    # Use (?=\D|$) instead of \b because \b fails between digits and underscores
+    # (both are word characters), e.g. "FY2026_Budget_Request.pdf".
+    m = re.search(r"\bFY[_\s-]?(\d{4})(?=\D|$)", filename, re.IGNORECASE)
+    if m:
+        return m.group(1)
+    # Fallback: bare 4-digit year in a reasonable range
+    m = re.search(r"(?:^|\D)(19\d{2}|20[0-4]\d)(?=\D|$)", filename)
+    if m:
+        return m.group(1)
+    return None
+
+
+def validate_fy_match(filename: str, expected_year: str) -> bool:
+    """Check whether a filename's embedded FY matches the expected year.
+
+    Returns True if either:
+    - The filename contains no detectable FY (benefit of the doubt), or
+    - The detected FY matches expected_year.
+
+    Returns False if the filename clearly belongs to a different FY.
+    """
+    detected = extract_fy_from_filename(filename)
+    if detected is None:
+        return True  # No FY in filename — can't reject
+    return detected == expected_year
+
+
 def enrich_file_metadata(
     filename: str,
     url: str = "",
