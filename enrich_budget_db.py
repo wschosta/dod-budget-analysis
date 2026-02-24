@@ -5,7 +5,10 @@ from pipeline.enricher import *  # noqa: F401,F403
 from pipeline.enricher import (  # noqa: F401,E402
     _context_window,
     _drop_enrichment_tables,
+    _ensure_checkpoint_table,
     _extract_fy_from_path,
+    _get_checkpoint,
+    _save_checkpoint,
     _tags_from_keywords,
 )
 

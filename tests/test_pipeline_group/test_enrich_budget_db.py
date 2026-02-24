@@ -1,5 +1,5 @@
 """
-Tests for enrich_budget_db.py — all four enrichment phases.
+Tests for enrich_budget_db.py — all five enrichment phases.
 
 Uses in-memory SQLite databases to avoid touching the real DB.
 """
@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,9 @@ from enrich_budget_db import (
     _extract_fy_from_path,
     _context_window,
     _tags_from_keywords,
+    _get_checkpoint,
+    _save_checkpoint,
+    _drop_enrichment_tables,
 )
 
 
@@ -821,3 +825,246 @@ class TestPhase5:
             "SELECT name FROM sqlite_master WHERE type='table'"
         ).fetchall()}
         assert "project_descriptions" in tables
+
+
+# ── Checkpoint resumability tests ────────────────────────────────────────────
+
+class TestCheckpointHelpers:
+    """Tests for the checkpoint helper functions."""
+
+    def test_get_checkpoint_empty(self, conn):
+        """_get_checkpoint returns 0 when no checkpoint exists."""
+        assert _get_checkpoint(conn, 4) == 0
+        assert _get_checkpoint(conn, 5) == 0
+
+    def test_save_and_get_checkpoint(self, conn):
+        """_save_checkpoint stores a value that _get_checkpoint retrieves."""
+        _save_checkpoint(conn, 4, 12345)
+        conn.commit()
+        assert _get_checkpoint(conn, 4) == 12345
+
+    def test_checkpoint_update(self, conn):
+        """_save_checkpoint overwrites a previous checkpoint for the same phase."""
+        _save_checkpoint(conn, 4, 100)
+        conn.commit()
+        _save_checkpoint(conn, 4, 500)
+        conn.commit()
+        assert _get_checkpoint(conn, 4) == 500
+
+    def test_checkpoints_independent_per_phase(self, conn):
+        """Phase 4 and Phase 5 checkpoints are stored independently."""
+        _save_checkpoint(conn, 4, 100)
+        _save_checkpoint(conn, 5, 200)
+        conn.commit()
+        assert _get_checkpoint(conn, 4) == 100
+        assert _get_checkpoint(conn, 5) == 200
+
+    def test_drop_clears_checkpoints(self, conn):
+        """_drop_enrichment_tables clears the checkpoints table."""
+        _save_checkpoint(conn, 4, 100)
+        conn.commit()
+        _drop_enrichment_tables(conn)
+        assert _get_checkpoint(conn, 4) == 0
+
+
+class TestPhase4Checkpoint:
+    """Tests for Phase 4 checkpoint-based resumability."""
+
+    def _setup(self, conn):
+        for pe, title in [("0602120A", "Radar Technology"),
+                           ("0603000A", "Fighter Systems")]:
+            _insert_budget_line(conn, pe_number=pe, title=title)
+        run_phase1(conn)
+
+    def test_phase4_saves_checkpoint(self, conn):
+        """Phase 4 saves a checkpoint after processing rows."""
+        self._setup(conn)
+        conn.execute("""
+            INSERT INTO pe_descriptions
+                (pe_number, fiscal_year, source_file, page_start, page_end, description_text)
+            VALUES ('0602120A', '2026', 'r2.pdf', 1, 1,
+                'This program supports 0603000A through shared radar components.')
+        """)
+        conn.commit()
+
+        run_phase4(conn)
+
+        # Checkpoint should be set to the max rowid processed
+        ckpt = _get_checkpoint(conn, 4)
+        assert ckpt > 0
+
+    def test_phase4_resumes_from_checkpoint(self, conn):
+        """Phase 4 only processes rows beyond the saved checkpoint."""
+        self._setup(conn)
+        # Insert first description row
+        conn.execute("""
+            INSERT INTO pe_descriptions
+                (pe_number, fiscal_year, source_file, page_start, page_end, description_text)
+            VALUES ('0602120A', '2026', 'r2.pdf', 1, 1,
+                'This program supports 0603000A through shared radar components.')
+        """)
+        conn.commit()
+
+        # First run — should find a cross-reference
+        count1 = run_phase4(conn)
+        assert count1 > 0
+        lineage_after_run1 = conn.execute("SELECT COUNT(*) FROM pe_lineage").fetchone()[0]
+
+        # Insert a second description row (will have higher rowid)
+        conn.execute("""
+            INSERT INTO pe_descriptions
+                (pe_number, fiscal_year, source_file, page_start, page_end, description_text)
+            VALUES ('0603000A', '2026', 'r2b.pdf', 2, 2,
+                'This program references 0602120A for radar testing.')
+        """)
+        conn.commit()
+
+        # Second run — should only process the new row, not the old one
+        count2 = run_phase4(conn)
+        assert count2 > 0  # found cross-ref in the new row
+        lineage_after_run2 = conn.execute("SELECT COUNT(*) FROM pe_lineage").fetchone()[0]
+        assert lineage_after_run2 > lineage_after_run1
+
+    def test_phase4_no_reprocessing_when_checkpoint_current(self, conn):
+        """Phase 4 returns 0 new lineage rows when checkpoint covers all rows."""
+        self._setup(conn)
+        conn.execute("""
+            INSERT INTO pe_descriptions
+                (pe_number, fiscal_year, source_file, page_start, page_end, description_text)
+            VALUES ('0602120A', '2026', 'r2.pdf', 1, 1,
+                'This program supports 0603000A through shared radar components.')
+        """)
+        conn.commit()
+
+        # First run processes everything
+        run_phase4(conn)
+        lineage_count = conn.execute("SELECT COUNT(*) FROM pe_lineage").fetchone()[0]
+
+        # Second run with no new data — checkpoint skips all rows
+        # (only 4c Excel co-occurrence runs, which produces 0 with no extra_fields)
+        count2 = run_phase4(conn)
+        assert count2 == 0
+        # Lineage count unchanged
+        assert conn.execute("SELECT COUNT(*) FROM pe_lineage").fetchone()[0] == lineage_count
+
+    def test_phase4_checkpoint_with_stop_event(self, conn):
+        """Phase 4 saves checkpoint when stopped via stop_event."""
+        self._setup(conn)
+        # Insert several rows
+        for i in range(5):
+            conn.execute("""
+                INSERT INTO pe_descriptions
+                    (pe_number, fiscal_year, source_file, page_start, page_end, description_text)
+                VALUES ('0602120A', '2026', ?, ?, ?,
+                    'Text mentioning 0603000A in radar description.')
+            """, (f"r2_{i}.pdf", i, i))
+        conn.commit()
+
+        # Run Phase 4 fully first
+        run_phase4(conn)
+        ckpt_full = _get_checkpoint(conn, 4)
+        assert ckpt_full > 0
+
+        # Now add more rows and run with immediate stop
+        for i in range(5, 10):
+            conn.execute("""
+                INSERT INTO pe_descriptions
+                    (pe_number, fiscal_year, source_file, page_start, page_end, description_text)
+                VALUES ('0602120A', '2026', ?, ?, ?,
+                    'More text about 0603000A radar systems.')
+            """, (f"r2_{i}.pdf", i, i))
+        conn.commit()
+
+        stop = threading.Event()
+        stop.set()  # Already stopped before running
+        run_phase4(conn, stop_event=stop)
+
+        # Checkpoint should still be at the previous position (no new work done)
+        assert _get_checkpoint(conn, 4) == ckpt_full
+
+
+class TestPhase5Checkpoint:
+    """Tests for Phase 5 checkpoint-based resumability."""
+
+    def _setup_pe(self, conn, pe_number="0602120A"):
+        _insert_budget_line(conn, pe_number=pe_number)
+        run_phase1(conn)
+
+    def _insert_pe_description(self, conn, pe_number="0602120A",
+                                fiscal_year="2026",
+                                source_file="army/FY2026/r2.pdf",
+                                page_start=1, page_end=3,
+                                section_header="Description",
+                                description_text="Sample description."):
+        conn.execute("""
+            INSERT INTO pe_descriptions
+                (pe_number, fiscal_year, source_file, page_start, page_end,
+                 section_header, description_text)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (pe_number, fiscal_year, source_file, page_start, page_end,
+              section_header, description_text))
+        conn.commit()
+
+    def test_phase5_saves_checkpoint(self, conn):
+        """Phase 5 saves a checkpoint after processing rows."""
+        self._setup_pe(conn)
+        self._insert_pe_description(
+            conn,
+            description_text="Radar technology for tactical engagement systems.",
+        )
+        run_phase5(conn)
+
+        ckpt = _get_checkpoint(conn, 5)
+        assert ckpt > 0
+
+    def test_phase5_resumes_from_checkpoint(self, conn):
+        """Phase 5 only processes rows beyond the saved checkpoint."""
+        self._setup_pe(conn)
+        self._insert_pe_description(
+            conn,
+            source_file="army/FY2026/r2_a.pdf",
+            description_text="Radar technology for tactical systems.",
+        )
+
+        # First run
+        count1 = run_phase5(conn)
+        assert count1 > 0
+        rows_after_run1 = conn.execute(
+            "SELECT COUNT(*) FROM project_descriptions"
+        ).fetchone()[0]
+
+        # Add a new description row
+        self._insert_pe_description(
+            conn,
+            source_file="army/FY2026/r2_b.pdf",
+            description_text="Electronic warfare countermeasures development.",
+        )
+
+        # Second run — should only process the new row
+        count2 = run_phase5(conn)
+        assert count2 > 0
+        rows_after_run2 = conn.execute(
+            "SELECT COUNT(*) FROM project_descriptions"
+        ).fetchone()[0]
+        assert rows_after_run2 > rows_after_run1
+
+    def test_phase5_no_reprocessing_when_checkpoint_current(self, conn):
+        """Phase 5 returns 0 when checkpoint covers all rows."""
+        self._setup_pe(conn)
+        self._insert_pe_description(
+            conn,
+            description_text="Advanced radar prototype development.",
+        )
+
+        run_phase5(conn)
+        rows1 = conn.execute(
+            "SELECT COUNT(*) FROM project_descriptions"
+        ).fetchone()[0]
+
+        # Second run — no new data
+        count2 = run_phase5(conn)
+        assert count2 == 0
+        rows2 = conn.execute(
+            "SELECT COUNT(*) FROM project_descriptions"
+        ).fetchone()[0]
+        assert rows1 == rows2

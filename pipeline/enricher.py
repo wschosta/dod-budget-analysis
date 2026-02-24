@@ -184,9 +184,40 @@ def _context_window(text: str, pos: int, window: int = 200) -> str:
     return f"...{snippet}..." if start > 0 or end < len(text) else snippet
 
 
+def _ensure_checkpoint_table(conn: sqlite3.Connection) -> None:
+    """Create the enrichment checkpoints table if it does not exist."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS _enrichment_checkpoints (
+            phase      INTEGER PRIMARY KEY,
+            last_rowid INTEGER NOT NULL,
+            updated_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+
+
+def _get_checkpoint(conn: sqlite3.Connection, phase: int) -> int:
+    """Return the last-processed pe_descriptions rowid for a phase, or 0."""
+    _ensure_checkpoint_table(conn)
+    row = conn.execute(
+        "SELECT last_rowid FROM _enrichment_checkpoints WHERE phase = ?",
+        (phase,),
+    ).fetchone()
+    return row[0] if row else 0
+
+
+def _save_checkpoint(conn: sqlite3.Connection, phase: int, last_rowid: int) -> None:
+    """Save a checkpoint for a phase (call before conn.commit())."""
+    _ensure_checkpoint_table(conn)
+    conn.execute("""
+        INSERT OR REPLACE INTO _enrichment_checkpoints (phase, last_rowid, updated_at)
+        VALUES (?, ?, datetime('now'))
+    """, (phase, last_rowid))
+
+
 def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
     # Drop FTS5 table first (depends on pe_descriptions content table)
     conn.execute("DROP TABLE IF EXISTS pe_descriptions_fts")
+    conn.execute("DROP TABLE IF EXISTS _enrichment_checkpoints")
     for table in ("project_descriptions", "pe_lineage", "pe_tags", "pe_descriptions", "pe_index"):
         conn.execute(f"DROP TABLE IF EXISTS {table}")
     conn.commit()
@@ -804,7 +835,11 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
 # ── Phase 4: Detect Cross-PE Lineage ─────────────────────────────────────────
 
 def run_phase4(conn: sqlite3.Connection, stop_event: threading.Event | None = None) -> int:
-    """Scan description text for PE number cross-references and name matches."""
+    """Scan description text for PE number cross-references and name matches.
+
+    Uses rowid-based checkpointing so interrupted runs can resume from where
+    they left off rather than re-scanning all pe_descriptions rows.
+    """
     logger.info("[Phase 4] Detecting cross-PE lineage...")
 
     known_pes = {
@@ -814,12 +849,31 @@ def run_phase4(conn: sqlite3.Connection, stop_event: threading.Event | None = No
         logger.info("pe_index is empty -- run Phase 1 first.")
         return 0
 
-    # Skip already-processed (pe_number, source_file) pairs
-    done_pairs = {
-        (r[0], r[1]) for r in conn.execute(
-            "SELECT DISTINCT source_pe, source_file FROM pe_lineage"
-        ).fetchall()
-    }
+    # ── Checkpoint-based resumption ──────────────────────────────────────
+    checkpoint_rowid = _get_checkpoint(conn, 4)
+
+    # Backward compatibility: if no checkpoint exists but pe_lineage already
+    # has rows (from a run before checkpointing was added), fall back to the
+    # legacy done_pairs mechanism for this run.  The checkpoint will be saved
+    # at the end, so subsequent runs use the fast rowid path.
+    use_done_pairs = False
+    done_pairs: set[tuple[str, str | None]] = set()
+    if checkpoint_rowid == 0:
+        lineage_count = conn.execute("SELECT COUNT(*) FROM pe_lineage").fetchone()[0]
+        if lineage_count > 0:
+            use_done_pairs = True
+            done_pairs = {
+                (r[0], r[1]) for r in conn.execute(
+                    "SELECT DISTINCT source_pe, source_file FROM pe_lineage"
+                ).fetchall()
+            }
+            logger.info(
+                "  No checkpoint found — using done_pairs (%s pairs) for backward compat.",
+                f"{len(done_pairs):,}",
+            )
+
+    if checkpoint_rowid > 0:
+        logger.info("  Resuming from checkpoint (rowid > %s)", f"{checkpoint_rowid:,}")
 
     # Build title index for name matching (phase 4b)
     # Only titles with >= 4 words are useful to avoid false positives.
@@ -842,30 +896,46 @@ def run_phase4(conn: sqlite3.Connection, stop_event: threading.Event | None = No
     total = 0
     CHUNK = 500  # rows per DB fetch to bound memory use
 
-    # Get total row count for progress reporting
-    desc_total = conn.execute(
+    # Get remaining row count for progress reporting
+    desc_remaining = conn.execute(
+        "SELECT COUNT(*) FROM pe_descriptions WHERE description_text IS NOT NULL AND rowid > ?",
+        (checkpoint_rowid,),
+    ).fetchone()[0]
+    desc_total_all = conn.execute(
         "SELECT COUNT(*) FROM pe_descriptions WHERE description_text IS NOT NULL"
     ).fetchone()[0]
-    logger.info(
-        "Scanning %s description rows against %d PEs and %d title patterns...",
-        f"{desc_total:,}", len(known_pes), len(title_index),
-    )
 
-    # Stream pe_descriptions in chunks instead of fetchall() to avoid loading
-    # potentially hundreds of MB of text into RAM at once.
+    if checkpoint_rowid > 0 and desc_remaining < desc_total_all:
+        logger.info(
+            "  Previously processed: %s — remaining: %s",
+            f"{desc_total_all - desc_remaining:,}", f"{desc_remaining:,}",
+        )
+
+    if desc_remaining == 0 and not use_done_pairs:
+        logger.info("All description rows already processed (checkpoint up to date).")
+    else:
+        logger.info(
+            "Scanning %s description rows against %d PEs and %d title patterns...",
+            f"{desc_remaining:,}", len(known_pes), len(title_index),
+        )
+
+    # Stream pe_descriptions in chunks, ordered by rowid for deterministic
+    # checkpoint resumption.  Only fetch rows beyond the saved checkpoint.
     cur = conn.execute("""
-        SELECT pe_number, fiscal_year, source_file, page_start, description_text
+        SELECT rowid, pe_number, fiscal_year, source_file, page_start, description_text
         FROM pe_descriptions
-        WHERE description_text IS NOT NULL
-    """)
+        WHERE description_text IS NOT NULL AND rowid > ?
+        ORDER BY rowid
+    """, (checkpoint_rowid,))
 
     rows_processed = 0
     skipped = 0
+    chunk_max_rowid = checkpoint_rowid
     t0 = time.time()
     while True:
         if stop_event and stop_event.is_set():
             logger.info("  Phase 4 stopped at row %s.", f"{rows_processed:,}")
-            # Flush any pending inserts before stopping
+            # Flush pending inserts + save checkpoint before stopping
             if insert_buf:
                 conn.executemany("""
                     INSERT OR IGNORE INTO pe_lineage
@@ -873,17 +943,21 @@ def run_phase4(conn: sqlite3.Connection, stop_event: threading.Event | None = No
                          page_number, context_snippet, link_type, confidence)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, insert_buf)
-                conn.commit()
                 total += len(insert_buf)
                 insert_buf = []
+            if chunk_max_rowid > checkpoint_rowid:
+                _save_checkpoint(conn, 4, chunk_max_rowid)
+            conn.commit()
             break
 
         chunk = cur.fetchmany(CHUNK)
         if not chunk:
             break
 
-        for pe_num, fy, source_file, page_start, text in chunk:
-            if (pe_num, source_file) in done_pairs:
+        for rowid, pe_num, fy, source_file, page_start, text in chunk:
+            chunk_max_rowid = rowid  # ordered by rowid, so last = max
+
+            if use_done_pairs and (pe_num, source_file) in done_pairs:
                 skipped += 1
                 continue
 
@@ -919,7 +993,7 @@ def run_phase4(conn: sqlite3.Connection, stop_event: threading.Event | None = No
 
         rows_processed += len(chunk)
 
-        # Flush insert buffer every chunk to keep memory bounded
+        # Flush insert buffer and save checkpoint atomically
         if insert_buf:
             conn.executemany("""
                 INSERT OR IGNORE INTO pe_lineage
@@ -927,19 +1001,20 @@ def run_phase4(conn: sqlite3.Connection, stop_event: threading.Event | None = No
                      page_number, context_snippet, link_type, confidence)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, insert_buf)
-            conn.commit()
             total += len(insert_buf)
             insert_buf = []
+        _save_checkpoint(conn, 4, chunk_max_rowid)
+        conn.commit()
 
         # Progress every 10,000 rows
         if rows_processed % 10_000 < CHUNK:
             elapsed = time.time() - t0
-            pct = rows_processed / desc_total * 100 if desc_total else 0
+            pct = rows_processed / desc_remaining * 100 if desc_remaining else 0
             rate = rows_processed / elapsed if elapsed > 0 else 0
-            eta = (desc_total - rows_processed) / rate if rate > 0 else 0
+            eta = (desc_remaining - rows_processed) / rate if rate > 0 else 0
             logger.info(
                 "  [Phase 4] %s / %s rows (%.1f%%) — %d links found — %.0f rows/s — ETA %.0fs",
-                f"{rows_processed:,}", f"{desc_total:,}", pct, total, rate, eta,
+                f"{rows_processed:,}", f"{desc_remaining:,}", pct, total, rate, eta,
             )
 
     elapsed = time.time() - t0
@@ -1006,6 +1081,8 @@ def run_phase5(conn: sqlite3.Connection, stop_event: threading.Event | None = No
 
     When project boundaries cannot be detected, the PE-level text is
     stored with project_number=NULL as a fallback.
+
+    Uses rowid-based checkpointing so interrupted runs can resume.
     """
     logger.info("[Phase 5] Decomposing PE descriptions into project-level sections...")
 
@@ -1030,37 +1107,60 @@ def run_phase5(conn: sqlite3.Connection, stop_event: threading.Event | None = No
     """)
 
     # Check if we have any pe_descriptions to process
-    desc_count = conn.execute("SELECT COUNT(*) FROM pe_descriptions").fetchone()[0]
-    if desc_count == 0:
+    desc_count_all = conn.execute("SELECT COUNT(*) FROM pe_descriptions").fetchone()[0]
+    if desc_count_all == 0:
         logger.info("pe_descriptions is empty -- run Phase 2 first.")
         return 0
 
-    # Skip already-processed source files (for incremental runs)
+    # ── Checkpoint-based resumption ──────────────────────────────────────
+    checkpoint_rowid = _get_checkpoint(conn, 5)
+
+    if checkpoint_rowid > 0:
+        logger.info("  Resuming from checkpoint (rowid > %s)", f"{checkpoint_rowid:,}")
+
+    # Backward compatibility: keep done_files as secondary skip check
     done_files = {
         r[0] for r in conn.execute(
             "SELECT DISTINCT source_file FROM project_descriptions WHERE source_file IS NOT NULL"
         ).fetchall()
     }
 
+    # Count remaining rows for progress
+    desc_remaining = conn.execute(
+        "SELECT COUNT(*) FROM pe_descriptions WHERE description_text IS NOT NULL AND rowid > ?",
+        (checkpoint_rowid,),
+    ).fetchone()[0]
+
+    if desc_remaining == 0:
+        logger.info("All description rows already processed (checkpoint up to date).")
+    else:
+        if checkpoint_rowid > 0:
+            logger.info(
+                "  Previously processed: %s — remaining: %s",
+                f"{desc_count_all - desc_remaining:,}", f"{desc_remaining:,}",
+            )
+        logger.info("  Scanning %s description rows for project boundaries...", f"{desc_remaining:,}")
+
     CHUNK = 500
-    logger.info("  Scanning %s description rows for project boundaries...", f"{desc_count:,}")
     cur = conn.execute("""
-        SELECT pe_number, fiscal_year, source_file, page_start, page_end,
+        SELECT rowid, pe_number, fiscal_year, source_file, page_start, page_end,
                section_header, description_text
         FROM pe_descriptions
-        WHERE description_text IS NOT NULL
-    """)
+        WHERE description_text IS NOT NULL AND rowid > ?
+        ORDER BY rowid
+    """, (checkpoint_rowid,))
 
     insert_buf: list[tuple] = []
     total_rows = 0
     pe_level_fallback = 0
     rows_processed = 0
+    chunk_max_rowid = checkpoint_rowid
     t0 = time.time()
 
     while True:
         if stop_event and stop_event.is_set():
             logger.info("  Phase 5 stopped at row %s.", f"{rows_processed:,}")
-            # Flush any pending inserts before stopping
+            # Flush pending inserts + save checkpoint before stopping
             if insert_buf:
                 conn.executemany("""
                     INSERT INTO project_descriptions
@@ -1069,16 +1169,20 @@ def run_phase5(conn: sqlite3.Connection, stop_event: threading.Event | None = No
                          page_start, page_end)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, insert_buf)
-                conn.commit()
                 total_rows += len(insert_buf)
                 insert_buf = []
+            if chunk_max_rowid > checkpoint_rowid:
+                _save_checkpoint(conn, 5, chunk_max_rowid)
+            conn.commit()
             break
 
         chunk = cur.fetchmany(CHUNK)
         if not chunk:
             break
 
-        for pe_num, fy, source_file, page_start, page_end, section_header, desc_text in chunk:
+        for rowid, pe_num, fy, source_file, page_start, page_end, section_header, desc_text in chunk:
+            chunk_max_rowid = rowid  # ordered by rowid, so last = max
+
             if source_file and source_file in done_files:
                 continue
 
@@ -1128,7 +1232,7 @@ def run_phase5(conn: sqlite3.Connection, stop_event: threading.Event | None = No
 
         rows_processed += len(chunk)
 
-        # Flush buffer periodically
+        # Flush buffer and save checkpoint atomically
         if insert_buf:
             conn.executemany("""
                 INSERT INTO project_descriptions
@@ -1137,19 +1241,20 @@ def run_phase5(conn: sqlite3.Connection, stop_event: threading.Event | None = No
                      page_start, page_end)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, insert_buf)
-            conn.commit()
             total_rows += len(insert_buf)
             insert_buf = []
+        _save_checkpoint(conn, 5, chunk_max_rowid)
+        conn.commit()
 
         # Progress every 10,000 rows
-        if rows_processed % 10_000 < CHUNK and desc_count > 0:
+        if rows_processed % 10_000 < CHUNK and desc_remaining > 0:
             elapsed = time.time() - t0
-            pct = rows_processed / desc_count * 100
+            pct = rows_processed / desc_remaining * 100
             rate = rows_processed / elapsed if elapsed > 0 else 0
-            eta = (desc_count - rows_processed) / rate if rate > 0 else 0
+            eta = (desc_remaining - rows_processed) / rate if rate > 0 else 0
             logger.info(
                 "  [Phase 5] %s / %s rows (%.1f%%) — %d project rows — %.0f rows/s — ETA %.0fs",
-                f"{rows_processed:,}", f"{desc_count:,}", pct, total_rows, rate, eta,
+                f"{rows_processed:,}", f"{desc_remaining:,}", pct, total_rows, rate, eta,
             )
 
     if insert_buf:
@@ -1160,6 +1265,7 @@ def run_phase5(conn: sqlite3.Connection, stop_event: threading.Event | None = No
                  page_start, page_end)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, insert_buf)
+        _save_checkpoint(conn, 5, chunk_max_rowid)
         conn.commit()
         total_rows += len(insert_buf)
 
