@@ -360,6 +360,22 @@ Shows revenue and expenses rather than budget authority like other exhibits.
 
 ---
 
+## Exhibits Not Yet Parsed
+
+The following exhibit types appear in downloaded documents but are not yet cataloged
+in `exhibit_catalog.py`. They are available as raw PDF text in `pdf_pages`.
+
+| Code | Name | Description |
+|------|------|-------------|
+| P-21 | Production Schedule | Production rates and delivery schedules for procurement items |
+| P-40 | Budget Item Justification | Detailed justification narratives for procurement line items |
+| R-2a | RDT&E Narrative | Extended mission description and justification (supplement to R-2) |
+
+Adding parser support for these exhibit types would increase the number of PEs with
+structured budget line data in `budget_lines`.
+
+---
+
 ## Monetary Convention
 
 - **Canonical unit:** Thousands of dollars (as stored in source documents)
