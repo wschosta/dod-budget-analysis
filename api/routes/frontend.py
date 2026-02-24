@@ -156,6 +156,7 @@ def _get_fiscal_years(conn: sqlite3.Connection) -> list[dict]:
         "SELECT fiscal_year, COUNT(*) AS row_count FROM budget_lines "
         "WHERE fiscal_year IS NOT NULL "
         "AND (fiscal_year GLOB '[0-9][0-9][0-9][0-9]' "
+        "     OR fiscal_year GLOB 'FY [0-9][0-9][0-9][0-9]' "
         "     OR fiscal_year GLOB 'FY[0-9][0-9][0-9][0-9]') "
         "GROUP BY fiscal_year ORDER BY fiscal_year"
     ).fetchall()

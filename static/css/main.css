@@ -438,7 +438,7 @@ a:hover { text-decoration: underline; }
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
-  overflow: hidden;
+  overflow: visible;
 }
 .results-header {
   display: flex;
@@ -1139,8 +1139,8 @@ tr:focus-within td {
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  z-index: 50;
-  max-height: 200px;
+  z-index: 1000;
+  max-height: 260px;
   overflow-y: auto;
 }
 .checkbox-select.open .checkbox-select-dropdown { display: block; }

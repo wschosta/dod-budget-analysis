@@ -204,13 +204,18 @@ function restoreFiltersFromURL() {
   const form = document.getElementById("filter-form");
   if (!form) return;
 
+  let hasActiveFilters = false;
+
   // Text inputs
   ["q", "min_amount", "max_amount"].forEach(name => {
     const el = form.elements[name];
-    if (el && params.has(name)) el.value = params.get(name);
+    if (el && params.has(name)) {
+      el.value = params.get(name);
+      hasActiveFilters = true;
+    }
   });
 
-  // Multi-selects
+  // Multi-selects — set option.selected then sync checkbox-select UI
   ["fiscal_year", "service", "exhibit_type", "appropriation_code"].forEach(name => {
     const el = form.elements[name];
     if (!el || !params.has(name)) return;
@@ -218,7 +223,27 @@ function restoreFiltersFromURL() {
     Array.from(el.options).forEach(opt => {
       opt.selected = vals.includes(opt.value);
     });
+    hasActiveFilters = true;
+    // Sync checkbox-select component if it wraps this select
+    const wrapper = el.closest(".checkbox-select");
+    if (wrapper && wrapper._checkboxSelectRefresh) {
+      wrapper._checkboxSelectRefresh();
+    }
   });
+
+  // Auto-open mobile filter drawer when URL has active filters
+  if (hasActiveFilters) {
+    const filterPanel = document.getElementById("filter-panel");
+    if (filterPanel && !filterPanel.classList.contains("drawer-open")) {
+      filterPanel.classList.add("drawer-open");
+      const toggleBtn = document.getElementById("filter-drawer-toggle");
+      if (toggleBtn) toggleBtn.setAttribute("aria-expanded", "true");
+    }
+    // Trigger a search with the restored filters
+    setTimeout(function () {
+      htmx.trigger(form, "filter-debounced");
+    }, 100);
+  }
 }
 
 // ── Download URL builder (3.A5-a / JS-001 / FE-011) ───────────────────────────
@@ -845,6 +870,8 @@ document.addEventListener("DOMContentLoaded", function () {
   // debounce before firing HTMX. The form's hx-trigger listens for a custom
   // "filter-debounced" event (not raw "change") so rapid clicks don't cause
   // duplicate requests. Number inputs also debounce on change.
+  // Suppress debounce while a checkbox-select dropdown is open to prevent
+  // HTMX swaps from closing the dropdown mid-interaction.
   let debounceTimer = null;
   const form = document.getElementById("filter-form");
   if (form) {
@@ -853,9 +880,11 @@ document.addEventListener("DOMContentLoaded", function () {
       const tag = e.target.tagName;
       if (tag === "SELECT" || e.target.type === "number") {
         clearTimeout(debounceTimer);
+        var anyDropdownOpen = document.querySelector(".checkbox-select.open");
+        var delay = anyDropdownOpen ? 800 : 300;
         debounceTimer = setTimeout(function () {
           htmx.trigger(form, "filter-debounced");
-        }, 300);
+        }, delay);
       }
     });
     form.addEventListener("input", updateDownloadLinks);

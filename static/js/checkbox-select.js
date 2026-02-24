@@ -113,6 +113,22 @@ function initCheckboxSelect(selectEl) {
     }
   });
 
+  // Public API: refresh checkbox UI from underlying <option> selected state.
+  // Call after programmatically changing option.selected values.
+  function refresh() {
+    var checkboxes = dropdown.querySelectorAll("input[type='checkbox']");
+    checkboxes.forEach(function (cb) {
+      var idx = parseInt(cb.dataset.index, 10);
+      if (idx < selectEl.options.length) {
+        cb.checked = selectEl.options[idx].selected;
+      }
+    });
+    updateTriggerText();
+  }
+
+  // Store refresh handle on the wrapper for external access
+  wrapper._checkboxSelectRefresh = refresh;
+
   buildOptions();
   updateTriggerText();
 }

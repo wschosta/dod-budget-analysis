@@ -28,14 +28,15 @@ def list_services(conn: sqlite3.Connection = Depends(get_db)) -> JSONResponse:
     """Return all known military services and defense agencies."""
     try:
         rows = conn.execute(
-            "SELECT code, full_name, category FROM services_agencies ORDER BY code"
+            "SELECT DISTINCT code, full_name, category "
+            "FROM services_agencies ORDER BY code"
         ).fetchall()
         data = [dict(r) for r in rows]
     except sqlite3.OperationalError:
         # Fall back to distinct values from flat budget_lines table
         rows = conn.execute(
-            "SELECT DISTINCT organization_name as code FROM budget_lines "
-            "WHERE organization_name IS NOT NULL ORDER BY organization_name"
+            "SELECT DISTINCT TRIM(organization_name) as code FROM budget_lines "
+            "WHERE organization_name IS NOT NULL ORDER BY code"
         ).fetchall()
         data = [{"code": r["code"], "full_name": r["code"], "category": "unknown"}
                 for r in rows]
