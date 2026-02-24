@@ -52,7 +52,9 @@ def metadata_db(tmp_path):
             organization_name TEXT,
             budget_type TEXT,
             fiscal_years TEXT,
-            exhibit_types TEXT
+            exhibit_types TEXT,
+            source TEXT NOT NULL DEFAULT 'budget_lines',
+            updated_at TEXT DEFAULT (datetime('now'))
         );
 
         CREATE TABLE pe_descriptions (

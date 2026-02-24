@@ -22,11 +22,13 @@ from enrich_budget_db import (
     run_phase4,
     run_phase5,
     _extract_fy_from_path,
+    _extract_pe_title_from_text,
     _context_window,
     _tags_from_keywords,
     _get_checkpoint,
     _save_checkpoint,
     _drop_enrichment_tables,
+    _EXHIBIT_TO_BUDGET_TYPE,
     _MIN_TEXT_FOR_NAME_MATCH,
     _MAX_PE_REFS_FOR_NAME_MATCH,
     _MAX_NAME_MATCHES_PER_ROW,
@@ -89,8 +91,19 @@ def _make_db() -> sqlite3.Connection:
             budget_type TEXT,
             fiscal_years TEXT,
             exhibit_types TEXT,
+            source TEXT NOT NULL DEFAULT 'budget_lines',
             updated_at TEXT DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE pdf_pe_numbers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pe_number TEXT NOT NULL,
+            page_number INTEGER,
+            source_file TEXT,
+            fiscal_year TEXT,
+            pdf_page_id INTEGER REFERENCES pdf_pages(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_ppn_pe ON pdf_pe_numbers(pe_number);
 
         CREATE TABLE pe_descriptions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,11 +183,28 @@ def _insert_budget_line(conn, pe_number="0602120A", fiscal_year="2026",
 
 
 def _insert_pdf_page(conn, source_file="army/FY2026/r2_army.pdf",
-                     page_number=1, page_text=""):
+                     page_number=1, page_text="",
+                     source_category="Army", exhibit_type=None) -> int:
+    """Insert a pdf_pages row and return its id."""
+    cur = conn.execute("""
+        INSERT INTO pdf_pages
+            (source_file, source_category, page_number, page_text, exhibit_type)
+        VALUES (?, ?, ?, ?, ?)
+    """, (source_file, source_category, page_number, page_text, exhibit_type))
+    conn.commit()
+    return cur.lastrowid
+
+
+def _insert_pdf_pe_number(conn, pe_number: str, pdf_page_id: int,
+                          page_number: int = 1,
+                          source_file: str = "army/FY2026/r2_army.pdf",
+                          fiscal_year: str | None = "2026"):
+    """Insert a pdf_pe_numbers junction row."""
     conn.execute("""
-        INSERT INTO pdf_pages (source_file, source_category, page_number, page_text)
-        VALUES (?, 'Army', ?, ?)
-    """, (source_file, page_number, page_text))
+        INSERT INTO pdf_pe_numbers
+            (pe_number, page_number, source_file, fiscal_year, pdf_page_id)
+        VALUES (?, ?, ?, ?, ?)
+    """, (pe_number, page_number, source_file, fiscal_year, pdf_page_id))
     conn.commit()
 
 
@@ -194,6 +224,7 @@ class TestPhase1:
         assert row is not None
         assert row["display_title"] == "Radar Technology"
         assert row["organization_name"] == "Army"
+        assert row["source"] == "budget_lines"
         assert "2026" in json.loads(row["fiscal_years"])
         assert "r1" in json.loads(row["exhibit_types"])
 
@@ -228,6 +259,182 @@ class TestPhase1:
         conn.commit()
         count = run_phase1(conn)
         assert count == 0
+
+
+# ── Phase 1 PDF-only PE tests ────────────────────────────────────────────────
+
+class TestPhase1PdfOnly:
+    """Tests for Pass 2 of Phase 1: PDF-only PE discovery."""
+
+    def test_indexes_pdf_only_pes(self, conn):
+        """PEs in pdf_pe_numbers but not in budget_lines are indexed with source='pdf'."""
+        # PE A in budget_lines, PEs A and B in pdf_pe_numbers
+        _insert_budget_line(conn, pe_number="0602120A")
+        page_id = _insert_pdf_page(conn, page_text="PE 0602120A content",
+                                   exhibit_type="r2")
+        _insert_pdf_pe_number(conn, "0602120A", page_id)
+        page_id2 = _insert_pdf_page(conn, page_text="PE 0603999BR: DARPA Special Program content",
+                                    source_file="darpa/FY2026/r2_darpa.pdf",
+                                    source_category="Defense-Wide", exhibit_type="r2",
+                                    page_number=2)
+        _insert_pdf_pe_number(conn, "0603999BR", page_id2, page_number=2,
+                              source_file="darpa/FY2026/r2_darpa.pdf")
+
+        count = run_phase1(conn)
+        assert count == 2
+
+        # A should be from budget_lines
+        row_a = conn.execute(
+            "SELECT source FROM pe_index WHERE pe_number = '0602120A'"
+        ).fetchone()
+        assert row_a["source"] == "budget_lines"
+
+        # B should be from pdf
+        row_b = conn.execute(
+            "SELECT * FROM pe_index WHERE pe_number = '0603999BR'"
+        ).fetchone()
+        assert row_b is not None
+        assert row_b["source"] == "pdf"
+
+    def test_title_extraction(self, conn):
+        """Title is extracted from PDF text patterns like 'PE XXXXXXXA: Title'."""
+        page_id = _insert_pdf_page(
+            conn, page_text="PE 0602702F: Advanced Radar Technology Development",
+            source_file="af/FY2026/r2_af.pdf", source_category="Air Force",
+            exhibit_type="r2",
+        )
+        _insert_pdf_pe_number(conn, "0602702F", page_id,
+                              source_file="af/FY2026/r2_af.pdf")
+        run_phase1(conn)
+
+        row = conn.execute(
+            "SELECT display_title FROM pe_index WHERE pe_number = '0602702F'"
+        ).fetchone()
+        assert row is not None
+        assert row["display_title"] == "Advanced Radar Technology Development"
+
+    def test_no_title_fallback(self, conn):
+        """PE with no recognizable title pattern gets NULL display_title."""
+        page_id = _insert_pdf_page(
+            conn, page_text="Some text mentioning 0603999BR in passing",
+            source_file="dw/FY2026/r2_dw.pdf", source_category="Defense-Wide",
+        )
+        _insert_pdf_pe_number(conn, "0603999BR", page_id,
+                              source_file="dw/FY2026/r2_dw.pdf")
+        run_phase1(conn)
+
+        row = conn.execute(
+            "SELECT display_title FROM pe_index WHERE pe_number = '0603999BR'"
+        ).fetchone()
+        assert row is not None
+        assert row["display_title"] is None
+
+    def test_does_not_overwrite_budget_lines_pe(self, conn):
+        """PE in both budget_lines and pdf_pe_numbers keeps budget_lines data."""
+        _insert_budget_line(conn, pe_number="0602120A", title="Excel Title")
+        page_id = _insert_pdf_page(
+            conn, page_text="PE 0602120A: PDF Title from narrative",
+        )
+        _insert_pdf_pe_number(conn, "0602120A", page_id)
+
+        run_phase1(conn)
+
+        row = conn.execute(
+            "SELECT display_title, source FROM pe_index WHERE pe_number = '0602120A'"
+        ).fetchone()
+        # budget_lines version should win (Pass 1 INSERT OR REPLACE, Pass 2 INSERT OR IGNORE)
+        assert row["source"] == "budget_lines"
+        assert row["display_title"] == "Excel Title"
+
+    def test_org_inference(self, conn):
+        """Organization is inferred from pdf_pages.source_category."""
+        page_id = _insert_pdf_page(
+            conn, page_text="PE 0603999BR: Special Ops Program",
+            source_file="army/FY2026/r2_army.pdf",
+            source_category="Army", exhibit_type="r2",
+        )
+        _insert_pdf_pe_number(conn, "0603999BR", page_id,
+                              source_file="army/FY2026/r2_army.pdf")
+        run_phase1(conn)
+
+        row = conn.execute(
+            "SELECT organization_name FROM pe_index WHERE pe_number = '0603999BR'"
+        ).fetchone()
+        assert row["organization_name"] == "Army"
+
+    def test_budget_type_inference(self, conn):
+        """Budget type is inferred from exhibit type of source PDF pages."""
+        page_id = _insert_pdf_page(
+            conn, page_text="PE 0603999BR: Special Research Program",
+            source_file="dw/FY2026/r2_dw.pdf",
+            source_category="Defense-Wide", exhibit_type="r2",
+        )
+        _insert_pdf_pe_number(conn, "0603999BR", page_id,
+                              source_file="dw/FY2026/r2_dw.pdf")
+        run_phase1(conn)
+
+        row = conn.execute(
+            "SELECT budget_type FROM pe_index WHERE pe_number = '0603999BR'"
+        ).fetchone()
+        assert row["budget_type"] == "RDT&E"
+
+    def test_phase2_processes_pdf_only_pes(self, conn):
+        """After Phase 1 indexes a PDF-only PE, Phase 2 creates pe_descriptions for it."""
+        page_id = _insert_pdf_page(
+            conn,
+            page_text=(
+                "PE 0603999BR: Special Research Program\n"
+                "Accomplishments/Planned Programs\n"
+                "In FY2026, the program completed prototype testing."
+            ),
+            source_file="dw/FY2026/r2_dw.pdf",
+            source_category="Defense-Wide", exhibit_type="r2",
+        )
+        _insert_pdf_pe_number(conn, "0603999BR", page_id,
+                              source_file="dw/FY2026/r2_dw.pdf")
+
+        run_phase1(conn)
+        # Verify it's indexed
+        assert conn.execute(
+            "SELECT COUNT(*) FROM pe_index WHERE pe_number = '0603999BR'"
+        ).fetchone()[0] == 1
+
+        count = run_phase2(conn)
+        assert count > 0
+        desc = conn.execute(
+            "SELECT * FROM pe_descriptions WHERE pe_number = '0603999BR'"
+        ).fetchone()
+        assert desc is not None
+
+    def test_phase3_tags_pdf_only_pes(self, conn):
+        """A PDF-only PE with narrative text about 'hypersonic' gets the tag."""
+        page_id = _insert_pdf_page(
+            conn,
+            page_text=(
+                "PE 0603999BR: Hypersonic Strike Program\n"
+                "The program develops hypersonic glide vehicle technology."
+            ),
+            source_file="dw/FY2026/r2_dw.pdf",
+            source_category="Defense-Wide", exhibit_type="r2",
+        )
+        _insert_pdf_pe_number(conn, "0603999BR", page_id,
+                              source_file="dw/FY2026/r2_dw.pdf")
+
+        run_phase1(conn)
+        run_phase2(conn)
+        run_phase3(conn, with_llm=False)
+
+        tags = [r["tag"] for r in conn.execute(
+            "SELECT tag FROM pe_tags WHERE pe_number = '0603999BR'"
+        ).fetchall()]
+        assert "hypersonic" in tags
+
+    def test_empty_pdf_pe_numbers(self, conn):
+        """Pass 2 produces 0 when pdf_pe_numbers is empty."""
+        _insert_budget_line(conn)
+        count = run_phase1(conn)
+        assert count == 1  # Only Pass 1 PE
+        assert conn.execute("SELECT COUNT(*) FROM pe_index").fetchone()[0] == 1
 
 
 # ── Phase 2 tests ─────────────────────────────────────────────────────────────
@@ -654,6 +861,40 @@ class TestHelpers:
         tags = _tags_from_keywords("0602120A", "submarine warfare and undersea systems")
         tag_names = [t[1] for t in tags]
         assert "submarine" in tag_names
+
+    def test_extract_pe_title_colon(self):
+        text = "PE 0602702F: Advanced Radar Technology Development\nMore text here."
+        title = _extract_pe_title_from_text("0602702F", text)
+        assert title == "Advanced Radar Technology Development"
+
+    def test_extract_pe_title_slash(self):
+        text = "PE 0603999BR / Special Operations Research Program\nDetails follow."
+        title = _extract_pe_title_from_text("0603999BR", text)
+        assert title == "Special Operations Research Program"
+
+    def test_extract_pe_title_dash(self):
+        text = "Program Element 0602120A - Tactical Radar Systems\nMore."
+        title = _extract_pe_title_from_text("0602120A", text)
+        assert title == "Tactical Radar Systems"
+
+    def test_extract_pe_title_wrong_pe(self):
+        text = "PE 0602702F: Advanced Radar Technology Development"
+        title = _extract_pe_title_from_text("0603999BR", text)
+        assert title is None
+
+    def test_extract_pe_title_no_match(self):
+        text = "No PE title pattern here, just mentions 0602702F in passing."
+        title = _extract_pe_title_from_text("0602702F", text)
+        assert title is None
+
+    def test_exhibit_to_budget_type_mapping(self):
+        assert _EXHIBIT_TO_BUDGET_TYPE["r1"] == "RDT&E"
+        assert _EXHIBIT_TO_BUDGET_TYPE["r2"] == "RDT&E"
+        assert _EXHIBIT_TO_BUDGET_TYPE["p1"] == "Procurement"
+        assert _EXHIBIT_TO_BUDGET_TYPE["p5"] == "Procurement"
+        assert _EXHIBIT_TO_BUDGET_TYPE["o1"] == "O&M"
+        assert _EXHIBIT_TO_BUDGET_TYPE["m1"] == "MilPers"
+        assert _EXHIBIT_TO_BUDGET_TYPE["c1"] == "MilCon"
 
 
 # ── Phase 5 tests ─────────────────────────────────────────────────────────────

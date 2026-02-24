@@ -208,11 +208,11 @@ def suggest_db(db):
         )
     """)
     db.execute(
-        "INSERT INTO pe_index VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO pe_index (pe_number, display_title, organization_name, budget_type, fiscal_years, exhibit_types) VALUES (?, ?, ?, ?, ?, ?)",
         ("0207449A", "Apache Helicopter", "Army", "Procurement", '["2026"]', '["p1"]'),
     )
     db.execute(
-        "INSERT INTO pe_index VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO pe_index (pe_number, display_title, organization_name, budget_type, fiscal_years, exhibit_types) VALUES (?, ?, ?, ?, ?, ?)",
         ("0204311N", "DDG-51 Destroyer", "Navy", "Procurement", '["2026"]', '["p1"]'),
     )
     db.commit()
