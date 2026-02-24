@@ -1,0 +1,96 @@
+{# HTMX partial: Spruill funding comparison table #}
+{% if rows %}
+
+<div class="table-wrapper">
+  <table class="pe-funding-table spruill-table">
+    <thead>
+      <tr>
+        <th scope="col">PE Number</th>
+        <th scope="col">Title / Sub-element</th>
+        <th scope="col">Service</th>
+        {% for fy in fiscal_years %}
+        <th scope="col" class="td-amount">
+          {% if 'actual' in fy %}FY{{ fy[2:4] }} Actual ($K)
+          {% elif 'enacted' in fy %}FY{{ fy[2:4] }} Enacted ($K)
+          {% elif 'request' in fy %}FY{{ fy[2:4] }} Request ($K)
+          {% else %}{{ fy }} ($K){% endif %}
+        </th>
+        {% endfor %}
+        <th scope="col" class="td-amount">Delta ($K)</th>
+        <th scope="col" class="td-amount">% Change</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr class="{% if row.is_subtotal %}spruill-subtotal{% else %}spruill-detail{% endif %}">
+        <td>
+          {% if row.is_subtotal %}
+          <a href="/programs/{{ row.pe_number }}" class="badge" style="text-decoration:none">{{ row.pe_number }}</a>
+          {% else %}
+          <span style="padding-left:1rem;font-size:.8rem;color:var(--text-secondary)">{{ row.pe_number }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if row.is_subtotal %}
+          <strong>{{ row.display_title or row.pe_number }}</strong>
+          {% else %}
+          <span style="padding-left:1rem;font-size:.85rem">{{ row.line_item_title or row.display_title or "—" }}</span>
+          {% endif %}
+        </td>
+        <td>{{ row.organization_name or "—" }}</td>
+        {% for fy in fiscal_years %}
+        <td class="td-amount">
+          {% set amt = row.amounts.get(fy) %}
+          {% if amt is not none %}
+          {{ "{:,.0f}".format(amt) }}
+          {% else %}—{% endif %}
+        </td>
+        {% endfor %}
+        {# Delta = last FY amount (request) - second-to-last FY amount (enacted) #}
+        {% set fy_keys = fiscal_years %}
+        {% if fy_keys | length >= 2 %}
+          {% set enacted_key = fy_keys[-2] %}
+          {% set request_key = fy_keys[-1] %}
+          {% set enacted_val = row.amounts.get(enacted_key) %}
+          {% set request_val = row.amounts.get(request_key) %}
+          {% if enacted_val is not none and request_val is not none %}
+            {% set delta = request_val - enacted_val %}
+            <td class="td-amount">
+              <span class="delta {{ 'positive' if delta >= 0 else 'negative' }}">
+                {{ "{:+,.0f}".format(delta) }}
+              </span>
+            </td>
+            <td class="td-amount">
+              {% if enacted_val != 0 %}
+                {% set pct = (delta / (enacted_val if enacted_val > 0 else -enacted_val)) * 100 %}
+                <span class="delta {{ 'positive' if pct >= 0 else 'negative' }}">
+                  {{ "{:+.1f}".format(pct) }}%
+                </span>
+              {% else %}—{% endif %}
+            </td>
+          {% else %}
+            <td class="td-amount">—</td>
+            <td class="td-amount">—</td>
+          {% endif %}
+        {% else %}
+          <td class="td-amount">—</td>
+          <td class="td-amount">—</td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<p style="margin-top:.75rem;font-size:.8rem;color:var(--text-secondary)">
+  {{ pe_count }} program{{ "s" if pe_count != 1 }} &middot; {{ rows | length }} row{{ "s" if rows | length != 1 }} &middot;
+  Amounts in thousands of dollars ($K). Delta = Request - Enacted.
+</p>
+
+{% else %}
+<div class="empty-state" style="padding:2rem;text-align:center">
+  <div class="empty-state-icon" aria-hidden="true">&#128202;</div>
+  <p><strong>No comparison data available.</strong></p>
+  <p style="font-size:.85rem">Select program elements from the <a href="/programs">Program Explorer</a> to compare funding.</p>
+</div>
+{% endif %}

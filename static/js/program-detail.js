@@ -71,4 +71,16 @@
   } catch (e) {
     // Silently fail — chart is a nice-to-have enhancement
   }
+
+  // ── Quantity column toggle ──────────────────────────────────────────────────
+  var qtyToggle = document.getElementById("qty-toggle");
+  if (qtyToggle) {
+    qtyToggle.addEventListener("click", function() {
+      var cells = document.querySelectorAll(".qty-col");
+      var show = this.getAttribute("aria-pressed") !== "true";
+      this.setAttribute("aria-pressed", String(show));
+      this.textContent = show ? "Hide Quantities" : "Show Quantities";
+      cells.forEach(function(c) { c.style.display = show ? "" : "none"; });
+    });
+  }
 })();

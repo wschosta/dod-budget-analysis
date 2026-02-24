@@ -1865,3 +1865,32 @@ tr:focus-within td {
   from { opacity: 1; }
   to   { opacity: 0; transform: translateY(-.5rem); }
 }
+
+/* ── Spruill comparison table ────────────────────────────────────────────── */
+.spruill-table { width: 100%; border-collapse: collapse; }
+.spruill-subtotal td { font-weight: 600; background: var(--bg-surface); }
+.spruill-detail td { padding-left: 2rem; font-size: .85rem; }
+
+/* ── PE selection compare bar ────────────────────────────────────────────── */
+.pe-compare-bar {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--bg-surface);
+  border-top: 2px solid var(--clr-blue);
+  padding: .75rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  z-index: 50;
+  box-shadow: 0 -2px 8px rgba(0,0,0,.1);
+  font-size: .9rem;
+}
+
+/* ── Search source toggle ────────────────────────────────────────────────── */
+.search-source-toggle label { cursor: pointer; }
+.search-source-toggle input[type="radio"] { margin-right: .25rem; }
+
+/* ── Quantity column toggle ──────────────────────────────────────────────── */
+.qty-col { display: none; }

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Spruill Chart — DoD Budget Explorer{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="/programs">Programs</a> &rsaquo; <span>Spruill Comparison</span>
+</nav>
+
+<h2>Spruill Funding Comparison</h2>
+<p class="programs-subtitle">Side-by-side funding comparison across fiscal years for selected program elements.</p>
+
+<div id="spruill-controls" style="margin-bottom:1rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+  <label for="spruill-detail" style="font-size:.85rem;cursor:pointer">
+    <input type="checkbox" id="spruill-detail"> Show sub-element detail
+  </label>
+  <a id="spruill-export" href="#" class="btn btn-secondary btn-sm" style="margin-left:auto" download>
+    &darr; Export CSV
+  </a>
+</div>
+
+<div id="spruill-table-container"
+     hx-get="/partials/spruill-table"
+     hx-trigger="load"
+     hx-indicator="#spruill-loading"
+     hx-vals='js:spruillHxVals()'>
+  <div id="spruill-loading" class="htmx-indicator">
+    <span class="spinner"></span> Loading comparison data&hellip;
+  </div>
+</div>
+
+{% if not selected_pes %}
+<div class="empty-state" style="margin-top:1rem;background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:2rem;text-align:center">
+  <div class="empty-state-icon" aria-hidden="true">&#128202;</div>
+  <p><strong>No programs selected.</strong></p>
+  <p style="font-size:.85rem">Go to the <a href="/programs">Program Explorer</a> to select PEs for comparison.</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/app.js"></script>
+<script src="/static/js/spruill.js"></script>
+{% endblock %}

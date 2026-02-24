@@ -1102,6 +1102,36 @@ function initHeroAutocomplete() {
   });
 }
 
+// ── Multi-PE selection for Spruill comparison ────────────────────────────────
+
+function updatePeCompareBar() {
+  var checkboxes = document.querySelectorAll(".pe-select-checkbox:checked");
+  var bar = document.getElementById("pe-compare-bar");
+  var countEl = document.getElementById("pe-compare-count");
+  var linkEl = document.getElementById("pe-compare-link");
+  if (!bar) return;
+  if (checkboxes.length > 0) {
+    bar.hidden = false;
+    countEl.textContent = checkboxes.length;
+    var pes = Array.from(checkboxes).map(function(cb) { return cb.value; });
+    linkEl.href = "/spruill?" + pes.map(function(pe) { return "pe=" + encodeURIComponent(pe); }).join("&");
+  } else {
+    bar.hidden = true;
+  }
+}
+
+function clearPeSelection() {
+  document.querySelectorAll(".pe-select-checkbox:checked").forEach(function(cb) { cb.checked = false; });
+  updatePeCompareBar();
+}
+
+// Delegate click events for checkboxes (works with HTMX swaps)
+document.addEventListener("change", function(e) {
+  if (e.target.classList.contains("pe-select-checkbox")) {
+    updatePeCompareBar();
+  }
+});
+
 // ── Programs page sort direction helper ──────────────────────────────────────
 
 (function() {

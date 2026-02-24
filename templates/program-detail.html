@@ -38,8 +38,11 @@
 {# ── Funding table ────────────────────────────────────────────────────────── #}
 {% if pe_data.funding %}
 <section class="pe-section" aria-label="Funding history">
-  <h3>Funding History ($K)</h3>
-  <div class="table-wrapper">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+    <h3 style="border-bottom:none;padding-bottom:0;margin-bottom:0">Funding History ($K)</h3>
+    <button type="button" id="qty-toggle" class="btn btn-secondary btn-sm" aria-pressed="false">Show Quantities</button>
+  </div>
+  <div class="table-wrapper" style="margin-top:.75rem">
     <table class="pe-funding-table">
       <thead>
         <tr>
@@ -50,6 +53,9 @@
           <th scope="col" class="td-amount">FY25 Enacted</th>
           <th scope="col" class="td-amount">FY26 Request</th>
           <th scope="col" class="td-amount">Delta</th>
+          <th scope="col" class="td-amount qty-col">Qty FY24</th>
+          <th scope="col" class="td-amount qty-col">Qty FY25</th>
+          <th scope="col" class="td-amount qty-col">Qty FY26 Req</th>
         </tr>
       </thead>
       <tbody>
@@ -75,6 +81,9 @@
               </span>
             {% else %}—{% endif %}
           </td>
+          <td class="td-amount qty-col">{{ row.quantity_fy2024 if row.quantity_fy2024 is defined and row.quantity_fy2024 is not none else "—" }}</td>
+          <td class="td-amount qty-col">{{ row.quantity_fy2025 if row.quantity_fy2025 is defined and row.quantity_fy2025 is not none else "—" }}</td>
+          <td class="td-amount qty-col">{{ row.quantity_fy2026 if row.quantity_fy2026 is defined and row.quantity_fy2026 is not none else "—" }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -116,7 +125,7 @@
     {% endif %}
   </h3>
   <div id="pe-related"
-       hx-get="/partials/program-related/{{ pe_data.pe_number }}"
+       hx-get="/partials/program-related/{{ pe_data.pe_number }}?min_confidence=0.6"
        hx-trigger="load"
        hx-indicator="#related-loading">
     <div id="related-loading" class="htmx-indicator">
