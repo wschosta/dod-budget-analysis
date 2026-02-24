@@ -3207,6 +3207,20 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     except Exception as _val_err:
         logger.warning("  [VALIDATION] Skipped: %s", _val_err)
 
+    # Return structured summary for callers (run_pipeline.py, tests)
+    return {
+        "total_rows": total_lines,
+        "total_pages": total_pages,
+        "total_files": total_files,
+        "excel_files": len(xlsx_files),
+        "pdf_files": len(pdf_files),
+        "skipped_excel": skipped_xlsx,
+        "skipped_pdf": skipped_pdf,
+        "errors": len(_failures),
+        "error_files": [f.file_path for f in _failures],
+        "db_size_mb": round(db_size, 1),
+    }
+
 
 def main():
     """Parse command-line arguments and run the database build pipeline."""

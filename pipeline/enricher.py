@@ -1059,7 +1059,16 @@ def enrich(
     with_llm: bool = False,
     rebuild: bool = False,
     stop_event: threading.Event | None = None,
-) -> None:
+) -> dict:
+    """Run enrichment phases and return a structured summary.
+
+    Returns a dict with keys:
+        phases_run   — list of phase numbers that executed
+        phases_skipped — list of {phase, reason} for phases that did nothing
+        phase_results — dict mapping phase number to rows-inserted count
+        table_counts — dict mapping table name to final row count
+        stopped_after — phase number if gracefully stopped, else None
+    """
     if not db_path.exists():
         logger.error("Database not found: %s", db_path)
         logger.error("Run 'python build_budget_db.py' first.")
@@ -1083,50 +1092,68 @@ def enrich(
     logger.info("Enriching database: %s", db_path)
     logger.info("Phases: %s", sorted(phases))
 
-    if 1 in phases:
-        run_phase1(conn)
-    if stop_event and stop_event.is_set():
-        logger.info("Enrichment stopped gracefully after Phase 1")
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        conn.close()
-        return
-    if 2 in phases:
-        run_phase2(conn)
-    if stop_event and stop_event.is_set():
-        logger.info("Enrichment stopped gracefully after Phase 2")
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        conn.close()
-        return
-    if 3 in phases:
-        run_phase3(conn, with_llm=with_llm)
-    if stop_event and stop_event.is_set():
-        logger.info("Enrichment stopped gracefully after Phase 3")
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        conn.close()
-        return
-    if 4 in phases:
-        run_phase4(conn)
-    if stop_event and stop_event.is_set():
-        logger.info("Enrichment stopped gracefully after Phase 4")
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        conn.close()
-        return
-    if 5 in phases:
-        run_phase5(conn)
+    # Track what each phase accomplished
+    phase_results: dict[int, int] = {}
+    phases_skipped: list[dict[str, str | int]] = []
+    stopped_after: int | None = None
+
+    _phase_runners = {
+        1: lambda: run_phase1(conn),
+        2: lambda: run_phase2(conn),
+        3: lambda: run_phase3(conn, with_llm=with_llm),
+        4: lambda: run_phase4(conn),
+        5: lambda: run_phase5(conn),
+    }
+
+    for phase_num in sorted(_phase_runners):
+        if phase_num not in phases:
+            phases_skipped.append({"phase": phase_num, "reason": "not selected"})
+            continue
+
+        result = _phase_runners[phase_num]()
+        phase_results[phase_num] = result if isinstance(result, int) else 0
+
+        # A return of 0 from a phase that was requested means it had nothing to do
+        if result == 0 and phase_num in phases:
+            phases_skipped.append({"phase": phase_num, "reason": "nothing to do (empty input or already done)"})
+
+        if stop_event and stop_event.is_set():
+            logger.info("Enrichment stopped gracefully after Phase %d", phase_num)
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.close()
+            stopped_after = phase_num
+            return {
+                "phases_run": list(phase_results.keys()),
+                "phases_skipped": phases_skipped,
+                "phase_results": phase_results,
+                "table_counts": {},
+                "stopped_after": stopped_after,
+            }
 
     elapsed = time.time() - t0
     logger.info("Enrichment complete in %.1fs", elapsed)
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     # Summary counts
+    table_counts: dict[str, int] = {}
     for table in ("pe_index", "pe_descriptions", "pe_tags", "pe_lineage", "project_descriptions"):
         try:
             n = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             logger.info("  %s: %s rows", table, f"{n:,}")
+            table_counts[table] = n
         except sqlite3.OperationalError:
             logger.info("  %s: (table not found)", table)
+            table_counts[table] = 0
 
     conn.close()
+
+    return {
+        "phases_run": list(phase_results.keys()),
+        "phases_skipped": phases_skipped,
+        "phase_results": phase_results,
+        "table_counts": table_counts,
+        "stopped_after": None,
+    }
 
 
 def main() -> None:

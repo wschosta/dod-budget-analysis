@@ -13,6 +13,8 @@ Features:
   - Automatic DB backup before build; rollback on failure
   - JSON progress file for external monitoring
   - Download step via subprocess (Playwright deps are heavy/optional)
+  - Per-step log files under logs/pipeline/<run-id>/ with full accountability
+  - Append-only JSONL ledger for cross-run history
 
 Usage:
     python run_pipeline.py                        # full run, incremental
@@ -39,6 +41,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
+
+from pipeline.logging import PipelineLogger, StepReport
 
 
 HERE = Path(__file__).resolve().parent
@@ -229,6 +233,105 @@ def _run_subprocess(label: str, cmd: list[str]) -> int:
     return result.returncode
 
 
+# ── StepReport population helpers ─────────────────────────────────────────────
+
+
+def _build_report_from_builder(report: StepReport, result: dict | None) -> None:
+    """Populate a StepReport from build_database()'s return dict."""
+    if not result or not isinstance(result, dict):
+        return
+    report.items_processed = (
+        result.get("excel_files", 0) - result.get("skipped_excel", 0)
+        + result.get("pdf_files", 0) - result.get("skipped_pdf", 0)
+    )
+    report.metrics = {
+        "total_rows": result.get("total_rows", 0),
+        "total_pages": result.get("total_pages", 0),
+        "db_size_mb": result.get("db_size_mb", 0),
+    }
+    # Account for skips
+    skipped_excel = result.get("skipped_excel", 0)
+    skipped_pdf = result.get("skipped_pdf", 0)
+    if skipped_excel:
+        report.add_skip("incremental_skip",
+                         f"{skipped_excel} unchanged Excel file(s)")
+    if skipped_pdf:
+        report.add_skip("incremental_skip",
+                         f"{skipped_pdf} unchanged PDF file(s)")
+    # Account for errors
+    for err_file in result.get("error_files", []):
+        report.add_error(f"Failed to process: {err_file}")
+
+
+def _build_report_from_staging(report: StepReport, result: dict | None) -> None:
+    """Populate a StepReport from stage_all_files()'s return dict."""
+    if not result or not isinstance(result, dict):
+        return
+    report.items_processed = result.get("staged_count", 0)
+    skipped = result.get("skipped_count", 0)
+    if skipped:
+        report.add_skip("incremental_skip", f"{skipped} unchanged file(s)")
+    for err in result.get("errors", []):
+        err_detail = err if isinstance(err, str) else str(err)
+        report.add_error(err_detail)
+
+
+def _build_report_from_load(report: StepReport, result: dict | None) -> None:
+    """Populate a StepReport from load_staging_to_db()'s return dict."""
+    if not result or not isinstance(result, dict):
+        return
+    report.metrics = {
+        "total_rows": result.get("total_rows", 0),
+        "total_pages": result.get("total_pages", 0),
+    }
+
+
+def _build_report_from_validator(report: StepReport, result: dict | None) -> None:
+    """Populate a StepReport from validate_all()'s return dict."""
+    if not result or not isinstance(result, dict):
+        return
+    checks = result.get("checks", [])
+    report.items_processed = len(checks)
+    report.metrics = {
+        "total_checks": result.get("total_checks", 0),
+        "total_warnings": result.get("total_warnings", 0),
+        "total_failures": result.get("total_failures", 0),
+    }
+    # Record each failed/warning check as an error or skip
+    for check in checks:
+        if check.get("status") == "fail":
+            report.add_error(f"{check.get('name', '?')}: {check.get('message', '')}")
+        elif check.get("status") == "warn":
+            report.add_skip("dependency_skip",
+                             f"Warning: {check.get('message', '')}",
+                             item=check.get("name", ""))
+
+
+def _build_report_from_enricher(report: StepReport, result: dict | None) -> None:
+    """Populate a StepReport from enrich()'s return dict."""
+    if not result or not isinstance(result, dict):
+        return
+    phase_results = result.get("phase_results", {})
+    total_rows = sum(phase_results.values())
+    report.items_processed = total_rows
+    report.metrics = {
+        "phases_run": result.get("phases_run", []),
+        "table_counts": result.get("table_counts", {}),
+    }
+    if result.get("stopped_after") is not None:
+        report.detail = f"Stopped after phase {result['stopped_after']}"
+    # Record skipped phases
+    for skip in result.get("phases_skipped", []):
+        phase = skip.get("phase", "?")
+        reason = skip.get("reason", "unknown")
+        if reason == "not selected":
+            report.add_skip("user_skipped",
+                             f"Phase {phase} not in selected phases")
+        else:
+            report.add_skip("already_done",
+                             f"Phase {phase}: {reason}")
+
+
 # ── Argument parser ───────────────────────────────────────────────────────────
 
 
@@ -354,6 +457,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Skip automatic database rollback on build failure",
     )
 
+    # Logging options
+    p.add_argument(
+        "--logs-dir", default="logs/pipeline",
+        help="Directory for pipeline run logs (default: logs/pipeline)",
+    )
+
     return p.parse_args(argv)
 
 
@@ -388,6 +497,13 @@ def main(argv: list[str] | None = None) -> int:
     _completed_steps.clear()
     _stop_event.clear()
 
+    # ── Initialise pipeline logger ───────────────────────────────────────
+    pl = PipelineLogger(logs_dir=args.logs_dir)
+    pl.args_dict = {
+        k: v for k, v in vars(args).items()
+        if v is not None and v is not False
+    }
+
     # ── Graceful shutdown via Ctrl+C ──────────────────────────────────────
     def _sigint_handler(sig: int, frame: Any) -> None:
         if not _stop_event.is_set():
@@ -403,6 +519,7 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, _sigint_handler)
 
     pipeline_start = time.monotonic()
+    pl.pipeline_start = pipeline_start
     use_staging = args.use_staging or args.stage_only or args.load_only
     db_path = Path(args.db)
     docs_dir = Path(args.docs) if args.docs else Path("DoD_Budget_Documents")
@@ -437,14 +554,23 @@ def main(argv: list[str] | None = None) -> int:
         + (" [+LLM]" if args.with_llm else "")
     )
     print(f"  Rollback : {'disabled' if args.no_rollback else 'enabled'}")
+    print(f"  Logs     : {pl.run_dir}")
 
     # ── Step 0: Download (optional, subprocess) ──────────────────────────
     if args.download and not args.skip_download:
+        dl_report = pl.start_step("download")
         rc = _run_subprocess("Step 0 / 4 -- Download documents", _download_cmd(args))
         if rc != 0:
+            dl_report.status = "failed"
+            dl_report.add_error(f"Download subprocess exited with code {rc}")
+            pl.finish_step("download", dl_report)
             print(f"\nPipeline aborted: download step failed (exit {rc}).", flush=True)
+            _finalize_pipeline(pl, rc)
             return rc
+        dl_report.status = "completed"
+        pl.finish_step("download", dl_report)
         if _check_stopped("download"):
+            _finalize_pipeline(pl, 0)
             return 0
 
     # ── Step 1: Build or Stage+Load ──────────────────────────────────────
@@ -457,6 +583,7 @@ def main(argv: list[str] | None = None) -> int:
         from pipeline.staging import stage_all_files, load_staging_to_db
 
         if not args.load_only:
+            stage_report = pl.start_step("stage")
             ok, stage_summary = _run_step(
                 "Step 1a / 4 -- Stage files to Parquet",
                 stage_all_files,
@@ -469,9 +596,17 @@ def main(argv: list[str] | None = None) -> int:
                 stop_event=_stop_event,
             )
             if not ok:
+                stage_report.status = "failed"
+                stage_report.add_error("stage_all_files raised an exception")
+                pl.finish_step("stage", stage_report)
                 _rollback_db(db_path, backup) if not args.no_rollback else None
                 print("\nPipeline aborted: staging step failed.", flush=True)
+                _finalize_pipeline(pl, 1)
                 return 1
+
+            _build_report_from_staging(stage_report, stage_summary)
+            stage_report.status = "completed"
+            pl.finish_step("stage", stage_report)
 
             if stage_summary:
                 print(f"  Staged: {stage_summary.get('staged_count', 0)} files, "
@@ -483,8 +618,10 @@ def main(argv: list[str] | None = None) -> int:
             _banner(f"Staging complete -- {total:.1f}s total")
             print(f"Staged data in: {staging_dir.resolve()}", flush=True)
             _clear_progress()
+            _finalize_pipeline(pl, 0)
             return 0
 
+        load_report = pl.start_step("load")
         ok, load_summary = _run_step(
             "Step 1b / 4 -- Load Parquet into SQLite",
             load_staging_to_db,
@@ -495,10 +632,18 @@ def main(argv: list[str] | None = None) -> int:
             stop_event=_stop_event,
         )
         if not ok:
+            load_report.status = "failed"
+            load_report.add_error("load_staging_to_db raised an exception")
+            pl.finish_step("load", load_report)
             if not args.no_rollback:
                 _rollback_db(db_path, backup)
             print("\nPipeline aborted: load step failed.", flush=True)
+            _finalize_pipeline(pl, 1)
             return 1
+
+        _build_report_from_load(load_report, load_summary)
+        load_report.status = "completed"
+        pl.finish_step("load", load_report)
 
         if load_summary:
             print(f"  Rows: {load_summary.get('total_rows', 0):,}, "
@@ -507,6 +652,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         # Direct build path: Excel/PDF -> SQLite
         from pipeline.builder import build_database
+
+        build_report = pl.start_step("build")
 
         build_kwargs: dict[str, Any] = {
             "docs_dir": docs_dir,
@@ -527,18 +674,29 @@ def main(argv: list[str] | None = None) -> int:
             **build_kwargs,
         )
         if not ok:
+            build_report.status = "failed"
+            build_report.add_error("build_database raised an exception")
+            pl.finish_step("build", build_report)
             if not args.no_rollback:
                 _rollback_db(db_path, backup)
             print("\nPipeline aborted: build step failed.", flush=True)
+            _finalize_pipeline(pl, 1)
             return 1
+
+        _build_report_from_builder(build_report, build_result)
+        build_report.status = "completed"
+        pl.finish_step("build", build_report)
 
     if _check_stopped("build"):
         _cleanup_backup(backup)
+        _finalize_pipeline(pl, 0)
         return 0
 
     # ── Step 2: Validate ─────────────────────────────────────────────────
     if not args.skip_validate:
         from pipeline.validator import validate_all
+
+        val_report = pl.start_step("validate")
 
         ok, val_summary = _run_step(
             "Step 2 / 4 -- Validate database",
@@ -550,6 +708,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         if ok and val_summary:
+            _build_report_from_validator(val_report, val_summary)
             exit_code = val_summary.get("exit_code", 0)
             warnings = val_summary.get("total_warnings", 0)
             failures = val_summary.get("total_failures", 0)
@@ -558,11 +717,14 @@ def main(argv: list[str] | None = None) -> int:
 
             if exit_code != 0:
                 mode = "pedantic" if args.pedantic else "strict"
+                val_report.status = "failed"
+                pl.finish_step("validate", val_report)
                 print(
                     f"\nPipeline aborted: validation failed.\n"
                     f"Re-run without --{mode} to continue past issues.",
                     flush=True,
                 )
+                _finalize_pipeline(pl, 1)
                 return 1
 
             if warnings > 0:
@@ -573,7 +735,12 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
         if not ok:
+            val_report.status = "failed"
+            val_report.add_error("validate_all raised an exception")
             print("\nValidation step raised an exception -- continuing pipeline.", flush=True)
+
+        val_report.status = val_report.status if val_report.status == "failed" else "completed"
+        pl.finish_step("validate", val_report)
 
         # Generate quality report if requested
         if args.report:
@@ -590,15 +757,19 @@ def main(argv: list[str] | None = None) -> int:
             if ok_report:
                 print(f"  Report: {report_path.resolve()}")
     else:
-        print("\n[Step 2 / 4 -- Validate database] SKIPPED", flush=True)
+        print("\n[Step 2 / 4 -- Validate database] SKIPPED (--skip-validate)", flush=True)
+        pl.record_user_skip("validate", "User passed --skip-validate")
 
     if _check_stopped("validate"):
         _cleanup_backup(backup)
+        _finalize_pipeline(pl, 0)
         return 0
 
     # ── Step 3: Enrich ───────────────────────────────────────────────────
     if not args.skip_enrich:
         from pipeline.enricher import enrich
+
+        enrich_report = pl.start_step("enrich")
 
         # Parse enrichment phases
         if args.enrich_phases:
@@ -606,7 +777,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             phases = {1, 2, 3, 4, 5}
 
-        ok, _ = _run_step(
+        ok, enrich_result = _run_step(
             "Step 3 / 4 -- Enrich database",
             enrich,
             db_path=db_path,
@@ -616,13 +787,22 @@ def main(argv: list[str] | None = None) -> int:
             stop_event=_stop_event,
         )
         if not ok:
+            enrich_report.status = "failed"
+            enrich_report.add_error("enrich() raised an exception")
+            pl.finish_step("enrich", enrich_report)
             print(
                 "\nPipeline aborted: enrichment step failed.",
                 flush=True,
             )
+            _finalize_pipeline(pl, 1)
             return 1
+
+        _build_report_from_enricher(enrich_report, enrich_result)
+        enrich_report.status = "completed"
+        pl.finish_step("enrich", enrich_report)
     else:
-        print("\n[Step 3 / 4 -- Enrich database] SKIPPED", flush=True)
+        print("\n[Step 3 / 4 -- Enrich database] SKIPPED (--skip-enrich)", flush=True)
+        pl.record_user_skip("enrich", "User passed --skip-enrich")
 
     # ── Done ─────────────────────────────────────────────────────────────
     _cleanup_backup(backup)
@@ -631,7 +811,21 @@ def main(argv: list[str] | None = None) -> int:
     total = time.monotonic() - pipeline_start
     _banner(f"Pipeline complete -- {total:.1f}s total")
     print(f"Database ready: {db_path.resolve()}", flush=True)
+
+    _finalize_pipeline(pl, 0)
     return 0
+
+
+def _finalize_pipeline(pl: PipelineLogger, exit_code: int) -> None:
+    """Write run summary JSON and append to the cross-run ledger."""
+    summary_path = pl.write_summary()
+
+    from pipeline.run_ledger import append_to_ledger
+    ledger_path = append_to_ledger(pl, exit_code)
+
+    print(f"\n  Run logs : {pl.run_dir}", flush=True)
+    print(f"  Summary  : {summary_path}", flush=True)
+    print(f"  Ledger   : {ledger_path}", flush=True)
 
 
 if __name__ == "__main__":
