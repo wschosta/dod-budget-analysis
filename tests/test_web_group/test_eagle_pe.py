@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient
 from api.app import create_app
+from api.database import get_db
 
 
 @pytest.fixture(scope="module")
@@ -187,6 +188,18 @@ def app_client(tmp_path_factory):
     conn.close()
 
     app = create_app(db_path=db_path)
+
+    # Override get_db to always use this specific DB path, preventing global
+    # DB path collisions when multiple module-scoped fixtures call create_app.
+    def _get_db_override():
+        c = sqlite3.connect(str(db_path), check_same_thread=False)
+        c.row_factory = sqlite3.Row
+        try:
+            yield c
+        finally:
+            c.close()
+
+    app.dependency_overrides[get_db] = _get_db_override
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -303,6 +316,17 @@ def app_client_no_projects(tmp_path_factory):
     conn.close()
 
     app = create_app(db_path=db_path)
+
+    # Override get_db to always use this specific DB path.
+    def _get_db_override():
+        c = sqlite3.connect(str(db_path), check_same_thread=False)
+        c.row_factory = sqlite3.Row
+        try:
+            yield c
+        finally:
+            c.close()
+
+    app.dependency_overrides[get_db] = _get_db_override
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -389,3 +413,131 @@ class TestProjectLevelDetail:
         """Non-existent PE returns 404."""
         resp = app_client.get("/api/v1/pe/0000000Z")
         assert resp.status_code == 404
+
+
+# ── Frontend partial route tests for enrichment wiring ────────────────────
+
+class TestProgramRelatedPartial:
+    """Tests for the /partials/program-related/{pe} HTMX partial."""
+
+    def test_related_partial_returns_html(self, app_client):
+        """Related programs partial returns 200 with HTML content."""
+        resp = app_client.get(
+            "/partials/program-related/0604131A",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
+
+    def test_related_partial_shows_linked_pe(self, app_client):
+        """Related programs partial includes the linked PE number."""
+        resp = app_client.get(
+            "/partials/program-related/0604131A",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert "0603292N" in resp.text
+
+    def test_related_partial_confidence_filter(self, app_client):
+        """Confidence filter parameter affects results."""
+        # With low threshold — should include name_match (confidence 0.6)
+        resp_low = app_client.get(
+            "/partials/program-related/0604131A?min_confidence=0",
+            headers={"HX-Request": "true"},
+        )
+        assert resp_low.status_code == 200
+        assert "0603292N" in resp_low.text
+
+        # With high threshold — should exclude name_match (confidence 0.6)
+        resp_high = app_client.get(
+            "/partials/program-related/0604131A?min_confidence=0.9",
+            headers={"HX-Request": "true"},
+        )
+        assert resp_high.status_code == 200
+        # name_match at 0.6 confidence should be filtered out
+        assert "0603292N" not in resp_high.text or "No related programs" in resp_high.text
+
+    def test_related_partial_no_related(self, app_client):
+        """PE with no related programs shows empty message."""
+        resp = app_client.get(
+            "/partials/program-related/0603292N",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert "No related programs" in resp.text
+
+
+class TestProgramProjectsPartial:
+    """Tests for the /partials/program-projects/{pe} HTMX partial."""
+
+    def test_projects_partial_returns_html(self, app_client):
+        """Projects partial returns 200 with HTML content."""
+        resp = app_client.get(
+            "/partials/program-projects/0604131A",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
+
+    def test_projects_partial_shows_project_numbers(self, app_client):
+        """Projects partial includes project numbers from project_descriptions."""
+        resp = app_client.get(
+            "/partials/program-projects/0604131A",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert "1234" in resp.text
+        assert "5678" in resp.text
+
+    def test_projects_partial_shows_titles(self, app_client):
+        """Projects partial includes project titles."""
+        resp = app_client.get(
+            "/partials/program-projects/0604131A",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert "Advanced Targeting System" in resp.text
+        assert "Sensor Fusion Package" in resp.text
+
+    def test_projects_partial_no_projects(self, app_client):
+        """PE with no project data shows empty message."""
+        resp = app_client.get(
+            "/partials/program-projects/0603292N",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert "No project-level descriptions" in resp.text
+
+    def test_projects_partial_without_table(self, app_client_no_projects):
+        """Projects partial works when project_descriptions table doesn't exist."""
+        resp = app_client_no_projects.get(
+            "/partials/program-projects/0604131A",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert "No project-level descriptions" in resp.text
+
+
+class TestEnhancedProgramDetailPage:
+    """Tests for the enhanced program-detail.html template."""
+
+    def test_tags_show_confidence(self, app_client):
+        """Program detail page shows tag confidence levels."""
+        resp = app_client.get("/programs/0604131A")
+        assert resp.status_code == 200
+        # Tags section should include tag source and confidence
+        assert "structured" in resp.text
+        assert "100%" in resp.text
+
+    def test_detail_has_related_htmx_target(self, app_client):
+        """Program detail page has HTMX target for lazy-loading related programs."""
+        resp = app_client.get("/programs/0604131A")
+        assert resp.status_code == 200
+        assert "program-related" in resp.text
+        assert "hx-get" in resp.text
+
+    def test_detail_has_projects_htmx_target(self, app_client):
+        """Program detail page has HTMX target for lazy-loading projects."""
+        resp = app_client.get("/programs/0604131A")
+        assert resp.status_code == 200
+        assert "program-projects" in resp.text

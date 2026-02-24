@@ -700,3 +700,76 @@ def program_descriptions_partial(
         "descriptions": descriptions,
         "total": total,
     })
+
+
+@router.get("/partials/program-related/{pe_number}",
+            response_class=HTMLResponse, include_in_schema=False)
+def program_related_partial(
+    pe_number: str,
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> HTMLResponse:
+    """HTMX partial: Related programs with confidence filter and pagination."""
+    related: list[dict] = []
+    total = 0
+    limit = 20
+    min_confidence = 0.0
+
+    params = request.query_params
+    try:
+        limit = min(100, max(10, int(params.get("limit", "20"))))
+    except (ValueError, TypeError):
+        pass
+    try:
+        min_confidence = max(0.0, min(1.0, float(params.get("min_confidence", "0"))))
+    except (ValueError, TypeError):
+        pass
+
+    if _table_exists(conn, "pe_lineage"):
+        try:
+            from api.routes.pe import get_pe_related
+            result = get_pe_related(
+                pe_number,
+                min_confidence=min_confidence,
+                limit=limit,
+                offset=0,
+                conn=conn,
+            )
+            related = result.get("related", [])
+            total = result.get("total", 0)
+        except Exception:
+            logger.debug("Failed to load related PEs for %s", pe_number, exc_info=True)
+
+    return _tmpl().TemplateResponse("partials/program-related.html", {
+        "request": request,
+        "pe_number": pe_number,
+        "related": related,
+        "total": total,
+        "limit": limit,
+        "min_confidence": min_confidence,
+    })
+
+
+@router.get("/partials/program-projects/{pe_number}",
+            response_class=HTMLResponse, include_in_schema=False)
+def program_projects_partial(
+    pe_number: str,
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> HTMLResponse:
+    """HTMX partial: Project-level descriptions for a PE."""
+    projects: list[dict] = []
+
+    if _table_exists(conn, "project_descriptions"):
+        try:
+            from api.routes.pe import get_pe
+            pe_data = get_pe(pe_number, conn=conn)
+            projects = pe_data.get("projects", [])
+        except Exception:
+            logger.debug("Failed to load project descriptions for %s", pe_number, exc_info=True)
+
+    return _tmpl().TemplateResponse("partials/program-projects.html", {
+        "request": request,
+        "pe_number": pe_number,
+        "projects": projects,
+    })

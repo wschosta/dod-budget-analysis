@@ -1,0 +1,36 @@
+{# HTMX partial: Project-level descriptions for a PE #}
+{% if projects %}
+{% for proj in projects %}
+<details class="pe-project-card" {% if loop.first %}open{% endif %}>
+  <summary class="pe-project-header">
+    {% if proj.project_number %}
+    <span class="badge">{{ proj.project_number }}</span>
+    {% endif %}
+    <strong>{{ proj.project_title or "PE-Level Description" }}</strong>
+    <span style="font-size:.75rem;color:var(--text-secondary)">
+      {{ proj.descriptions | length }} section{{ "s" if proj.descriptions | length != 1 }}
+    </span>
+  </summary>
+  <div class="pe-project-body">
+    {% for desc in proj.descriptions %}
+    <div class="pe-description-card" style="margin-bottom:.5rem">
+      <div class="pe-desc-header">
+        {% if desc.fiscal_year %}
+        <span class="badge" style="font-size:.75rem">FY{{ desc.fiscal_year }}</span>
+        {% endif %}
+        {% if desc.header %}
+        <strong style="font-size:.85rem">{{ desc.header }}</strong>
+        {% endif %}
+      </div>
+      <div class="pe-desc-text" style="font-size:.85rem;line-height:1.5">{{ desc.text }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</details>
+{% endfor %}
+{% else %}
+<p style="color:var(--text-secondary);font-size:.85rem">
+  No project-level descriptions available. Project decomposition is
+  performed during the enrichment pipeline (Phase 5).
+</p>
+{% endif %}
