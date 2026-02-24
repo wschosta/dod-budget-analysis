@@ -46,10 +46,13 @@ def collect_metadata(conn: sqlite3.Connection) -> dict:
         "pe_tags", "pe_lineage", "project_descriptions",
     ]
     for table in known_tables:
+        if not table.isidentifier():
+            tables[table] = None
+            continue
         try:
-            count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            count = conn.execute(f"SELECT COUNT(*) FROM [{table}]").fetchone()[0]
             tables[table] = count
-        except Exception:
+        except sqlite3.OperationalError:
             tables[table] = None  # table doesn't exist
     meta["tables"] = tables
 
@@ -60,7 +63,7 @@ def collect_metadata(conn: sqlite3.Connection) -> dict:
             "WHERE fiscal_year IS NOT NULL ORDER BY fiscal_year"
         ).fetchall()
         meta["fiscal_years"] = [r[0] for r in rows]
-    except Exception:
+    except sqlite3.OperationalError:
         meta["fiscal_years"] = []
 
     # ── Distinct services / organizations ────────────────────────────────
@@ -70,7 +73,7 @@ def collect_metadata(conn: sqlite3.Connection) -> dict:
             "WHERE organization_name IS NOT NULL ORDER BY organization_name"
         ).fetchall()
         meta["services"] = [r[0] for r in rows]
-    except Exception:
+    except sqlite3.OperationalError:
         meta["services"] = []
 
     # ── Distinct exhibit types ───────────────────────────────────────────
@@ -80,7 +83,7 @@ def collect_metadata(conn: sqlite3.Connection) -> dict:
             "WHERE exhibit_type IS NOT NULL ORDER BY exhibit_type"
         ).fetchall()
         meta["exhibit_types"] = [r[0] for r in rows]
-    except Exception:
+    except sqlite3.OperationalError:
         meta["exhibit_types"] = []
 
     # ── Enrichment coverage ──────────────────────────────────────────────
@@ -98,7 +101,7 @@ def collect_metadata(conn: sqlite3.Connection) -> dict:
             "budget_lines_distinct_pes": bl_pe_count,
             "coverage_pct": round(pe_count / bl_pe_count * 100, 1) if bl_pe_count else 0,
         }
-    except Exception:
+    except sqlite3.OperationalError:
         enrichment["pe_index"] = None
 
     # Tag statistics
@@ -116,7 +119,7 @@ def collect_metadata(conn: sqlite3.Connection) -> dict:
             "distinct_tags": distinct_tags,
             "by_source": {r[0]: r[1] for r in tag_sources},
         }
-    except Exception:
+    except sqlite3.OperationalError:
         enrichment["pe_tags"] = None
 
     # Description coverage
@@ -129,7 +132,7 @@ def collect_metadata(conn: sqlite3.Connection) -> dict:
             "total": desc_count,
             "distinct_pes": desc_pe_count,
         }
-    except Exception:
+    except sqlite3.OperationalError:
         enrichment["pe_descriptions"] = None
 
     # Project decomposition coverage
@@ -144,14 +147,14 @@ def collect_metadata(conn: sqlite3.Connection) -> dict:
             "with_project_number": proj_with_num,
             "pe_level_fallback": proj_count - proj_with_num,
         }
-    except Exception:
+    except sqlite3.OperationalError:
         enrichment["project_descriptions"] = None
 
     # Lineage links
     try:
         lineage_count = conn.execute("SELECT COUNT(*) FROM pe_lineage").fetchone()[0]
         enrichment["pe_lineage"] = {"total": lineage_count}
-    except Exception:
+    except sqlite3.OperationalError:
         enrichment["pe_lineage"] = None
 
     meta["enrichment"] = enrichment
@@ -170,7 +173,7 @@ def collect_metadata(conn: sqlite3.Connection) -> dict:
             "total_fy2025_enacted": round(row[1], 2) if row[1] else 0,
             "total_fy2024_actual": round(row[2], 2) if row[2] else 0,
         }
-    except Exception:
+    except sqlite3.OperationalError:
         meta["amounts"] = None
 
     return meta

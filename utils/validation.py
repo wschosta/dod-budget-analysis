@@ -193,7 +193,9 @@ class ValidationRegistry:
 
 
 def is_valid_fiscal_year(year: int) -> bool:
-    """Check if year is a valid fiscal year (2000-2099).
+    """Check if year is a valid fiscal year (1990-2099).
+
+    The lower bound accommodates Navy archive historical data (FY1998+).
 
     Args:
         year: Year to validate
@@ -201,7 +203,7 @@ def is_valid_fiscal_year(year: int) -> bool:
     Returns:
         True if valid fiscal year, False otherwise
     """
-    return isinstance(year, int) and 2000 <= year <= 2099
+    return isinstance(year, int) and 1990 <= year <= 2099
 
 
 def is_valid_amount(value: float) -> bool:

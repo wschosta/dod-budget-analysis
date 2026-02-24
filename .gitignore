@@ -10,6 +10,7 @@ _ul*
 
 # Python
 __pycache__/
+*.pyc
 *.py[cod]
 *$py.class
 *.egg-info/
@@ -29,6 +30,10 @@ htmlcov/
 .vscode/
 .idea/
 
+# Environment
+.env
+.env.*
+
 # OS
 .DS_Store
 Thumbs.db
@@ -38,6 +43,10 @@ data_quality_report.json
 refresh_progress.json
 failed_downloads.json
 profile_report.json
+pipeline_progress.json
+
+# Pipeline run logs
+logs/
 
 # Claude Code
 .claude/

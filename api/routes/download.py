@@ -22,7 +22,7 @@ from fastapi.responses import StreamingResponse
 
 from api.database import get_db
 from utils import sanitize_fts5_query
-from utils.query import build_where_clause
+from utils.query import ALLOWED_SORT_COLUMNS, build_where_clause
 
 router = APIRouter(prefix="/download", tags=["download"])
 
@@ -37,9 +37,8 @@ _DOWNLOAD_COLUMNS = [
     "amount_fy2026_total", "amount_type", "amount_unit", "currency_year",
 ]
 
-_ALLOWED_SORT = {"id", "source_file", "exhibit_type", "fiscal_year",
-                 "organization_name", "amount_fy2026_request", "budget_type",
-                 "pe_number", "appropriation_code"}
+# Backward-compatible alias — canonical definition lives in utils/query.py
+_ALLOWED_SORT = ALLOWED_SORT_COLUMNS
 
 
 def _iter_rows(conn: sqlite3.Connection, sql: str, params: list[Any]):
@@ -83,7 +82,7 @@ def _build_download_sql(
                 (safe_q,),
             ).fetchall()
             fts_ids = [r[0] for r in fts_rows]
-        except Exception:
+        except (sqlite3.OperationalError, sqlite3.DatabaseError):
             fts_ids = []
 
     # OPT-DL-001: Use shared WHERE builder
@@ -107,7 +106,8 @@ def _build_download_sql(
     sort_col = sort_by if sort_by in _ALLOWED_SORT else "id"
     direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
     sql = (f"SELECT {col_list} FROM budget_lines {where} "
-           f"ORDER BY {sort_col} {direction} LIMIT {limit}")
+           f"ORDER BY {sort_col} {direction} LIMIT ?")
+    params.append(limit)
 
     return sql, params, total
 

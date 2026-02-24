@@ -15,6 +15,205 @@ TODOs for this file
 from pathlib import Path
 from typing import Dict, Optional, Any
 import json
+import re
+
+
+# ── Exhibit Classification Constants ─────────────────────────────────────────
+# Used by both downloader (folder layout) and pipeline (data source registration).
+# Canonical source; downloader.metadata duplicates for import isolation.
+
+SUMMARY_EXHIBIT_KEYS = frozenset({"p1", "r1", "o1", "m1", "c1", "rf1", "p1r"})
+DETAIL_EXHIBIT_KEYS = frozenset({"p5", "r2", "r3", "r4"})
+
+# ── Appropriation-Based Classification Patterns ──────────────────────────────
+# Many DoD budget documents use descriptive filenames based on appropriation
+# titles rather than exhibit type codes (e.g. "aircraft.pdf" instead of
+# "p5_army.xlsx").  These patterns classify such files into summary/detail
+# categories matching their budget appropriation type.
+#
+# NOTE on word boundaries: Standard \b fails between abbreviation and
+# underscore/digit (e.g. \bapn\b won't match "apn_ba5") because _ and digits
+# are word characters.  We use (?![a-zA-Z]) as a trailing boundary instead,
+# which ensures the abbreviation isn't followed by more letters but allows
+# underscores, digits, dots, dashes, etc.
+_END = r"(?![a-zA-Z])"  # "end of abbreviation" — no more letters after this
+# Alternate "start of abbreviation" that matches after _, digits, hyphens, etc.
+# Python's \b treats _ as a word char, so \b fails at _X boundaries.
+_START = r"(?<![a-zA-Z])"  # no letter immediately before
+
+# Procurement appropriations → detail (equivalent to P-5 exhibits)
+_PROCUREMENT_PATTERNS = re.compile(
+    r"|".join([
+        r"\baircraft" + _END,      # Aircraft Procurement
+        r"\bacft" + _END,          # Aircraft (abbreviation)
+        r"\bmissiles?" + _END,     # Missile Procurement
+        r"\bmsls" + _END,          # Missiles (abbreviation)
+        r"\bmissle" + _END,        # Common misspelling
+        r"\bammo" + _END,          # Ammunition
+        r"\bammunition" + _END,
+        r"\bwtcv" + _END,          # Weapons & Tracked Combat Vehicles
+        r"\bweapons?" + _END,
+        r"\bopa\d*" + _END,        # Other Procurement Army (opa, opa1, opa2, opa34)
+        r"\bopn" + _END,           # Other Procurement Navy
+        r"\bapn" + _END,           # Aircraft Procurement Navy
+        r"\bscn" + _END,           # Shipbuilding & Conversion Navy
+        r"\bpanmc" + _END,         # Procurement Ammo Navy/Marine Corps
+        r"\bpmc" + _END,           # Procurement Marine Corps
+        r"\bprocurement" + _END,
+        r"\bshipbuilding" + _END,
+        # Defense-Wide per-agency procurement books (PROC_CBDP, PROC_SOCOM, …)
+        _START + r"proc_",         # PROC_{agency} files — underscore IS the boundary
+        _START + r"pdw" + _END,    # Procurement Defense-Wide (PDW_VOL_1, etc.)
+        # Multi-year procurement justifications
+        _START + r"myp" + _END,    # Multi-Year Procurement (MYP_1-4, etc.)
+    ]),
+    re.IGNORECASE,
+)
+
+# O&M appropriations → summary (equivalent to O-1 exhibits)
+_OM_PATTERNS = re.compile(
+    r"|".join([
+        r"\boma" + _END,           # Operation & Maintenance Army
+        r"\boma[-_v]",             # oma-v1, oma_vol, etc.
+        r"\bomar" + _END,          # O&M Army Reserve
+        r"\bomng" + _END,          # O&M Army National Guard
+        r"\bomnr" + _END,          # O&M Navy Reserve
+        r"\bomn" + _END,           # O&M Navy
+        r"\bomn[-_v]",             # omn_vol, etc.
+        r"\bommc" + _END,          # O&M Marine Corps
+        r"\bommcr" + _END,         # O&M Marine Corps Reserve
+        r"\boperation[s]?\s*(?:and|&)\s*maintenance" + _END,
+        r"(?<![a-zA-Z])op-5" + _END,  # O&M detail by agency (OP-5 exhibit)
+        r"(?<![a-zA-Z])op-8" + _END,  # Force structure
+        r"(?<![a-zA-Z])op-31",     # Appropriation detail (op-31, op-31q variants)
+        r"(?<![a-zA-Z])op-32",     # Appropriation summary (op-32, op-32a variants)
+        r"(?<![a-zA-Z])op-34",     # Budget activity detail
+        r"\bawcf" + _END,          # Army Working Capital Fund
+        r"\bafwcf" + _END,         # Air Force Working Capital Fund
+        r"\bnwcf" + _END,          # Navy Working Capital Fund
+        r"\bworking\s*capital\s*fund" + _END,
+        r"\bo\s+and\s+m" + _END,   # "O and M"
+        r"\bo&m" + _END,           # "O&M"
+        r"(?<![a-zA-Z])o-1" + _END,  # exhibit O-1 (e.g. "0104_caaf_o-1.pdf")
+        # Defense-Wide O&M volume/exhibit patterns (_START handles _ boundaries)
+        _START + r"om[_-]volume" + _END,   # OM_Volume1_Part1, OM_Volume1_Part_2
+        _START + r"om[_-]overview" + _END, # OM_Overview, FY2026_OM_Overview
+        _START + r"pb-\d+" + _END,   # PB-15, PB-24, PB-28, PB-31Q, PB-61
+        _START + r"env-\d+" + _END,  # ENV-30 (environmental restoration exhibit)
+        _START + r"dwwcf" + _END,    # Defense-Wide Working Capital Fund
+        _START + r"revolving[_\s]*funds?" + _END,  # DoD Revolving Funds J-Book
+        r"\bdeca" + _END,            # Defense Commissary Agency (DeCA J-Book)
+        _START + r"dhp" + _END,      # Defense Health Program
+        _START + r"service[_\s]*support" + _END,  # Service Support exhibit
+    ]),
+    re.IGNORECASE,
+)
+
+# Military Personnel appropriations → summary (equivalent to M-1 exhibits)
+_MILPERS_PATTERNS = re.compile(
+    r"|".join([
+        r"\bmpa" + _END,           # Military Personnel Army
+        r"\bngpa" + _END,          # National Guard Personnel Army
+        r"\brpa" + _END,           # Reserve Personnel Army
+        r"\bmpn" + _END,           # Military Personnel Navy
+        r"\bmpmc" + _END,          # Military Personnel Marine Corps
+        r"\brpmc" + _END,          # Reserve Personnel Marine Corps
+        r"\brpn" + _END,           # Reserve Personnel Navy
+        r"\bmpaf" + _END,          # Military Personnel Air Force
+        r"\bmilpers" + _END,
+        r"\bmilitary\s*personnel" + _END,
+        r"\breserve\s*personnel" + _END,
+        r"\bnational\s*guard\s*personnel" + _END,
+    ]),
+    re.IGNORECASE,
+)
+
+# MILCON appropriations → detail (detailed project justification)
+_MILCON_PATTERNS = re.compile(
+    r"|".join([
+        r"\bmca" + _END,           # Military Construction Army
+        r"\bmca[-_]",              # mca-afh, mca_fy, etc.
+        r"\bmcar" + _END,          # Military Construction Army Reserve
+        r"\bmcng" + _END,          # Military Construction National Guard
+        r"\bmcon" + _END,          # Military Construction
+        r"\bmilcon" + _END,
+        r"\bmilitary\s*construction" + _END,
+        r"\bbrac" + _END,          # Base Realignment and Closure
+        r"\bbase\s*realignment" + _END,
+        r"\bfamily\s*housing" + _END,
+        r"\bfh" + _END,            # Family Housing (abbreviation)
+        r"\bafh" + _END,           # Army Family Housing
+        r"\bhoa" + _END,           # Homeowners Assistance
+        r"\bhomeowner" + _END,
+        r"\bnsip" + _END,          # NATO Security Investment Program
+        _START + r"nato[_\s]*security" + _END,  # NATO Security Investment Program (full)
+        _START + r"military[_\s]*construction.*consolidated",  # DW consolidated MCON
+        _START + r"brac[_\s]*overview" + _END,  # BRAC Overview files
+        _START + r"fhif" + _END,   # Family Housing Improvement Fund
+    ]),
+    re.IGNORECASE,
+)
+
+# RDT&E appropriations → detail (equivalent to R-2/R-3/R-4 exhibits)
+_RDTE_PATTERNS = re.compile(
+    r"|".join([
+        r"\brdte" + _END,          # RDT&E
+        r"\brdten" + _END,         # RDT&E Navy
+        r"\bresearch.*development" + _END,
+        r"\btest\s+and\s+evaluation" + _END,
+        r"\bvol[-_]?\d+[a-z]?" + _END,  # vol1, vol_1, vol-2, vol5a
+        r"\bvolume[-_]\w+",        # volume_1, volume_i, etc.
+        r"\bvolume\s+\w+",         # volume 1, volume i, etc.
+        r"\bbudget\s*activity\s*\d",  # Budget Activity 1-7
+    ]),
+    re.IGNORECASE,
+)
+
+
+def classify_exhibit_category(filename_or_exhibit_type: str) -> str:
+    """Classify a filename or exhibit type as summary, detail, or other.
+
+    Accepts either a full filename (e.g. "p1_display.xlsx") or a bare
+    exhibit type key (e.g. "p1").  Uses a two-tier classification:
+
+    1. Exhibit type codes: p1, r2, etc. (highest confidence)
+    2. Appropriation-based patterns: "aircraft.pdf", "omng_vol_1.pdf", etc.
+
+    Appropriation category mapping:
+        - Procurement, MILCON, RDT&E → "detail" (line-item justification books)
+        - O&M, Military Personnel → "summary" (summary/overview exhibits)
+        - Everything else → "other"
+
+    Returns:
+        "summary", "detail", or "other".
+    """
+    name = filename_or_exhibit_type.lower()
+
+    # ── Tier 1: Exhibit type codes (highest confidence) ──────────────────
+    # Check detail first (longer keys like "r2" before "r1")
+    for key in sorted(DETAIL_EXHIBIT_KEYS, key=len, reverse=True):
+        if key in name:
+            return "detail"
+    for key in sorted(SUMMARY_EXHIBIT_KEYS, key=len, reverse=True):
+        if key in name:
+            return "summary"
+
+    # ── Tier 2: Appropriation-based patterns ─────────────────────────────
+    # Detail categories: procurement, milcon, RDT&E
+    if _PROCUREMENT_PATTERNS.search(name):
+        return "detail"
+    if _MILCON_PATTERNS.search(name):
+        return "detail"
+    # Summary categories: O&M, military personnel
+    if _OM_PATTERNS.search(name):
+        return "summary"
+    if _MILPERS_PATTERNS.search(name):
+        return "summary"
+    # RDT&E detail
+    if _RDTE_PATTERNS.search(name):
+        return "detail"
+
+    return "other"
 
 
 class Config:
@@ -168,32 +367,6 @@ class KnownValues:
         "3450": "Missile Procurement, Air Force",
     }
 
-    # OPT-CFG-002: Configurable fiscal years via SUPPORTED_FISCAL_YEARS env var
-    # Default: [2024, 2025, 2026]. Override: SUPPORTED_FISCAL_YEARS=2024,2025,2026,2027
-    @classmethod
-    def _load_fiscal_years(cls) -> list[int]:
-        import os
-        raw = os.getenv("SUPPORTED_FISCAL_YEARS", "")
-        if raw.strip():
-            try:
-                return [int(y.strip()) for y in raw.split(",") if y.strip()]
-            except ValueError:
-                pass
-        return [2024, 2025, 2026]
-
-    fiscal_years: list[int] = property(  # type: ignore
-        lambda self: KnownValues._load_fiscal_years()
-    )
-
-    @classmethod
-    def get_fiscal_years(cls) -> list[int]:
-        """Return supported fiscal years from SUPPORTED_FISCAL_YEARS env var.
-
-        Returns:
-            List of fiscal year integers (e.g. [2024, 2025, 2026]).
-        """
-        return cls._load_fiscal_years()
-
     @classmethod
     def is_valid_org(cls, org: str) -> bool:
         """Check if organization is in known values.
@@ -314,7 +487,6 @@ class ColumnMapping:
             return ""
         normalized = str(header).lower().replace("\n", " ").strip()
         # Collapse multiple spaces
-        import re
         normalized = re.sub(r'\s+', ' ', normalized)
         return normalized
 
@@ -343,7 +515,6 @@ class FilePatterns:
         Returns:
             True if matches budget document naming
         """
-        import re
         filename_lower = filename.lower()
         patterns = [
             r"budget.*justification",
@@ -364,10 +535,9 @@ class FilePatterns:
             filename: Filename to parse
 
         Returns:
-            Fiscal year (2000-2099) or None
+            Fiscal year (1990-2099) or None
         """
-        import re
-        match = re.search(r'20\d{2}', filename)
+        match = re.search(r'(?:19|20)\d{2}', filename)
         if match:
             try:
                 return int(match.group())

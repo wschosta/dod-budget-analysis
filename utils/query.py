@@ -7,7 +7,7 @@ frontend.py, and download.py.
 from typing import Any
 
 
-_ALLOWED_SORTS_DEFAULT = {
+ALLOWED_SORT_COLUMNS = {
     "id", "source_file", "exhibit_type", "fiscal_year",
     "organization_name", "account", "account_title", "pe_number",
     "amount_fy2026_request", "amount_fy2025_enacted", "amount_fy2024_actual",
@@ -161,14 +161,14 @@ def build_order_clause(
         sort_by: Column name to sort by.
         sort_dir: Direction: 'asc' or 'desc' (case-insensitive).
         allowed_sorts: Set of valid sort column names. Defaults to
-            _ALLOWED_SORTS_DEFAULT if not provided.
+            ALLOWED_SORT_COLUMNS if not provided.
         default_sort: Column to use if sort_by is not in allowed_sorts.
 
     Returns:
         ORDER BY clause string, e.g. "ORDER BY id ASC".
     """
     if allowed_sorts is None:
-        allowed_sorts = _ALLOWED_SORTS_DEFAULT
+        allowed_sorts = ALLOWED_SORT_COLUMNS
     col = sort_by if sort_by in allowed_sorts else default_sort
     direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
     return f"ORDER BY {col} {direction}"

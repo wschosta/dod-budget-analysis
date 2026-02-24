@@ -24,9 +24,19 @@ from fastapi.templating import Jinja2Templates
 from api.database import get_db
 
 logger = logging.getLogger(__name__)
-from api.routes.budget_lines import _ALLOWED_SORT
+
+
+def _safe_int(value: str, default: int) -> int:
+    """Convert string to int, returning default on failure."""
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
 from utils.cache import TTLCache
 from utils.query import (
+    ALLOWED_SORT_COLUMNS,
     build_where_clause,
     validate_amount_column,
     FISCAL_YEAR_COLUMN_LABELS,
@@ -98,7 +108,7 @@ def _get_services(conn: sqlite3.Connection) -> list[dict]:
             "WHERE b.organization_name IS NOT NULL AND b.organization_name != '' "
             "ORDER BY b.organization_name"
         ).fetchall()
-    except Exception:
+    except sqlite3.OperationalError:
         rows = conn.execute(
             "SELECT DISTINCT organization_name AS code, "
             "organization_name AS full_name "
@@ -122,7 +132,7 @@ def _get_exhibit_types(conn: sqlite3.Connection) -> list[dict]:
         ).fetchall()
         result = [dict(r) for r in rows]
         _exhibit_types_cache.set(cache_key, result)  # only cache stable reference table
-    except Exception:
+    except sqlite3.OperationalError:
         rows = conn.execute(
             "SELECT DISTINCT exhibit_type AS code FROM budget_lines "
             "WHERE exhibit_type IS NOT NULL ORDER BY exhibit_type"
@@ -189,9 +199,9 @@ def _parse_filters(request: Request) -> dict[str, Any]:
         "amount_column":     amount_column,
         "sort_by":           params.get("sort_by", "id"),
         "sort_dir":          params.get("sort_dir", "asc"),
-        "page":              max(1, int(params.get("page", 1))),
+        "page":              max(1, _safe_int(params.get("page", "1"), 1)),
         # EAGLE-4: Expanded page size cap from 100 to 200
-        "page_size":         min(200, max(10, int(params.get("page_size", 25)))),
+        "page_size":         min(200, max(10, _safe_int(params.get("page_size", "25"), 25))),
     }
 
 # EAGLE-4: Page size options for template dropdown
@@ -204,7 +214,7 @@ def _query_results(
     page_size: int | None = None,
 ) -> dict[str, Any]:
     """Run the filtered budget_lines query and return template context vars."""
-    sort_by   = filters["sort_by"] if filters["sort_by"] in _ALLOWED_SORT else "id"
+    sort_by   = filters["sort_by"] if filters["sort_by"] in ALLOWED_SORT_COLUMNS else "id"
     sort_dir  = "DESC" if filters["sort_dir"] == "desc" else "ASC"
     page      = filters["page"]
     page_size = page_size or filters.get("page_size", 25)
@@ -287,12 +297,6 @@ def _query_results(
                 if af.op in (">", "<", ">=", "<="):
                     extra_field_conditions.append(f"{amt_col} {af.op} ?")
                     extra_field_params.append(af.value)
-        except ImportError:
-            # HAWK-4 not merged yet — treat entire query as free-text
-            parsed_query = {
-                "raw": q, "fts_terms": q,
-                "field_filters": [], "amount_filters": [],
-            }
         except Exception:
             parsed_query = {
                 "raw": q, "fts_terms": q,
@@ -614,16 +618,22 @@ def program_detail(
             detail=exc.detail or f"Program {pe_number} not found",
         ) from exc
 
-    # Also fetch related PE titles for display
+    # Batch-fetch related PE titles to avoid N+1 queries
     related = pe_data.get("related", [])
-    for rel in related:
-        if not rel.get("referenced_title"):
-            title_row = conn.execute(
-                "SELECT display_title FROM pe_index WHERE pe_number = ?",
-                (rel.get("referenced_pe"),),
-            ).fetchone()
-            if title_row:
-                rel["referenced_title"] = title_row["display_title"]
+    missing_pes = [r["referenced_pe"] for r in related
+                   if not r.get("referenced_title") and r.get("referenced_pe")]
+    if missing_pes:
+        ph = ",".join("?" * len(missing_pes))
+        title_map = {
+            r["pe_number"]: r["display_title"]
+            for r in conn.execute(
+                f"SELECT pe_number, display_title FROM pe_index "
+                f"WHERE pe_number IN ({ph})", missing_pes
+            ).fetchall()
+        }
+        for rel in related:
+            if not rel.get("referenced_title") and rel.get("referenced_pe"):
+                rel["referenced_title"] = title_map.get(rel["referenced_pe"])
 
     return _tmpl().TemplateResponse("program-detail.html", {
         "request": request,

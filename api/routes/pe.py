@@ -59,7 +59,7 @@ def _json_list(val: str | None) -> list[str]:
         return []
     try:
         return json.loads(val)
-    except Exception:
+    except (json.JSONDecodeError, TypeError, ValueError):
         return []
 
 
@@ -612,7 +612,7 @@ def get_pe_pdf_pages(
             f"WHERE j.pe_number = ? {fy_clause}",
             params,
         ).fetchone()[0]
-    except Exception:
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
         total = 0
 
     if total > 0:
@@ -723,7 +723,7 @@ def get_pe_related(
 )
 def list_pes(
     tag: list[str] | None = Query(None, description="Filter by tag(s) (AND logic)"),
-    q: str | None = Query(None, description="Free-text topic search via FTS5"),
+    q: str | None = Query(None, max_length=500, description="Free-text topic search via FTS5"),
     service: str | None = Query(None, description="Filter by service/org name"),
     budget_type: str | None = Query(None, description="Filter by budget type"),
     approp: str | None = Query(None, description="Filter by appropriation title (substring)"),
@@ -816,7 +816,7 @@ def list_pes(
                     WHERE pe_descriptions_fts MATCH ?
                 )""")
                 params.append(safe_q)
-            except Exception:
+            except (sqlite3.OperationalError, sqlite3.DatabaseError):
                 conditions.append("""p.pe_number IN (
                     SELECT DISTINCT pe_number FROM pe_descriptions
                     WHERE description_text LIKE ?
