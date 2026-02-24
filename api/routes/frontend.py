@@ -642,6 +642,51 @@ def program_detail(
     })
 
 
+@router.get("/compare", response_class=HTMLResponse, include_in_schema=False)
+def spruill_page(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> HTMLResponse:
+    """Spruill-style multi-PE funding comparison page."""
+    params = request.query_params
+    selected_pes = params.getlist("pe")
+    return _tmpl().TemplateResponse("spruill.html", {
+        "request": request,
+        "selected_pes": selected_pes,
+    })
+
+
+@router.get("/partials/spruill-table", response_class=HTMLResponse, include_in_schema=False)
+def spruill_table_partial(
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> HTMLResponse:
+    """HTMX partial: Spruill comparison table."""
+    params = request.query_params
+    pe_list = params.getlist("pe")
+    detail = params.get("detail", "false").lower() in ("true", "1", "yes")
+    rows: list[dict] = []
+    fiscal_years: list[str] = []
+    pe_count = 0
+
+    if len(pe_list) >= 2 and _table_exists(conn, "budget_lines"):
+        try:
+            from api.routes.pe import get_spruill_table
+            result = get_spruill_table(pe=pe_list, detail=detail, conn=conn)
+            rows = result.get("rows", [])
+            fiscal_years = result.get("fiscal_years", [])
+            pe_count = result.get("pe_count", 0)
+        except Exception:
+            logger.debug("Failed to load Spruill table data", exc_info=True)
+
+    return _tmpl().TemplateResponse("partials/spruill-table.html", {
+        "request": request,
+        "rows": rows,
+        "fiscal_years": fiscal_years,
+        "pe_count": pe_count,
+    })
+
+
 @router.get("/partials/program-list", response_class=HTMLResponse, include_in_schema=False)
 def program_list_partial(
     request: Request,

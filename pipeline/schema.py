@@ -355,6 +355,20 @@ END;
         3,
         "003_pe_descriptions_fts: FTS5 virtual table + sync triggers for pe_descriptions",
         """
+-- Ensure pe_descriptions base table exists before creating FTS5 content table.
+-- The enrichment pipeline creates this table with more columns; this minimal
+-- DDL ensures the migration works on a fresh DB before enrichment runs.
+CREATE TABLE IF NOT EXISTS pe_descriptions (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    pe_number        TEXT NOT NULL,
+    fiscal_year      TEXT,
+    source_file      TEXT,
+    page_start       INTEGER,
+    page_end         INTEGER,
+    section_header   TEXT,
+    description_text TEXT
+);
+
 -- pe_descriptions_fts enables fast topic search across PE narrative text
 -- without expensive LIKE scans. Content table linkage avoids data duplication.
 
