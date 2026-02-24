@@ -359,13 +359,166 @@ Based on the gap analysis, the following recommendations are ordered by estimate
 
 ---
 
-## Next Steps
+## 8. Stakeholder Responses
 
-1. **Answer the 27 questions above** — responses will be used to scope the next development sprint
-2. **Prioritize API-to-GUI wiring** — the fastest wins are surfacing existing API capabilities
-3. **Decide on Phase 2 visualization scope** — trend analysis and Spruill charts require design decisions
-4. **Resolve deployment model** — the answer to G2/G3 affects several other decisions
+**Date:** 2026-02-24
+**Respondent:** Project owner
+
+### Category A: User Identity & Primary Workflow
+
+> **A1. Primary user persona?**
+> **Analyst (power user).** Emphasize power-user features: keyboard shortcuts, comparison tables, batch exports, dense data views.
+
+> **A2. Primary workflow to optimize?**
+> **All three use cases.** UC1 (search-filter-export), UC2 (trend analysis), and UC3 (browsing/discovery) are all needed.
+
+> **A3. Single-analyst or multi-user?**
+> **Start single, scale up.** Single user now, but design so it can scale to multi-user later.
+
+> **A4. What does a successful analysis session produce?**
+> **All output types.** Different sessions have different goals — exported spreadsheets, charts for briefings, and quick in-tool answers are all needed.
+
+### Category B: Data Presentation & Amounts
+
+> **B1. Multi-year funding presentation?**
+> **Priority order: Spruill chart table first, then time-series chart, then delta/waterfall.** Will eventually need all three views.
+
+> **B2. Default display unit?**
+> **$K is fine.** Analysts expect it and it matches source documents.
+
+> **B3. Currency year / constant-dollar distinction?**
+> **Not needed.** Core tenet: this is a data analysis/visualization tool, not a data creation tool. Every number comes from a source document or is the result of math off a source document value (e.g., a sum or percentage). No inflation adjustment.
+
+> **B4. Surface quantity data?**
+> **Yes, show them.** Add quantity columns as togglable fields in search results and as a dedicated section in PE detail.
+
+### Category C: Visualization & Analysis Features
+
+> **C1. Most important chart types to add?**
+> **Spruill charts first.** The standard DoD budget briefing format — PE funding over time in a structured table/chart.
+
+> **C2. More interactive charts?**
+> **Yes, full drill-down.** All charts should be clickable with drill-through to relevant detail pages or filtered views.
+
+> **C3. "Biggest movers" view?**
+> **Sort option on Programs page.** Add a "Sort by YoY change" option to the existing Programs page.
+
+> **C4. PE-to-PE comparison?**
+> **Yes — multi-PE selection for Spruill-style report.** The ability to select multiple PEs to build a report is needed. When selected, it should create a table with rows of PEs or sub-PE elements and columns of FYs.
+
+### Category D: Source Document Access & Provenance
+
+> **D1. Viewing source PDF pages?**
+> **Inline extracted text with a link to the source PDF** (the actual file, not the general Comptroller website) that the user can click to download. Eventually may want an embedded PDF viewer or ZIP download of pages, but those can be saved for later.
+
+> **D2. Source traceability?**
+> **Yes, critical.** Add a "View Source" button that shows exact file/sheet/row reference and allows downloading the original source file.
+
+> **D3. Link to external context?**
+> **Future consideration.** Not a priority now, but plan the architecture to support it later.
+
+### Category E: Programs & PE Explorer
+
+> **E1. What's missing from Program Explorer?**
+> **All three capabilities needed:**
+> - Unified PE timeline (all exhibits for one PE in chronological view)
+> - PE family trees (parent/child/sibling relationships as visual hierarchy)
+> - Portfolio views (cross-cutting views like "all Hypersonics-tagged PEs across all services")
+
+> **E2. How should related PEs be presented?**
+> **Both changes:** Raise the default confidence threshold to 60%+ AND group by relationship type (explicit reference vs. name match vs. tag overlap).
+
+> **E3. Program descriptions searchable independently?**
+> **Yes, high priority.** Searching across narrative descriptions reveals cross-cutting themes and connections. This is a core analyst need.
+
+### Category F: Export & Reporting
+
+> **F1. Export formats needed?**
+> **Add PNG/SVG chart export.** Current CSV + Excel is sufficient for data. Add ability to export charts as images for embedding in presentations and briefings.
+
+> **F2. Pre-built report templates?**
+> **Future consideration.** Structured reports would be nice eventually, but not a priority now.
+
+> **F3. Scheduled or recurring exports?**
+> **Not needed.** Users will run exports manually when they need them.
+
+### Category G: Infrastructure & Access
+
+> **G1. HTMX + Jinja2 approach working?**
+> **Not sure yet.** Need to see more features built before deciding if the architecture needs changes.
+
+> **G2. Deployment model?**
+> **Initial capability: local Docker container. Target: public internet site.** Start with Docker for single-user, plan for public deployment later.
+
+> **G3. Authentication needed?**
+> **Plan for it later.** Not needed now, but architect the system so auth can be added when moving to public deployment.
+
+> **G4. Data update notifications?**
+> **Both banner + changelog.** Banner for quick awareness plus a changelog page for details on what data was added or changed.
 
 ---
 
-*This assessment was generated by reviewing the complete codebase, all documentation, all planning documents, recent git history, and the current state of all agent instruction files (LION, TIGER, BEAR, OH MY). It represents a snapshot of the project as of 2026-02-24.*
+## 9. Key Decisions Summary
+
+Based on the stakeholder responses, the following decisions inform the next development sprint:
+
+| Decision | Answer | Impact |
+|----------|--------|--------|
+| **Primary persona** | Analyst (power user) | Dense data views, keyboard shortcuts, batch operations |
+| **All three use cases** | UC1 + UC2 + UC3 equally | Broad scope — prioritize by effort/impact ratio |
+| **Core tenet** | Data analysis/visualization only | No inflation adjustment, no synthetic data — only source document values and derived math |
+| **Spruill charts first** | Priority visualization | Standard DoD format, multi-PE table with FY columns |
+| **Full chart drill-down** | All charts clickable | Significant Chart.js interaction work |
+| **Source traceability critical** | View Source with file download | Inline text + source PDF link + exact row reference |
+| **All PE Explorer features** | Unified timeline + family trees + portfolios | Large scope — likely multi-sprint |
+| **Description search high priority** | FTS across narratives | Infrastructure exists (FTS5), needs GUI wiring |
+| **Related PEs: raise threshold + group** | 60%+ default, grouped by type | Moderate UI work on PE detail page |
+| **PNG/SVG chart export** | New capability | Requires Chart.js-to-image export implementation |
+| **Local Docker → public site** | Two-phase deployment | Plan auth hooks now, implement later |
+| **Banner + changelog for data updates** | User notification | New GUI components needed |
+
+### Development Priority Stack (derived from answers)
+
+**Highest impact, lowest effort (wire existing API to GUI):**
+1. Programs page: add "Sort by YoY change" (uses existing `/pe/top-changes` data)
+2. Search autocomplete (wire existing `/search/suggest` endpoint)
+3. PE detail: add "Funding Changes" tab (wire `/pe/{pe}/changes`)
+4. PE detail: add PDF page text tab (wire `/pe/{pe}/pdf-pages`)
+5. PE detail: add source traceability ("View Source" button)
+
+**High impact, moderate effort (new GUI features):**
+6. Spruill chart table (multi-PE, FY columns) — core analyst need
+7. Multi-PE selection on Programs page for Spruill report building
+8. Program description full-text search (wire FTS5 to search UI)
+9. Related PEs: 60%+ default threshold, group by relationship type
+10. Full chart drill-down on all chart types
+
+**High impact, higher effort (new capabilities):**
+11. Unified PE timeline (all exhibits chronologically)
+12. PE family tree visualization
+13. Portfolio views (tag-based cross-service views)
+14. PNG/SVG chart export
+15. Quantity data display (togglable columns)
+16. Data update banner + changelog page
+
+**Future / deferred:**
+17. Pre-built report templates (PE dossier, service overview)
+18. External context integration (CRS/GAO links)
+19. Authentication system
+20. Waterfall charts, Sankey diagrams
+21. Embedded PDF viewer
+22. Public internet deployment
+
+---
+
+## Next Steps
+
+1. ~~Answer the 27 questions above~~ — **DONE** (all 27 answered 2026-02-24)
+2. **Begin "wire existing API to GUI" sprint** — items 1-5 from the priority stack are low-effort, high-value
+3. **Design Spruill chart component** — this is the single most important new visualization
+4. **Add program description search** — FTS5 infrastructure exists, needs GUI integration
+5. **Plan auth-ready architecture** — ensure session/user hooks exist even without auth implementation
+
+---
+
+*This assessment was generated by reviewing the complete codebase, all documentation, all planning documents, recent git history, and the current state of all agent instruction files (LION, TIGER, BEAR, OH MY). It represents a snapshot of the project as of 2026-02-24. Stakeholder responses were collected on 2026-02-24.*
