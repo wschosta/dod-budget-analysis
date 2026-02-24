@@ -1303,7 +1303,7 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
             n_params = len(all_cols.split(","))
             placeholders = ", ".join(["?"] * n_params)
             conn.executemany(
-                f"INSERT INTO budget_lines ({all_cols}) VALUES ({placeholders})",
+                f"INSERT OR IGNORE INTO budget_lines ({all_cols}) VALUES ({placeholders})",
                 batch,
             )
             total_rows += len(batch)
@@ -2464,7 +2464,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                     all_c = ", ".join(filter(None, [_fixed_c, _fy_c, _tail_c]))
                     n_p = len(all_c.split(","))
                     ph = ", ".join(["?"] * n_p)
-                    conn.executemany(f"INSERT INTO budget_lines ({all_c}) VALUES ({ph})", rows)
+                    conn.executemany(f"INSERT OR IGNORE INTO budget_lines ({all_c}) VALUES ({ph})", rows)
                     total_budget_rows += len(rows)
                     _metrics["rows"] = total_budget_rows
 
@@ -3130,6 +3130,41 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             ON budget_lines(budget_type, amount_fy2026_request);
     """)
     conn.commit()
+
+    # ── Deduplicate budget_lines rows ──────────────────────────────────────
+    # Remove exact duplicate rows (same source, fiscal_year, PE, line_item,
+    # org) keeping only the row with the lowest id.
+    _progress("index", 0, 1, "Deduplicating budget_lines...")
+    logger.info("Deduplicating budget_lines...")
+    dup_count = conn.execute("""
+        DELETE FROM budget_lines WHERE id NOT IN (
+            SELECT MIN(id) FROM budget_lines
+            GROUP BY source_file, fiscal_year, pe_number,
+                     line_item_title, organization_name,
+                     exhibit_type, amount_type
+        )
+    """).rowcount
+    if dup_count:
+        logger.info("  Removed %d duplicate budget_lines rows", dup_count)
+        # Rebuild FTS index after deduplication
+        conn.execute(
+            "INSERT INTO budget_lines_fts(budget_lines_fts) VALUES('rebuild')"
+        )
+    conn.commit()
+
+    # Create a unique index to prevent future duplicates
+    try:
+        conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_bl_dedup
+            ON budget_lines(source_file, fiscal_year, pe_number,
+                            line_item_title, organization_name,
+                            exhibit_type, amount_type)
+        """)
+        conn.commit()
+    except Exception:
+        # May fail if residual non-exact duplicates exist; log and continue
+        logger.warning("  Could not create dedup unique index (non-critical)")
+
     _progress("index", 1, 1, "Indexes created")
 
     # ── Update data source timestamps ──────────────────────────────────────
