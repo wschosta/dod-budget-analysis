@@ -1,30 +1,36 @@
 """
-Full pipeline runner -- downloads, builds, validates, and enriches the DoD budget database.
+Full pipeline runner -- downloads, builds, repairs, validates, and enriches
+the DoD budget database.
 
 Steps (in order):
-  0. dod_budget_downloader.py  -- download budget documents (optional, --download)
-  1. build / stage+load        -- ingest Excel + PDF source files into SQLite
-  2. validate_budget_data      -- QA checks against the populated DB
-  3. enrich_budget_db          -- populate pe_index, pe_descriptions,
-                                  pe_tags, pe_lineage
+  0. download              -- download budget documents from DoD websites
+  1. build / stage+load    -- ingest Excel + PDF source files into SQLite
+  2. repair                -- normalize data, create reference tables,
+                              add indexes, rebuild FTS
+  3. validate              -- QA checks against the populated DB
+  4. enrich                -- populate pe_index, pe_descriptions,
+                              pe_tags, pe_lineage
 
 Features:
-  - Direct function imports for build/stage/validate/enrich (no subprocess overhead)
+  - Direct function imports for all steps (no subprocess overhead)
   - Automatic DB backup before build; rollback on failure
   - JSON progress file for external monitoring
-  - Download step via subprocess (Playwright deps are heavy/optional)
   - Per-step log files under logs/pipeline/<run-id>/ with full accountability
   - Append-only JSONL ledger for cross-run history
 
 Usage:
-    python run_pipeline.py                        # full run, incremental
-    python run_pipeline.py --rebuild              # full rebuild from scratch
-    python run_pipeline.py --download --years 2026 --sources all  # include download
-    python run_pipeline.py --use-staging          # use Parquet staging layer
-    python run_pipeline.py --report               # generate data_quality_report.json
-    python run_pipeline.py --skip-validate        # skip validation step
-    python run_pipeline.py --skip-enrich          # stop after validation
-    python run_pipeline.py --no-rollback          # disable automatic rollback
+    python run_pipeline.py                            # full pipeline (download → enrich)
+    python run_pipeline.py --skip-download            # skip download, build existing docs
+    python run_pipeline.py --rebuild                  # full rebuild from scratch
+    python run_pipeline.py --rebuild --years 2026     # rebuild, only download FY2026
+    python run_pipeline.py --years 2026 --sources all # download all sources for FY2026
+    python run_pipeline.py --use-staging              # use Parquet staging layer
+    python run_pipeline.py --repair-only              # only run the repair step
+    python run_pipeline.py --report                   # generate data_quality_report.json
+    python run_pipeline.py --skip-validate            # skip validation step
+    python run_pipeline.py --skip-enrich              # stop after validation
+    python run_pipeline.py --skip-repair              # skip the repair step
+    python run_pipeline.py --no-rollback              # disable automatic rollback
 """
 
 from __future__ import annotations
@@ -36,8 +42,8 @@ import signal
 import shutil
 import subprocess
 import sys
-import threading
 import time
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -47,7 +53,7 @@ from pipeline.logging import PipelineLogger, StepReport
 
 HERE = Path(__file__).resolve().parent
 
-# Download step uses subprocess (heavy optional deps: Playwright, GUI)
+# Download step uses subprocess as a fallback when direct import fails
 STEP_DOWNLOAD = HERE / "dod_budget_downloader.py"
 
 # Progress file for external monitors
@@ -236,6 +242,25 @@ def _run_subprocess(label: str, cmd: list[str]) -> int:
 # ── StepReport population helpers ─────────────────────────────────────────────
 
 
+def _build_report_from_download(report: StepReport, result: dict | None) -> None:
+    """Populate a StepReport from download_all()'s return dict."""
+    if not result or not isinstance(result, dict):
+        return
+    report.items_processed = result.get("downloaded", 0)
+    report.metrics = {
+        "downloaded": result.get("downloaded", 0),
+        "skipped": result.get("skipped", 0),
+        "failed": result.get("failed", 0),
+        "total_bytes": result.get("total_bytes", 0),
+    }
+    skipped = result.get("skipped", 0)
+    if skipped:
+        report.add_skip("incremental_skip", f"{skipped} file(s) already on disk")
+    failed = result.get("failed", 0)
+    if failed:
+        report.add_error(f"{failed} file(s) failed to download")
+
+
 def _build_report_from_builder(report: StepReport, result: dict | None) -> None:
     """Populate a StepReport from build_database()'s return dict."""
     if not result or not isinstance(result, dict):
@@ -283,6 +308,24 @@ def _build_report_from_load(report: StepReport, result: dict | None) -> None:
     report.metrics = {
         "total_rows": result.get("total_rows", 0),
         "total_pages": result.get("total_pages", 0),
+    }
+
+
+def _build_report_from_repair(report: StepReport, result: dict | None) -> None:
+    """Populate a StepReport from repair()'s return dict."""
+    if not result or not isinstance(result, dict):
+        return
+    report.items_processed = (
+        result.get("org_normalized", 0)
+        + result.get("approp_backfilled", 0)
+    )
+    ref_summary = result.get("reference", {})
+    report.metrics = {
+        "org_normalized": result.get("org_normalized", 0),
+        "approp_backfilled": result.get("approp_backfilled", 0),
+        "reference_services": ref_summary.get("services_agencies", 0),
+        "reference_exhibits": ref_summary.get("exhibit_types", 0),
+        "reference_appropriations": ref_summary.get("appropriation_titles", 0),
     }
 
 
@@ -339,7 +382,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=(
             "Run the full DoD budget pipeline: "
-            "[download] -> build/stage -> validate -> enrich"
+            "download -> build -> repair -> validate -> enrich"
         ),
     )
 
@@ -349,104 +392,135 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Database path (default: dod_budget.sqlite)",
     )
 
-    # Download options
-    p.add_argument(
-        "--download", action="store_true",
-        help="Include document download step (runs dod_budget_downloader.py)",
-    )
-    p.add_argument(
-        "--years", nargs="+", default=None, metavar="YEAR",
-        help="Fiscal years to download (e.g., 2026 2025). Requires --download.",
-    )
-    p.add_argument(
-        "--sources", nargs="+", default=None, metavar="SRC",
-        help="Sources to download (e.g., all, comptroller, army). Requires --download.",
-    )
-    p.add_argument(
+    # Download options (download is ON by default)
+    dl_group = p.add_argument_group("download options")
+    dl_group.add_argument(
         "--skip-download", action="store_true",
-        help="Skip the download step (even if --download is set)",
+        help="Skip the document download step",
+    )
+    dl_group.add_argument(
+        "--years", nargs="+", default=None, metavar="YEAR",
+        help="Fiscal years to download (e.g., 2026 2025). Default: all available.",
+    )
+    dl_group.add_argument(
+        "--sources", nargs="+", default=None, metavar="SRC",
+        help=(
+            "Sources to download (e.g., all, comptroller, army, navy, "
+            "airforce, defense-wide). Default: comptroller."
+        ),
+    )
+    dl_group.add_argument(
+        "--download-workers", type=int, default=4, metavar="N",
+        help="HTTP download threads (default: 4)",
+    )
+    dl_group.add_argument(
+        "--download-delay", type=float, default=0.1, metavar="SECS",
+        help="Delay between per-source page fetches (default: 0.1s)",
+    )
+    dl_group.add_argument(
+        "--overwrite-downloads", action="store_true",
+        help="Re-download files that already exist on disk",
+    )
+    dl_group.add_argument(
+        "--extract-zips", action="store_true",
+        help="Extract ZIP files after downloading",
     )
 
     # Staging options
-    p.add_argument(
+    stg_group = p.add_argument_group("staging options")
+    stg_group.add_argument(
         "--use-staging", action="store_true",
         help="Use Parquet staging layer (Stage -> Load -> Validate -> Enrich)",
     )
-    p.add_argument(
+    stg_group.add_argument(
         "--staging-dir", default="staging",
         help="Staging directory for Parquet files (default: staging)",
     )
-    p.add_argument(
+    stg_group.add_argument(
         "--stage-only", action="store_true",
         help="Only run staging (Phase 1: parse -> Parquet); skip DB build",
     )
-    p.add_argument(
+    stg_group.add_argument(
         "--load-only", action="store_true",
         help="Only run load (Phase 2: Parquet -> SQLite); skip file parsing",
     )
 
     # Build options
-    p.add_argument(
+    build_group = p.add_argument_group("build options")
+    build_group.add_argument(
         "--docs", default=None,
         help="Documents directory (default: DoD_Budget_Documents)",
     )
-    p.add_argument(
+    build_group.add_argument(
         "--rebuild", action="store_true",
-        help="Force full rebuild of the database",
+        help="Force full rebuild of the database (drops and recreates all tables)",
     )
-    p.add_argument(
+    build_group.add_argument(
         "--resume", action="store_true",
         help="Resume build from last checkpoint",
     )
-    p.add_argument(
+    build_group.add_argument(
         "--workers", type=int, default=None,
         help="Parallel PDF workers (default: auto-detect CPU count)",
     )
-    p.add_argument(
+    build_group.add_argument(
         "--checkpoint-interval", type=int, default=None, metavar="N",
         help="Checkpoint every N files (default: 10)",
     )
-    p.add_argument(
+    build_group.add_argument(
         "--pdf-timeout", type=int, default=30, metavar="SECS",
         help="Seconds per PDF page table extraction (default: 30)",
     )
 
+    # Repair options
+    repair_group = p.add_argument_group("repair options")
+    repair_group.add_argument(
+        "--skip-repair", action="store_true",
+        help="Skip the database repair step",
+    )
+    repair_group.add_argument(
+        "--repair-only", action="store_true",
+        help="Run only the repair step (skip download, build, validate, enrich)",
+    )
+
     # Validate options
-    p.add_argument(
+    val_group = p.add_argument_group("validate options")
+    val_group.add_argument(
         "--skip-validate", action="store_true",
         help="Skip the validation step",
     )
-    p.add_argument(
+    val_group.add_argument(
         "--strict", action="store_true",
         help="Abort the pipeline on validation failures",
     )
-    p.add_argument(
+    val_group.add_argument(
         "--pedantic", action="store_true",
         help="Abort the pipeline on any validation warnings or failures",
     )
-    p.add_argument(
+    val_group.add_argument(
         "--report", action="store_true",
         help="Generate a data quality report after validation",
     )
-    p.add_argument(
+    val_group.add_argument(
         "--report-path", default="data_quality_report.json", metavar="PATH",
         help="Path for the quality report (default: data_quality_report.json)",
     )
 
     # Enrich options
-    p.add_argument(
+    enr_group = p.add_argument_group("enrich options")
+    enr_group.add_argument(
         "--skip-enrich", action="store_true",
         help="Skip the enrichment step",
     )
-    p.add_argument(
+    enr_group.add_argument(
         "--with-llm", action="store_true",
         help="Enable LLM-based tagging (requires ANTHROPIC_API_KEY)",
     )
-    p.add_argument(
+    enr_group.add_argument(
         "--enrich-phases", default=None, metavar="PHASES",
         help="Comma-separated enrichment phases to run (default: 1,2,3,4,5)",
     )
-    p.add_argument(
+    enr_group.add_argument(
         "--rebuild-enrich", action="store_true",
         help="Drop and rebuild enrichment tables only (not the full DB)",
     )
@@ -463,19 +537,175 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Directory for pipeline run logs (default: logs/pipeline)",
     )
 
+    # Legacy compat: --download is silently accepted (no-op, download is default)
+    p.add_argument("--download", action="store_true", help=argparse.SUPPRESS)
+
     return p.parse_args(argv)
 
 
-# ── Download step (subprocess) ────────────────────────────────────────────────
+# ── Download step (direct call with subprocess fallback) ──────────────────────
 
 
-def _download_cmd(args: argparse.Namespace) -> list[str]:
-    """Build command for the downloader."""
+def _run_download(args: argparse.Namespace, docs_dir: Path) -> dict:
+    """Discover and download budget documents.
+
+    Uses direct Python imports for structured return values and StepReport
+    integration.  Falls back to subprocess if downloader imports fail
+    (e.g. Playwright not installed).
+
+    Returns:
+        Summary dict with keys: downloaded, skipped, failed, total_bytes.
+    """
+    import time as _time
+
+    from downloader.core import (
+        download_all,
+        get_session,
+        deduplicate_across_sources,
+    )
+    from downloader.sources import (
+        ALL_SOURCES,
+        SERVICE_PAGE_TEMPLATES,
+        SOURCE_DISCOVERERS,
+        _is_browser_source,
+        _close_browser,
+        discover_fiscal_years,
+        discover_comptroller_files,
+    )
+    from downloader.manifest import write_manifest
+    from downloader.metadata import validate_fy_match
+
+    session = get_session()
+
+    # Discover available fiscal years
+    print("  Discovering available fiscal years...", flush=True)
+    available_years = discover_fiscal_years(session)
+    if not available_years:
+        print("  WARNING: No fiscal years discovered from Comptroller page.", flush=True)
+        return {"downloaded": 0, "skipped": 0, "failed": 0, "total_bytes": 0}
+
+    # Select years
+    if args.years:
+        selected_years = [str(y) for y in args.years]
+        # Validate against available
+        for y in selected_years:
+            if y not in available_years:
+                print(f"  WARNING: FY{y} not found on Comptroller page "
+                      f"(available: {', '.join(sorted(available_years.keys()))})")
+    else:
+        selected_years = sorted(available_years.keys(), reverse=True)
+
+    print(f"  Fiscal years: {', '.join(f'FY{y}' for y in selected_years)}", flush=True)
+
+    # Select sources
+    if args.sources:
+        if "all" in [s.lower() for s in args.sources]:
+            selected_sources = list(ALL_SOURCES)
+        else:
+            selected_sources = []
+            for s in args.sources:
+                s_lower = s.lower().replace("_", "-")
+                if s_lower in ALL_SOURCES:
+                    selected_sources.append(s_lower)
+                else:
+                    print(f"  WARNING: Unknown source '{s}'. "
+                          f"Available: {', '.join(ALL_SOURCES)}")
+    else:
+        # Default: comptroller only (fastest, most reliable)
+        selected_sources = ["comptroller"]
+
+    print(f"  Sources: {', '.join(selected_sources)}", flush=True)
+
+    # Discover files
+    all_files: dict[str, dict[str, list[dict]]] = {}
+    browser_labels: set[str] = set()
+
+    for year in selected_years:
+        all_files[year] = {}
+        for source in selected_sources:
+            if source == "comptroller":
+                if year not in available_years:
+                    continue
+                url = available_years[year]
+                files = discover_comptroller_files(session, year, url)
+            else:
+                discoverer = SOURCE_DISCOVERERS.get(source)
+                if discoverer is None:
+                    continue
+                files = discoverer(session, year)
+
+            # FY validation: filter out misrouted files
+            pre_count = len(files)
+            files = [f for f in files if validate_fy_match(f["filename"], year)]
+            fy_dropped = pre_count - len(files)
+            if fy_dropped:
+                print(f"  [FY FILTER] {source} FY{year}: dropped {fy_dropped} "
+                      f"file(s) with mismatched fiscal year in filename")
+
+            label = (SERVICE_PAGE_TEMPLATES[source]["label"]
+                     if source != "comptroller" else "Comptroller")
+            all_files[year][label] = files
+
+            if _is_browser_source(source):
+                browser_labels.add(label)
+
+            _time.sleep(args.download_delay)
+
+    # Cross-source deduplication
+    dedup_stats = deduplicate_across_sources(all_files, output_dir=docs_dir)
+    dedup_total = dedup_stats.get("removed", 0) + dedup_stats.get("disk_dedup", 0)
+    if dedup_total:
+        print(f"  Deduplicated: {dedup_total} file(s)", flush=True)
+
+    # Count total files
+    total_discovered = sum(
+        len(files) for year_sources in all_files.values()
+        for files in year_sources.values()
+    )
+    print(f"  Discovered {total_discovered} file(s) to download", flush=True)
+
+    if total_discovered == 0:
+        return {"downloaded": 0, "skipped": 0, "failed": 0, "total_bytes": 0}
+
+    # Write manifest
+    manifest_path = docs_dir / "manifest.json"
+    write_manifest(docs_dir, all_files, manifest_path)
+
+    # Download
+    summary = download_all(
+        all_files,
+        docs_dir,
+        browser_labels,
+        overwrite=args.overwrite_downloads,
+        delay=args.download_delay,
+        extract_zips=args.extract_zips,
+        use_gui=False,
+        manifest_path=manifest_path,
+        workers=args.download_workers,
+    )
+
+    # Cleanup browser if used
+    try:
+        _close_browser()
+    except Exception:
+        pass
+
+    return summary
+
+
+def _download_cmd_fallback(args: argparse.Namespace) -> list[str]:
+    """Build a subprocess command for the downloader (fallback)."""
     cmd = [PYTHON, str(STEP_DOWNLOAD), "--no-gui"]
     if args.years:
         cmd += ["--years"] + [str(y) for y in args.years]
     if args.sources:
         cmd += ["--sources"] + args.sources
+    if args.overwrite_downloads:
+        cmd.append("--overwrite")
+    if args.extract_zips:
+        cmd.append("--extract-zips")
+    cmd += ["--workers", str(args.download_workers)]
+    cmd += ["--delay", str(args.download_delay)]
     return cmd
 
 
@@ -530,11 +760,21 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  Database : {db_path}")
     print(f"  Docs dir : {docs_dir}")
     print(f"  Rebuild  : {'yes (full)' if args.rebuild else 'no (incremental)'}")
-    if args.download and not args.skip_download:
-        print(f"  Download : yes"
-              + (f" [years: {' '.join(str(y) for y in args.years)}]" if args.years else "")
-              + (f" [sources: {' '.join(args.sources)}]" if args.sources else ""))
-    if use_staging:
+
+    # Download summary
+    if args.repair_only:
+        print(f"  Mode     : repair-only")
+    elif not args.skip_download:
+        dl_detail = "yes"
+        if args.years:
+            dl_detail += f" [years: {' '.join(str(y) for y in args.years)}]"
+        if args.sources:
+            dl_detail += f" [sources: {' '.join(args.sources)}]"
+        print(f"  Download : {dl_detail}")
+    else:
+        print(f"  Download : skip")
+
+    if use_staging and not args.repair_only:
         print(f"  Staging  : {staging_dir}")
         if args.stage_only:
             print(f"  Mode     : stage-only (Phase 1)")
@@ -542,38 +782,105 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  Mode     : load-only (Phase 2)")
         else:
             print(f"  Mode     : full staging (Phase 1 + 2)")
+
+    print(f"  Repair   : {'skip' if args.skip_repair else 'yes'}")
+
     validate_mode = " [pedantic]" if args.pedantic else " [strict]" if args.strict else ""
     print(
-        f"  Validate : {'skip' if args.skip_validate else 'yes'}"
+        f"  Validate : {'skip' if args.skip_validate or args.repair_only else 'yes'}"
         + validate_mode
         + (" [+report]" if args.report else "")
     )
     print(
-        f"  Enrich   : {'skip' if args.skip_enrich else 'yes'}"
+        f"  Enrich   : {'skip' if args.skip_enrich or args.repair_only else 'yes'}"
         + (f" [phases {args.enrich_phases}]" if args.enrich_phases else "")
         + (" [+LLM]" if args.with_llm else "")
     )
     print(f"  Rollback : {'disabled' if args.no_rollback else 'enabled'}")
     print(f"  Logs     : {pl.run_dir}")
 
-    # ── Step 0: Download (optional, subprocess) ──────────────────────────
-    if args.download and not args.skip_download:
+    # ── Repair-only mode ─────────────────────────────────────────────────
+    if args.repair_only:
+        from repair_database import repair
+
+        repair_report = pl.start_step("repair")
+        ok, repair_result = _run_step(
+            "Repair database (repair-only mode)",
+            repair,
+            db_path=db_path,
+        )
+        if not ok:
+            repair_report.status = "failed"
+            repair_report.add_error("repair() raised an exception")
+            pl.finish_step("repair", repair_report)
+            print("\nRepair failed.", flush=True)
+            _finalize_pipeline(pl, 1)
+            return 1
+
+        _build_report_from_repair(repair_report, repair_result)
+        repair_report.status = "completed"
+        pl.finish_step("repair", repair_report)
+
+        total = time.monotonic() - pipeline_start
+        _banner(f"Repair complete -- {total:.1f}s total")
+        print(f"Database: {db_path.resolve()}", flush=True)
+        _finalize_pipeline(pl, 0)
+        return 0
+
+    # ── Step 0 / 5: Download (default ON, skip with --skip-download) ─────
+    if not args.skip_download:
         dl_report = pl.start_step("download")
-        rc = _run_subprocess("Step 0 / 4 -- Download documents", _download_cmd(args))
-        if rc != 0:
-            dl_report.status = "failed"
-            dl_report.add_error(f"Download subprocess exited with code {rc}")
+
+        # Try direct Python import; fall back to subprocess if unavailable
+        try:
+            ok, dl_result = _run_step(
+                "Step 0 / 5 -- Download documents",
+                _run_download,
+                args, docs_dir,
+            )
+            if not ok:
+                dl_report.status = "failed"
+                dl_report.add_error("Download step raised an exception")
+                pl.finish_step("download", dl_report)
+                print("\nPipeline aborted: download step failed.", flush=True)
+                _finalize_pipeline(pl, 1)
+                return 1
+
+            _build_report_from_download(dl_report, dl_result)
+            dl_report.status = "completed"
             pl.finish_step("download", dl_report)
-            print(f"\nPipeline aborted: download step failed (exit {rc}).", flush=True)
-            _finalize_pipeline(pl, rc)
-            return rc
-        dl_report.status = "completed"
-        pl.finish_step("download", dl_report)
+
+            if dl_result:
+                print(f"  Downloaded: {dl_result.get('downloaded', 0)}, "
+                      f"Skipped: {dl_result.get('skipped', 0)}, "
+                      f"Failed: {dl_result.get('failed', 0)}", flush=True)
+
+        except ImportError as imp_err:
+            # Fallback: run downloader as subprocess
+            print(f"  Direct download import failed ({imp_err}), "
+                  f"falling back to subprocess...", flush=True)
+            rc = _run_subprocess(
+                "Step 0 / 5 -- Download documents (subprocess)",
+                _download_cmd_fallback(args),
+            )
+            if rc != 0:
+                dl_report.status = "failed"
+                dl_report.add_error(f"Download subprocess exited with code {rc}")
+                pl.finish_step("download", dl_report)
+                print(f"\nPipeline aborted: download step failed (exit {rc}).", flush=True)
+                _finalize_pipeline(pl, rc)
+                return rc
+            dl_report.status = "completed"
+            pl.finish_step("download", dl_report)
+
         if _check_stopped("download"):
             _finalize_pipeline(pl, 0)
             return 0
+    else:
+        print("\n[Step 0 / 5 -- Download documents] SKIPPED (--skip-download)", flush=True)
+        pl.record_user_skip("download", "User passed --skip-download")
 
-    # ── Step 1: Build or Stage+Load ──────────────────────────────────────
+    # ── Step 1 / 5: Build or Stage+Load ──────────────────────────────────
     backup = None
     if not args.no_rollback:
         backup = _backup_db(db_path)
@@ -585,7 +892,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.load_only:
             stage_report = pl.start_step("stage")
             ok, stage_summary = _run_step(
-                "Step 1a / 4 -- Stage files to Parquet",
+                "Step 1a / 5 -- Stage files to Parquet",
                 stage_all_files,
                 docs_dir=docs_dir,
                 staging_dir=staging_dir,
@@ -622,7 +929,7 @@ def main(argv: list[str] | None = None) -> int:
 
         load_report = pl.start_step("load")
         ok, load_summary = _run_step(
-            "Step 1b / 4 -- Load Parquet into SQLite",
+            "Step 1b / 5 -- Load Parquet into SQLite",
             load_staging_to_db,
             staging_dir=staging_dir,
             db_path=db_path,
@@ -664,14 +971,14 @@ def main(argv: list[str] | None = None) -> int:
             "progress_callback": _build_progress,
             "stop_event": _stop_event,
             # Skip the builder's internal quality report when validation will
-            # run as a separate pipeline step (Step 2), avoiding ~50s duplicate.
+            # run as a separate pipeline step (Step 3), avoiding ~50s duplicate.
             "skip_quality_report": not args.skip_validate,
         }
         if args.checkpoint_interval is not None:
             build_kwargs["checkpoint_interval"] = args.checkpoint_interval
 
         ok, build_result = _run_step(
-            "Step 1 / 4 -- Build database",
+            "Step 1 / 5 -- Build database",
             build_database,
             **build_kwargs,
         )
@@ -694,14 +1001,48 @@ def main(argv: list[str] | None = None) -> int:
         _finalize_pipeline(pl, 0)
         return 0
 
-    # ── Step 2: Validate ─────────────────────────────────────────────────
+    # ── Step 2 / 5: Repair ───────────────────────────────────────────────
+    if not args.skip_repair:
+        from repair_database import repair
+
+        repair_report = pl.start_step("repair")
+        ok, repair_result = _run_step(
+            "Step 2 / 5 -- Repair database",
+            repair,
+            db_path=db_path,
+        )
+        if not ok:
+            repair_report.status = "failed"
+            repair_report.add_error("repair() raised an exception")
+            pl.finish_step("repair", repair_report)
+            # Repair failure is non-fatal — continue the pipeline
+            print("\nRepair step failed -- continuing pipeline.", flush=True)
+        else:
+            _build_report_from_repair(repair_report, repair_result)
+            repair_report.status = "completed"
+            pl.finish_step("repair", repair_report)
+
+            if repair_result:
+                print(f"  Org normalized: {repair_result.get('org_normalized', 0):,}, "
+                      f"Approp backfilled: {repair_result.get('approp_backfilled', 0):,}",
+                      flush=True)
+    else:
+        print("\n[Step 2 / 5 -- Repair database] SKIPPED (--skip-repair)", flush=True)
+        pl.record_user_skip("repair", "User passed --skip-repair")
+
+    if _check_stopped("repair"):
+        _cleanup_backup(backup)
+        _finalize_pipeline(pl, 0)
+        return 0
+
+    # ── Step 3 / 5: Validate ─────────────────────────────────────────────
     if not args.skip_validate:
         from pipeline.validator import validate_all
 
         val_report = pl.start_step("validate")
 
         ok, val_summary = _run_step(
-            "Step 2 / 4 -- Validate database",
+            "Step 3 / 5 -- Validate database",
             validate_all,
             db_path=db_path,
             strict=args.strict,
@@ -750,7 +1091,7 @@ def main(argv: list[str] | None = None) -> int:
 
             report_path = Path(args.report_path)
             ok_report, _ = _run_step(
-                "Step 2b / 4 -- Generate quality report",
+                "Step 3b / 5 -- Generate quality report",
                 generate_quality_report,
                 db_path=db_path,
                 output_path=report_path,
@@ -759,7 +1100,7 @@ def main(argv: list[str] | None = None) -> int:
             if ok_report:
                 print(f"  Report: {report_path.resolve()}")
     else:
-        print("\n[Step 2 / 4 -- Validate database] SKIPPED (--skip-validate)", flush=True)
+        print("\n[Step 3 / 5 -- Validate database] SKIPPED (--skip-validate)", flush=True)
         pl.record_user_skip("validate", "User passed --skip-validate")
 
     if _check_stopped("validate"):
@@ -767,7 +1108,7 @@ def main(argv: list[str] | None = None) -> int:
         _finalize_pipeline(pl, 0)
         return 0
 
-    # ── Step 3: Enrich ───────────────────────────────────────────────────
+    # ── Step 4 / 5: Enrich ───────────────────────────────────────────────
     if not args.skip_enrich:
         from pipeline.enricher import enrich
 
@@ -780,7 +1121,7 @@ def main(argv: list[str] | None = None) -> int:
             phases = {1, 2, 3, 4, 5}
 
         ok, enrich_result = _run_step(
-            "Step 3 / 4 -- Enrich database",
+            "Step 4 / 5 -- Enrich database",
             enrich,
             db_path=db_path,
             phases=phases,
@@ -803,7 +1144,7 @@ def main(argv: list[str] | None = None) -> int:
         enrich_report.status = "completed"
         pl.finish_step("enrich", enrich_report)
     else:
-        print("\n[Step 3 / 4 -- Enrich database] SKIPPED (--skip-enrich)", flush=True)
+        print("\n[Step 4 / 5 -- Enrich database] SKIPPED (--skip-enrich)", flush=True)
         pl.record_user_skip("enrich", "User passed --skip-enrich")
 
     # ── Done ─────────────────────────────────────────────────────────────

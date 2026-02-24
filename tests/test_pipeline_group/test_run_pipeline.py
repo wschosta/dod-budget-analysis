@@ -152,20 +152,32 @@ class TestParseArgs:
     def test_defaults(self):
         args = run_pipeline._parse_args([])
         assert args.db == "dod_budget.sqlite"
-        assert args.download is False
+        assert args.skip_download is False
         assert args.skip_validate is False
         assert args.skip_enrich is False
+        assert args.skip_repair is False
         assert args.rebuild is False
         assert args.use_staging is False
         assert args.no_rollback is False
         assert args.report is False
         assert args.report_path == "data_quality_report.json"
+        assert args.download_workers == 4
+        assert args.download_delay == 0.1
 
     def test_download_flags(self):
-        args = run_pipeline._parse_args(["--download", "--years", "2026", "2025", "--sources", "all"])
-        assert args.download is True
+        args = run_pipeline._parse_args(["--years", "2026", "2025", "--sources", "all"])
         assert args.years == ["2026", "2025"]
         assert args.sources == ["all"]
+
+    def test_skip_download(self):
+        args = run_pipeline._parse_args(["--skip-download"])
+        assert args.skip_download is True
+
+    def test_repair_flags(self):
+        args = run_pipeline._parse_args(["--repair-only"])
+        assert args.repair_only is True
+        args2 = run_pipeline._parse_args(["--skip-repair"])
+        assert args2.skip_repair is True
 
     def test_staging_flags(self):
         args = run_pipeline._parse_args(["--use-staging", "--staging-dir", "/tmp/stage"])
@@ -186,24 +198,31 @@ class TestParseArgs:
         assert args.enrich_phases == "1,2,3"
 
 
-# ── _download_cmd tests ─────────────────────────────────────────────────────
+# ── _download_cmd_fallback tests ────────────────────────────────────────────
 
 
-class TestDownloadCmd:
+class TestDownloadCmdFallback:
     def test_basic(self):
-        args = run_pipeline._parse_args(["--download"])
-        cmd = run_pipeline._download_cmd(args)
+        args = run_pipeline._parse_args([])
+        cmd = run_pipeline._download_cmd_fallback(args)
         assert "--no-gui" in cmd
         assert str(run_pipeline.STEP_DOWNLOAD) in cmd
 
     def test_with_years_and_sources(self):
-        args = run_pipeline._parse_args(["--download", "--years", "2026", "--sources", "army", "navy"])
-        cmd = run_pipeline._download_cmd(args)
+        args = run_pipeline._parse_args(["--years", "2026", "--sources", "army", "navy"])
+        cmd = run_pipeline._download_cmd_fallback(args)
         assert "--years" in cmd
         assert "2026" in cmd
         assert "--sources" in cmd
         assert "army" in cmd
         assert "navy" in cmd
+
+    def test_overwrite_and_workers(self):
+        args = run_pipeline._parse_args(["--overwrite-downloads", "--download-workers", "8"])
+        cmd = run_pipeline._download_cmd_fallback(args)
+        assert "--overwrite" in cmd
+        assert "--workers" in cmd
+        assert "8" in cmd
 
 
 # ── main() integration tests ────────────────────────────────────────────────
@@ -216,15 +235,19 @@ class TestMainIntegration:
     @patch("run_pipeline._cleanup_backup")
     @patch("run_pipeline._clear_progress")
     def test_skip_validate_and_enrich(self, mock_clear, mock_cleanup, mock_backup, tmp_path):
-        """Skip both validate and enrich — only build runs."""
+        """Skip download, validate, enrich — only build + repair runs."""
         db = tmp_path / "test.sqlite"
         docs = tmp_path / "docs"
         docs.mkdir()
 
-        with patch("pipeline.builder.build_database", return_value={"rows": 10}) as mock_build:
+        with (
+            patch("pipeline.builder.build_database", return_value={"rows": 10}) as mock_build,
+            patch("repair_database.repair", return_value={"org_normalized": 0, "approp_backfilled": 0, "reference": {}}),
+        ):
             rc = run_pipeline.main([
                 "--db", str(db),
                 "--docs", str(docs),
+                "--skip-download",
                 "--skip-validate",
                 "--skip-enrich",
             ])
@@ -236,18 +259,20 @@ class TestMainIntegration:
     @patch("run_pipeline._cleanup_backup")
     @patch("run_pipeline._clear_progress")
     def test_skip_validate_only(self, mock_clear, mock_cleanup, mock_backup, tmp_path):
-        """Skip validate, run enrich."""
+        """Skip download + validate, run build + repair + enrich."""
         db = tmp_path / "test.sqlite"
         docs = tmp_path / "docs"
         docs.mkdir()
 
         with (
             patch("pipeline.builder.build_database", return_value={"rows": 10}),
+            patch("repair_database.repair", return_value={"org_normalized": 0, "approp_backfilled": 0, "reference": {}}),
             patch("pipeline.enricher.enrich") as mock_enrich,
         ):
             rc = run_pipeline.main([
                 "--db", str(db),
                 "--docs", str(docs),
+                "--skip-download",
                 "--skip-validate",
             ])
 
@@ -258,7 +283,7 @@ class TestMainIntegration:
     @patch("run_pipeline._cleanup_backup")
     @patch("run_pipeline._clear_progress")
     def test_skip_enrich_only(self, mock_clear, mock_cleanup, mock_backup, tmp_path):
-        """Run validate, skip enrich."""
+        """Skip download + enrich, run build + repair + validate."""
         db = tmp_path / "test.sqlite"
         docs = tmp_path / "docs"
         docs.mkdir()
@@ -267,16 +292,37 @@ class TestMainIntegration:
 
         with (
             patch("pipeline.builder.build_database", return_value={"rows": 10}),
+            patch("repair_database.repair", return_value={"org_normalized": 0, "approp_backfilled": 0, "reference": {}}),
             patch("pipeline.validator.validate_all", return_value=val_result) as mock_val,
         ):
             rc = run_pipeline.main([
                 "--db", str(db),
                 "--docs", str(docs),
+                "--skip-download",
                 "--skip-enrich",
             ])
 
         assert rc == 0
         mock_val.assert_called_once()
+
+    @patch("run_pipeline._backup_db", return_value=None)
+    @patch("run_pipeline._cleanup_backup")
+    @patch("run_pipeline._clear_progress")
+    def test_repair_only_mode(self, mock_clear, mock_cleanup, mock_backup, tmp_path):
+        """Test --repair-only runs only the repair step."""
+        db = tmp_path / "test.sqlite"
+        _make_db(db)
+
+        repair_result = {"org_normalized": 50, "approp_backfilled": 100, "reference": {"services_agencies": 5}}
+
+        with patch("repair_database.repair", return_value=repair_result) as mock_repair:
+            rc = run_pipeline.main([
+                "--db", str(db),
+                "--repair-only",
+            ])
+
+        assert rc == 0
+        mock_repair.assert_called_once()
 
     @patch("run_pipeline._backup_db")
     @patch("run_pipeline._rollback_db")
@@ -293,6 +339,7 @@ class TestMainIntegration:
             rc = run_pipeline.main([
                 "--db", str(db),
                 "--docs", str(docs),
+                "--skip-download",
                 "--skip-validate",
                 "--skip-enrich",
             ])
@@ -313,6 +360,7 @@ class TestMainIntegration:
             rc = run_pipeline.main([
                 "--db", str(db),
                 "--docs", str(docs),
+                "--skip-download",
                 "--skip-validate",
                 "--skip-enrich",
                 "--no-rollback",
@@ -335,47 +383,48 @@ class TestMainIntegration:
 
         with (
             patch("pipeline.builder.build_database", return_value={"rows": 10}),
+            patch("repair_database.repair", return_value={"org_normalized": 0, "approp_backfilled": 0, "reference": {}}),
             patch("pipeline.validator.validate_all", return_value=val_result),
         ):
             rc = run_pipeline.main([
                 "--db", str(db),
                 "--docs", str(docs),
+                "--skip-download",
                 "--strict",
                 "--skip-enrich",
             ])
 
         assert rc == 1
 
-    @patch("run_pipeline._run_subprocess", return_value=0)
+    @patch("run_pipeline._run_download", return_value={"downloaded": 3, "skipped": 0, "failed": 0, "total_bytes": 1024})
     @patch("run_pipeline._backup_db", return_value=None)
     @patch("run_pipeline._cleanup_backup")
     @patch("run_pipeline._clear_progress")
-    def test_download_flag_calls_subprocess(self, mock_clear, mock_cleanup, mock_backup, mock_sub, tmp_path):
-        """--download should invoke subprocess for the downloader."""
+    def test_download_runs_by_default(self, mock_clear, mock_cleanup, mock_backup, mock_dl, tmp_path):
+        """Download step should run by default when --skip-download is not passed."""
         db = tmp_path / "test.sqlite"
         docs = tmp_path / "docs"
         docs.mkdir()
 
         with (
             patch("pipeline.builder.build_database", return_value={"rows": 10}),
+            patch("repair_database.repair", return_value={"org_normalized": 0, "approp_backfilled": 0, "reference": {}}),
             patch("pipeline.validator.validate_all", return_value={"exit_code": 0, "total_checks": 1, "total_warnings": 0, "total_failures": 0, "checks": []}),
             patch("pipeline.enricher.enrich"),
         ):
             rc = run_pipeline.main([
                 "--db", str(db),
                 "--docs", str(docs),
-                "--download",
                 "--years", "2026",
                 "--sources", "all",
             ])
 
         assert rc == 0
-        mock_sub.assert_called_once()
-        call_args = mock_sub.call_args
-        assert "Download" in call_args[0][0]
+        mock_dl.assert_called_once()
 
-    @patch("run_pipeline._run_subprocess", return_value=1)
-    def test_download_failure_aborts(self, mock_sub, tmp_path):
+    @patch("run_pipeline._run_download", side_effect=RuntimeError("download failed"))
+    @patch("run_pipeline._clear_progress")
+    def test_download_failure_aborts(self, mock_clear, mock_dl, tmp_path):
         """Failed download should abort pipeline."""
         db = tmp_path / "test.sqlite"
         docs = tmp_path / "docs"
@@ -384,7 +433,6 @@ class TestMainIntegration:
         rc = run_pipeline.main([
             "--db", str(db),
             "--docs", str(docs),
-            "--download",
             "--years", "2026",
         ])
 
@@ -406,12 +454,14 @@ class TestMainIntegration:
         with (
             patch("pipeline.staging.stage_all_files", return_value=stage_result) as mock_stage,
             patch("pipeline.staging.load_staging_to_db", return_value=load_result) as mock_load,
+            patch("repair_database.repair", return_value={"org_normalized": 0, "approp_backfilled": 0, "reference": {}}),
             patch("pipeline.validator.validate_all", return_value={"exit_code": 0, "total_checks": 1, "total_warnings": 0, "total_failures": 0, "checks": []}),
             patch("pipeline.enricher.enrich"),
         ):
             rc = run_pipeline.main([
                 "--db", str(db),
                 "--docs", str(docs),
+                "--skip-download",
                 "--use-staging",
                 "--staging-dir", str(staging),
             ])
@@ -433,6 +483,7 @@ class TestMainIntegration:
 
         with (
             patch("pipeline.builder.build_database", return_value={"rows": 10}),
+            patch("repair_database.repair", return_value={"org_normalized": 0, "approp_backfilled": 0, "reference": {}}),
             patch("pipeline.validator.validate_all", return_value=val_result),
             patch("pipeline.validator.generate_quality_report", return_value={}) as mock_report,
             patch("pipeline.enricher.enrich"),
@@ -440,6 +491,7 @@ class TestMainIntegration:
             rc = run_pipeline.main([
                 "--db", str(db),
                 "--docs", str(docs),
+                "--skip-download",
                 "--report",
                 "--report-path", str(tmp_path / "report.json"),
             ])
@@ -451,7 +503,7 @@ class TestMainIntegration:
     @patch("run_pipeline._cleanup_backup")
     @patch("run_pipeline._clear_progress")
     def test_full_pipeline_call_order(self, mock_clear, mock_cleanup, mock_backup, tmp_path):
-        """Verify build -> validate -> enrich call order."""
+        """Verify build -> repair -> validate -> enrich call order."""
         db = tmp_path / "test.sqlite"
         docs = tmp_path / "docs"
         docs.mkdir()
@@ -460,6 +512,10 @@ class TestMainIntegration:
         def track_build(**kw):
             call_order.append("build")
             return {"rows": 10}
+
+        def track_repair(**kw):
+            call_order.append("repair")
+            return {"org_normalized": 0, "approp_backfilled": 0, "reference": {}}
 
         def track_validate(**kw):
             call_order.append("validate")
@@ -470,16 +526,18 @@ class TestMainIntegration:
 
         with (
             patch("pipeline.builder.build_database", side_effect=track_build),
+            patch("repair_database.repair", side_effect=track_repair),
             patch("pipeline.validator.validate_all", side_effect=track_validate),
             patch("pipeline.enricher.enrich", side_effect=track_enrich),
         ):
             rc = run_pipeline.main([
                 "--db", str(db),
                 "--docs", str(docs),
+                "--skip-download",
             ])
 
         assert rc == 0
-        assert call_order == ["build", "validate", "enrich"]
+        assert call_order == ["build", "repair", "validate", "enrich"]
 
     @patch("run_pipeline._backup_db", return_value=None)
     @patch("run_pipeline._cleanup_backup")
@@ -494,12 +552,14 @@ class TestMainIntegration:
 
         with (
             patch("pipeline.builder.build_database", return_value={"rows": 10}),
+            patch("repair_database.repair", return_value={"org_normalized": 0, "approp_backfilled": 0, "reference": {}}),
             patch("pipeline.validator.validate_all", return_value=val_result),
             patch("pipeline.enricher.enrich") as mock_enrich,
         ):
             rc = run_pipeline.main([
                 "--db", str(db),
                 "--docs", str(docs),
+                "--skip-download",
                 "--enrich-phases", "1,3",
             ])
 
@@ -546,10 +606,14 @@ class TestGracefulShutdown:
         docs = tmp_path / "docs"
         docs.mkdir()
 
-        with patch("pipeline.builder.build_database", return_value={"rows": 10}) as mock_build:
+        with (
+            patch("pipeline.builder.build_database", return_value={"rows": 10}) as mock_build,
+            patch("repair_database.repair", return_value={"org_normalized": 0, "approp_backfilled": 0, "reference": {}}),
+        ):
             run_pipeline.main([
                 "--db", str(db),
                 "--docs", str(docs),
+                "--skip-download",
                 "--skip-validate",
                 "--skip-enrich",
             ])
@@ -569,6 +633,7 @@ class TestGracefulShutdown:
 
         with (
             patch("pipeline.builder.build_database", return_value={"rows": 10}),
+            patch("repair_database.repair", return_value={"org_normalized": 0, "approp_backfilled": 0, "reference": {}}),
             patch("pipeline.validator.validate_all", return_value={
                 "exit_code": 0, "total_checks": 1, "total_warnings": 0,
                 "total_failures": 0, "checks": [],
@@ -578,6 +643,7 @@ class TestGracefulShutdown:
             run_pipeline.main([
                 "--db", str(db),
                 "--docs", str(docs),
+                "--skip-download",
             ])
 
         call_kwargs = mock_val.call_args[1]
@@ -595,6 +661,7 @@ class TestGracefulShutdown:
 
         with (
             patch("pipeline.builder.build_database", return_value={"rows": 10}),
+            patch("repair_database.repair", return_value={"org_normalized": 0, "approp_backfilled": 0, "reference": {}}),
             patch("pipeline.validator.validate_all", return_value={
                 "exit_code": 0, "total_checks": 1, "total_warnings": 0,
                 "total_failures": 0, "checks": [],
@@ -604,6 +671,7 @@ class TestGracefulShutdown:
             run_pipeline.main([
                 "--db", str(db),
                 "--docs", str(docs),
+                "--skip-download",
             ])
 
         call_kwargs = mock_enrich.call_args[1]
@@ -625,6 +693,7 @@ class TestGracefulShutdown:
         with (
             patch("pipeline.staging.stage_all_files", return_value=stage_result) as mock_stage,
             patch("pipeline.staging.load_staging_to_db", return_value=load_result) as mock_load,
+            patch("repair_database.repair", return_value={"org_normalized": 0, "approp_backfilled": 0, "reference": {}}),
             patch("pipeline.validator.validate_all", return_value={
                 "exit_code": 0, "total_checks": 1, "total_warnings": 0,
                 "total_failures": 0, "checks": [],
@@ -634,6 +703,7 @@ class TestGracefulShutdown:
             run_pipeline.main([
                 "--db", str(db),
                 "--docs", str(docs),
+                "--skip-download",
                 "--use-staging",
                 "--staging-dir", str(tmp_path / "staging"),
             ])
@@ -660,15 +730,18 @@ class TestGracefulShutdown:
 
         with (
             patch("pipeline.builder.build_database", side_effect=build_then_stop),
+            patch("repair_database.repair") as mock_repair,
             patch("pipeline.validator.validate_all") as mock_val,
             patch("pipeline.enricher.enrich") as mock_enrich,
         ):
             rc = run_pipeline.main([
                 "--db", str(db),
                 "--docs", str(docs),
+                "--skip-download",
             ])
 
         assert rc == 0  # graceful stop is success
+        mock_repair.assert_not_called()
         mock_val.assert_not_called()
         mock_enrich.assert_not_called()
 
@@ -687,12 +760,14 @@ class TestGracefulShutdown:
 
         with (
             patch("pipeline.builder.build_database", return_value={"rows": 10}),
+            patch("repair_database.repair", return_value={"org_normalized": 0, "approp_backfilled": 0, "reference": {}}),
             patch("pipeline.validator.validate_all", side_effect=validate_then_stop),
             patch("pipeline.enricher.enrich") as mock_enrich,
         ):
             rc = run_pipeline.main([
                 "--db", str(db),
                 "--docs", str(docs),
+                "--skip-download",
             ])
 
         assert rc == 0
