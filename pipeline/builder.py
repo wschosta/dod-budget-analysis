@@ -113,6 +113,7 @@ logger = logging.getLogger(__name__)
 # Shared utilities: Import from utils package for consistency across codebase
 # Optimization: Pre-compiled patterns and safe_float function reduce data ingestion time by ~10-15%
 from utils import safe_float
+from utils.strings import normalize_fiscal_year as _normalize_fy_value
 from utils.patterns import PE_NUMBER
 
 # For backward compatibility, use the shared pattern
@@ -1154,6 +1155,13 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
                           "sheet='%s' vs dir='%s' — using sheet value",
                           file_path.name, fiscal_year, dir_fy)
 
+        # B4.4: Normalize fiscal_year to consistent 4-digit format for storage.
+        # _normalise_fiscal_year returns "FY YYYY"; _normalize_fy_value extracts
+        # the bare 4-digit year (e.g. "2026") for consistent DB storage.
+        _normalized_fy = _normalize_fy_value(fiscal_year)
+        if _normalized_fy:
+            fiscal_year = _normalized_fy
+
         # C-1 fallback: remap generic authorization/appropriation columns to
         # FY-specific names using the sheet's fiscal year context.
         _fy_match = re.search(r"(\d{4})", fiscal_year)
@@ -1389,6 +1397,11 @@ def _extract_excel_rows(args: tuple) -> dict:
         dir_fy = _extract_fy_from_path(file_path)
         if fiscal_year == sheet_name and dir_fy:
             fiscal_year = dir_fy
+
+        # B4.4: Normalize fiscal_year to consistent 4-digit format
+        _normalized_fy = _normalize_fy_value(fiscal_year)
+        if _normalized_fy:
+            fiscal_year = _normalized_fy
 
         # C-1 fallback: remap generic authorization/appropriation columns to
         # FY-specific names using the sheet's fiscal year context.
