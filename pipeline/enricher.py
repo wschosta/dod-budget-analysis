@@ -164,6 +164,14 @@ _ORG_TAGS: dict[str, str] = {
     "defense wide": "defense-wide",
 }
 
+# ── Exhibit type → budget type mapping (for PDF-only PE inference) ────────────
+
+_EXHIBIT_TO_BUDGET_TYPE: dict[str, str] = {
+    "r1": "RDT&E", "r2": "RDT&E", "r3": "RDT&E", "r4": "RDT&E",
+    "p1": "Procurement", "p1r": "Procurement", "p5": "Procurement",
+    "o1": "O&M", "m1": "MilPers", "c1": "MilCon", "rf1": "Revolving",
+}
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -173,6 +181,36 @@ def _extract_fy_from_path(source_file: str) -> str | None:
     if m:
         digits = re.search(r"(?:19|20)\d{2}", m.group(), re.IGNORECASE)
         return digits.group() if digits else None
+    return None
+
+
+# Regex to extract a PE title from PDF page text.
+# Matches patterns like:
+#   "PE 0602702F: Cool Program Title"
+#   "PE 0602702F / Cool Program Title"
+#   "Program Element 0602702F Cool Program Title"
+_PE_TITLE_PATTERN = re.compile(
+    r"(?:PE|Program\s+Element)\s+"
+    r"([0-9]{7}[A-Z]{1,2})"
+    r"\s*[:/\-–—]\s*"
+    r"([A-Z][^\n]{5,80})",
+    re.IGNORECASE,
+)
+
+
+def _extract_pe_title_from_text(pe_number: str, text: str) -> str | None:
+    """Try to extract a display title for a PE from PDF page text.
+
+    Searches for patterns like 'PE 0602702F: Title' or 'PE 0602702F / Title'.
+    Returns the first matching title for the given PE number, or None.
+    """
+    for m in _PE_TITLE_PATTERN.finditer(text):
+        if m.group(1).upper() == pe_number.upper():
+            title = m.group(2).strip()
+            # Clean up trailing punctuation and whitespace
+            title = re.sub(r"[\s.,:;]+$", "", title)
+            if title:
+                return title
     return None
 
 
@@ -214,6 +252,20 @@ def _save_checkpoint(conn: sqlite3.Connection, phase: int, last_rowid: int) -> N
     """, (phase, last_rowid))
 
 
+def _ensure_pe_index_source_column(conn: sqlite3.Connection) -> None:
+    """Add the 'source' column to pe_index if it doesn't exist yet.
+
+    Handles the upgrade path for databases created before PDF-only PE support.
+    """
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(pe_index)").fetchall()}
+    if "source" not in cols:
+        conn.execute(
+            "ALTER TABLE pe_index ADD COLUMN source TEXT NOT NULL DEFAULT 'budget_lines'"
+        )
+        conn.commit()
+        logger.info("  Added 'source' column to pe_index (upgrade).")
+
+
 def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
     # Drop FTS5 table first (depends on pe_descriptions content table)
     conn.execute("DROP TABLE IF EXISTS pe_descriptions_fts")
@@ -231,6 +283,7 @@ def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
             budget_type       TEXT,
             fiscal_years      TEXT,
             exhibit_types     TEXT,
+            source            TEXT NOT NULL DEFAULT 'budget_lines',
             updated_at        TEXT DEFAULT (datetime('now'))
         );
         CREATE TABLE IF NOT EXISTS pe_descriptions (
@@ -324,14 +377,23 @@ def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
 # ── Phase 1: Build pe_index ───────────────────────────────────────────────────
 
 def run_phase1(conn: sqlite3.Connection, stop_event: threading.Event | None = None) -> int:
-    """Aggregate all distinct PE numbers from budget_lines into pe_index."""
-    logger.info("[Phase 1] Building pe_index from budget_lines...")
+    """Aggregate PE numbers from budget_lines and pdf_pe_numbers into pe_index.
+
+    Pass 1: Index PEs from budget_lines (Excel data) with full metadata.
+    Pass 2: Discover additional PEs from pdf_pe_numbers that are NOT already
+             in pe_index, extracting metadata from PDF page text.
+    """
+    logger.info("[Phase 1] Building pe_index...")
     t0 = time.time()
 
-    # Use a single aggregation pass to get all fields including most-common org.
-    # The correlated subquery was replaced with a pre-aggregated CTE to avoid
-    # one COUNT(*) per PE row (which scaled O(N*M) with thousands of PE numbers).
-    logger.info("  Querying budget_lines for distinct PE numbers...")
+    # Ensure pe_index has the 'source' column (upgrade path for older DBs)
+    try:
+        _ensure_pe_index_source_column(conn)
+    except sqlite3.OperationalError:
+        pass  # pe_index doesn't exist yet; will be created by _drop_enrichment_tables
+
+    # ── Pass 1: budget_lines (Excel-sourced PEs) ─────────────────────────
+    logger.info("  Pass 1: Querying budget_lines for distinct PE numbers...")
     rows = conn.execute("""
         WITH org_ranked AS (
             SELECT pe_number,
@@ -365,27 +427,151 @@ def run_phase1(conn: sqlite3.Connection, stop_event: threading.Event | None = No
         GROUP BY b.pe_number
     """).fetchall()
 
-    if not rows:
-        logger.info("No PE numbers found in budget_lines -- skipping.")
-        return 0
+    pass1_count = 0
+    if rows:
+        if stop_event and stop_event.is_set():
+            logger.info("  Phase 1 stopped before Pass 1 insert.")
+            return 0
 
-    if stop_event and stop_event.is_set():
-        logger.info("  Phase 1 stopped before insert.")
-        return 0
+        conn.executemany("""
+            INSERT OR REPLACE INTO pe_index
+                (pe_number, display_title, organization_name, budget_type,
+                 fiscal_years, exhibit_types, source, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'budget_lines', datetime('now'))
+        """, [
+            (r[0], r[1], r[2], r[3], r[4], r[5])
+            for r in rows
+        ])
+        conn.commit()
+        pass1_count = len(rows)
+    logger.info("  Pass 1: Indexed %d PEs from budget_lines.", pass1_count)
 
-    logger.info("  Inserting %d PE index rows...", len(rows))
-    conn.executemany("""
-        INSERT OR REPLACE INTO pe_index
-            (pe_number, display_title, organization_name, budget_type,
-             fiscal_years, exhibit_types, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-    """, [
-        (r[0], r[1], r[2], r[3], r[4], r[5])
-        for r in rows
-    ])
-    conn.commit()
-    logger.info("Indexed %d PE numbers in %.1fs.", len(rows), time.time() - t0)
-    return len(rows)
+    # ── Pass 2: pdf_pe_numbers (PDF-only PEs) ────────────────────────────
+    # Discover PEs that appear in PDF documents but have no budget_lines rows.
+    pass2_count = 0
+    try:
+        pdf_only_pes = conn.execute("""
+            SELECT DISTINCT ppn.pe_number
+            FROM pdf_pe_numbers ppn
+            WHERE NOT EXISTS (
+                SELECT 1 FROM pe_index pi WHERE pi.pe_number = ppn.pe_number
+            )
+        """).fetchall()
+    except sqlite3.OperationalError:
+        # pdf_pe_numbers table may not exist
+        pdf_only_pes = []
+
+    if pdf_only_pes:
+        logger.info("  Pass 2: Found %d PDF-only PEs to index...", len(pdf_only_pes))
+
+        if stop_event and stop_event.is_set():
+            logger.info("  Phase 1 stopped before Pass 2.")
+            return pass1_count
+
+        insert_buf: list[tuple] = []
+        for row in pdf_only_pes:
+            pe = row[0]
+
+            # Try to extract title from PDF page text
+            title = None
+            try:
+                page_rows = conn.execute("""
+                    SELECT pp.page_text
+                    FROM pdf_pe_numbers ppn
+                    JOIN pdf_pages pp ON pp.id = ppn.pdf_page_id
+                    WHERE ppn.pe_number = ?
+                    LIMIT 10
+                """, (pe,)).fetchall()
+                for pr in page_rows:
+                    if pr[0]:
+                        title = _extract_pe_title_from_text(pe, pr[0])
+                        if title:
+                            break
+            except sqlite3.OperationalError:
+                pass
+
+            # Infer organization from source_category (most common)
+            org_name = None
+            try:
+                org_row = conn.execute("""
+                    SELECT pp.source_category, COUNT(*) AS cnt
+                    FROM pdf_pe_numbers ppn
+                    JOIN pdf_pages pp ON pp.id = ppn.pdf_page_id
+                    WHERE ppn.pe_number = ?
+                      AND pp.source_category IS NOT NULL
+                    GROUP BY pp.source_category
+                    ORDER BY cnt DESC
+                    LIMIT 1
+                """, (pe,)).fetchone()
+                if org_row:
+                    org_name = org_row[0]
+            except sqlite3.OperationalError:
+                pass
+
+            # Infer budget type from exhibit types of source files
+            budget_type = None
+            try:
+                exhibit_row = conn.execute("""
+                    SELECT pp.exhibit_type, COUNT(*) AS cnt
+                    FROM pdf_pe_numbers ppn
+                    JOIN pdf_pages pp ON pp.id = ppn.pdf_page_id
+                    WHERE ppn.pe_number = ?
+                      AND pp.exhibit_type IS NOT NULL
+                    GROUP BY pp.exhibit_type
+                    ORDER BY cnt DESC
+                    LIMIT 1
+                """, (pe,)).fetchone()
+                if exhibit_row and exhibit_row[0]:
+                    budget_type = _EXHIBIT_TO_BUDGET_TYPE.get(
+                        exhibit_row[0].lower(), None
+                    )
+            except sqlite3.OperationalError:
+                pass
+
+            # Collect fiscal years and exhibit types
+            fiscal_years_json = "[]"
+            exhibit_types_json = "[]"
+            try:
+                fy_rows = conn.execute("""
+                    SELECT DISTINCT ppn.fiscal_year
+                    FROM pdf_pe_numbers ppn
+                    WHERE ppn.pe_number = ? AND ppn.fiscal_year IS NOT NULL
+                """, (pe,)).fetchall()
+                if fy_rows:
+                    fiscal_years_json = json.dumps([r[0] for r in fy_rows])
+
+                et_rows = conn.execute("""
+                    SELECT DISTINCT pp.exhibit_type
+                    FROM pdf_pe_numbers ppn
+                    JOIN pdf_pages pp ON pp.id = ppn.pdf_page_id
+                    WHERE ppn.pe_number = ? AND pp.exhibit_type IS NOT NULL
+                """, (pe,)).fetchall()
+                if et_rows:
+                    exhibit_types_json = json.dumps([r[0] for r in et_rows])
+            except sqlite3.OperationalError:
+                pass
+
+            insert_buf.append((
+                pe, title, org_name, budget_type,
+                fiscal_years_json, exhibit_types_json,
+            ))
+
+        if insert_buf:
+            conn.executemany("""
+                INSERT OR IGNORE INTO pe_index
+                    (pe_number, display_title, organization_name, budget_type,
+                     fiscal_years, exhibit_types, source, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'pdf', datetime('now'))
+            """, insert_buf)
+            conn.commit()
+            pass2_count = len(insert_buf)
+        logger.info("  Pass 2: Indexed %d additional PEs from PDF documents.", pass2_count)
+    else:
+        logger.info("  Pass 2: No additional PDF-only PEs found.")
+
+    total = pass1_count + pass2_count
+    logger.info("[Phase 1] Total: %d PEs in pe_index (%.1fs).", total, time.time() - t0)
+    return total
 
 
 # ── Phase 2: Link PDFs to PEs ─────────────────────────────────────────────────

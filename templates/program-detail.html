@@ -10,6 +10,9 @@
 <h2>{{ pe_data.index.display_title or pe_data.pe_number }}</h2>
 <div class="pe-meta">
   <span class="badge" style="font-size:.85rem">{{ pe_data.pe_number }}</span>
+  {% if pe_data.index.source == 'pdf' %}
+  <span class="badge badge-secondary" title="Data derived from PDF narratives only; no structured Excel line items available" style="font-size:.75rem;background:var(--text-secondary);color:var(--bg)">PDF-only</span>
+  {% endif %}
   {% if pe_data.index.organization_name %}
   <span>{{ pe_data.index.organization_name }}</span>
   {% endif %}

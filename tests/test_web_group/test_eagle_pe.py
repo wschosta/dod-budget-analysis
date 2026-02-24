@@ -64,7 +64,9 @@ def app_client(tmp_path_factory):
             organization_name TEXT,
             budget_type TEXT,
             fiscal_years TEXT,
-            exhibit_types TEXT
+            exhibit_types TEXT,
+            source TEXT NOT NULL DEFAULT 'budget_lines',
+            updated_at TEXT DEFAULT (datetime('now'))
         );
         CREATE TABLE pe_tags (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -147,7 +149,7 @@ def app_client(tmp_path_factory):
         SELECT id, account_title, line_item_title, budget_activity_title
         FROM budget_lines;
 
-        INSERT INTO pe_index VALUES
+        INSERT INTO pe_index (pe_number, display_title, organization_name, budget_type, fiscal_years, exhibit_types) VALUES
             ('0604131A', 'Apache AH-64 Block III', 'Army', 'RDT&E',
              '["2026"]', '["r2"]'),
             ('0603292N', 'F-35 Lightning II', 'Navy', 'RDT&E',
@@ -250,7 +252,9 @@ def app_client_no_projects(tmp_path_factory):
             organization_name TEXT,
             budget_type TEXT,
             fiscal_years TEXT,
-            exhibit_types TEXT
+            exhibit_types TEXT,
+            source TEXT NOT NULL DEFAULT 'budget_lines',
+            updated_at TEXT DEFAULT (datetime('now'))
         );
         CREATE TABLE pe_tags (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -303,7 +307,7 @@ def app_client_no_projects(tmp_path_factory):
         SELECT id, account_title, line_item_title, budget_activity_title
         FROM budget_lines;
 
-        INSERT INTO pe_index VALUES
+        INSERT INTO pe_index (pe_number, display_title, organization_name, budget_type, fiscal_years, exhibit_types) VALUES
             ('0604131A', 'Apache AH-64 Block III', 'Army', 'RDT&E',
              '["2026"]', '["r2"]');
         INSERT INTO pe_tags VALUES

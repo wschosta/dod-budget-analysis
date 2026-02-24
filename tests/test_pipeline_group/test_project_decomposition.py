@@ -136,6 +136,7 @@ class TestPhase5Integration:
                 budget_type TEXT,
                 fiscal_years TEXT,
                 exhibit_types TEXT,
+                source TEXT NOT NULL DEFAULT 'budget_lines',
                 updated_at TEXT DEFAULT (datetime('now'))
             );
             CREATE TABLE pe_descriptions (

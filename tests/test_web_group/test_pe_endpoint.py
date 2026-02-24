@@ -97,6 +97,7 @@ def _make_db() -> sqlite3.Connection:
             budget_type TEXT,
             fiscal_years TEXT,
             exhibit_types TEXT,
+            source TEXT NOT NULL DEFAULT 'budget_lines',
             updated_at TEXT DEFAULT (datetime('now'))
         );
 
