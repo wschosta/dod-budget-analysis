@@ -16,7 +16,7 @@
     <div class="pe-description-card" style="margin-bottom:.5rem">
       <div class="pe-desc-header">
         {% if desc.fiscal_year %}
-        <span class="badge" style="font-size:.75rem">FY{{ desc.fiscal_year }}</span>
+        <span class="badge" style="font-size:.75rem">{{ desc.fiscal_year|format_fy }}</span>
         {% endif %}
         {% if desc.header %}
         <strong style="font-size:.85rem">{{ desc.header }}</strong>

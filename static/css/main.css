@@ -1349,6 +1349,9 @@ tr:focus-within td {
   gap: 1.25rem;
   align-items: start;
 }
+.programs-layout .filter-panel {
+  overflow: visible;
+}
 .pe-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));

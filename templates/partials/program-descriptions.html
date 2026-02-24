@@ -2,7 +2,7 @@
 {% for desc in descriptions %}
 <div class="pe-description-card">
   <div class="pe-desc-header">
-    <span class="badge">FY{{ desc.fiscal_year }}</span>
+    <span class="badge">{{ desc.fiscal_year|format_fy }}</span>
     {% if desc.section_header %}<strong>{{ desc.section_header }}</strong>{% endif %}
     <span style="color:var(--text-secondary);font-size:.75rem">{{ desc.source_file }}</span>
   </div>

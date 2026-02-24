@@ -22,6 +22,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from api.database import get_db
+from pipeline.builder import EXHIBIT_TYPES as _EXHIBIT_TYPE_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -74,9 +75,21 @@ _exhibit_types_cache: TTLCache = TTLCache(maxsize=4, ttl_seconds=300)
 _fiscal_years_cache: TTLCache = TTLCache(maxsize=4, ttl_seconds=300)
 
 
+def _format_fy(value: str | None) -> str:
+    """Format fiscal year for display, avoiding FYFY duplication."""
+    if not value:
+        return ""
+    s = str(value).strip()
+    # Strip existing FY prefix (with or without space)
+    if s.upper().startswith("FY"):
+        s = s[2:].lstrip()
+    return f"FY {s}" if s else ""
+
+
 def set_templates(t: Jinja2Templates) -> None:
     global _templates
     _templates = t
+    t.env.filters["format_fy"] = _format_fy
 
 
 def _tmpl() -> Jinja2Templates:
@@ -137,7 +150,7 @@ def _get_exhibit_types(conn: sqlite3.Connection) -> list[dict]:
             "SELECT DISTINCT exhibit_type AS code FROM budget_lines "
             "WHERE exhibit_type IS NOT NULL ORDER BY exhibit_type"
         ).fetchall()
-        result = [{"code": r["code"], "display_name": r["code"]} for r in rows]
+        result = [{"code": r["code"], "display_name": _EXHIBIT_TYPE_NAMES.get(r["code"], r["code"].upper())} for r in rows]
     return result
 
 
@@ -152,28 +165,88 @@ def _get_fiscal_years(conn: sqlite3.Connection) -> list[dict]:
     cached = _fiscal_years_cache.get(cache_key)
     if cached is not None:
         return cached
-    rows = conn.execute(
-        "SELECT fiscal_year, COUNT(*) AS row_count FROM budget_lines "
-        "WHERE fiscal_year IS NOT NULL "
-        "AND (fiscal_year GLOB '[0-9][0-9][0-9][0-9]' "
-        "     OR fiscal_year GLOB 'FY [0-9][0-9][0-9][0-9]' "
-        "     OR fiscal_year GLOB 'FY[0-9][0-9][0-9][0-9]') "
-        "GROUP BY fiscal_year ORDER BY fiscal_year"
-    ).fetchall()
+    try:
+        rows = conn.execute(
+            "SELECT TRIM(fiscal_year) AS fiscal_year, COUNT(*) AS row_count "
+            "FROM budget_lines "
+            "WHERE fiscal_year IS NOT NULL "
+            "AND (TRIM(fiscal_year) GLOB '[0-9][0-9][0-9][0-9]' "
+            "     OR TRIM(fiscal_year) GLOB 'FY [0-9][0-9][0-9][0-9]' "
+            "     OR TRIM(fiscal_year) GLOB 'FY[0-9][0-9][0-9][0-9]') "
+            "GROUP BY TRIM(fiscal_year) ORDER BY TRIM(fiscal_year)"
+        ).fetchall()
+    except Exception:
+        logger.debug("Fiscal year GLOB query failed", exc_info=True)
+        rows = []
+    # Fallback: if GLOB matched nothing, try permissive LIKE
+    if not rows:
+        try:
+            rows = conn.execute(
+                "SELECT TRIM(fiscal_year) AS fiscal_year, COUNT(*) AS row_count "
+                "FROM budget_lines "
+                "WHERE fiscal_year IS NOT NULL AND fiscal_year != '' "
+                "AND fiscal_year NOT LIKE '%Detail%' "
+                "AND fiscal_year NOT LIKE '%Emergency%' "
+                "AND fiscal_year NOT LIKE '%Act%' "
+                "AND LENGTH(TRIM(fiscal_year)) <= 10 "
+                "GROUP BY TRIM(fiscal_year) ORDER BY TRIM(fiscal_year)"
+            ).fetchall()
+        except Exception:
+            logger.debug("Fiscal year fallback query failed", exc_info=True)
+            rows = []
     result = [{"fiscal_year": r["fiscal_year"], "row_count": r["row_count"]} for r in rows]
     _fiscal_years_cache.set(cache_key, result)
     return result
 
+
+_APPROP_KEYWORDS: dict[str, str] = {
+    "aircraft procurement": "APAF",
+    "missile procurement": "MPAF",
+    "weapons procurement": "WPN",
+    "ammunition procurement": "AMMO",
+    "other procurement": "OPROC",
+    "procurement": "PROC",
+    "shipbuilding and conversion": "SCN",
+    "research, development, test & eval": "RDTE",
+    "research, development, test and eval": "RDTE",
+    "rdt&e": "RDTE",
+    "operation and maintenance": "O&M",
+    "operations and maintenance": "O&M",
+    "military personnel": "MILPERS",
+    "military construction": "MILCON",
+    "revolving fund": "RFUND",
+    "family housing": "FHSG",
+}
 
 def _get_appropriations(conn: sqlite3.Connection) -> list[dict]:
     """FE-002: Return distinct appropriation codes and titles."""
     rows = conn.execute(
         "SELECT DISTINCT appropriation_code AS code, appropriation_title AS title "
         "FROM budget_lines "
-        "WHERE appropriation_code IS NOT NULL "
+        "WHERE appropriation_code IS NOT NULL AND appropriation_code != '' "
         "ORDER BY appropriation_code"
     ).fetchall()
-    return [{"code": r["code"], "title": r["title"]} for r in rows]
+    if rows:
+        return [{"code": r["code"], "title": r["title"]} for r in rows]
+    # Fallback: derive categories from appropriation_title
+    try:
+        title_rows = conn.execute(
+            "SELECT DISTINCT appropriation_title AS title "
+            "FROM budget_lines "
+            "WHERE appropriation_title IS NOT NULL AND appropriation_title != '' "
+            "ORDER BY appropriation_title"
+        ).fetchall()
+    except Exception:
+        return []
+    seen: dict[str, str] = {}
+    for r in title_rows:
+        title = r["title"]
+        lower = title.lower()
+        for keyword, code in _APPROP_KEYWORDS.items():
+            if keyword in lower and code not in seen:
+                seen[code] = title
+                break
+    return [{"code": code, "title": title} for code, title in sorted(seen.items())]
 
 
 def _parse_filters(request: Request) -> dict[str, Any]:

@@ -133,7 +133,7 @@
             hx-target="#detail-container"
             hx-swap="innerHTML"
             title="{{ rel.line_item_title or rel.organization_name or 'Budget Line' }}">
-      FY{{ rel.fiscal_year }}
+      {{ rel.fiscal_year|format_fy }}
       {% if best_amt is not none %}
         <span style="font-size:.75rem;color:var(--clr-gray-700)">
           (${{ "{:,.0f}".format(best_amt) }}K)
