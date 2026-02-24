@@ -1071,7 +1071,13 @@ document.addEventListener("DOMContentLoaded", function () {
 
 function _escapeHtml(s) {
   if (!s) return "";
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Escape characters that are dangerous in both text and attribute contexts
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 function initAutocomplete() {
