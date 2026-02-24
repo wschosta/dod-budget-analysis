@@ -144,21 +144,62 @@ ORG_MAP = {
     # Single-letter codes (filename-level)
     "A": "Army", "N": "Navy", "F": "Air Force", "S": "Space Force",
     "D": "Defense-Wide", "M": "Marine Corps", "J": "Joint Staff",
-    # Multi-letter / full codes found in Organization column cells
+    # Uppercase multi-letter variants found in spreadsheet Organization column
+    "ARMY": "Army", "AF": "Air Force", "NAVY": "Navy",
+    "USAF": "Air Force", "USMC": "Marine Corps", "USN": "Navy",
+    "AIR FORCE": "Air Force", "MARINE CORPS": "Marine Corps",
+    "SPACE FORCE": "Space Force", "DEFENSE-WIDE": "Defense-Wide",
+    "DEFENSEWIDE": "Defense-Wide", "DW": "Defense-Wide",
+    # Defense agencies and field activities (pass-through or normalize)
     "SOCOM": "SOCOM", "USSOCOM": "SOCOM",
     "DISA":  "DISA",
     "DLA":   "DLA",
     "MDA":   "MDA",
-    "DHA":   "DHA",  # Defense Health Agency
-    "NGB":   "NGB",  # National Guard Bureau
+    "DHA":   "DHA",
+    "NGB":   "NGB",
     "DARPA": "DARPA",
     "NSA":   "NSA",
     "DIA":   "DIA",
     "NRO":   "NRO",
     "NGA":   "NGA",
-    "DTRA":  "DTRA",  # Defense Threat Reduction Agency
-    "DCSA":  "DCSA",  # Defense Counterintelligence and Security Agency
-    "WHS":   "WHS",   # Washington Headquarters Services
+    "DTRA":  "DTRA",
+    "DCSA":  "DCSA",
+    "WHS":   "WHS",
+    "DCMA":  "DCMA",
+    "DFAS":  "DFAS",
+    "DODEA": "DODEA",
+    "DPAA":  "DPAA",
+    "TJS":   "TJS",
+    "DSCA":  "DSCA",
+    "DECA":  "DECA",
+    "OSD":   "OSD",
+    "DAU":   "DAU",
+    "DTIC":  "DTIC",
+    "DHRA":  "DHRA",
+    "DLSA":  "DLSA",
+    "DTSA":  "DTSA",
+    "OTE":   "OTE",
+    "CYBER": "CYBER",
+    "CMP":   "CMP",
+    "DEPS":  "DEPS",
+    "DEPSDDR": "DEPSDDR",
+    "DMACT": "DMACT",
+    "OLDCC": "OLDCC",
+    "CAAF":  "CAAF",
+    "CBDP":  "CBDP",
+    "SDA":   "SDA",
+    "TRANSCOM": "TRANSCOM",
+    "TRANS": "TRANSCOM",
+    "BTA":   "BTA",
+    "DEFW":  "DEFW",
+    "DEFR":  "DEFR",
+    "OEA":   "OEA",
+    "UNDD":  "UNDD",
+    "DPMO":  "DPMO",
+    "DSS":   "DSS",
+    "IG":    "IG",
+    "TMA":   "TMA",
+    "NDU":   "NDU",
 }
 
 # Map exhibit type prefixes to readable names (Step 1.B1-g)
@@ -320,6 +361,26 @@ def _migrate_add_columns(conn: sqlite3.Connection) -> None:
                 conn.execute(
                     f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}"
                 )
+    conn.commit()
+
+
+def _seed_reference_tables(conn: sqlite3.Connection) -> None:
+    """Seed reference tables with canonical display names."""
+    # Exhibit types
+    for code, display_name in EXHIBIT_TYPES.items():
+        exhibit_class = "summary" if code in ("p1", "r1", "o1", "m1", "c1", "rf1", "p1r") else "detail"
+        conn.execute(
+            "INSERT OR IGNORE INTO exhibit_types (code, display_name, exhibit_class) VALUES (?, ?, ?)",
+            (code, display_name, exhibit_class),
+        )
+    # Budget cycles
+    for code, label in [("PB", "President's Budget"), ("ENACTED", "Enacted"),
+                        ("CR", "Continuing Resolution"), ("AMENDED", "Amended Budget"),
+                        ("SAR", "Selected Acquisition Report")]:
+        conn.execute(
+            "INSERT OR IGNORE INTO budget_cycles (code, label) VALUES (?, ?)",
+            (code, label),
+        )
     conn.commit()
 
 
@@ -575,6 +636,35 @@ def create_database(db_path: Path) -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_processed_files_session
             ON processed_files(session_id);
 
+        -- Reference tables (normalised lookups)
+        CREATE TABLE IF NOT EXISTS services_agencies (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            code        TEXT    NOT NULL UNIQUE,
+            full_name   TEXT    NOT NULL,
+            category    TEXT    NOT NULL DEFAULT 'Other'
+        );
+
+        CREATE TABLE IF NOT EXISTS exhibit_types (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            code         TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            exhibit_class TEXT NOT NULL DEFAULT 'other',
+            description  TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS appropriation_titles (
+            id    INTEGER PRIMARY KEY AUTOINCREMENT,
+            code  TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL,
+            color_of_money TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS budget_cycles (
+            id    INTEGER PRIMARY KEY AUTOINCREMENT,
+            code  TEXT NOT NULL UNIQUE,
+            label TEXT NOT NULL
+        );
+
         -- Enrichment tables (populated by enrich_budget_db.py)
 
         -- Canonical record per unique PE number, aggregating across years/exhibits
@@ -647,6 +737,9 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             applied_at   TEXT DEFAULT (datetime('now'))
         );
     """)
+
+    # Seed reference tables with canonical data
+    _seed_reference_tables(conn)
 
     # Record schema version if not already present
     current_version = conn.execute(
@@ -726,21 +819,51 @@ def _extract_all_pe_numbers(text: str | None) -> list[str]:
     return result
 
 
-def _parse_appropriation(account_title: str | None) -> tuple[str | None, str | None]:
-    """Split a combined account_title into (appropriation_code, appropriation_title).
+_APPROPRIATION_KEYWORDS: dict[str, str] = {
+    "aircraft procurement": "APAF",
+    "missile procurement": "MPAF",
+    "weapons procurement": "WPN",
+    "ammunition procurement": "AMMO",
+    "other procurement": "OPROC",
+    "shipbuilding and conversion": "SCN",
+    "research, development, test & eval": "RDTE",
+    "research, development, test and eval": "RDTE",
+    "rdt&e": "RDTE",
+    "operation and maintenance": "O&M",
+    "operations and maintenance": "O&M",
+    "military personnel": "MILPERS",
+    "military construction": "MILCON",
+    "revolving fund": "RFUND",
+    "family housing": "FHSG",
+    "national guard and reserve": "NGRE",
+    "chemical agents": "CHEM",
+    "defense production act": "DPA",
+    "environmental restoration": "ER",
+    "drug interdiction": "DRUG",
+}
 
-    Many account_title values contain a leading numeric appropriation code
-    followed by the title, e.g. "2035 Aircraft Procurement, Army".
-    Returns (code, title) where code may be None if the field has no numeric prefix.
-    Implements TODO 1.B4-c.
+
+def _parse_appropriation(account_title: str | None) -> tuple[str | None, str | None]:
+    """Split account_title into (appropriation_code, appropriation_title).
+
+    Strategy 1: Leading numeric code (e.g., "2035 Aircraft Procurement, Army").
+    Strategy 2: Keyword-based detection from title text.
     """
     if not account_title:
         return None, None
     s = str(account_title).strip()
+    if not s:
+        return None, None
+    # Strategy 1: Leading numeric code
     parts = s.split(None, 1)
     if len(parts) == 2 and parts[0].isdigit():
         return parts[0], parts[1]
-    return None, s if s else None
+    # Strategy 2: Keyword-based appropriation type
+    lower = s.lower()
+    for keyword, code in _APPROPRIATION_KEYWORDS.items():
+        if keyword in lower:
+            return code, s
+    return None, s
 
 
 def _detect_currency_year(sheet_name: str, filename: str) -> str:
@@ -1212,7 +1335,7 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
         def get_org_name(row):
             """Get organization name, defaulting to code if not in map."""
             org_code = get_str(row, "organization") or ""
-            return ORG_MAP.get(org_code, org_code)
+            return ORG_MAP.get(org_code) or ORG_MAP.get(org_code.upper()) or ORG_MAP.get(org_code.title(), org_code)
 
         # Process rows after header
         for row in rows_iter:
@@ -1230,8 +1353,8 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
                 if _org_idx is not None and _org_idx < len(row) and row[_org_idx]
                 else ""
             )
-            # Lookup by exact code first, then by uppercase match (Step 1.B4-b)
-            org_name = ORG_MAP.get(org_code) or ORG_MAP.get(org_code.upper(), org_code)
+            # Lookup by exact code first, then uppercase, then title-case (Step 1.B4-b)
+            org_name = ORG_MAP.get(org_code) or ORG_MAP.get(org_code.upper()) or ORG_MAP.get(org_code.title(), org_code)
 
             # Extract PE number from line_item or account fields (Step 1.B4-a implementation)
             line_item_val = get_str(row, "line_item")
@@ -1459,7 +1582,7 @@ def _extract_excel_rows(args: tuple) -> dict:
                 if _org_idx is not None and _org_idx < len(row) and row[_org_idx]
                 else ""
             )
-            org_name = ORG_MAP.get(org_code) or ORG_MAP.get(org_code.upper(), org_code)
+            org_name = ORG_MAP.get(org_code) or ORG_MAP.get(org_code.upper()) or ORG_MAP.get(org_code.title(), org_code)
             line_item_val = _get_str(row, "line_item")
             account_val = str(acct).strip()
             pe_number = _extract_pe_number(line_item_val) or _extract_pe_number(account_val)
@@ -3080,6 +3203,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         CREATE INDEX IF NOT EXISTS idx_bl_source ON budget_lines(source_file);
         CREATE INDEX IF NOT EXISTS idx_bl_pe ON budget_lines(pe_number);
         CREATE INDEX IF NOT EXISTS idx_bl_approp ON budget_lines(appropriation_code);
+        CREATE INDEX IF NOT EXISTS idx_bl_approp_title ON budget_lines(appropriation_title);
         -- Composite index for PE detail: pe_number + fiscal_year covers
         -- the common WHERE pe_number=? ORDER BY fiscal_year pattern.
         CREATE INDEX IF NOT EXISTS idx_bl_pe_fy

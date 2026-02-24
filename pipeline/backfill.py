@@ -20,6 +20,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from pipeline.builder import EXHIBIT_TYPES as _EXHIBIT_TYPE_NAMES
+
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 
@@ -90,7 +92,7 @@ def backfill(conn: sqlite3.Connection, dry_run: bool = False) -> dict:
         code = exhibit_code.strip()
         normalized = code.lower()
         exhibit_class = exhibit_class_map.get(normalized, "other")
-        display_name = code.upper()
+        display_name = _EXHIBIT_TYPE_NAMES.get(normalized, code.upper())
 
         if not dry_run:
             conn.execute(
