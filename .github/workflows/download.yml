@@ -1,4 +1,6 @@
 name: Download DoD Budget Documents
+permissions:
+  contents: read
 
 # Step 1.A4-c: Manual trigger only — no automatic schedule.
 # Downloaded files are NOT committed to the repo; the manifest is uploaded
