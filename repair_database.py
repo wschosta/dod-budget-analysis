@@ -297,6 +297,20 @@ def step_6_backfill_reference_data(conn: sqlite3.Connection, dry_run: bool = Fal
     return summary
 
 
+def step_7_rebuild_fts(conn: sqlite3.Connection) -> None:
+    """Rebuild FTS5 indexes to ensure consistency after data changes."""
+    logger.info("Step 7: Rebuilding FTS5 indexes...")
+    for table in ["budget_lines_fts", "pdf_pages_fts"]:
+        try:
+            conn.execute(f"INSERT INTO {table}({table}) VALUES('rebuild')")
+            logger.info(f"  Rebuilt {table}")
+        except sqlite3.OperationalError:
+            logger.debug(f"  {table} does not exist, skipping")
+    conn.execute("PRAGMA optimize")
+    conn.commit()
+    logger.info("  ✓ FTS5 rebuild complete")
+
+
 def repair(db_path: Path, dry_run: bool = False) -> dict:
     """Run all repair steps on the database.
 
@@ -326,6 +340,8 @@ def repair(db_path: Path, dry_run: bool = False) -> dict:
         summary["approp_backfilled"] = step_4_backfill_appropriation_codes(conn, dry_run)
         step_5_add_indexes(conn)
         summary["reference"] = step_6_backfill_reference_data(conn, dry_run)
+        if not dry_run:
+            step_7_rebuild_fts(conn)
     finally:
         conn.close()
 

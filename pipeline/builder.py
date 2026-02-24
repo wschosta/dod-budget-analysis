@@ -1356,17 +1356,21 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
             # Lookup by exact code first, then uppercase, then title-case (Step 1.B4-b)
             org_name = ORG_MAP.get(org_code) or ORG_MAP.get(org_code.upper()) or ORG_MAP.get(org_code.title(), org_code)
 
-            # Extract PE number from line_item or account fields (Step 1.B4-a implementation)
+            # Extract PE number from line_item, account, or account_title (Step 1.B4-a)
             line_item_val = get_str(row, "line_item")
             account_val = str(acct).strip()
-            pe_number = _extract_pe_number(line_item_val) or _extract_pe_number(account_val)
+            acct_title_val = get_str(row, "account_title")
+            pe_number = (
+                _extract_pe_number(line_item_val)
+                or _extract_pe_number(account_val)
+                or _extract_pe_number(acct_title_val)
+            )
             # LION-102: Capture additional PE numbers for cross-referencing
             all_pes = _extract_all_pe_numbers(
                 f"{line_item_val or ''} {account_val} {get_str(row, 'line_item_title') or ''}")
             additional_pes = [p for p in all_pes if p != pe_number] if pe_number else all_pes[1:]
 
             # Split appropriation code and title from account_title (Step 1.B4-c implementation)
-            acct_title_val = get_str(row, "account_title")
             approp_code, approp_title = _parse_appropriation(acct_title_val)
 
             def _amt(field):
@@ -1585,13 +1589,18 @@ def _extract_excel_rows(args: tuple) -> dict:
             org_name = ORG_MAP.get(org_code) or ORG_MAP.get(org_code.upper()) or ORG_MAP.get(org_code.title(), org_code)
             line_item_val = _get_str(row, "line_item")
             account_val = str(acct).strip()
-            pe_number = _extract_pe_number(line_item_val) or _extract_pe_number(account_val)
+            acct_title_val = _get_str(row, "account_title")
+            # Extract PE from line_item, account, or account_title
+            pe_number = (
+                _extract_pe_number(line_item_val)
+                or _extract_pe_number(account_val)
+                or _extract_pe_number(acct_title_val)
+            )
             # LION-102: Capture additional PE numbers in parallel worker
             line_item_title_val = _get_str(row, "line_item_title")
             all_pes = _extract_all_pe_numbers(
                 f"{line_item_val or ''} {account_val} {line_item_title_val or ''}")
             additional_pes = [p for p in all_pes if p != pe_number] if pe_number else all_pes[1:]
-            acct_title_val = _get_str(row, "account_title")
             approp_code, approp_title = _parse_appropriation(acct_title_val)
 
             fy_dict: dict[str, float | None] = {}
