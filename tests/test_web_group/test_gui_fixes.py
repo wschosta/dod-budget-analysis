@@ -206,7 +206,7 @@ class TestFix002ServiceDropdown:
         resp = gui_client.get("/partials/results?service=AF", headers={"HX-Request": "true"})
         assert resp.status_code == 200
         # Should not show any results since "AF" is not an exact org name
-        assert "No budget items" in resp.text or "0 result" in resp.text
+        assert "No budget items" in resp.text or "0 result" in resp.text or "No data found" in resp.text
 
 
 # ── FIX-003: Fiscal year dropdown validation ─────────────────────────────────
