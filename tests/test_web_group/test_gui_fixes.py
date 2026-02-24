@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import re
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -159,8 +160,8 @@ class TestFix001CDNScripts:
     def test_base_template_has_htmx_script(self, gui_client):
         resp = gui_client.get("/")
         assert resp.status_code == 200
-        # Should have htmx script tag without integrity attribute
-        assert "htmx.org" in resp.text
+        # Should have htmx script tag sourced from the official CDN, without integrity attribute
+        assert re.search(r'<script[^>]+src=["\']https?://[^"\']*htmx\.org[^"\']*["\']', resp.text)
         assert 'integrity="sha384-D1Kt99CQ' not in resp.text
 
     def test_base_template_has_chartjs_script(self, gui_client):
