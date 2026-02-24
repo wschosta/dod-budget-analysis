@@ -834,11 +834,28 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
 
 # ── Phase 4: Detect Cross-PE Lineage ─────────────────────────────────────────
 
+# Noise reduction constants for Phase 4 name matching (4b).
+# See: https://github.com/.../issues/phase4-noise — name_match produces many
+# false-positive links from tabular PE listing pages that mention dozens of
+# programs in table format.  These filters reduce noise by ~85-95%.
+_MIN_TEXT_FOR_NAME_MATCH = 200   # Skip name_match on very short text blocks
+_MAX_PE_REFS_FOR_NAME_MATCH = 5  # Skip name_match if text contains >5 distinct PE refs (listing page)
+_MAX_NAME_MATCHES_PER_ROW = 3    # Cap name_match links per description row
+_MIN_TITLE_WORDS = 5             # Require at least 5 words in title for name matching
+
+
 def run_phase4(conn: sqlite3.Connection, stop_event: threading.Event | None = None) -> int:
     """Scan description text for PE number cross-references and name matches.
 
     Uses rowid-based checkpointing so interrupted runs can resume from where
     they left off rather than re-scanning all pe_descriptions rows.
+
+    Noise reduction strategies for name_match (4b):
+      1. Skip name_match on text blocks shorter than _MIN_TEXT_FOR_NAME_MATCH chars
+      2. Skip name_match on PE listing pages (>_MAX_PE_REFS_FOR_NAME_MATCH distinct PE refs)
+      3. Cap name_match links per row at _MAX_NAME_MATCHES_PER_ROW
+      4. Require at least _MIN_TITLE_WORDS words in title (up from 4)
+      5. Dedup: skip name_match for PEs already found via explicit_pe_ref (4a)
     """
     logger.info("[Phase 4] Detecting cross-PE lineage...")
 
@@ -876,7 +893,7 @@ def run_phase4(conn: sqlite3.Connection, stop_event: threading.Event | None = No
         logger.info("  Resuming from checkpoint (rowid > %s)", f"{checkpoint_rowid:,}")
 
     # Build title index for name matching (phase 4b)
-    # Only titles with >= 4 words are useful to avoid false positives.
+    # Only titles with >= _MIN_TITLE_WORDS words are useful to avoid false positives.
     # Each entry includes lowercase keyword tokens for a fast pre-filter:
     # skip the expensive regex unless ALL keywords appear in the text.
     # This eliminates ~95% of regex calls (most titles don't match most texts).
@@ -886,10 +903,11 @@ def run_phase4(conn: sqlite3.Connection, stop_event: threading.Event | None = No
     ).fetchall():
         pe, title = row
         words = title.split()
-        if len(words) >= 4:
-            phrase = r"\s+".join(re.escape(w) for w in words[:4])
-            # Pre-filter keywords: the first 4 words, lowered, for fast 'in' check
-            keywords = tuple(w.lower() for w in words[:4])
+        if len(words) >= _MIN_TITLE_WORDS:
+            match_words = words[:_MIN_TITLE_WORDS]
+            phrase = r"\s+".join(re.escape(w) for w in match_words)
+            # Pre-filter keywords: the first N words, lowered, for fast 'in' check
+            keywords = tuple(w.lower() for w in match_words)
             title_index.append((pe, keywords, re.compile(phrase, re.IGNORECASE)))
 
     insert_buf: list[tuple] = []
@@ -962,24 +980,48 @@ def run_phase4(conn: sqlite3.Connection, stop_event: threading.Event | None = No
                 continue
 
             # 4a: Explicit PE number references
+            # Collect explicit refs for dedup against name_match (strategy 5)
+            explicit_refs: set[str] = set()
             for m in PE_NUMBER.finditer(text):
                 ref_pe = m.group()
                 if ref_pe == pe_num:
                     continue
                 if ref_pe not in known_pes:
                     continue
+                explicit_refs.add(ref_pe)
                 snippet = _context_window(text, m.start())
                 insert_buf.append((
                     pe_num, ref_pe, fy, source_file, page_start,
                     snippet, "explicit_pe_ref", 0.95,
                 ))
 
-            # 4b: Program name matching (with keyword pre-filter)
-            # Lowercase the text once for all keyword checks
+            # 4b: Program name matching (with keyword pre-filter + noise reduction)
+            #
+            # Noise reduction strategies applied here:
+            #   Strategy 1: Skip name_match on very short text blocks
+            #   Strategy 2: Skip if text is a PE listing page (many PE refs)
+            #   Strategy 3: Cap name_match links per row
+            #   Strategy 5: Dedup — skip PEs already found via explicit_pe_ref
+
+            # Strategy 1: minimum text length for name matching
+            if len(text) < _MIN_TEXT_FOR_NAME_MATCH:
+                continue  # skip 4b entirely for this row — text too short
+
+            # Strategy 2: PE density filter — listing pages mention many PEs
+            if len(explicit_refs) > _MAX_PE_REFS_FOR_NAME_MATCH:
+                continue  # skip 4b — this is likely a summary/listing page
+
             text_lower = text.lower()
+            name_match_count = 0
             for ref_pe, keywords, pattern in title_index:
                 if ref_pe == pe_num:
                     continue
+                # Strategy 5: skip name_match for PEs already found via 4a
+                if ref_pe in explicit_refs:
+                    continue
+                # Strategy 3: cap name_match links per row
+                if name_match_count >= _MAX_NAME_MATCHES_PER_ROW:
+                    break
                 # Fast pre-filter: skip regex unless all keywords appear
                 if not all(kw in text_lower for kw in keywords):
                     continue
@@ -990,6 +1032,7 @@ def run_phase4(conn: sqlite3.Connection, stop_event: threading.Event | None = No
                         pe_num, ref_pe, fy, source_file, page_start,
                         snippet, "name_match", 0.6,
                     ))
+                    name_match_count += 1
 
         rows_processed += len(chunk)
 

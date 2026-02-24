@@ -27,6 +27,10 @@ from enrich_budget_db import (
     _get_checkpoint,
     _save_checkpoint,
     _drop_enrichment_tables,
+    _MIN_TEXT_FOR_NAME_MATCH,
+    _MAX_PE_REFS_FOR_NAME_MATCH,
+    _MAX_NAME_MATCHES_PER_ROW,
+    _MIN_TITLE_WORDS,
 )
 
 
@@ -413,6 +417,189 @@ class TestPhase4:
         """).fetchone()
         assert row is not None
         assert row["confidence"] >= 0.8
+
+
+# ── Phase 4 noise reduction tests ──────────────────────────────────────────────
+
+class TestPhase4NoiseReduction:
+    """Tests for Phase 4 name_match noise reduction strategies."""
+
+    def _setup_many_pes(self, conn, count=8):
+        """Insert multiple PEs with long enough titles (>= _MIN_TITLE_WORDS words)."""
+        pes = []
+        for i in range(count):
+            pe = f"060{2000 + i:04d}A"
+            # Ensure title has >= _MIN_TITLE_WORDS words
+            title = f"Advanced Technology Development Program Number {i}"
+            _insert_budget_line(conn, pe_number=pe, title=title)
+            pes.append(pe)
+        run_phase1(conn)
+        return pes
+
+    def test_short_text_skips_name_match(self, conn):
+        """Strategy 1: text shorter than _MIN_TEXT_FOR_NAME_MATCH skips name_match.
+
+        Explicit PE refs (4a) should still be found even on short text.
+        """
+        pes = self._setup_many_pes(conn, count=3)
+        # Short text (<200 chars) that mentions pe[1] by name and pe[2] explicitly
+        short_text = f"See PE {pes[1]} and Advanced Technology Development Program Number 2."
+        assert len(short_text) < _MIN_TEXT_FOR_NAME_MATCH
+
+        conn.execute("""
+            INSERT INTO pe_descriptions
+                (pe_number, fiscal_year, source_file, page_start, page_end, description_text)
+            VALUES (?, '2026', 'r2.pdf', 1, 1, ?)
+        """, (pes[0], short_text))
+        conn.commit()
+
+        run_phase4(conn)
+
+        # 4a: explicit PE ref should still be found
+        explicit = conn.execute("""
+            SELECT * FROM pe_lineage
+            WHERE source_pe = ? AND link_type = 'explicit_pe_ref'
+        """, (pes[0],)).fetchall()
+        assert len(explicit) >= 1
+
+        # 4b: name_match should NOT be found (text too short)
+        name_matches = conn.execute("""
+            SELECT * FROM pe_lineage
+            WHERE source_pe = ? AND link_type = 'name_match'
+        """, (pes[0],)).fetchall()
+        assert len(name_matches) == 0
+
+    def test_pe_density_skips_name_match(self, conn):
+        """Strategy 2: text with >_MAX_PE_REFS_FOR_NAME_MATCH explicit PE refs
+        skips name_match (likely a summary/listing page)."""
+        pes = self._setup_many_pes(conn, count=8)
+        # Build long text that mentions 6+ PEs explicitly (tabular listing)
+        pe_mentions = " ".join(pes[1:7])  # 6 explicit PE refs
+        long_text = (
+            f"Budget Summary Table for Programs: {pe_mentions}. "
+            + "Additional context " * 30  # pad to exceed _MIN_TEXT_FOR_NAME_MATCH
+            + f"Advanced Technology Development Program Number 7"  # title match for pes[7]
+        )
+        assert len(long_text) >= _MIN_TEXT_FOR_NAME_MATCH
+
+        conn.execute("""
+            INSERT INTO pe_descriptions
+                (pe_number, fiscal_year, source_file, page_start, page_end, description_text)
+            VALUES (?, '2026', 'listing.pdf', 1, 1, ?)
+        """, (pes[0], long_text))
+        conn.commit()
+
+        run_phase4(conn)
+
+        # Explicit refs should all be found
+        explicit = conn.execute("""
+            SELECT COUNT(*) FROM pe_lineage
+            WHERE source_pe = ? AND link_type = 'explicit_pe_ref'
+        """, (pes[0],)).fetchone()[0]
+        assert explicit >= 5
+
+        # name_match should NOT be found (too many PE refs → listing page)
+        name_matches = conn.execute("""
+            SELECT COUNT(*) FROM pe_lineage
+            WHERE source_pe = ? AND link_type = 'name_match'
+        """, (pes[0],)).fetchone()[0]
+        assert name_matches == 0
+
+    def test_per_row_cap_on_name_match(self, conn):
+        """Strategy 3: name_match links are capped at _MAX_NAME_MATCHES_PER_ROW per row."""
+        # Create many PEs with long titles
+        pes = self._setup_many_pes(conn, count=8)
+        # Build text mentioning many program titles (but few explicit PE refs)
+        title_mentions = ". ".join(
+            f"Advanced Technology Development Program Number {i}"
+            for i in range(1, 8)
+        )
+        long_text = (
+            f"Program overview: {title_mentions}. "
+            + "Additional context for length " * 10
+        )
+        assert len(long_text) >= _MIN_TEXT_FOR_NAME_MATCH
+
+        conn.execute("""
+            INSERT INTO pe_descriptions
+                (pe_number, fiscal_year, source_file, page_start, page_end, description_text)
+            VALUES (?, '2026', 'overview.pdf', 1, 1, ?)
+        """, (pes[0], long_text))
+        conn.commit()
+
+        run_phase4(conn)
+
+        name_matches = conn.execute("""
+            SELECT COUNT(*) FROM pe_lineage
+            WHERE source_pe = ? AND link_type = 'name_match'
+        """, (pes[0],)).fetchone()[0]
+        assert name_matches <= _MAX_NAME_MATCHES_PER_ROW
+
+    def test_dedup_name_match_against_explicit_pe_ref(self, conn):
+        """Strategy 5: name_match is suppressed for PEs already found via
+        explicit_pe_ref in the same description row."""
+        pes = self._setup_many_pes(conn, count=3)
+        # Text mentions pes[1] both by PE number AND by title
+        long_text = (
+            f"This program references {pes[1]} (Advanced Technology "
+            f"Development Program Number 1) for shared components. "
+            + "Additional context " * 20
+        )
+        assert len(long_text) >= _MIN_TEXT_FOR_NAME_MATCH
+
+        conn.execute("""
+            INSERT INTO pe_descriptions
+                (pe_number, fiscal_year, source_file, page_start, page_end, description_text)
+            VALUES (?, '2026', 'r2.pdf', 1, 1, ?)
+        """, (pes[0], long_text))
+        conn.commit()
+
+        run_phase4(conn)
+
+        # Should have explicit_pe_ref but NOT duplicate name_match
+        explicit = conn.execute("""
+            SELECT COUNT(*) FROM pe_lineage
+            WHERE source_pe = ? AND referenced_pe = ? AND link_type = 'explicit_pe_ref'
+        """, (pes[0], pes[1])).fetchone()[0]
+        assert explicit >= 1
+
+        name_match = conn.execute("""
+            SELECT COUNT(*) FROM pe_lineage
+            WHERE source_pe = ? AND referenced_pe = ? AND link_type = 'name_match'
+        """, (pes[0], pes[1])).fetchone()[0]
+        assert name_match == 0
+
+    def test_min_title_words_constant(self):
+        """Verify _MIN_TITLE_WORDS is 5 (up from old hardcoded 4)."""
+        assert _MIN_TITLE_WORDS == 5
+
+    def test_long_text_with_few_pe_refs_allows_name_match(self, conn):
+        """Verify that name_match DOES work when text is long enough, has few
+        explicit PE refs, and the title is long enough."""
+        pes = self._setup_many_pes(conn, count=3)
+        # Long text with NO explicit PE refs but mentions pes[1]'s title
+        long_text = (
+            "The program leverages Advanced Technology Development Program Number 1 "
+            "for shared radar component development and testing capabilities. "
+            + "Additional technical context about the integration effort " * 10
+        )
+        assert len(long_text) >= _MIN_TEXT_FOR_NAME_MATCH
+
+        conn.execute("""
+            INSERT INTO pe_descriptions
+                (pe_number, fiscal_year, source_file, page_start, page_end, description_text)
+            VALUES (?, '2026', 'r2.pdf', 1, 1, ?)
+        """, (pes[0], long_text))
+        conn.commit()
+
+        run_phase4(conn)
+
+        # Should find a name_match (all conditions met)
+        name_matches = conn.execute("""
+            SELECT COUNT(*) FROM pe_lineage
+            WHERE source_pe = ? AND link_type = 'name_match'
+        """, (pes[0],)).fetchone()[0]
+        assert name_matches >= 1
 
 
 # ── Utility function tests ────────────────────────────────────────────────────
