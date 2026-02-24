@@ -60,6 +60,7 @@ def dashboard_summary(
     summary_filter = (
         "exhibit_type NOT IN ('p1','r1','o1','m1','c1','rf1','p1r') "
         "AND (fiscal_year IS NULL OR fiscal_year GLOB '[0-9][0-9][0-9][0-9]' "
+        "     OR fiscal_year GLOB 'FY [0-9][0-9][0-9][0-9]' "
         "     OR fiscal_year GLOB 'FY[0-9][0-9][0-9][0-9]')"
     )
 
