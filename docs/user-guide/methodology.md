@@ -4,6 +4,87 @@ How data is collected, parsed, and loaded into the DoD Budget Analysis database.
 
 ---
 
+## DoD Budget Structure
+
+Understanding the DoD budget document hierarchy is essential for interpreting the data
+in this database. The structure below follows the conventions established by the Office
+of the Under Secretary of Defense (Comptroller).
+
+### Budget Hierarchy
+
+The DoD budget is organized in a strict hierarchy:
+
+```
+Appropriation Account  (e.g., RDT&E, Procurement, O&M)
+  └── Budget Activity  (e.g., 6.1 Basic Research, 6.2 Applied Research)
+       └── Program Element (PE)  (e.g., 0602702F — Air Force applied research)
+            └── Project  (e.g., Project 1234 — Specific sub-effort within a PE)
+```
+
+Each level corresponds to a different document exhibit family and level of detail.
+
+### Program Elements (PEs)
+
+A **Program Element** is the fundamental building block of DoD budget justification.
+There are **over 3,600 individual PEs** across the department, spanning the five-year
+Future Years Defense Program (FYDP) horizon.
+
+**PE number format:** Seven digits plus an alphabetical service suffix:
+
+| Position | Meaning | Example |
+|----------|---------|---------|
+| Digits 1--2 | Major Force Program (MFP) | `06` = RDT&E |
+| Digits 3--5 | Program identifier | `027` = specific program |
+| Digits 6--7 | Sub-classification | `02` |
+| Letter suffix | Service | A=Army, N=Navy, F=Air Force, M=Marines |
+
+Example: `0602702F` → MFP 06 (R&D), program 027, sub-class 02, Air Force.
+
+Some PEs have multi-character suffixes for defense agencies (e.g., `BR` for DARPA,
+`BB` for NSA, `BQ` for Special Operations Command, `LC` for intelligence community).
+
+### Appropriation Categories ("Color of Money")
+
+Each appropriation has a distinct availability period that constrains how and when
+funds can be obligated:
+
+| Category | Availability | Typical Exhibits |
+|----------|-------------|-----------------|
+| RDT&E | 2 years | R-1, R-2, R-3, R-4 |
+| Procurement | 3 years | P-1, P-5, P-21, P-40 |
+| Operation & Maintenance | 1 year | O-1 |
+| Military Personnel | 1 year | M-1 |
+| Military Construction | 5 years | C-1 |
+
+The $350K expense/investment threshold drives decisions about which appropriation
+category a program falls under, which in turn determines which exhibit documents
+contain its budget data.
+
+### Cross-Document Tracking
+
+Approximately one-third of RDT&E funding appears under PEs not identified as R&D
+in their coding. As programs mature from research (R-docs) to production (P-docs),
+they may appear in different exhibit families. This means a single PE's full budget
+picture often requires cross-referencing R-series and P-series documents.
+
+This cross-document nature is why the enrichment pipeline's lineage detection
+(Phase 4) scans PDF narratives for PE cross-references — programs frequently cite
+related PEs in their justification text.
+
+### FYDP Organization
+
+The Future Years Defense Program structures budget data across three dimensions:
+
+1. **Organizations** — Military departments (Army, Navy, Air Force) and defense agencies
+2. **Appropriations** — RDT&E, O&M, Procurement, MilPers, MilCon
+3. **Major Force Programs (MFPs)** — 11 categories (strategic forces, general purpose
+   forces, mobility forces, R&D, etc.)
+
+This three-dimensional structure enables "crosswalk" analysis between internal DoD
+accounting (MFP view) and Congressional appropriations (exhibit view).
+
+---
+
 ## Data Collection Process
 
 The download pipeline (`dod_budget_downloader.py`) follows these steps:
@@ -173,6 +254,16 @@ exhibit uses a different unit, values will be misinterpreted.
 **Currency year**
 The database does not yet distinguish between then-year dollars and constant dollars.
 All amounts are stored as-is from source documents.
+
+**PE index coverage gap**
+The `pe_index` enrichment table currently indexes only PEs found in `budget_lines`
+(Excel-parsed data), which captures ~1,600 PEs. However, over 3,600 PEs exist across
+the DoD, and ~3,400 distinct PEs are mentioned in PDF narratives (`pdf_pe_numbers`).
+This means approximately 1,800 PEs that appear in PDF justification text but lack
+corresponding Excel line items are not indexed and therefore receive no tags, lineage
+detection, or program detail pages. These are typically cross-referenced programs,
+defense agency PEs with multi-character suffixes (e.g., `BR` for DARPA, `BB` for NSA),
+or programs from exhibit types not yet parsed (P-21, P-40, R-2a).
 
 ---
 
