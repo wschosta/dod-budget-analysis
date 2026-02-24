@@ -83,6 +83,23 @@
 </section>
 {% endif %}
 
+{# ── Funding Changes (lazy-loaded via HTMX) ──────────────────── #}
+<section class="pe-section" aria-label="Funding changes">
+  <h3>Funding Changes (FY25 → FY26)
+    {% if pe_data.summary.funding_rows > 0 %}
+    <span class="badge" style="font-size:.7rem;vertical-align:middle">YoY</span>
+    {% endif %}
+  </h3>
+  <div id="pe-changes"
+       hx-get="/partials/program-changes/{{ pe_data.pe_number }}"
+       hx-trigger="load"
+       hx-indicator="#changes-loading">
+    <div id="changes-loading" class="htmx-indicator">
+      <span class="spinner"></span> Loading funding changes&hellip;
+    </div>
+  </div>
+</section>
+
 {# ── Funding trend chart ──────────────────────────────────────────────────── #}
 <section class="pe-section" aria-label="Funding trend">
   <h3>Funding Trend</h3>
@@ -120,6 +137,23 @@
     </div>
   </div>
 </section>
+
+{# ── PDF Pages (lazy-loaded via HTMX) ────────────────────────── #}
+{% if pe_data.summary.pdf_page_count > 0 %}
+<section class="pe-section" aria-label="PDF source pages">
+  <h3>PDF Source Pages
+    <span class="badge" style="font-size:.7rem;vertical-align:middle">{{ pe_data.summary.pdf_page_count }}</span>
+  </h3>
+  <div id="pe-pdf-pages"
+       hx-get="/partials/program-pdf-pages/{{ pe_data.pe_number }}"
+       hx-trigger="load"
+       hx-indicator="#pdf-pages-loading">
+    <div id="pdf-pages-loading" class="htmx-indicator">
+      <span class="spinner"></span> Loading PDF pages&hellip;
+    </div>
+  </div>
+</section>
+{% endif %}
 
 {# ── Tags (with confidence and provenance) ─────────────────────────────── #}
 {% if pe_data.tags %}

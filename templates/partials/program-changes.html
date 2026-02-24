@@ -1,0 +1,84 @@
+{% if changes %}
+{# Summary row #}
+{% if summary %}
+<div style="display:flex;flex-wrap:wrap;gap:1rem;margin-bottom:1rem;font-size:.85rem">
+  <div>
+    <span style="color:var(--text-secondary)">Total FY25:</span>
+    <strong>{{ summary.total_fy2025 | fmt_amount if summary.total_fy2025 is not none else "—" }}</strong>
+  </div>
+  <div>
+    <span style="color:var(--text-secondary)">Total FY26 Request:</span>
+    <strong>{{ summary.total_fy2026_request | fmt_amount if summary.total_fy2026_request is not none else "—" }}</strong>
+  </div>
+  <div>
+    <span style="color:var(--text-secondary)">Total Delta:</span>
+    <strong class="delta {{ 'positive' if summary.total_delta and summary.total_delta >= 0 else 'negative' }}">
+      {{ summary.total_delta | fmt_amount if summary.total_delta is not none else "—" }}
+    </strong>
+  </div>
+  {% if summary.pct_change is not none %}
+  <div>
+    <span style="color:var(--text-secondary)">Change:</span>
+    <strong class="delta {{ 'positive' if summary.pct_change >= 0 else 'negative' }}">
+      {{ "{:+.1f}".format(summary.pct_change) }}%
+    </strong>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="table-wrapper">
+  <table class="pe-funding-table">
+    <thead>
+      <tr>
+        <th scope="col">Line Item</th>
+        <th scope="col">Exhibit</th>
+        <th scope="col" class="td-amount">FY25 Total ($K)</th>
+        <th scope="col" class="td-amount">FY26 Request ($K)</th>
+        <th scope="col" class="td-amount">Delta ($K)</th>
+        <th scope="col">Change Type</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in changes %}
+      <tr>
+        <td>{{ c.line_item_title or c.line_item or "—" }}</td>
+        <td><span class="badge">{{ (c.exhibit_type or "—") | upper }}</span></td>
+        <td class="td-amount">
+          {{ c.amount_fy2025 | fmt_amount if c.amount_fy2025 is not none else "—" }}
+        </td>
+        <td class="td-amount">
+          {{ c.amount_fy2026_request | fmt_amount if c.amount_fy2026_request is not none else "—" }}
+        </td>
+        <td class="td-amount">
+          {% if c.delta is not none %}
+          <span class="delta {{ 'positive' if c.delta >= 0 else 'negative' }}">
+            {{ "{:+,.0f}".format(c.delta) }}
+          </span>
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          {% if c.change_type == 'increase' %}
+            <span class="change-badge increase">Increase</span>
+          {% elif c.change_type == 'decrease' %}
+            <span class="change-badge decrease">Decrease</span>
+          {% elif c.change_type == 'new' %}
+            <span class="change-badge new">New</span>
+          {% elif c.change_type == 'terminated' %}
+            <span class="change-badge terminated">Terminated</span>
+          {% elif c.change_type == 'flat' %}
+            <span class="change-badge flat">Flat</span>
+          {% else %}
+            <span class="change-badge flat">{{ c.change_type or "—" }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state" style="padding:1.5rem">
+  <p>No funding changes found for this PE.</p>
+</div>
+{% endif %}

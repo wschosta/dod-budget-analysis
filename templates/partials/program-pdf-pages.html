@@ -1,0 +1,29 @@
+{% if pages %}
+<p style="font-size:.82rem;color:var(--text-secondary);margin-bottom:.75rem">
+  Showing {{ pages | length }} of {{ total }} page{{ 's' if total != 1 else '' }}
+</p>
+{% for page in pages %}
+<details class="pdf-page-card">
+  <summary class="pdf-page-header">
+    <span>
+      <code style="font-size:.8rem">{{ page.source_file or "Unknown file" }}</code>
+      — Page {{ page.page_number or "?" }}
+    </span>
+    <span style="display:flex;gap:.35rem;align-items:center">
+      {% if page.fiscal_year %}
+      <span class="badge" style="font-size:.68rem">FY{{ page.fiscal_year }}</span>
+      {% endif %}
+      {% if page.exhibit_type %}
+      <span class="badge" style="font-size:.68rem">{{ page.exhibit_type | upper }}</span>
+      {% endif %}
+      <span style="font-size:.75rem;color:var(--text-secondary)">&#9660;</span>
+    </span>
+  </summary>
+  <div class="pdf-page-text">{{ page.page_text or "(No text extracted)" }}</div>
+</details>
+{% endfor %}
+{% else %}
+<div class="empty-state" style="padding:1.5rem">
+  <p>No PDF pages found for {{ pe_number }}.</p>
+</div>
+{% endif %}

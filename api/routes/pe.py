@@ -419,8 +419,35 @@ def get_pe_changes(
     Compares FY2025 enacted/total vs FY2026 request to surface budget
     increases, decreases, and new/terminated line items. Useful for
     identifying programs gaining or losing funding.
+
+    Edge cases handled:
+    - PE with no FY2025 data: lines labelled as 'new'
+    - PE exists only in PDFs (no budget_lines): returns empty line_items with note
+    - has_budget_lines flag indicates whether any budget_lines exist for this PE
     """
     _validate_pe_number(pe_number)
+
+    # Check if any budget_lines exist for this PE
+    bl_count = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines WHERE pe_number = ?",
+        (pe_number,),
+    ).fetchone()[0]
+    has_budget_lines = bl_count > 0
+
+    if not has_budget_lines:
+        # PE may exist only in PDFs or pe_index — return empty with note
+        return {
+            "pe_number": pe_number,
+            "has_budget_lines": False,
+            "total_fy2025": 0,
+            "total_fy2026_request": 0,
+            "total_delta": 0,
+            "pct_change": None,
+            "note": "No budget line items found for this PE. "
+                    "Data may only be available in PDF documents.",
+            "line_items": [],
+        }
+
     rows = conn.execute("""
         SELECT
             line_item_title,
@@ -460,6 +487,7 @@ def get_pe_changes(
 
     return {
         "pe_number": pe_number,
+        "has_budget_lines": True,
         "total_fy2025": total_fy25,
         "total_fy2026_request": total_fy26,
         "total_delta": total_fy26 - total_fy25,

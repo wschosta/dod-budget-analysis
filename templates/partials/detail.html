@@ -88,11 +88,34 @@
     </div>
   </div>
 
-  <p style="margin-top:.75rem;font-size:.78rem;color:var(--clr-gray-700)">
-    Source: <code>{{ item.source_file }}</code>
-    {% if item.sheet_name %} · Sheet: {{ item.sheet_name }}{% endif %}
-    {% if item.row_number %} · Row {{ item.row_number }}{% endif %}
-  </p>
+  <div class="detail-source-info" style="margin-top:1rem;padding:.75rem;background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius)">
+    <h4 style="margin:0 0 .5rem;font-size:.8rem;color:var(--text-secondary)">Data Source</h4>
+    <div class="detail-grid">
+      <div class="detail-field">
+        <label>Source File</label>
+        <span style="word-break:break-all"><code>{{ item.source_file or "—" }}</code></span>
+      </div>
+      {% if item.sheet_name %}
+      <div class="detail-field">
+        <label>Sheet</label>
+        <span>{{ item.sheet_name }}</span>
+      </div>
+      {% endif %}
+      {% if item.row_number %}
+      <div class="detail-field">
+        <label>Row</label>
+        <span>{{ item.row_number }}</span>
+      </div>
+      {% endif %}
+    </div>
+    {% if item.pe_number %}
+    <div style="margin-top:.5rem">
+      <a href="/programs/{{ item.pe_number }}" class="btn btn-secondary btn-sm" title="View full program detail for {{ item.pe_number }}">
+        View Program Detail
+      </a>
+    </div>
+    {% endif %}
+  </div>
 
   {# FE-006: Related Items across fiscal years #}
   {% if related_items %}

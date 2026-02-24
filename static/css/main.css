@@ -1157,6 +1157,7 @@ tr:focus-within td {
 .checkbox-select-item input[type="checkbox"] { accent-color: var(--clr-blue); }
 
 /* ── Autocomplete ─────────────────────────────────────────────────────────── */
+.autocomplete-wrapper { position: relative; }
 .autocomplete-dropdown {
   display: none;
   position: absolute;
@@ -1167,9 +1168,12 @@ tr:focus-within td {
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  z-index: 50;
+  z-index: 100;
   max-height: 300px;
   overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
 .autocomplete-item {
   padding: .5rem .75rem;
@@ -1182,6 +1186,23 @@ tr:focus-within td {
 }
 .autocomplete-item:hover { background: var(--clr-sky); }
 .autocomplete-field { font-size: .75rem; color: var(--text-secondary); }
+.autocomplete-dropdown li.autocomplete-item {
+  padding: .5rem .75rem;
+  cursor: pointer;
+  list-style: none;
+}
+.autocomplete-dropdown li.autocomplete-item:hover,
+.autocomplete-dropdown li.autocomplete-item.active {
+  background: var(--clr-sky);
+}
+.autocomplete-dropdown li.autocomplete-item[aria-selected="true"] {
+  background: var(--clr-sky);
+}
+.autocomplete-label {
+  display: block;
+  font-size: .75rem;
+  color: var(--text-secondary);
+}
 
 /* ── FALCON-4: Advanced search UI ────────────────────────────────────────── */
 .advanced-search {
@@ -1724,6 +1745,61 @@ tr:focus-within td {
   background: var(--bg-surface);
   color: var(--text-primary);
   border-color: var(--border-color);
+}
+
+/* ── Top movers cards ─────────────────────────────────────────────────── */
+.top-movers-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 768px) { .top-movers-grid { grid-template-columns: 1fr; } }
+.top-movers-card {
+  background: var(--bg-surface); border: 1px solid var(--border-color);
+  border-radius: var(--radius); padding: 1rem;
+}
+.top-movers-card h4 { margin: 0 0 .75rem; font-size: .9rem; }
+.top-movers-list { list-style: none; padding: 0; margin: 0; }
+.top-movers-list li {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: .4rem 0; border-bottom: 1px solid var(--border-color);
+  font-size: .85rem;
+}
+.top-movers-list li:last-child { border-bottom: none; }
+
+/* ── Change type badges ──────────────────────────────────────────────── */
+.change-badge { font-size: .7rem; padding: .1rem .4rem; border-radius: .2rem; font-weight: 600; }
+.change-badge.increase { background: #dcfce7; color: #166534; }
+.change-badge.decrease { background: #fef2f2; color: #991b1b; }
+.change-badge.new { background: #dbeafe; color: #1e40af; }
+.change-badge.terminated { background: #fef3c7; color: #92400e; }
+.change-badge.flat { background: var(--bg-surface); color: var(--text-secondary); }
+
+/* Change badge dark mode overrides */
+[data-theme="dark"] .change-badge.increase { background: #052e16; color: #86efac; }
+[data-theme="dark"] .change-badge.decrease { background: #450a0a; color: #fca5a5; }
+[data-theme="dark"] .change-badge.new { background: #172554; color: #93c5fd; }
+[data-theme="dark"] .change-badge.terminated { background: #451a03; color: #fcd34d; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .change-badge.increase { background: #052e16; color: #86efac; }
+  :root:not([data-theme="light"]) .change-badge.decrease { background: #450a0a; color: #fca5a5; }
+  :root:not([data-theme="light"]) .change-badge.new { background: #172554; color: #93c5fd; }
+  :root:not([data-theme="light"]) .change-badge.terminated { background: #451a03; color: #fcd34d; }
+}
+
+/* ── PDF page viewer ─────────────────────────────────────────────────── */
+.pdf-page-card {
+  background: var(--bg-surface); border: 1px solid var(--border-color);
+  border-radius: var(--radius); margin-bottom: .75rem;
+}
+.pdf-page-card > summary { list-style: none; }
+.pdf-page-card > summary::-webkit-details-marker { display: none; }
+.pdf-page-header {
+  padding: .5rem .75rem; cursor: pointer; display: flex;
+  justify-content: space-between; align-items: center;
+  font-size: .85rem;
+}
+.pdf-page-header:hover { background: var(--clr-sky); }
+.pdf-page-text {
+  padding: .75rem; border-top: 1px solid var(--border-color);
+  font-size: .8rem; line-height: 1.5; white-space: pre-wrap;
+  max-height: 400px; overflow-y: auto;
 }
 
 /* ── Back to top button ───────────────────────────────────────────────── */

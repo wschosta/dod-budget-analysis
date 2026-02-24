@@ -1002,15 +1002,22 @@ function initHeroAutocomplete() {
   var dropdown = document.getElementById("hero-autocomplete-list");
   if (!input || !dropdown) return;
 
+  // Remove hidden attribute since CSS .autocomplete-dropdown uses display:none
+  dropdown.removeAttribute("hidden");
+
   var acTimer = null;
   var activeIdx = -1;
 
+  function hideDropdown() {
+    dropdown.innerHTML = "";
+    dropdown.style.display = "none";
+    input.setAttribute("aria-expanded", "false");
+    activeIdx = -1;
+  }
+
   function renderItems(items) {
     if (!items || !items.length) {
-      dropdown.innerHTML = "";
-      dropdown.hidden = true;
-      input.setAttribute("aria-expanded", "false");
-      activeIdx = -1;
+      hideDropdown();
       return;
     }
     dropdown.innerHTML = items.map(function(item, i) {
@@ -1019,7 +1026,7 @@ function initHeroAutocomplete() {
         (item.label ? '<span class="autocomplete-label">' + _escapeHtml(item.label) + '</span>' : '') +
         '</li>';
     }).join("");
-    dropdown.hidden = false;
+    dropdown.style.display = "block";
     input.setAttribute("aria-expanded", "true");
     activeIdx = -1;
   }
@@ -1040,10 +1047,7 @@ function initHeroAutocomplete() {
   function selectItem(li) {
     if (!li) return;
     input.value = li.getAttribute("data-value") || li.querySelector(".autocomplete-value").textContent;
-    dropdown.innerHTML = "";
-    dropdown.hidden = true;
-    input.setAttribute("aria-expanded", "false");
-    activeIdx = -1;
+    hideDropdown();
     // Submit the hero search form
     var form = input.closest("form");
     if (form) form.submit();
@@ -1053,27 +1057,20 @@ function initHeroAutocomplete() {
     clearTimeout(acTimer);
     var val = input.value.trim();
     if (val.length < 2) {
-      dropdown.innerHTML = "";
-      dropdown.hidden = true;
-      input.setAttribute("aria-expanded", "false");
-      activeIdx = -1;
+      hideDropdown();
       return;
     }
     acTimer = setTimeout(function() {
       fetch("/api/v1/search/suggest?q=" + encodeURIComponent(val) + "&limit=5")
         .then(function(r) { return r.json(); })
         .then(function(items) { renderItems(items); })
-        .catch(function() {
-          dropdown.innerHTML = "";
-          dropdown.hidden = true;
-          input.setAttribute("aria-expanded", "false");
-        });
+        .catch(function() { hideDropdown(); });
     }, 200);
   });
 
   input.addEventListener("keydown", function(e) {
     var items = dropdown.querySelectorAll("li");
-    if (!items.length || dropdown.hidden) return;
+    if (!items.length || dropdown.style.display === "none") return;
 
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -1088,10 +1085,7 @@ function initHeroAutocomplete() {
       }
       // Otherwise let the form submit naturally
     } else if (e.key === "Escape") {
-      dropdown.innerHTML = "";
-      dropdown.hidden = true;
-      input.setAttribute("aria-expanded", "false");
-      activeIdx = -1;
+      hideDropdown();
     }
   });
 
@@ -1103,10 +1097,7 @@ function initHeroAutocomplete() {
   // Close on click outside
   document.addEventListener("click", function(e) {
     if (!input.contains(e.target) && !dropdown.contains(e.target)) {
-      dropdown.innerHTML = "";
-      dropdown.hidden = true;
-      input.setAttribute("aria-expanded", "false");
-      activeIdx = -1;
+      hideDropdown();
     }
   });
 }

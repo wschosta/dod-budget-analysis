@@ -801,7 +801,12 @@ def program_changes_partial(
         try:
             from api.routes.pe import get_pe_changes
             result = get_pe_changes(pe_number, conn=conn)
-            changes = result.get("line_items", [])
+            raw_items = result.get("line_items", [])
+            # Map API field names to template-expected field names
+            for item in raw_items:
+                item["amount_fy2025"] = item.get("fy2025_total")
+                item["amount_fy2026_request"] = item.get("fy2026_request")
+            changes = raw_items
             summary = {
                 "total_fy2025": result.get("total_fy2025", 0),
                 "total_fy2026_request": result.get("total_fy2026_request", 0),
