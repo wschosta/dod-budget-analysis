@@ -480,9 +480,13 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 conn.close()
                 return {"status": "ok", "database": str(db_path), "budget_lines": count}
             except Exception as e:
+                logging.exception("Health check degraded: database error while querying budget_lines")
                 return JSONResponse(
                     status_code=503,
-                    content={"status": "degraded", "error": str(e)},
+                    content={
+                        "status": "degraded",
+                        "database": str(db_path),
+                    },
                 )
         return JSONResponse(
             status_code=503,
