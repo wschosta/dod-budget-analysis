@@ -146,6 +146,8 @@ jobs:
     name: "Post-deploy Smoke Test"
     runs-on: ubuntu-latest
     needs: build-and-push
+    permissions:
+      contents: read
     # TODO [OH MY]: Update needs to include your chosen deploy job above
     steps:
       - uses: actions/checkout@v4

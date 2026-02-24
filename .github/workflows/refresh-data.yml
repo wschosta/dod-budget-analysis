@@ -11,6 +11,8 @@
 #   5. Post summary to PR/commit comment
 
 name: Refresh Data
+permissions:
+  contents: read
 
 on:
   schedule:
