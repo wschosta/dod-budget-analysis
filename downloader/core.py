@@ -19,7 +19,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
+import logging
+
 import requests
+
+# Suppress urllib3's verbose retry/connection logging — our own [RETRY]
+# messages are cleaner and more informative.
+logging.getLogger("urllib3.util.retry").setLevel(logging.ERROR)
+logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
 
 # Shared utilities
 from utils import format_bytes, elapsed
@@ -298,6 +305,54 @@ def _close_session() -> None:
     _global_session = None
 
 
+# ---- Error formatting ----
+
+
+def _format_request_error(exc: Exception | None) -> str:
+    """Format a requests exception into a concise, human-readable message.
+
+    Strips away the deeply-nested urllib3 wrapper objects and extracts
+    just the actionable information: timeout, DNS failure, refused, etc.
+    """
+    if exc is None:
+        return "unknown error"
+
+    msg = str(exc)
+
+    # ConnectionError wrapping urllib3 ConnectTimeoutError
+    if "timed out" in msg.lower() or "timeout" in msg.lower():
+        # Extract the host if possible
+        host_match = __import__("re").search(r"host='([^']+)'", msg)
+        host = host_match.group(1) if host_match else "server"
+        return f"connection timed out ({host})"
+
+    # DNS resolution failure
+    if "NameResolutionError" in msg or "getaddrinfo failed" in msg:
+        host_match = __import__("re").search(r"host='([^']+)'", msg)
+        host = host_match.group(1) if host_match else "server"
+        return f"DNS lookup failed ({host})"
+
+    # Connection refused
+    if "ConnectionRefusedError" in msg or "Connection refused" in msg:
+        return "connection refused"
+
+    # SSL errors
+    if "SSL" in msg or "certificate" in msg.lower():
+        return "SSL/TLS error"
+
+    # HTTP status errors
+    if "HTTPError" in type(exc).__name__ or hasattr(exc, "response"):
+        resp = getattr(exc, "response", None)
+        if resp is not None:
+            return f"HTTP {resp.status_code}"
+
+    # Generic: truncate to something reasonable
+    short = msg.split("\n")[0]
+    if len(short) > 80:
+        short = short[:77] + "..."
+    return short
+
+
 # ---- Download helpers ----
 
 # Magic-byte signatures for common DoD budget file types (Step 1.A3-b)
@@ -511,8 +566,9 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
     for attempt in range(len(_retry_delays) + 1):
         if attempt > 0:
             delay = _retry_delays[attempt - 1]
+            reason = _format_request_error(last_exc) if last_exc else "error"
             print(f"\r    [RETRY {attempt}/{len(_retry_delays)}] {fname}: "
-                  f"retrying in {delay}s...          ")
+                  f"{reason} — retrying in {delay}s...          ")
             time.sleep(delay)
         try:
             # Optimization: Check if we can resume from partial download
@@ -599,11 +655,12 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
             if dest_path.exists() and dest_path.stat().st_size == 0:
                 dest_path.unlink()
 
+    fail_reason = _format_request_error(last_exc) if last_exc else "unknown error"
     if _tracker:
-        _tracker.file_failed(url, str(dest_path), fname, str(last_exc),
+        _tracker.file_failed(url, str(dest_path), fname, fail_reason,
                              use_browser=False)
     else:
-        print(f"\r    [FAIL] {fname}: {last_exc}          ")
+        print(f"\r    [FAIL] {fname}: {fail_reason}          ")
     update_manifest_entry(url, "fail", 0, None)
     return False
 
