@@ -3234,8 +3234,13 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         if not _pdf_stopped:
             # Rebuild FTS5 if new pages were added
             final_page_count = conn.execute("SELECT COUNT(*) FROM pdf_pages").fetchone()[0]
-            if final_page_count > initial_page_count:
-                logger.info("  Rebuilding full-text search indexes...")
+            new_pages = final_page_count - initial_page_count
+            if new_pages > 0:
+                _t0 = time.time()
+                logger.info("  Rebuilding full-text search indexes (%s pages)...",
+                            f"{final_page_count:,}")
+                print(f"  Rebuilding full-text search indexes "
+                      f"({final_page_count:,} pages)...", flush=True)
                 # FTS5 'rebuild' command repopulates the index from the content
                 # table in a single optimized pass — faster than DELETE+INSERT.
                 conn.execute("INSERT INTO pdf_pages_fts(pdf_pages_fts) VALUES('rebuild')")
@@ -3257,11 +3262,15 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                     END
                 """)
                 conn.commit()
-                logger.info("  FTS5 rebuild complete and triggers recreated")
+                _elapsed = time.time() - _t0
+                logger.info("  FTS5 rebuild complete and triggers recreated (%.1fs)", _elapsed)
+                print(f"  FTS5 rebuild complete — {new_pages:,} new pages indexed "
+                      f"({_elapsed:.1f}s)", flush=True)
             else:
                 _recreate_pdf_fts_triggers(conn)
                 conn.commit()
                 logger.info("  Skipped FTS5 rebuild (no new pages added)")
+                print("  FTS5 rebuild skipped (no new pages)", flush=True)
 
     # If stopped gracefully during PDF loop, close and exit cleanly
     if _pdf_stopped:
@@ -3271,11 +3280,18 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
     if skipped_pdf:
         logger.info("  Skipped %d unchanged PDF file(s)", skipped_pdf)
+        print(f"  PDF phase: {processed_pdf:,} processed, "
+              f"{skipped_pdf:,} unchanged (skipped), "
+              f"{total_pdf_pages:,} pages extracted", flush=True)
+    else:
+        print(f"  PDF phase: {processed_pdf:,} files, "
+              f"{total_pdf_pages:,} pages extracted", flush=True)
     logger.info("  Ingested PDF pages: %s", f"{total_pdf_pages:,}")
     if num_workers > 1:
         logger.info("  Workers used: %d", num_workers)
 
     # ── Detect removed files ───────────────────────────────────────────────
+    print("  Detecting removed files...", end="", flush=True)
     all_current = {str(f.relative_to(docs_dir)) for f in xlsx_files}
     all_current |= {str(f.relative_to(docs_dir)) for f in pdf_files}
 
@@ -3293,10 +3309,15 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     if removed_count:
         conn.commit()
         logger.info("  Cleaned up %d removed file(s)", removed_count)
+        print(f" removed {removed_count} stale file(s)", flush=True)
+    else:
+        print(" none found", flush=True)
 
     # ── Create indexes ─────────────────────────────────────────────────────
+    _t0 = time.time()
     _progress("index", 0, 1, "Creating indexes...")
     logger.info("Creating indexes...")
+    print("  Creating database indexes...", end="", flush=True)
     conn.executescript("""
         CREATE INDEX IF NOT EXISTS idx_bl_exhibit ON budget_lines(exhibit_type);
         CREATE INDEX IF NOT EXISTS idx_bl_org ON budget_lines(organization_name);
@@ -3370,12 +3391,18 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             ON budget_lines(budget_type, amount_fy2026_request);
     """)
     conn.commit()
+    _elapsed = time.time() - _t0
+    print(f" done ({_elapsed:.1f}s)", flush=True)
 
     # ── Deduplicate budget_lines rows ──────────────────────────────────────
     # Remove exact duplicate rows (same source, fiscal_year, PE, line_item,
     # org) keeping only the row with the lowest id.
+    _t0 = time.time()
     _progress("index", 0, 1, "Deduplicating budget_lines...")
     logger.info("Deduplicating budget_lines...")
+    total_before_dedup = conn.execute("SELECT COUNT(*) FROM budget_lines").fetchone()[0]
+    print(f"  Deduplicating budget_lines ({total_before_dedup:,} rows)...",
+          end="", flush=True)
     dup_count = conn.execute("""
         DELETE FROM budget_lines WHERE id NOT IN (
             SELECT MIN(id) FROM budget_lines
@@ -3386,10 +3413,13 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     """).rowcount
     if dup_count:
         logger.info("  Removed %d duplicate budget_lines rows", dup_count)
+        print(f" removed {dup_count:,} duplicates", end="", flush=True)
         # Rebuild FTS index after deduplication
         conn.execute(
             "INSERT INTO budget_lines_fts(budget_lines_fts) VALUES('rebuild')"
         )
+    else:
+        print(" no duplicates found", end="", flush=True)
     conn.commit()
 
     # Create a unique index to prevent future duplicates
@@ -3405,6 +3435,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         # May fail if residual non-exact duplicates exist; log and continue
         logger.warning("  Could not create dedup unique index (non-critical)")
 
+    _elapsed = time.time() - _t0
+    print(f" ({_elapsed:.1f}s)", flush=True)
     _progress("index", 1, 1, "Indexes created")
 
     # ── Update data source timestamps ──────────────────────────────────────
@@ -3446,6 +3478,18 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     logger.info("  Total PDF pages:    %s", f"{total_pages:,}")
     logger.info("  Excel files:        %d", len(xlsx_files))
     logger.info("  PDF files:          %d", len(pdf_files))
+
+    print("\n  ── Build Summary ──────────────────────────────", flush=True)
+    print(f"  Database:       {db_path.name} ({db_size:.1f} MB)", flush=True)
+    print(f"  Budget lines:   {total_lines:,}", flush=True)
+    print(f"  PDF pages:      {total_pages:,}", flush=True)
+    print(f"  Excel files:    {len(xlsx_files):,} "
+          f"({len(xlsx_files) - skipped_xlsx:,} processed, "
+          f"{skipped_xlsx:,} skipped)", flush=True)
+    print(f"  PDF files:      {len(pdf_files):,} "
+          f"({processed_pdf:,} processed, "
+          f"{skipped_pdf:,} skipped)", flush=True)
+
     if not rebuild:
         new_files = (len(xlsx_files) - skipped_xlsx) + (len(pdf_files) - skipped_pdf)
         logger.info("  New/updated files:  %d", new_files)
