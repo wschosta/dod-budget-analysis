@@ -233,6 +233,13 @@ def _run_step(label: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> 
         _write_progress(label, "completed", elapsed)
         _completed_steps[label] = f"completed in {elapsed:.1f}s"
         return True, result
+    except KeyboardInterrupt:
+        elapsed = time.monotonic() - t0
+        _stop_event.set()
+        print(f"\n[{label}] INTERRUPTED -- {elapsed:.1f}s", flush=True)
+        _write_progress(label, "interrupted", elapsed)
+        _completed_steps[label] = f"interrupted after {elapsed:.1f}s"
+        return False, None
     except Exception as e:
         elapsed = time.monotonic() - t0
         print(f"\n[{label}] FAILED -- {elapsed:.1f}s: {e}", flush=True)

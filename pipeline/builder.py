@@ -3074,8 +3074,29 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                               {"files_remaining": total_files - files_done_total})
                     break
 
-                # Wait for the next completed future
-                done, _ = wait(active, return_when=FIRST_COMPLETED)
+                # Wait for the next completed future.
+                # Use a short timeout so we can check stop_event periodically,
+                # and catch KeyboardInterrupt so Ctrl+C triggers a clean
+                # checkpoint save instead of a raw traceback.
+                try:
+                    done, _ = wait(active, timeout=2, return_when=FIRST_COMPLETED)
+                except KeyboardInterrupt:
+                    logger.info("  KeyboardInterrupt — saving checkpoint...")
+                    if stop_event:
+                        stop_event.set()
+                    for f in active:
+                        f.cancel()
+                    _save_checkpoint(conn, session_id, files_done_total,
+                                     total_files, total_pdf_pages,
+                                     total_budget_rows, 0, "", "interrupted")
+                    conn.commit()
+                    _pdf_stopped = True
+                    _progress("stopped", processed_pdf, len(pdfs_to_process),
+                              "Stopped (Ctrl+C) — resume with --resume",
+                              {"files_remaining": total_files - files_done_total})
+                    break
+                if not done:
+                    continue  # Timeout with no completions; re-check stop_event
                 for future in done:
                     pdf = active.pop(future)
                     rel_path = str(pdf.relative_to(docs_dir))
@@ -3087,6 +3108,21 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
                     try:
                         result = future.result(timeout=300)  # 5-min safety timeout
+                    except (KeyboardInterrupt, BrokenPipeError):
+                        # Worker was killed by Ctrl+C; treat as graceful stop
+                        if stop_event:
+                            stop_event.set()
+                        for f in active:
+                            f.cancel()
+                        _save_checkpoint(conn, session_id, files_done_total,
+                                         total_files, total_pdf_pages,
+                                         total_budget_rows, 0, "", "interrupted")
+                        conn.commit()
+                        _pdf_stopped = True
+                        _progress("stopped", processed_pdf, len(pdfs_to_process),
+                                  "Stopped (interrupted) — resume with --resume",
+                                  {"files_remaining": total_files - files_done_total})
+                        break
                     except Exception as e:
                         logger.error("  ERROR: %s: %s", pdf.name, e)
                         stat = pdf.stat()
