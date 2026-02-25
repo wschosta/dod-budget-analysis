@@ -146,12 +146,14 @@ def check_security():
 
                 for pattern, desc in secret_patterns:
                     if re.search(pattern, line, re.IGNORECASE):
+                        # Record only non-sensitive metadata about the finding.
                         errors.append(f"{py_file.name}:{i}: {desc}")
 
     if errors:
         print("[FAILED] Security issues found:")
         for error in errors:
-            print(f"  {error}")
+            # Do not include any matched content, only the pre-constructed metadata.
+            print("  " + error)
         return False
 
     print("[PASSED] No hardcoded secrets detected.")
