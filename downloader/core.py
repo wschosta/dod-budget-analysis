@@ -283,11 +283,18 @@ def get_session() -> requests.Session:
     _global_session = requests.Session()
     _global_session.headers.update(HEADERS)
     # Optimization: Enhanced connection pool configuration
+    # NOTE: Only retry on HTTP status errors (429, 5xx) at this layer.
+    # Connection-level retries (timeouts, DNS, refused) are handled by
+    # the application retry loop in download_file() with better logging
+    # and shorter delays.  Setting connect=0 prevents urllib3 from
+    # silently retrying connection failures (which stacks 120s timeouts).
     adapter = requests.adapters.HTTPAdapter(
         pool_connections=20,      # Increased from default 10
         pool_maxsize=30,          # Increased from default 10
         max_retries=requests.adapters.Retry(
             total=3,
+            connect=0,            # No urllib3 retries on connection errors
+            read=0,               # No urllib3 retries on read errors
             backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504],
         ),
@@ -562,6 +569,9 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
 
     file_start = time.time()
     _retry_delays = [2, 4, 8]
+    # Timeouts: (connect, read) — connect should be short (server either
+    # responds quickly or is down); read can be longer for large files.
+    _timeout = (30, 120)
     last_exc = None
     for attempt in range(len(_retry_delays) + 1):
         if attempt > 0:
@@ -593,7 +603,7 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
             if resume_from > 0:
                 headers["Range"] = f"bytes={resume_from}-"
 
-            resp = session.get(url, headers=headers, timeout=120, stream=True)
+            resp = session.get(url, headers=headers, timeout=_timeout, stream=True)
             resp.raise_for_status()
 
             # WAF / bot-protection detection
@@ -607,7 +617,7 @@ def download_file(session: requests.Session, url: str, dest_path: Path,
             if resume_from > 0 and resp.status_code != 206:
                 # Server doesn't support range, restart
                 dest_path.unlink()
-                resp = session.get(url, timeout=120, stream=True)
+                resp = session.get(url, timeout=_timeout, stream=True)
                 resp.raise_for_status()
                 mode = "wb"
                 resume_from = 0
