@@ -3,11 +3,11 @@
 {% if summary %}
 <div style="display:flex;flex-wrap:wrap;gap:1rem;margin-bottom:1rem;font-size:.85rem">
   <div>
-    <span style="color:var(--text-secondary)">Total FY25:</span>
+    <span style="color:var(--text-secondary)">Prior Year Total:</span>
     <strong>{{ summary.total_fy2025 | fmt_amount if summary.total_fy2025 is not none else "—" }}</strong>
   </div>
   <div>
-    <span style="color:var(--text-secondary)">Total FY26 Request:</span>
+    <span style="color:var(--text-secondary)">Current Request:</span>
     <strong>{{ summary.total_fy2026_request | fmt_amount if summary.total_fy2026_request is not none else "—" }}</strong>
   </div>
   <div>
@@ -33,8 +33,8 @@
       <tr>
         <th scope="col">Line Item</th>
         <th scope="col">Exhibit</th>
-        <th scope="col" class="td-amount">FY25 Total ($K)</th>
-        <th scope="col" class="td-amount">FY26 Request ($K)</th>
+        <th scope="col" class="td-amount">Prior Year ($K)</th>
+        <th scope="col" class="td-amount">Request ($K)</th>
         <th scope="col" class="td-amount">Delta ($K)</th>
         <th scope="col">Change Type</th>
       </tr>

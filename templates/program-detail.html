@@ -49,9 +49,17 @@
           <th scope="col">FY</th>
           <th scope="col">Exhibit</th>
           <th scope="col">Service</th>
-          <th scope="col" class="td-amount">FY24 Actual</th>
-          <th scope="col" class="td-amount">FY25 Enacted</th>
-          <th scope="col" class="td-amount">FY26 Request</th>
+          {% set amt_cols = [] %}
+          {% if pe_data.funding %}
+            {% for key in pe_data.funding[0].keys() %}
+              {% if key.startswith('amount_fy') %}
+                {% set _ = amt_cols.append(key) %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+          {% for col in amt_cols|sort %}
+          <th scope="col" class="td-amount">{{ col.replace("amount_fy", "FY").replace("_actual", " Actual").replace("_enacted", " Enacted").replace("_request", " Request").replace("_total", " Total").replace("_supplemental", " Supp.").replace("_reconciliation", " Recon.") }}</th>
+          {% endfor %}
           <th scope="col" class="td-amount">Delta</th>
           <th scope="col" class="td-amount qty-col">Qty FY24</th>
           <th scope="col" class="td-amount qty-col">Qty FY25</th>
@@ -64,21 +72,22 @@
           <td>{{ row.fiscal_year or "—" }}</td>
           <td><span class="badge">{{ (row.exhibit_type or "—") | upper }}</span></td>
           <td>{{ row.organization_name or "—" }}</td>
+          {% for col in amt_cols|sort %}
           <td class="td-amount">
-            {{ row.amount_fy2024_actual | fmt_amount if row.amount_fy2024_actual is not none else "—" }}
+            {{ row[col] | fmt_amount if row[col] is not none else "—" }}
           </td>
+          {% endfor %}
           <td class="td-amount">
-            {{ row.amount_fy2025_enacted | fmt_amount if row.amount_fy2025_enacted is not none else "—" }}
-          </td>
-          <td class="td-amount">
-            {{ row.amount_fy2026_request | fmt_amount if row.amount_fy2026_request is not none else "—" }}
-          </td>
-          <td class="td-amount">
-            {% if row.amount_fy2025_enacted and row.amount_fy2026_request and row.amount_fy2025_enacted != 0 %}
-              {% set delta_pct = ((row.amount_fy2026_request - row.amount_fy2025_enacted) / (row.amount_fy2025_enacted if row.amount_fy2025_enacted > 0 else 1) * 100) %}
-              <span class="delta {{ 'positive' if delta_pct >= 0 else 'negative' }}">
-                {{ "{:+.1f}".format(delta_pct) }}%
-              </span>
+            {% set sorted_cols = amt_cols|sort %}
+            {% if sorted_cols|length >= 2 %}
+              {% set prev_col = sorted_cols[-2] %}
+              {% set curr_col = sorted_cols[-1] %}
+              {% if row[prev_col] and row[curr_col] and row[prev_col] != 0 %}
+                {% set delta_pct = ((row[curr_col] - row[prev_col]) / (row[prev_col] if row[prev_col] > 0 else 1) * 100) %}
+                <span class="delta {{ 'positive' if delta_pct >= 0 else 'negative' }}">
+                  {{ "{:+.1f}".format(delta_pct) }}%
+                </span>
+              {% else %}—{% endif %}
             {% else %}—{% endif %}
           </td>
           <td class="td-amount qty-col">{{ row.quantity_fy2024 if row.quantity_fy2024 is defined and row.quantity_fy2024 is not none else "—" }}</td>
@@ -94,7 +103,7 @@
 
 {# ── Funding Changes (lazy-loaded via HTMX) ──────────────────── #}
 <section class="pe-section" aria-label="Funding changes">
-  <h3>Funding Changes (FY25 → FY26)
+  <h3>Funding Changes (Year-over-Year)
     {% if pe_data.summary.funding_rows > 0 %}
     <span class="badge" style="font-size:.7rem;vertical-align:middle">YoY</span>
     {% endif %}

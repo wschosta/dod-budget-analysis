@@ -23,11 +23,6 @@
     </div>
     <button type="submit" class="btn btn-primary hero-search-btn">Search</button>
   </form>
-  <div class="search-source-toggle" style="margin-top:.5rem;font-size:.8rem;display:flex;gap:.75rem;justify-content:center">
-    <label><input type="radio" name="hero_source" value="budget_lines" checked> Budget Lines</label>
-    <label><input type="radio" name="hero_source" value="descriptions"> Program Descriptions</label>
-    <label><input type="radio" name="hero_source" value="both"> Both</label>
-  </div>
   <div class="hero-actions">
     <button type="button" class="btn btn-secondary btn-sm" onclick="toggleAdvancedSearch()">Advanced Search</button>
   </div>
@@ -96,7 +91,7 @@
       <details class="filter-section" open>
         <summary class="filter-section-header">Time &amp; Service</summary>
         <div class="filter-group">
-          <label for="fiscal_year" data-tooltip="DoD fiscal year runs Oct 1 – Sep 30. FY2026 = Oct 2025 – Sep 2026. Select multiple years with Ctrl+click (Windows) or Cmd+click (Mac).">Fiscal Year</label>
+          <label for="fiscal_year" data-tooltip="DoD fiscal year runs Oct 1 – Sep 30 (e.g., FY20XX = Oct 20XX-1 – Sep 20XX). Select multiple years with Ctrl+click (Windows) or Cmd+click (Mac).">Fiscal Year</label>
           <select id="fiscal_year" name="fiscal_year" multiple>
             {% for fy in fiscal_years %}
             <option value="{{ fy.fiscal_year }}"
@@ -152,6 +147,14 @@
         {# FE-001: Amount range filters + FALCON-3: dynamic FY column selector #}
         <div class="filter-group">
           <span id="amount-range-label" data-tooltip="Amount in thousands of dollars ($K). Filter lines where the selected FY column falls within this range.">Amount Range ($K)</span>
+          <div style="margin-bottom:.3rem">
+            <select name="amount_column" id="amount_column"
+                    style="width:100%;padding:.25rem .4rem;font-size:.82rem;border:1px solid var(--border-color);border-radius:var(--radius);background:var(--bg-surface);color:var(--text-primary)">
+              {% for fc in fiscal_year_columns %}
+              <option value="{{ fc.column }}" {% if fc.column == amount_column %}selected{% endif %}>{{ fc.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
           <div style="display:flex;gap:.4rem;align-items:center" role="group" aria-labelledby="amount-range-label">
             <label for="min_amount" class="sr-only">Minimum amount ($K)</label>
             <input type="number" id="min_amount" name="min_amount"
@@ -257,7 +260,8 @@
   <div class="modal">
     <h3 id="dl-modal-title">Download Budget Lines</h3>
     <p id="dl-modal-count" style="font-size:.85rem;color:var(--text-secondary);margin-bottom:.75rem">
-      Downloads apply the current filters (up to 50,000 rows).
+      Your filters match <strong>{{ "{:,}".format(total) if total is defined else "—" }}</strong> rows.
+      Downloads include all matching rows (up to 50,000).
     </p>
     <div style="display:flex;gap:.5rem;flex-direction:column">
       <a id="dl-csv" href="#" class="btn btn-primary" download>

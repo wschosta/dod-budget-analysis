@@ -36,12 +36,15 @@ def _safe_int(value: str, default: int) -> int:
 
 
 from utils.cache import TTLCache
+from utils.database import get_amount_columns
 from utils.query import (
     ALLOWED_SORT_COLUMNS,
+    _AMOUNT_COL_RE,
     build_where_clause,
     validate_amount_column,
     FISCAL_YEAR_COLUMN_LABELS,
     DEFAULT_AMOUNT_COLUMN,
+    make_fiscal_year_column_labels,
 )
 from utils import sanitize_fts5_query
 
@@ -288,7 +291,12 @@ def _query_results(
     page_size: int | None = None,
 ) -> dict[str, Any]:
     """Run the filtered budget_lines query and return template context vars."""
-    sort_by   = filters["sort_by"] if filters["sort_by"] in ALLOWED_SORT_COLUMNS else "id"
+    raw_sort = filters["sort_by"]
+    # Accept both static allowed columns and any valid amount_fy* column
+    if raw_sort in ALLOWED_SORT_COLUMNS or _AMOUNT_COL_RE.match(raw_sort):
+        sort_by = raw_sort
+    else:
+        sort_by = "id"
     sort_dir  = "DESC" if filters["sort_dir"] == "desc" else "ASC"
     page      = filters["page"]
     page_size = page_size or filters.get("page_size", 25)
@@ -423,11 +431,16 @@ def _query_results(
 
     # FIX-005: Added FY25 total and FY26 total columns.
     # FIX-007: Added source_file for source material links.
+    # Issue #29: Dynamically discover all amount_fy* columns instead of hardcoding.
+    amount_cols = get_amount_columns(conn)
+    if not amount_cols:
+        amount_cols = ["amount_fy2024_actual", "amount_fy2025_enacted", "amount_fy2025_total",
+                       "amount_fy2026_request", "amount_fy2026_total"]
+    amt_select = ", ".join(amount_cols)
     rows = conn.execute(
         f"SELECT id, exhibit_type, fiscal_year, account, account_title, "
         f"organization_name, budget_activity_title, line_item_title, pe_number, "
-        f"amount_fy2024_actual, amount_fy2025_enacted, amount_fy2025_total, "
-        f"amount_fy2026_request, amount_fy2026_total, source_file "
+        f"{amt_select}, source_file "
         f"FROM budget_lines {where} "
         f"ORDER BY {sort_by} {sort_dir} LIMIT ? OFFSET ?",
         params + [page_size, offset],
@@ -441,6 +454,8 @@ def _query_results(
         "sort_by":     sort_by,
         "sort_dir":    filters["sort_dir"],
         "page_size":   page_size,
+        # Issue #29: Pass dynamic amount columns to templates
+        "amount_columns": amount_cols,
         # EAGLE-5: Parsed query structure for template display
         "parsed_query": parsed_query,
     }
@@ -458,6 +473,10 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLR
     exhibit_types  = _get_exhibit_types(conn)
     appropriations = _get_appropriations(conn)
 
+    # Build dynamic FY column labels from discovered amount columns
+    amt_cols = results.get("amount_columns", [])
+    fy_col_labels = make_fiscal_year_column_labels(amt_cols) if amt_cols else FISCAL_YEAR_COLUMN_LABELS
+
     return _tmpl().TemplateResponse(
         "index.html",
         {
@@ -467,9 +486,9 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLR
             "services":       services,
             "exhibit_types":  exhibit_types,
             "appropriations": appropriations,
-            # EAGLE-1: Dynamic amount column context for FY selector
+            # Dynamic amount column context — discovered from DB schema
             "amount_column":        filters.get("amount_column", DEFAULT_AMOUNT_COLUMN),
-            "fiscal_year_columns":  FISCAL_YEAR_COLUMN_LABELS,
+            "fiscal_year_columns":  fy_col_labels,
             # EAGLE-4: Pagination options for template dropdown
             "page_size_options":    PAGE_SIZE_OPTIONS,
             **results,
@@ -514,14 +533,18 @@ def results_partial(
     filters = _parse_filters(request)
     results = _query_results(filters, conn)
 
+    # Build dynamic FY column labels from discovered amount columns
+    amt_cols = results.get("amount_columns", [])
+    fy_col_labels = make_fiscal_year_column_labels(amt_cols) if amt_cols else FISCAL_YEAR_COLUMN_LABELS
+
     response = _tmpl().TemplateResponse(
         "partials/results.html",
         {
             "request": request,
             "filters": filters,
-            # EAGLE-1: Dynamic amount column context
+            # Dynamic amount column context — discovered from DB schema
             "amount_column": filters.get("amount_column", DEFAULT_AMOUNT_COLUMN),
-            "fiscal_year_columns": FISCAL_YEAR_COLUMN_LABELS,
+            "fiscal_year_columns": fy_col_labels,
             # EAGLE-4: Pagination options
             "page_size_options": PAGE_SIZE_OPTIONS,
             **results,
@@ -646,6 +669,17 @@ def programs(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HT
     total = 0
 
     has_pe_data = _table_exists(conn, "pe_index")
+
+    params = request.query_params
+    try:
+        limit = min(100, max(10, int(params.get("limit", "25"))))
+    except (ValueError, TypeError):
+        limit = 25
+    try:
+        offset = max(0, int(params.get("offset", "0")))
+    except (ValueError, TypeError):
+        offset = 0
+
     if has_pe_data:
         try:
             from api.routes.pe import list_pes, list_tags
@@ -656,7 +690,7 @@ def programs(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HT
                                 budget_type=None, approp=None, account=None,
                                 ba=None, exhibit=None, fy=None,
                                 sort_by=None, sort_dir=None,
-                                count_only=False, limit=25, offset=0,
+                                count_only=False, limit=limit, offset=offset,
                                 conn=conn)
             items = pe_result.get("items", [])
             total = pe_result.get("total", 0)
@@ -670,6 +704,8 @@ def programs(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HT
         "items": items,
         "total": total,
         "has_pe_data": has_pe_data,
+        "limit": limit,
+        "offset": offset,
     })
 
 
@@ -773,6 +809,15 @@ def program_list_partial(
     sort_by = params.get("sort_by") or None
     sort_dir = params.get("sort_dir") or None
 
+    try:
+        limit = min(100, max(10, int(params.get("limit", "25"))))
+    except (ValueError, TypeError):
+        limit = 25
+    try:
+        offset = max(0, int(params.get("offset", "0")))
+    except (ValueError, TypeError):
+        offset = 0
+
     if _table_exists(conn, "pe_index"):
         try:
             from api.routes.pe import list_pes
@@ -783,7 +828,7 @@ def program_list_partial(
                 service=params.get("service") or None,
                 budget_type=None, approp=None, account=None, ba=None,
                 exhibit=None, fy=None, sort_by=sort_by, sort_dir=sort_dir,
-                count_only=False, limit=25, offset=0, conn=conn,
+                count_only=False, limit=limit, offset=offset, conn=conn,
             )
             items = result.get("items", [])
             total = result.get("total", 0)
@@ -796,6 +841,8 @@ def program_list_partial(
         "total": total,
         "sort_by": sort_by or "pe_number",
         "sort_dir": sort_dir or "asc",
+        "limit": limit,
+        "offset": offset,
     })
 
 

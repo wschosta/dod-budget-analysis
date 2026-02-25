@@ -8,11 +8,11 @@
 <!-- Summary stat cards -->
 <div class="dashboard-stats" role="region" aria-label="Budget summary statistics">
   <div class="stat-card">
-    <div class="stat-label">FY2026 Total Request</div>
+    <div class="stat-label">Latest Request Total</div>
     <div class="stat-value" id="stat-total-fy26">--</div>
   </div>
   <div class="stat-card">
-    <div class="stat-label">FY2025 Enacted</div>
+    <div class="stat-label">Prior Year Enacted</div>
     <div class="stat-value" id="stat-total-fy25">--</div>
   </div>
   <div class="stat-card">
@@ -22,6 +22,10 @@
   <div class="stat-card">
     <div class="stat-label">Budget Lines</div>
     <div class="stat-value" id="stat-line-count">--</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Last Updated</div>
+    <div class="stat-value" id="stat-freshness" style="font-size:.9rem">--</div>
   </div>
 </div>
 
@@ -47,7 +51,7 @@
 <!-- Top 10 programs -->
 <div class="dashboard-grid" id="dash-programs" style="display:none" role="region" aria-label="Top programs">
   <div class="chart-card" style="grid-column: 1 / -1">
-    <h3>Top 10 Programs by FY2026 Request</h3>
+    <h3>Top 10 Programs by Request</h3>
     <div id="dash-top-programs"></div>
   </div>
 </div>

@@ -4,6 +4,7 @@ Provides DRY WHERE clause and ORDER BY construction used by budget_lines.py,
 frontend.py, and download.py.
 """
 
+import re
 from typing import Any
 
 
@@ -13,18 +14,11 @@ ALLOWED_SORT_COLUMNS = {
     "amount_fy2026_request", "amount_fy2025_enacted", "amount_fy2024_actual",
 }
 
-# EAGLE-1: Whitelist of valid fiscal year amount columns for dynamic filtering
-VALID_AMOUNT_COLUMNS = {
-    "amount_fy2024_actual",
-    "amount_fy2025_enacted",
-    "amount_fy2025_supplemental",
-    "amount_fy2025_total",
-    "amount_fy2026_request",
-    "amount_fy2026_reconciliation",
-    "amount_fy2026_total",
-}
+# Pattern for valid amount column names (amount_fyYYYY_type)
+_AMOUNT_COL_RE = re.compile(r"^amount_fy\d{4}_[a-z]+$")
 
-# EAGLE-1: Human-readable labels for FY amount columns
+# Fallback labels used when DB introspection isn't available.
+# The frontend dynamically discovers columns via get_amount_columns() at runtime.
 FISCAL_YEAR_COLUMN_LABELS = [
     {"column": "amount_fy2024_actual", "label": "FY2024 Actual"},
     {"column": "amount_fy2025_enacted", "label": "FY2025 Enacted"},
@@ -36,24 +30,47 @@ FISCAL_YEAR_COLUMN_LABELS = [
 DEFAULT_AMOUNT_COLUMN = "amount_fy2026_request"
 
 
+def amount_col_to_label(col: str) -> str:
+    """Convert an amount column name to a human-readable label.
+
+    Example: 'amount_fy2024_actual' → 'FY2024 Actual'
+    """
+    label = col.replace("amount_fy", "FY")
+    for suffix, replacement in [
+        ("_actual", " Actual"), ("_enacted", " Enacted"),
+        ("_request", " Request"), ("_total", " Total"),
+        ("_supplemental", " Supplemental"), ("_reconciliation", " Reconciliation"),
+    ]:
+        label = label.replace(suffix, replacement)
+    return label
+
+
+def make_fiscal_year_column_labels(columns: list[str]) -> list[dict[str, str]]:
+    """Build the column-label list from discovered amount columns."""
+    return [{"column": c, "label": amount_col_to_label(c)} for c in sorted(columns)]
+
+
 def validate_amount_column(column: str | None) -> str:
     """Validate and return an amount column name, defaulting to FY2026 request.
+
+    Accepts any column matching the ``amount_fy{YYYY}_{type}`` pattern
+    to support databases with arbitrary fiscal year data.
 
     Args:
         column: Column name to validate. None returns the default.
 
     Returns:
-        A valid amount column name from VALID_AMOUNT_COLUMNS.
+        A safe amount column name.
 
     Raises:
-        ValueError: If the column name is not in the whitelist.
+        ValueError: If the column name doesn't match the expected pattern.
     """
     if column is None:
         return DEFAULT_AMOUNT_COLUMN
-    if column not in VALID_AMOUNT_COLUMNS:
+    if not _AMOUNT_COL_RE.match(column):
         raise ValueError(
             f"Invalid amount column: '{column}'. "
-            f"Must be one of: {', '.join(sorted(VALID_AMOUNT_COLUMNS))}"
+            f"Must match pattern amount_fyYYYY_type (e.g. amount_fy2026_request)."
         )
     return column
 

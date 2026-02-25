@@ -203,7 +203,8 @@ async function loadTopNChart(fy) {
   clearChartError('err-topn', 'chart-topn');
   try {
     var services = getSelectedServices();
-    var url = CHARTS_API + '/budget-lines?sort_by=amount_fy2026_request&sort_dir=desc&limit=10&fiscal_year=' + fy;
+    var sortCol = 'amount_fy' + fy.replace(/\D/g, '') + '_request';
+    var url = CHARTS_API + '/budget-lines?sort_by=' + sortCol + '&sort_dir=desc&limit=10&fiscal_year=' + fy;
     services.forEach(function(s) { url += '&service=' + encodeURIComponent(s); });
 
     var resp = await fetch(url);
@@ -217,7 +218,7 @@ async function loadTopNChart(fy) {
 
     var sampleItem = data.items[0];
     var amtKeys = Object.keys(sampleItem).filter(function(k) { return k.startsWith('amount_') && k.includes('request'); });
-    var amtCol = amtKeys.find(function(k) { return k.includes('2026'); }) || amtKeys[0] || 'amount_fy2026_request';
+    var amtCol = amtKeys.find(function(k) { return k.includes(fy.replace(/\D/g, '')); }) || amtKeys[0] || sortCol;
 
     var topLabels = data.items.map(function(r) {
       var title = r.line_item_title || r.account_title || 'Unknown';
@@ -404,7 +405,7 @@ async function loadTreemap(fy) {
             display: true,
             align: 'left',
             position: 'top',
-            color: '#fff',
+            color: getComputedStyle(document.documentElement).getPropertyValue('--text-on-primary').trim() || '#fff',
             font: { size: 11, weight: 'bold' },
             formatter: function(ctx) {
               if (!ctx.raw || !ctx.raw._data) return '';
