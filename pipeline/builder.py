@@ -2454,6 +2454,11 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             _retry_only = None
 
     # ── Setup ──────────────────────────────────────────────────────────────
+    # Resolve docs_dir once so all downstream relative_to() calls are
+    # consistent — mixing resolved and unresolved Paths causes ValueError
+    # on Windows when one is absolute and the other relative.
+    docs_dir = docs_dir.resolve()
+
     if not docs_dir.exists():
         _progress("error", 0, 0, f"Documents directory not found: {docs_dir}")
         raise FileNotFoundError(f"Documents directory not found: {docs_dir}")

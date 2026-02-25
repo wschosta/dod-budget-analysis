@@ -125,11 +125,29 @@ def _backup_db(db_path: Path) -> Path | None:
 
 
 def _rollback_db(db_path: Path, backup: Path | None) -> bool:
-    """Restore the database from backup after a failed build."""
-    if backup and backup.exists():
-        shutil.copy2(backup, db_path)
-        print(f"  Database restored from {backup}", flush=True)
-        return True
+    """Restore the database from backup after a failed build.
+
+    On Windows, SQLite may keep the database file memory-mapped even after
+    the connection is closed. We retry with a short delay to allow the OS
+    to release the file handle.
+    """
+    if not backup or not backup.exists():
+        return False
+
+    import time as _time
+    for attempt in range(5):
+        try:
+            shutil.copy2(backup, db_path)
+            print(f"  Database restored from {backup}", flush=True)
+            return True
+        except OSError as e:
+            # WinError 1224: file with user-mapped section open
+            if attempt < 4:
+                _time.sleep(0.5 * (attempt + 1))
+            else:
+                print(f"  Warning: could not restore backup — {e}", flush=True)
+                print(f"  Backup is preserved at: {backup}", flush=True)
+                return False
     return False
 
 
