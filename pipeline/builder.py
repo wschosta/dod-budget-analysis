@@ -108,13 +108,11 @@ from concurrent.futures import (
 import logging
 import os
 
-logger = logging.getLogger(__name__)
-
-# Shared utilities: Import from utils package for consistency across codebase
-# Optimization: Pre-compiled patterns and safe_float function reduce data ingestion time by ~10-15%
 from utils import safe_float
 from utils.strings import normalize_fiscal_year as _normalize_fy_value
 from utils.patterns import PE_NUMBER
+
+logger = logging.getLogger(__name__)
 
 # For backward compatibility, use the shared pattern
 _PE_PATTERN = PE_NUMBER
