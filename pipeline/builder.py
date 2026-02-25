@@ -2799,9 +2799,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 _mark_file_processed(conn, session_id, rel_path, "excel", rows_count=len(rows))
                 elapsed = time.time() - t_excel_start
                 excel_file_times.append(elapsed / max(xi + 1, 1))
-                logger.info("  [%d/%d] %s: %d rows", xi + 1, len(xlsx_to_process), xl.name, len(rows))
                 _progress("excel", xi + 1 + skipped_xlsx, len(xlsx_files),
-                          f"Done: {xl.name} ({len(rows)} rows)",
+                          f"{xl.name} — {len(rows):,} rows",
                           {"rows": total_budget_rows,
                            "files_remaining": total_files - files_done_total})
         conn.commit()
@@ -2847,7 +2846,6 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         _progress("excel", xi + 1, len(xlsx_files),
                   f"Processing: {xlsx.name}",
                   {"files_remaining": total_files - files_done_total})
-        logger.info("  Processing: %s...", xlsx.name)
 
         _remove_file_data(conn, rel_path, "xlsx")
 
@@ -2875,7 +2873,6 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             files_done_total += 1
             continue
         file_elapsed = time.time() - t0
-        logger.info("  %s: %d rows (%.1fs)", xlsx.name, rows, file_elapsed)
 
         # Update speed tracking
         if file_elapsed > 0 and rows > 0:
@@ -2899,7 +2896,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
         # Post-file progress update with updated row count
         _progress("excel", xi + 1, len(xlsx_files),
-                  f"Done: {xlsx.name} ({rows} rows)",
+                  f"{xlsx.name} — {rows:,} rows",
                   {"rows": total_budget_rows,
                    "files_remaining": total_files - files_done_total})
 
@@ -3238,11 +3235,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                         remaining = len(pdfs_to_process) - processed_pdf
                         _metrics["eta_sec"] = avg_per_file * remaining
 
-                    logger.info("  [%d/%d] %s: %d pages",
-                               processed_pdf, len(pdfs_to_process), pdf.name, pages)
                     _progress("pdf", processed_pdf, len(pdfs_to_process),
-                              f"[{processed_pdf}/{len(pdfs_to_process)}] "
-                              f"{pdf.name}: {pages} pages",
+                              f"{pdf.name} — {pages:,} pages",
                               dict(_metrics))
 
                     _mark_file_processed(conn, session_id, rel_path, "pdf",
@@ -3282,12 +3276,10 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             _metrics["files_remaining"] = total_files - files_done_total
 
             _progress("pdf", processed_pdf, len(pdfs_to_process),
-                      f"[{processed_pdf}] {pdf.name}",
+                      f"{pdf.name}",
                       {"files_remaining": total_files - files_done_total,
                        "current_pages": 0,
                        "current_total_pages": 0})
-            logger.info("  [%d/%d] %s...", processed_pdf, len(pdfs_to_process), pdf.name)
-
             def _page_cb(pages_done: int, page_total: int,
                          _proc=processed_pdf, _name=pdf.name,
                          _idx=processed_pdf, _total=len(pdfs_to_process)) -> None:
@@ -3295,7 +3287,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 _metrics["current_pages"] = pages_done
                 _metrics["current_total_pages"] = page_total
                 _progress("pdf", _idx, _total,
-                          f"[{_proc}] {_name} — page {pages_done}/{page_total}",
+                          f"{_name} — page {pages_done}/{page_total}",
                           {"files_remaining": total_files - files_done_total,
                            "current_pages": pages_done,
                            "current_total_pages": page_total})
@@ -3305,7 +3297,6 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                                                  docs_dir=docs_dir,
                                                  pdf_timeout=pdf_timeout)
             file_elapsed = time.time() - t0
-            logger.info("  %s: %d pages (%.1fs)", pdf.name, pages, file_elapsed)
 
             if file_elapsed > 0 and pages > 0:
                 _update_speed("speed_pages", pages / file_elapsed)
