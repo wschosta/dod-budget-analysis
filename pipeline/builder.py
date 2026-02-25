@@ -2527,6 +2527,14 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     is_new = not db_path.exists()
     conn = create_database(db_path)
 
+    # For full rebuilds, use aggressive WAL settings — if the build crashes
+    # the user would just rebuild again anyway.  Incremental updates keep
+    # the safer NORMAL synchronous mode set by create_database().
+    if rebuild or is_new:
+        conn.execute("PRAGMA synchronous=OFF")
+        conn.execute("PRAGMA locking_mode=EXCLUSIVE")
+        logger.info("  Build mode: synchronous=OFF, locking_mode=EXCLUSIVE (rebuild)")
+
     if is_new:
         logger.info("Created new database: %s", db_path)
     else:
@@ -2632,8 +2640,11 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     logger.info("  INGESTING EXCEL FILES")
     logger.info("=" * 60)
 
-    # Resolve worker count early (used for both Excel and PDF)
-    num_workers = workers if workers > 0 else min(os.cpu_count() or 1, 4)
+    # Resolve worker count early (used for both Excel and PDF).
+    # Default: up to 8 workers (PDF extraction is I/O + CPU mixed; going
+    # beyond 8 typically hits diminishing returns from pdfplumber's GIL
+    # contention and disk thrashing).  Users can override via --workers.
+    num_workers = workers if workers > 0 else min(os.cpu_count() or 1, 8)
 
     total_budget_rows = 0
     skipped_xlsx = 0
