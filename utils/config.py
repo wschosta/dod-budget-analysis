@@ -22,8 +22,16 @@ import re
 # Used by both downloader (folder layout) and pipeline (data source registration).
 # Canonical source; downloader.metadata duplicates for import isolation.
 
-SUMMARY_EXHIBIT_KEYS = frozenset({"p1", "r1", "o1", "m1", "c1", "rf1", "p1r"})
+SUMMARY_EXHIBIT_KEYS = frozenset({
+    "p1", "r1", "o1", "m1", "c1", "rf1", "p1r",
+    "ogsi", "supplemental", "amendment",
+})
 DETAIL_EXHIBIT_KEYS = frozenset({"p5", "r2", "r3", "r4"})
+
+# Short exhibit type keys that are summary-level but too short for safe
+# substring matching in filenames (e.g. "oco" is a substring of "socom").
+# Used for exact-match classification only.
+_SHORT_SUMMARY_KEYS = frozenset({"oco", "enl", "toa"})
 
 # ── Appropriation-Based Classification Patterns ──────────────────────────────
 # Many DoD budget documents use descriptive filenames based on appropriation
@@ -188,6 +196,12 @@ def classify_exhibit_category(filename_or_exhibit_type: str) -> str:
         "summary", "detail", or "other".
     """
     name = filename_or_exhibit_type.lower()
+
+    # ── Tier 0: Exact match for short keys (oco, enl, toa) ──────────────
+    # These are too short for safe substring matching in filenames
+    # (e.g. "oco" is a substring of "socom"), so check exact match only.
+    if name in _SHORT_SUMMARY_KEYS:
+        return "summary"
 
     # ── Tier 1: Exhibit type codes (highest confidence) ──────────────────
     # Check detail first (longer keys like "r2" before "r1")

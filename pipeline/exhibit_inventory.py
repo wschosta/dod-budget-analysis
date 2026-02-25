@@ -48,9 +48,20 @@ class ExhibitInventory:
         self.errors = []
 
     def _detect_exhibit_type(self, filename: str) -> str:
-        """Simple exhibit type detection from filename."""
-        name = filename.lower().replace("_display", "").replace(".xlsx", "")
-        exhibit_types = ["p1r", "p1", "o1", "r1", "m1", "c1", "rf1"]
+        """Simple exhibit type detection from filename.
+
+        Uses substring matching against known exhibit type codes,
+        checked longest-first to avoid false positives (e.g. "p1r"
+        before "p1"). Also recognizes keyword-based special types
+        like OCO, OGSI, supplemental, and amendment. All matching
+        is case-insensitive.
+        """
+        name = filename.lower().replace("_display", "").replace(".xlsx", "").replace(".pdf", "")
+        # Standard exhibit codes (longest first to avoid false positives)
+        exhibit_types = [
+            "supplemental", "amendment", "ogsi", "p1r", "rf1",
+            "p1", "p5", "o1", "r1", "r2", "r3", "r4", "m1", "c1",
+        ]
         for e_type in exhibit_types:
             if e_type in name:
                 return e_type

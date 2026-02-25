@@ -845,14 +845,14 @@ def main(argv: list[str] | None = None) -> int:
         _finalize_pipeline(pl, 0)
         return 0
 
-    # ── Step 0 / 5: Download (default ON, skip with --skip-download) ─────
+    # ── Step 1 / 5: Download (default ON, skip with --skip-download) ─────
     if not args.skip_download:
         dl_report = pl.start_step("download")
 
         # Try direct Python import; fall back to subprocess if unavailable
         try:
             ok, dl_result = _run_step(
-                "Step 0 / 5 -- Download documents",
+                "Step 1 / 5 -- Download documents",
                 _run_download,
                 args, docs_dir,
             )
@@ -878,7 +878,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  Direct download import failed ({imp_err}), "
                   f"falling back to subprocess...", flush=True)
             rc = _run_subprocess(
-                "Step 0 / 5 -- Download documents (subprocess)",
+                "Step 1 / 5 -- Download documents (subprocess)",
                 _download_cmd_fallback(args),
             )
             if rc != 0:
@@ -895,10 +895,10 @@ def main(argv: list[str] | None = None) -> int:
             _finalize_pipeline(pl, 0)
             return 0
     else:
-        print("\n[Step 0 / 5 -- Download documents] SKIPPED (--skip-download)", flush=True)
+        print("\n[Step 1 / 5 -- Download documents] SKIPPED (--skip-download)", flush=True)
         pl.record_user_skip("download", "User passed --skip-download")
 
-    # ── Step 1 / 5: Build or Stage+Load ──────────────────────────────────
+    # ── Step 2 / 5: Build or Stage+Load ──────────────────────────────────
     backup = None
     if not args.no_rollback:
         backup = _backup_db(db_path)
@@ -910,7 +910,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.load_only:
             stage_report = pl.start_step("stage")
             ok, stage_summary = _run_step(
-                "Step 1a / 5 -- Stage files to Parquet",
+                "Step 2a / 5 -- Stage files to Parquet",
                 stage_all_files,
                 docs_dir=docs_dir,
                 staging_dir=staging_dir,
@@ -947,7 +947,7 @@ def main(argv: list[str] | None = None) -> int:
 
         load_report = pl.start_step("load")
         ok, load_summary = _run_step(
-            "Step 1b / 5 -- Load Parquet into SQLite",
+            "Step 2b / 5 -- Load Parquet into SQLite",
             load_staging_to_db,
             staging_dir=staging_dir,
             db_path=db_path,
@@ -996,7 +996,7 @@ def main(argv: list[str] | None = None) -> int:
             build_kwargs["checkpoint_interval"] = args.checkpoint_interval
 
         ok, build_result = _run_step(
-            "Step 1 / 5 -- Build database",
+            "Step 2 / 5 -- Build database",
             build_database,
             **build_kwargs,
         )
@@ -1019,13 +1019,13 @@ def main(argv: list[str] | None = None) -> int:
         _finalize_pipeline(pl, 0)
         return 0
 
-    # ── Step 2 / 5: Repair ───────────────────────────────────────────────
+    # ── Step 3 / 5: Repair ───────────────────────────────────────────────
     if not args.skip_repair:
         from repair_database import repair
 
         repair_report = pl.start_step("repair")
         ok, repair_result = _run_step(
-            "Step 2 / 5 -- Repair database",
+            "Step 3 / 5 -- Repair database",
             repair,
             db_path=db_path,
         )
@@ -1053,14 +1053,14 @@ def main(argv: list[str] | None = None) -> int:
         _finalize_pipeline(pl, 0)
         return 0
 
-    # ── Step 3 / 5: Validate ─────────────────────────────────────────────
+    # ── Step 4 / 5: Validate ─────────────────────────────────────────────
     if not args.skip_validate:
         from pipeline.validator import validate_all
 
         val_report = pl.start_step("validate")
 
         ok, val_summary = _run_step(
-            "Step 3 / 5 -- Validate database",
+            "Step 4 / 5 -- Validate database",
             validate_all,
             db_path=db_path,
             strict=args.strict,
@@ -1118,7 +1118,7 @@ def main(argv: list[str] | None = None) -> int:
             if ok_report:
                 print(f"  Report: {report_path.resolve()}")
     else:
-        print("\n[Step 3 / 5 -- Validate database] SKIPPED (--skip-validate)", flush=True)
+        print("\n[Step 4 / 5 -- Validate database] SKIPPED (--skip-validate)", flush=True)
         pl.record_user_skip("validate", "User passed --skip-validate")
 
     if _check_stopped("validate"):
@@ -1126,7 +1126,7 @@ def main(argv: list[str] | None = None) -> int:
         _finalize_pipeline(pl, 0)
         return 0
 
-    # ── Step 4 / 5: Enrich ───────────────────────────────────────────────
+    # ── Step 5 / 5: Enrich ───────────────────────────────────────────────
     if not args.skip_enrich:
         from pipeline.enricher import enrich
 
@@ -1139,7 +1139,7 @@ def main(argv: list[str] | None = None) -> int:
             phases = {1, 2, 3, 4, 5}
 
         ok, enrich_result = _run_step(
-            "Step 4 / 5 -- Enrich database",
+            "Step 5 / 5 -- Enrich database",
             enrich,
             db_path=db_path,
             phases=phases,
@@ -1162,7 +1162,7 @@ def main(argv: list[str] | None = None) -> int:
         enrich_report.status = "completed"
         pl.finish_step("enrich", enrich_report)
     else:
-        print("\n[Step 4 / 5 -- Enrich database] SKIPPED (--skip-enrich)", flush=True)
+        print("\n[Step 5 / 5 -- Enrich database] SKIPPED (--skip-enrich)", flush=True)
         pl.record_user_skip("enrich", "User passed --skip-enrich")
 
     # ── Done ─────────────────────────────────────────────────────────────

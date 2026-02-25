@@ -27,10 +27,21 @@ _EXHIBIT_TYPES = {
     "r2":  "RDT&E PE Detail (R-2)",
     "r3":  "RDT&E Project Schedule (R-3)",
     "r4":  "RDT&E Budget Item Justification (R-4)",
+    # Special / non-standard exhibit types (long names safe for substring matching)
+    "ogsi":         "Overseas/Global Security & Intelligence (OGSI)",
+    "supplemental": "Supplemental Budget Request",
+    "amendment":    "Budget Amendment / Update",
 }
 
-SUMMARY_EXHIBIT_KEYS = frozenset({"p1", "r1", "o1", "m1", "c1", "rf1", "p1r"})
+SUMMARY_EXHIBIT_KEYS = frozenset({
+    "p1", "r1", "o1", "m1", "c1", "rf1", "p1r",
+    "ogsi", "supplemental", "amendment",
+})
 DETAIL_EXHIBIT_KEYS = frozenset({"p5", "r2", "r3", "r4"})
+
+# Short exhibit type keys that are summary-level but too short for safe
+# substring matching in filenames (e.g. "oco" is a substring of "socom").
+_SHORT_SUMMARY_KEYS = frozenset({"oco", "enl", "toa"})
 
 # Navy/DoN appropriation justification book → exhibit type mapping.
 # Mirrors NAVY_APPROPRIATION_TO_EXHIBIT in pipeline.builder (kept separate to
@@ -66,6 +77,26 @@ _SOURCE_SERVICE_MAP = {
     "darpa": "DARPA",
 }
 
+# Keyword-based exhibit type patterns for Tier 3 detection.
+# Catches Comptroller/special files that don't match standard exhibit codes
+# or Navy abbreviations. Must stay in sync with _KEYWORD_EXHIBIT_PATTERNS
+# in pipeline/builder.py.
+_KEYWORD_EXHIBIT_PATTERNS: list[tuple[str, str]] = [
+    ("budget_amendment", "amendment"),
+    ("amendment_update", "amendment"),
+    ("amendment", "amendment"),
+    ("overseas_contingency", "oco"),
+    ("_oco_", "oco"),
+    ("oco_", "oco"),
+    ("_oco", "oco"),
+    ("ogsi", "ogsi"),
+    ("supplemental", "supplemental"),
+    ("_toa_", "toa"),
+    ("toa_summary", "toa"),
+    ("_enl_", "enl"),
+    ("enl_summary", "enl"),
+]
+
 # Budget cycle detection patterns
 _CYCLE_PATTERNS = [
     (re.compile(r"\benacted\b", re.I), "enacted"),
@@ -80,10 +111,13 @@ _CYCLE_PATTERNS = [
 def detect_exhibit_type_from_filename(filename: str) -> str:
     """Detect the exhibit type from a filename.
 
-    Uses a three-tier strategy mirroring pipeline.builder._detect_exhibit_type():
+    Uses a four-tier strategy mirroring pipeline.builder._detect_exhibit_type():
     1. Standard exhibit codes (p1, r2, …).
     2. Appropriation book abbreviations (apn→p5, rdten→r2, proc_*→p5).
-    3. Fallback to ``"unknown"``.
+    3. Keyword-based detection (oco, supplemental, amendment, …).
+    4. Fallback to ``"unknown"``.
+
+    All matching is case-insensitive.
 
     Args:
         filename: The filename (not full path), e.g. "p1_display.xlsx".
@@ -105,6 +139,10 @@ def detect_exhibit_type_from_filename(filename: str) -> str:
     # Tier 2b: Defense-Wide PROC_{agency} files → p5
     if name.startswith("proc_"):
         return "p5"
+    # Tier 3: keyword-based detection for Comptroller/special files
+    for keyword, etype in _KEYWORD_EXHIBIT_PATTERNS:
+        if keyword in name:
+            return etype
     return "unknown"
 
 
@@ -118,7 +156,7 @@ def classify_exhibit_category(exhibit_type: str) -> str:
         "summary", "detail", or "other".
     """
     et = exhibit_type.lower()
-    if et in SUMMARY_EXHIBIT_KEYS:
+    if et in SUMMARY_EXHIBIT_KEYS or et in _SHORT_SUMMARY_KEYS:
         return "summary"
     if et in DETAIL_EXHIBIT_KEYS:
         return "detail"
