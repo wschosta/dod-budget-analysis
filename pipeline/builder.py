@@ -224,6 +224,19 @@ EXHIBIT_TYPES = {
     "r2":  "RDT&E PE Detail (R-2)",
     "r3":  "RDT&E Project Schedule (R-3)",
     "r4":  "RDT&E Budget Item Justification (R-4)",
+    # Special / non-standard exhibit types (long names safe for substring matching)
+    "ogsi":         "Overseas/Global Security & Intelligence (OGSI)",
+    "supplemental": "Supplemental Budget Request",
+    "amendment":    "Budget Amendment / Update",
+}
+
+# Additional exhibit type display names for types detected only via keyword
+# patterns (Tier 3). These are too short for safe Tier 1 substring matching
+# (e.g. "oco" is a substring of "socom").
+KEYWORD_ONLY_EXHIBIT_TYPES: dict[str, str] = {
+    "oco":  "Overseas Contingency Operations (OCO)",
+    "enl":  "Enlisted Personnel Summary",
+    "toa":  "Total Obligation Authority Summary",
 }
 
 # Navy/DoN appropriation justification book abbreviations → exhibit type mapping.
@@ -264,6 +277,33 @@ DEFENSE_WIDE_PROC_AGENCIES = frozenset({
     "dodea", "dpaa", "dpap", "dtra", "osd", "socom", "tjs", "whs",
     "mda",
 })
+
+# Keyword-based exhibit type patterns for Tier 3 detection.
+# These catch Comptroller/special files that don't match standard exhibit
+# codes or Navy abbreviations. Ordered longest-first for greedy matching.
+# Each entry is (keyword, exhibit_type).
+_KEYWORD_EXHIBIT_PATTERNS: list[tuple[str, str]] = [
+    # Budget amendment / update files (e.g., "FY15_OCO_Budget_Amendment_Update.xlsx")
+    # Check "amendment" before "oco" so compound names resolve to the more specific type
+    ("budget_amendment", "amendment"),
+    ("amendment_update", "amendment"),
+    ("amendment", "amendment"),
+    # Overseas Contingency Operations (OCO)
+    ("overseas_contingency", "oco"),
+    ("_oco_", "oco"),
+    ("oco_", "oco"),
+    ("_oco", "oco"),
+    # Overseas/Global Security & Intelligence (OGSI)
+    ("ogsi", "ogsi"),
+    # Supplemental budget requests
+    ("supplemental", "supplemental"),
+    # Total Obligation Authority summaries
+    ("_toa_", "toa"),
+    ("toa_summary", "toa"),
+    # Enlisted personnel summaries
+    ("_enl_", "enl"),
+    ("enl_summary", "enl"),
+]
 
 
 # ── BUILD-001: Structured failure log ─────────────────────────────────────────
@@ -374,8 +414,12 @@ def _migrate_add_columns(conn: sqlite3.Connection) -> None:
 def _seed_reference_tables(conn: sqlite3.Connection) -> None:
     """Seed reference tables with canonical display names."""
     # Exhibit types
-    for code, display_name in EXHIBIT_TYPES.items():
-        exhibit_class = "summary" if code in ("p1", "r1", "o1", "m1", "c1", "rf1", "p1r") else "detail"
+    _summary_codes = {"p1", "r1", "o1", "m1", "c1", "rf1", "p1r",
+                       "oco", "ogsi", "supplemental", "amendment", "enl", "toa"}
+    # Seed both standard exhibit types and keyword-only types
+    all_exhibit_types = {**EXHIBIT_TYPES, **KEYWORD_ONLY_EXHIBIT_TYPES}
+    for code, display_name in all_exhibit_types.items():
+        exhibit_class = "summary" if code in _summary_codes else "detail"
         conn.execute(
             "INSERT OR IGNORE INTO exhibit_types (code, display_name, exhibit_class) VALUES (?, ?, ?)",
             (code, display_name, exhibit_class),
@@ -772,12 +816,15 @@ _safe_float = safe_float
 def _detect_exhibit_type(filename: str) -> str:
     """Detect the exhibit type from the filename.
 
-    Uses a three-tier strategy:
+    Uses a four-tier strategy:
     1. Standard exhibit codes (p1, r2, m1, …) — highest confidence.
     2. Appropriation book abbreviations (apn→p5, rdten→r2, …) — Navy/DW.
-    3. Fallback to ``"unknown"``.
+    3. Keyword-based detection (oco, supplemental, amendment, …) — Comptroller.
+    4. Fallback to ``"unknown"``.
+
+    All matching is case-insensitive.
     """
-    name = filename.lower().replace("_display", "").replace(".xlsx", "")
+    name = filename.lower().replace("_display", "").replace(".xlsx", "").replace(".pdf", "")
     # Tier 1: standard exhibit type codes
     for key in sorted(EXHIBIT_TYPES.keys(), key=len, reverse=True):
         if key in name:
@@ -791,6 +838,10 @@ def _detect_exhibit_type(filename: str) -> str:
     # Tier 2b: Defense-Wide PROC_{agency} files → p5
     if name.startswith("proc_"):
         return "p5"
+    # Tier 3: keyword-based detection for Comptroller/special files
+    for keyword, etype in _KEYWORD_EXHIBIT_PATTERNS:
+        if keyword in name:
+            return etype
     return "unknown"
 
 
@@ -1755,10 +1806,12 @@ def _extract_fy_from_path(file_path: Path) -> str | None:
 def _detect_pdf_exhibit_type(filename: str) -> str:
     """Detect the exhibit type from a PDF filename (LION-100).
 
-    Uses the same three-tier strategy as :func:`_detect_exhibit_type`:
-    standard codes → appropriation abbreviations → ``"unknown"``.
+    Uses the same four-tier strategy as :func:`_detect_exhibit_type`:
+    standard codes → appropriation abbreviations → keyword patterns → ``"unknown"``.
+
+    All matching is case-insensitive.
     """
-    name = filename.lower().replace("_display", "")
+    name = filename.lower().replace("_display", "").replace(".pdf", "")
     # Tier 1: standard exhibit type codes
     for key in sorted(EXHIBIT_TYPES.keys(), key=len, reverse=True):
         if key in name:
@@ -1772,6 +1825,10 @@ def _detect_pdf_exhibit_type(filename: str) -> str:
     # Tier 2b: Defense-Wide PROC_{agency} files → p5
     if name.startswith("proc_"):
         return "p5"
+    # Tier 3: keyword-based detection for Comptroller/special files
+    for keyword, etype in _KEYWORD_EXHIBIT_PATTERNS:
+        if keyword in name:
+            return etype
     return "unknown"
 
 
@@ -2496,8 +2553,19 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     _progress("scan", 0, 0, "Scanning directories...")
     _register_data_source(conn, docs_dir)
 
-    xlsx_files = sorted(docs_dir.rglob("*.xlsx"))
+    _all_xlsx = sorted(docs_dir.rglob("*.xlsx"))
     pdf_files = sorted(docs_dir.rglob("*.pdf"))
+
+    # Exclude *_display* files — the Comptroller publishes both e.g.
+    # r1.xlsx and r1_display.xlsx which contain identical data in a
+    # different formatting.  Ingesting both creates ~49% duplicate rows.
+    _display_count = sum(1 for f in _all_xlsx if "_display" in f.stem.lower())
+    xlsx_files = [f for f in _all_xlsx if "_display" not in f.stem.lower()]
+    if _display_count:
+        logger.info("Excluded %d *_display* Excel files (duplicate data)",
+                    _display_count)
+        print(f"  Excluded {_display_count} *_display* Excel files "
+              f"(duplicate formatting variants)", flush=True)
 
     # Legacy .xls support: convert to .xlsx on-the-fly if xlrd is available.
     # FY1998-2009 era documents use the older OLE2 .xls format that openpyxl
@@ -3421,6 +3489,35 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     else:
         print(" no duplicates found", end="", flush=True)
     conn.commit()
+
+    # ── Reconcile ingested_files row_count after deduplication ────────────
+    # The row_count column was set during ingestion but deduplication may
+    # have removed rows, leaving the counts stale.  Re-derive from actual
+    # data so downstream validation (row_count_consistency) passes.
+    _xlsx_updated = conn.execute("""
+        UPDATE ingested_files SET row_count = (
+            SELECT COUNT(*) FROM budget_lines
+            WHERE budget_lines.source_file = ingested_files.file_path
+        )
+        WHERE file_type = 'xlsx'
+    """).rowcount
+    _pdf_updated = conn.execute("""
+        UPDATE ingested_files SET row_count = (
+            SELECT COUNT(*) FROM pdf_pages
+            WHERE pdf_pages.source_file = ingested_files.file_path
+        )
+        WHERE file_type = 'pdf'
+    """).rowcount
+    conn.commit()
+    _total_updated = _xlsx_updated + _pdf_updated
+    if _total_updated:
+        logger.info(
+            "Reconciled ingested_files.row_count for %d files "
+            "(%d xlsx, %d pdf) after deduplication",
+            _total_updated, _xlsx_updated, _pdf_updated,
+        )
+        print(f"  Reconciled row_count for {_total_updated:,} ingested_files "
+              f"({_xlsx_updated:,} xlsx, {_pdf_updated:,} pdf)", flush=True)
 
     # Create a unique index to prevent future duplicates
     try:
