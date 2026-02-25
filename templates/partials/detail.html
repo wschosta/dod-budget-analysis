@@ -62,30 +62,14 @@
     Funding ($K)
   </h4>
   <div class="detail-grid">
+    {% for key, value in item.items() %}
+    {% if key.startswith('amount_fy') and value is not none %}
     <div class="detail-field">
-      <label>FY2024 Actual</label>
-      <span>{{ item.amount_fy2024_actual | fmt_amount if item.amount_fy2024_actual is not none else "—" }}</span>
+      <label>{{ key.replace("amount_fy", "FY").replace("_actual", " Actual").replace("_enacted", " Enacted").replace("_request", " Request").replace("_total", " Total").replace("_supplemental", " Supplemental").replace("_reconciliation", " Reconciliation") }}</label>
+      <span>{{ value | fmt_amount }}</span>
     </div>
-    <div class="detail-field">
-      <label>FY2025 Enacted</label>
-      <span>{{ item.amount_fy2025_enacted | fmt_amount if item.amount_fy2025_enacted is not none else "—" }}</span>
-    </div>
-    <div class="detail-field">
-      <label>FY2025 Supplemental</label>
-      <span>{{ item.amount_fy2025_supplemental | fmt_amount if item.amount_fy2025_supplemental is not none else "—" }}</span>
-    </div>
-    <div class="detail-field">
-      <label>FY2026 Request</label>
-      <span>{{ item.amount_fy2026_request | fmt_amount if item.amount_fy2026_request is not none else "—" }}</span>
-    </div>
-    <div class="detail-field">
-      <label>FY2026 Reconciliation</label>
-      <span>{{ item.amount_fy2026_reconciliation | fmt_amount if item.amount_fy2026_reconciliation is not none else "—" }}</span>
-    </div>
-    <div class="detail-field">
-      <label>FY2026 Total</label>
-      <span>{{ item.amount_fy2026_total | fmt_amount if item.amount_fy2026_total is not none else "—" }}</span>
-    </div>
+    {% endif %}
+    {% endfor %}
   </div>
 
   <div class="detail-source-info" style="margin-top:1rem;padding:.75rem;background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius)">

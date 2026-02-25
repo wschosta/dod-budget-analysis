@@ -63,6 +63,15 @@ function showDashError(id, canvasId, msg) {
       statYoy.parentElement.classList.add(pct >= 0 ? "stat-positive" : "stat-negative");
     }
 
+    // Display data freshness
+    if (data.freshness && data.freshness.last_build) {
+      var freshnessEl = document.getElementById("stat-freshness");
+      if (freshnessEl) {
+        var d = new Date(data.freshness.last_build);
+        freshnessEl.textContent = d.toLocaleDateString();
+      }
+    }
+
     // ── Service bar chart ───────────────────────────────────────────────────
     if (data.by_service && data.by_service.length) {
       var svcLabels = data.by_service.map(function(r) { return r.service || "Unknown"; });
@@ -73,7 +82,7 @@ function showDashError(id, canvasId, msg) {
         data: {
           labels: svcLabels,
           datasets: [{
-            label: "FY2026 Request ($M)",
+            label: "Latest Request ($M)",
             data: svcAmounts,
             backgroundColor: DASH_COLORS,
             borderRadius: 4
@@ -165,8 +174,8 @@ function showDashError(id, canvasId, msg) {
     if (container && data.top_programs && data.top_programs.length) {
       var html = '<table class="top-programs-table">';
       html += "<thead><tr><th>#</th><th>Program</th><th>Service</th><th>PE #</th>";
-      html += '<th class="td-amount">FY26 Request ($K)</th>';
-      html += '<th class="td-amount">FY25 Enacted ($K)</th>';
+      html += '<th class="td-amount">Request ($K)</th>';
+      html += '<th class="td-amount">Prior Enacted ($K)</th>';
       html += '<th class="td-amount">Delta</th></tr></thead><tbody>';
 
       data.top_programs.forEach(function(p, i) {
