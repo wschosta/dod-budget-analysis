@@ -29,15 +29,13 @@ except ImportError:
 
 pytestmark = pytest.mark.skipif(not HAS_PYARROW, reason="pyarrow not installed")
 
-from pipeline.staging import (
+from pipeline.staging import (  # noqa: E402
     EXCEL_FIXED_COLUMNS,
     EXCEL_TAIL_COLUMNS,
-    PDF_COLUMNS,
     _load_excel_parquets,
     _load_pdf_parquets,
     _rebuild_fts_indexes,
     load_staging_to_db,
-    discover_fy_columns,
 )
 
 
@@ -68,8 +66,6 @@ def _create_excel_parquet(
     source_file_value = f"{rel_subpath}.xlsx"
 
     # Build columns
-    all_col_names = EXCEL_FIXED_COLUMNS + fy_columns + EXCEL_TAIL_COLUMNS
-
     fields = []
     for col in EXCEL_FIXED_COLUMNS:
         fields.append(pa.field(col, pa.string()))

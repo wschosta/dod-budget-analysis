@@ -1,5 +1,13 @@
 """Backward-compatible shim -- canonical code lives in pipeline/builder.py."""
-from pipeline.builder import *  # noqa: F401,F403
+from pipeline.builder import main  # noqa: F401
+
+# Re-export public API used by tests and other modules
+from pipeline.builder import (  # noqa: F401,E402
+    DOCS_DIR,
+    build_database,
+    create_database,
+    ingest_excel_file,
+)
 
 # Re-export private names used by tests and scripts
 from pipeline.builder import (  # noqa: F401,E402

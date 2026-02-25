@@ -788,7 +788,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Download summary
     if args.repair_only:
-        print(f"  Mode     : repair-only")
+        print("  Mode     : repair-only")
     elif not args.skip_download:
         dl_detail = "yes"
         if args.years:
@@ -797,16 +797,16 @@ def main(argv: list[str] | None = None) -> int:
             dl_detail += f" [sources: {' '.join(args.sources)}]"
         print(f"  Download : {dl_detail}")
     else:
-        print(f"  Download : skip")
+        print("  Download : skip")
 
     if use_staging and not args.repair_only:
         print(f"  Staging  : {staging_dir}")
         if args.stage_only:
-            print(f"  Mode     : stage-only (Phase 1)")
+            print("  Mode     : stage-only (Phase 1)")
         elif args.load_only:
-            print(f"  Mode     : load-only (Phase 2)")
+            print("  Mode     : load-only (Phase 2)")
         else:
-            print(f"  Mode     : full staging (Phase 1 + 2)")
+            print("  Mode     : full staging (Phase 1 + 2)")
 
     print(f"  Repair   : {'skip' if args.skip_repair else 'yes'}")
 

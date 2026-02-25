@@ -183,7 +183,6 @@ def stage_excel_file(
     all_col_names = EXCEL_FIXED_COLUMNS + fy_columns + EXCEL_TAIL_COLUMNS
     n_fixed = len(EXCEL_FIXED_COLUMNS)
     n_fy = len(fy_columns)
-    n_tail = len(EXCEL_TAIL_COLUMNS)
 
     # Transpose rows (list of tuples) into columnar dict for Arrow
     columns: dict[str, list] = {col: [] for col in all_col_names}
@@ -670,7 +669,7 @@ def load_staging_to_db(
     elapsed = time.time() - t_start
 
     # Register data sources
-    from pipeline.builder import _register_data_source, DOCS_DIR
+    from pipeline.builder import _register_data_source
     # Try to determine docs_dir from staging metadata
     staging_meta_path = staging_dir / "_metadata.json"
     if staging_meta_path.exists():

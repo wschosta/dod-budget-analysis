@@ -14,9 +14,10 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 import requests  # type: ignore[import-untyped]
 
-logger = logging.getLogger(__name__)
 from requests.adapters import HTTPAdapter  # type: ignore[import-untyped]
 from urllib3.util.retry import Retry as URLRetry
+
+logger = logging.getLogger(__name__)
 
 
 class RetryStrategy:

@@ -11,11 +11,8 @@ import json
 import logging
 import os
 import re
-import sys
 import time
 from datetime import datetime
-
-logger = logging.getLogger(__name__)
 from pathlib import Path
 from urllib.parse import urljoin, urlparse, unquote
 
@@ -25,6 +22,8 @@ from bs4 import BeautifulSoup
 # Shared utilities
 from utils import sanitize_filename
 from utils.patterns import DOWNLOADABLE_EXTENSIONS
+
+logger = logging.getLogger(__name__)
 
 # Optimization: Try to use lxml parser (3-5x faster), fall back to html.parser
 try:

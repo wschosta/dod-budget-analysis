@@ -23,11 +23,6 @@ import logging
 
 import requests
 
-# Suppress urllib3's verbose retry/connection logging — our own [RETRY]
-# messages are cleaner and more informative.
-logging.getLogger("urllib3.util.retry").setLevel(logging.ERROR)
-logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
-
 # Shared utilities
 from utils import format_bytes, elapsed
 
@@ -41,20 +36,23 @@ from downloader.manifest import (
 )
 from downloader.sources import (
     ALL_SOURCES,
-    BROWSER_REQUIRED_SOURCES,
     HEADERS,
     SERVICE_PAGE_TEMPLATES,
     SOURCE_DISCOVERERS,
     _browser_download_file,
     _close_browser,
     _is_browser_source,
-    _refresh_cache,
     discover_comptroller_files,
     discover_fiscal_years,
 )
 from downloader.gui import GuiProgressTracker
-from downloader.metadata import detect_budget_cycle, enrich_file_metadata, validate_fy_match
+from downloader.metadata import detect_budget_cycle, validate_fy_match
 from utils.config import classify_exhibit_category
+
+# Suppress urllib3's verbose retry/connection logging — our own [RETRY]
+# messages are cleaner and more informative.
+logging.getLogger("urllib3.util.retry").setLevel(logging.ERROR)
+logging.getLogger("urllib3.connectionpool").setLevel(logging.ERROR)
 
 
 # ---- Configuration ----

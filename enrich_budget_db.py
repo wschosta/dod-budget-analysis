@@ -1,5 +1,14 @@
 """Backward-compatible shim -- canonical code lives in pipeline/enricher.py."""
-from pipeline.enricher import *  # noqa: F401,F403
+from pipeline.enricher import main  # noqa: F401
+
+# Re-export public API used by tests and other modules
+from pipeline.enricher import (  # noqa: F401,E402
+    run_phase1,
+    run_phase2,
+    run_phase3,
+    run_phase4,
+    run_phase5,
+)
 
 # Re-export private names used by tests
 from pipeline.enricher import (  # noqa: F401,E402

@@ -10,16 +10,25 @@ Verifies:
   - No secrets or large files staged
   - Package structure integrity (downloader/, pipeline/, api/, utils/)
 """
-import os
 import re
 import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def _run_git(*args: str) -> subprocess.CompletedProcess:
+    """Run a git command, skipping the test if subprocess pipes are unsupported."""
+    try:
+        return subprocess.run(
+            ["git", *args],
+            capture_output=True, text=True, cwd=str(ROOT),
+        )
+    except OSError as e:
+        pytest.skip(f"subprocess pipes not supported in this environment: {e}")
 
 
 # ── Branch naming convention tests ──────────────────────────────────────────
@@ -43,10 +52,7 @@ class TestBranchNaming:
 
     def test_current_branch_follows_convention(self):
         """Current branch name should match one of the allowed patterns."""
-        result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, cwd=str(ROOT),
-        )
+        result = _run_git("rev-parse", "--abbrev-ref", "HEAD")
         if result.returncode != 0:
             pytest.skip("Not in a git repository")
         branch = result.stdout.strip()
@@ -90,10 +96,7 @@ class TestCommitMessageFormat:
 
     def test_recent_commits_follow_format(self):
         """Check that recent commits on this branch follow the convention."""
-        result = subprocess.run(
-            ["git", "log", "--format=%s", "-20"],
-            capture_output=True, text=True, cwd=str(ROOT),
-        )
+        result = _run_git("log", "--format=%s", "-20")
         if result.returncode != 0:
             pytest.skip("Not in a git repository")
         messages = [m for m in result.stdout.strip().split("\n") if m]
@@ -211,10 +214,13 @@ class TestPreCommitHook:
         hook_path = ROOT / "scripts" / "hooks" / "pre-commit-hook.py"
         if not hook_path.exists():
             pytest.skip("Pre-commit hook script missing")
-        result = subprocess.run(
-            [sys.executable, "-c", f"import py_compile; py_compile.compile(r'{hook_path}', doraise=True)"],
-            capture_output=True, text=True,
-        )
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", f"import py_compile; py_compile.compile(r'{hook_path}', doraise=True)"],
+                capture_output=True, text=True,
+            )
+        except OSError as e:
+            pytest.skip(f"subprocess pipes not supported in this environment: {e}")
         assert result.returncode == 0, f"Hook has syntax errors: {result.stderr}"
 
 
@@ -333,10 +339,7 @@ class TestNoLargeFiles:
 
     def test_no_large_tracked_binaries(self):
         """Check that no large binary files are tracked by git."""
-        result = subprocess.run(
-            ["git", "ls-files"],
-            capture_output=True, text=True, cwd=str(ROOT),
-        )
+        result = _run_git("ls-files")
         if result.returncode != 0:
             pytest.skip("Not in a git repository")
         tracked = result.stdout.strip().split("\n")

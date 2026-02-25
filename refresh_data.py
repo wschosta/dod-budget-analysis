@@ -1,5 +1,8 @@
 """Backward-compatible shim -- canonical code lives in pipeline/refresh.py."""
-from pipeline.refresh import *  # noqa: F401,F403
+from pipeline.refresh import main  # noqa: F401
+
+# Re-export public API used by tests
+from pipeline.refresh import RefreshWorkflow  # noqa: F401,E402
 
 # Re-export private names used by tests
 from pipeline.refresh import (  # noqa: F401,E402

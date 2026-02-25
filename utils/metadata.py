@@ -40,7 +40,7 @@ def collect_metadata(conn: sqlite3.Connection) -> dict:
     }
 
     # ── Table row counts ─────────────────────────────────────────────────
-    tables = {}
+    tables: dict[str, int | None] = {}
     known_tables = [
         "budget_lines", "pdf_pages", "pe_index", "pe_descriptions",
         "pe_tags", "pe_lineage", "project_descriptions",

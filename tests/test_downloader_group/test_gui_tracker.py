@@ -312,13 +312,16 @@ def test_no_deallocator_error_on_close():
         gc.collect()      # force GC from main thread — this triggered the bug
     """)
 
-    result = subprocess.run(
-        [sys.executable, '-c', script],
-        capture_output=True,
-        text=True,
-        timeout=15,
-        cwd=str(PROJECT_ROOT),
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            cwd=str(PROJECT_ROOT),
+        )
+    except OSError as e:
+        pytest.skip(f"subprocess pipes not supported in this environment: {e}")
 
     assert "main thread is not in main loop" not in result.stderr, (
         "StringVar deallocator error detected — cleanup on close is broken:\n"

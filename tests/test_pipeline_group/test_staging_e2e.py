@@ -28,10 +28,9 @@ except ImportError:
 
 pytestmark = pytest.mark.skipif(not HAS_PYARROW, reason="pyarrow not installed")
 
-from pipeline.staging import (
+from pipeline.staging import (  # noqa: E402
     EXCEL_FIXED_COLUMNS,
     EXCEL_TAIL_COLUMNS,
-    PDF_COLUMNS,
     load_staging_to_db,
     discover_fy_columns,
 )

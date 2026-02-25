@@ -30,7 +30,6 @@ from enrich_budget_db import (
     _drop_enrichment_tables,
     _EXHIBIT_TO_BUDGET_TYPE,
     _MIN_TEXT_FOR_NAME_MATCH,
-    _MAX_PE_REFS_FOR_NAME_MATCH,
     _MAX_NAME_MATCHES_PER_ROW,
     _MIN_TITLE_WORDS,
 )
@@ -685,7 +684,7 @@ class TestPhase4NoiseReduction:
         long_text = (
             f"Budget Summary Table for Programs: {pe_mentions}. "
             + "Additional context " * 30  # pad to exceed _MIN_TEXT_FOR_NAME_MATCH
-            + f"Advanced Technology Development Program Number 7"  # title match for pes[7]
+            + "Advanced Technology Development Program Number 7"  # title match for pes[7]
         )
         assert len(long_text) >= _MIN_TEXT_FOR_NAME_MATCH
 
@@ -1211,7 +1210,7 @@ class TestPhase5:
         ).fetchone()[0]
 
         # Second run should skip the same source file
-        count2 = run_phase5(conn)
+        run_phase5(conn)
         rows2 = conn.execute(
             "SELECT COUNT(*) FROM project_descriptions"
         ).fetchone()[0]
