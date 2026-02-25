@@ -45,8 +45,12 @@ DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 # Values exceeding this are likely unit-of-measure errors.
 _EXTREME_VALUE_THRESHOLD = 1_000_000_000
 
-# Baseline amount columns — used as fallback when database is unavailable.
-# The runtime list is built dynamically by _get_amount_columns() below.
+# Baseline amount columns — FALLBACK ONLY.
+# Used when the database is unavailable or the budget_lines table is missing.
+# At runtime, _get_amount_columns() discovers ALL amount_fy*/quantity_fy*
+# columns dynamically from the live database schema via PRAGMA table_info.
+# The production database typically has 40-50 amount columns spanning
+# FY2011 through FY2027+, far more than this static list.
 _BASELINE_AMOUNT_COLUMNS = [
     "amount_fy2024_actual",
     "amount_fy2025_enacted",
@@ -59,11 +63,15 @@ _BASELINE_AMOUNT_COLUMNS = [
 
 
 def _get_amount_columns(conn: sqlite3.Connection) -> list[str]:
-    """Dynamically discover all amount/quantity FY columns from the DB schema.
+    """Dynamically discover ALL numeric FY columns from the DB schema.
 
-    Returns column names matching 'amount_fy*' or 'quantity_fy*' from the
-    budget_lines table, sorted alphabetically.  Falls back to the baseline
-    list if the table doesn't exist or the query fails.
+    Queries PRAGMA table_info(budget_lines) and returns every column whose
+    name starts with ``amount_fy`` or ``quantity_fy``, sorted alphabetically.
+    Text columns such as ``amount_unit`` and ``amount_type`` are excluded
+    because they do not start with the ``amount_fy`` prefix.
+
+    Falls back to ``_BASELINE_AMOUNT_COLUMNS`` only when the table does not
+    exist or the query fails.
     """
     try:
         cols = [
@@ -180,13 +188,36 @@ def check_duplicate_rows(conn: sqlite3.Connection) -> dict:
 
 
 def check_null_heavy_rows(conn: sqlite3.Connection) -> dict:
-    """1.B6-c: Flag rows where ALL amount columns are NULL or zero."""
+    """1.B6-c: Flag rows where ALL amount columns are NULL or zero.
+
+    Dynamically discovers every ``amount_fy*`` and ``quantity_fy*`` column
+    in the budget_lines table so that rows from older fiscal years (e.g.
+    FY2011-FY2023) are not wrongly flagged when they have valid data in
+    columns like ``amount_fy2013_request`` or ``amount_fy2017_total``.
+
+    A row is only flagged when **every** discovered numeric FY column is
+    either NULL or zero.
+    """
     amount_cols = _get_amount_columns(conn)
+    if not amount_cols:
+        return {
+            "name": "null_heavy_rows",
+            "status": "pass",
+            "message": "No amount columns found — skipping check",
+            "details": [],
+        }
+
     for col in amount_cols:
         _validate_identifier(col, "column name")
     conditions = " AND ".join(
         f"(COALESCE({col}, 0) = 0)" for col in amount_cols
     )
+
+    logger.debug(
+        "check_null_heavy_rows: checking %d columns: %s",
+        len(amount_cols), ", ".join(amount_cols),
+    )
+
     cur = conn.execute(f"""
         SELECT exhibit_type, COUNT(*) as cnt
         FROM budget_lines
@@ -203,7 +234,10 @@ def check_null_heavy_rows(conn: sqlite3.Connection) -> dict:
     return {
         "name": "null_heavy_rows",
         "status": "warn" if pct > 10 else "pass",
-        "message": f"{total} row(s) ({pct:.1f}%) have all-null/zero amounts",
+        "message": (
+            f"{total} row(s) ({pct:.1f}%) have all-null/zero amounts "
+            f"(checked {len(amount_cols)} columns)"
+        ),
         "details": rows,
     }
 
