@@ -5,12 +5,9 @@ Tests normalize_fiscal_year() with various input formats, and verifies that
 the builder module applies the normalization during ingestion.
 """
 
-import re
 import sys
 from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 

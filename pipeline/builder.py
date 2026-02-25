@@ -10,83 +10,6 @@ Usage:
     python build_budget_db.py                  # Build or update the database
     python build_budget_db.py --rebuild        # Force full rebuild
     python build_budget_db.py --db mydb.sqlite # Custom database path
-
----
-Phase 1 Roadmap Tasks for this file (Steps 1.B3 – 1.B5)
----
-**Status:** Foundation + key enhancements implemented (1.B2-a year-agnostic
-column mapping, 1.B2-c multi-row headers, 1.B2-d FY normalization,
-1.B3-a monetary normalization, 1.B3-b currency_year, 1.B4-a PE numbers,
-1.B4-b ORG_MAP expansion, 1.B4-c appropriation parsing complete).
-Remaining tasks below.
-
-DONE FIX-001: ingest_excel_file() uses first_rows[header_idx] throughout; no
-    undefined `rows` variable — confirmed by passing test_full_excel_ingestion_pipeline.
-DONE FIX-002: No lines over 100 chars; precommit line-length check passes.
-
-DONE 1.B3-c: amount_type column added to budget_lines schema; C-1 rows get
-    'authorization', all other exhibits default to 'budget_authority'.
-    _EXHIBIT_AMOUNT_TYPE mapping drives the derivation in ingest_excel_file().
-
-DONE 1.B5-a  scripts/pdf_quality_audit.py implements PDF extraction quality audit.
-    Checks: non-ASCII ratio, whitespace-heavy pages, short text, empty table data.
-    Outputs Markdown report to docs/pdf_quality_audit.md.
-    Tests in tests/test_pdf_quality_audit.py (all pass).
-    To run against real data: python scripts/pdf_quality_audit.py --db dod_budget.sqlite
-
-DONE 1.B5-b  _extract_tables_with_timeout() implements 3 progressive strategies:
-    1. lines/lines (primary), 2. text/lines (fallback_text_lines),
-    3. text/text (fallback_text_text). Returns first non-empty result with
-    issue_type label. ThreadPoolExecutor timeout per strategy call.
-
-DONE 1.B5-c  utils/pdf_sections.py: parse_narrative_sections() detects R-2/R-3
-    section headers (Accomplishments/Planned Program, Acquisition Strategy,
-    Performance Metrics, Mission Description, etc.) using compiled regex.
-    extract_sections_for_page() returns formatted string for FTS5 indexing.
-    is_narrative_exhibit() helper identifies R-2/R-3 PDFs.
-    10 unit tests in tests/test_utils.py; all pass.
-
-DONE 1.B6-h: validate_budget_data.validate_all() called at end of build_database().
-
-──────────────────────────────────────────────────────────────────────────────
-Remaining TODOs for this file
-──────────────────────────────────────────────────────────────────────────────
-
-BUILD-001 [DONE]: Structured failure log + --retry-failures flag.
-    FailedFileEntry dataclass tracks parse errors. build_database() writes
-    failed_downloads.json on errors; --retry-failures re-processes only those files.
-
-BUILD-002 [DONE]: Dynamic fiscal year columns (auto ALTER TABLE).
-    _ensure_fy_columns() adds new FY columns dynamically. ingest_excel_file()
-    uses dynamic column list for INSERT. Backward-compatible with FY2024-2026.
-
-OPT-BUILD-001 [DONE]: Parallelize Excel file ingestion using ProcessPoolExecutor.
-    _extract_excel_rows() is a standalone worker that extracts rows without DB access.
-    build_database() uses ProcessPoolExecutor for Excel when workers > 1.
-    Rows are merged back into the main DB via batch INSERT in the main process.
-
-──────────────────────────────────────────────────────────────────────────────
-LION TODOs — Database Import Alignment & Integrity (Review)
-──────────────────────────────────────────────────────────────────────────────
-
-LION-100 [DONE]: Add fiscal_year and exhibit_type columns to pdf_pages table.
-    _extract_fy_from_path() and _detect_pdf_exhibit_type() populate these
-    columns during PDF ingestion in both sequential and parallel paths.
-
-LION-101 [DONE]: Validate fiscal year from sheet name against directory path.
-    _normalise_fiscal_year() + _extract_fy_from_path() fallback implemented
-    in both ingest_excel_file() and _extract_excel_rows(). Logs warning on
-    mismatch; uses directory-derived FY when sheet name yields no year.
-
-LION-102 [DONE]: Extract ALL PE numbers per cell, not just the first match.
-    _extract_all_pe_numbers() captures all PEs; additional PEs stored in
-    extra_fields JSON under key "additional_pe_numbers". Both sequential
-    and parallel paths updated.
-
-LION-103 [DONE]: Create pdf_pe_numbers junction table populated during PDF ingestion.
-    pdf_pe_numbers table created in create_database(). Both ingest_pdf_file()
-    and _extract_pdf_data() populate it at ingestion time.
-
 """
 
 import argparse
@@ -108,13 +31,11 @@ from concurrent.futures import (
 import logging
 import os
 
-logger = logging.getLogger(__name__)
-
-# Shared utilities: Import from utils package for consistency across codebase
-# Optimization: Pre-compiled patterns and safe_float function reduce data ingestion time by ~10-15%
 from utils import safe_float
 from utils.strings import normalize_fiscal_year as _normalize_fy_value
 from utils.patterns import PE_NUMBER
+
+logger = logging.getLogger(__name__)
 
 # For backward compatibility, use the shared pattern
 _PE_PATTERN = PE_NUMBER
@@ -1063,7 +984,7 @@ def _merge_header_rows(header_row: list, next_row: list) -> list[str | None]:
         return list(header_row)
 
     # Merge pairwise; concatenate with a space where both cells are populated
-    merged = []
+    merged: list[str | None] = []
     for main, sub in zip(header_row, next_row):
         main_s = str(main).strip() if main is not None else ""
         sub_s = str(sub).strip() if sub is not None else ""
@@ -1981,7 +1902,7 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                         )
                         tables = None
 
-                table_text = _extract_table_text(tables)
+                table_text = _extract_table_text(tables or [])
 
                 # Skip truly empty pages
                 if not text.strip() and not table_text.strip():
@@ -2132,7 +2053,7 @@ def _extract_pdf_data(args):
                             ))
                             tables = None
 
-                    table_text = _extract_table_text(tables)
+                    table_text = _extract_table_text(tables or [])
 
                     if not text.strip() and not table_text.strip():
                         continue
@@ -2721,11 +2642,11 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                     for f in future_to_xl:
                         f.cancel()
                     _save_checkpoint(conn, session_id, files_done_total, total_files,
-                                     _metrics["pages"], total_budget_rows, 0, "", "interrupted")
+                                     int(_metrics["pages"]), total_budget_rows, 0, "", "interrupted")
                     conn.commit()
                     _progress("stopped", xi, len(xlsx_to_process), "Stopped — resume with --resume")
                     conn.close()
-                    return
+                    return {}
 
                 xl = future_to_xl[future]
                 rel_path = str(xl.relative_to(docs_dir))
@@ -2799,9 +2720,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 _mark_file_processed(conn, session_id, rel_path, "excel", rows_count=len(rows))
                 elapsed = time.time() - t_excel_start
                 excel_file_times.append(elapsed / max(xi + 1, 1))
-                logger.info("  [%d/%d] %s: %d rows", xi + 1, len(xlsx_to_process), xl.name, len(rows))
                 _progress("excel", xi + 1 + skipped_xlsx, len(xlsx_files),
-                          f"Done: {xl.name} ({len(rows)} rows)",
+                          f"{xl.name} — {len(rows):,} rows",
                           {"rows": total_budget_rows,
                            "files_remaining": total_files - files_done_total})
         conn.commit()
@@ -2815,14 +2735,14 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         if stop_event and stop_event.is_set():
             logger.info("  Graceful stop requested — saving checkpoint...")
             _save_checkpoint(conn, session_id, files_done_total, total_files,
-                             _metrics["pages"], _metrics["rows"],
+                             int(_metrics["pages"]), int(_metrics["rows"]),
                              0, str(xlsx), "interrupted")
             conn.commit()
             _progress("stopped", xi, len(xlsx_files),
                       f"Stopped at {xlsx.name} — resume with --resume",
                       {"files_remaining": total_files - files_done_total})
             conn.close()
-            return
+            return {}
 
         rel_path = str(xlsx.relative_to(docs_dir))
 
@@ -2847,7 +2767,6 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         _progress("excel", xi + 1, len(xlsx_files),
                   f"Processing: {xlsx.name}",
                   {"files_remaining": total_files - files_done_total})
-        logger.info("  Processing: %s...", xlsx.name)
 
         _remove_file_data(conn, rel_path, "xlsx")
 
@@ -2875,7 +2794,6 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             files_done_total += 1
             continue
         file_elapsed = time.time() - t0
-        logger.info("  %s: %d rows (%.1fs)", xlsx.name, rows, file_elapsed)
 
         # Update speed tracking
         if file_elapsed > 0 and rows > 0:
@@ -2899,7 +2817,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
         # Post-file progress update with updated row count
         _progress("excel", xi + 1, len(xlsx_files),
-                  f"Done: {xlsx.name} ({rows} rows)",
+                  f"{xlsx.name} — {rows:,} rows",
                   {"rows": total_budget_rows,
                    "files_remaining": total_files - files_done_total})
 
@@ -2912,7 +2830,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             _metrics["eta_sec"] = avg_time * remaining
             _metrics["files_remaining"] = remaining
             _save_checkpoint(conn, session_id, files_done_total, total_files,
-                             _metrics["pages"], total_budget_rows,
+                             int(_metrics["pages"]), total_budget_rows,
                              stat.st_size, rel_path, "ok")
         elif xi % 5 == 4 or xi == len(xlsx_files) - 1:
             # Commit every 5 Excel files even outside checkpoint interval
@@ -3238,11 +3156,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                         remaining = len(pdfs_to_process) - processed_pdf
                         _metrics["eta_sec"] = avg_per_file * remaining
 
-                    logger.info("  [%d/%d] %s: %d pages",
-                               processed_pdf, len(pdfs_to_process), pdf.name, pages)
                     _progress("pdf", processed_pdf, len(pdfs_to_process),
-                              f"[{processed_pdf}/{len(pdfs_to_process)}] "
-                              f"{pdf.name}: {pages} pages",
+                              f"{pdf.name} — {pages:,} pages",
                               dict(_metrics))
 
                     _mark_file_processed(conn, session_id, rel_path, "pdf",
@@ -3282,12 +3197,10 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             _metrics["files_remaining"] = total_files - files_done_total
 
             _progress("pdf", processed_pdf, len(pdfs_to_process),
-                      f"[{processed_pdf}] {pdf.name}",
+                      f"{pdf.name}",
                       {"files_remaining": total_files - files_done_total,
                        "current_pages": 0,
                        "current_total_pages": 0})
-            logger.info("  [%d/%d] %s...", processed_pdf, len(pdfs_to_process), pdf.name)
-
             def _page_cb(pages_done: int, page_total: int,
                          _proc=processed_pdf, _name=pdf.name,
                          _idx=processed_pdf, _total=len(pdfs_to_process)) -> None:
@@ -3295,7 +3208,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 _metrics["current_pages"] = pages_done
                 _metrics["current_total_pages"] = page_total
                 _progress("pdf", _idx, _total,
-                          f"[{_proc}] {_name} — page {pages_done}/{page_total}",
+                          f"{_name} — page {pages_done}/{page_total}",
                           {"files_remaining": total_files - files_done_total,
                            "current_pages": pages_done,
                            "current_total_pages": page_total})
@@ -3305,7 +3218,6 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                                                  docs_dir=docs_dir,
                                                  pdf_timeout=pdf_timeout)
             file_elapsed = time.time() - t0
-            logger.info("  %s: %d pages (%.1fs)", pdf.name, pages, file_elapsed)
 
             if file_elapsed > 0 and pages > 0:
                 _update_speed("speed_pages", pages / file_elapsed)
@@ -3391,7 +3303,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     if _pdf_stopped:
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         conn.close()
-        return
+        return {}
 
     if skipped_pdf:
         logger.info("  Skipped %d unchanged PDF file(s)", skipped_pdf)
@@ -3623,7 +3535,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     logger.info("  Excel files:        %d", len(xlsx_files))
     logger.info("  PDF files:          %d", len(pdf_files))
 
-    print("\n  ── Build Summary ──────────────────────────────", flush=True)
+    print("\n  -- Build Summary ------------------------------------------------", flush=True)
     print(f"  Database:       {db_path.name} ({db_size:.1f} MB)", flush=True)
     print(f"  Budget lines:   {total_lines:,}", flush=True)
     print(f"  PDF pages:      {total_pages:,}", flush=True)
@@ -3672,7 +3584,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             logger.info("  [QUALITY REPORT] %s budget lines | %d checks | %d warning(s) | %d failure(s)",
                         f"{report['total_budget_lines']:,}",
                         val['total_checks'], val['total_warnings'], val['total_failures'])
-            logger.info("  [QUALITY REPORT] Written to data_quality_report.json")
+            logger.info("  [QUALITY REPORT] Written to logs/data_quality_report.json")
         except Exception as _val_err:
             logger.warning("  [VALIDATION] Skipped: %s", _val_err)
 

@@ -4,13 +4,9 @@ Tests for schema_design.py — migration framework and normalized schema creatio
 Tests _current_version, migrate, and create_normalized_db.
 """
 import sqlite3
-import sys
-from pathlib import Path
 
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from schema_design import _current_version, migrate, create_normalized_db
+from pipeline.schema import _current_version, migrate, create_normalized_db
 
 
 class TestCurrentVersion:

@@ -11,13 +11,10 @@ Tests that the system can handle pre-FY2024 data:
 # DONE [Group: BEAR] BEAR-002: Add historical data compatibility tests (FY2017-2023 fixtures) (~2,500 tokens)
 
 import sqlite3
-import sys
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from build_budget_db import create_database, _ensure_fy_columns
+from pipeline.builder import create_database, _ensure_fy_columns
 from utils.strings import safe_float
 
 

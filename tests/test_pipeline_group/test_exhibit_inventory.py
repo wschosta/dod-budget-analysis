@@ -6,15 +6,12 @@ report generation, and JSON/CSV export using synthetic Excel fixtures.
 """
 import csv
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 import openpyxl
-from exhibit_type_inventory import ExhibitInventory
+from pipeline.exhibit_inventory import ExhibitInventory
 
 
 def _create_xlsx(path: Path, headers: list[str], rows: list[list] = None):

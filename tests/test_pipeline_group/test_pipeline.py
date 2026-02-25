@@ -23,15 +23,12 @@ are broken (pyo3/cryptography incompatibility).
 
 import sqlite3
 import shutil
-import sys
 import time
-from pathlib import Path
 
 import pytest
 
 # Import build_database and other functions
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from build_budget_db import build_database  # type: ignore
+from pipeline.builder import build_database  # type: ignore
 
 
 # ── 1.C3-h (standalone): Test empty DB schema integrity ─────────────────────
@@ -289,7 +286,7 @@ def test_search_budget_functions(test_db):
     """
     # Import search functions
     try:
-        from search_budget import search_budget_lines, filter_by_organization, filter_by_exhibit_type  # type: ignore  # noqa: F401
+        from pipeline.search import search_budget_lines, filter_by_organization, filter_by_exhibit_type  # type: ignore  # noqa: F401
     except ImportError:
         pytest.skip("search_budget module not available")
 

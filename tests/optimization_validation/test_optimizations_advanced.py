@@ -11,7 +11,7 @@ import types
 for _mod in ("openpyxl", "pdfplumber"):
     sys.modules.setdefault(_mod, types.ModuleType(_mod))
 
-from build_budget_db import _likely_has_tables  # noqa: E402
+from pipeline.builder import _likely_has_tables  # noqa: E402
 
 
 class MockPageWithTables:
@@ -62,7 +62,7 @@ def test_likely_has_tables_missing_attributes():
 
 def test_map_columns_empty_edge_cases():
     """Test _map_columns with edge cases and empty/None values."""
-    from build_budget_db import _map_columns
+    from pipeline.builder import _map_columns
 
     # Empty header list
     mapping = _map_columns([], "p1")
@@ -83,7 +83,7 @@ def test_map_columns_empty_edge_cases():
 
 def test_map_columns_quantity_vs_amount():
     """Test that _map_columns correctly distinguishes quantity from amount columns."""
-    from build_budget_db import _map_columns
+    from pipeline.builder import _map_columns
 
     headers = [
         "Account",
@@ -113,7 +113,7 @@ def test_map_columns_quantity_vs_amount():
 
 def test_map_columns_case_insensitivity():
     """Test that _map_columns handles case variations."""
-    from build_budget_db import _map_columns
+    from pipeline.builder import _map_columns
 
     headers = [
         "ACCOUNT", "ACCOUNT TITLE", "Organization",
@@ -137,7 +137,7 @@ def test_map_columns_case_insensitivity():
 
 def test_extract_table_text_large_tables():
     """Test _extract_table_text with large/complex tables."""
-    from build_budget_db import _extract_table_text
+    from pipeline.builder import _extract_table_text
 
     # Create a large table with many rows
     large_table = []

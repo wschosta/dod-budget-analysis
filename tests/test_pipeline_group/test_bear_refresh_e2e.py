@@ -12,14 +12,11 @@ Test the full refresh pipeline in dry-run mode:
 # DONE [Group: BEAR] BEAR-010: Add data refresh end-to-end test (dry-run, rollback, webhook) (~2,500 tokens)
 
 import json
-import sys
-from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from refresh_data import (
+from pipeline.refresh import (
     RefreshWorkflow,
     _SCHEDULE_INTERVALS,
     _next_run_time,

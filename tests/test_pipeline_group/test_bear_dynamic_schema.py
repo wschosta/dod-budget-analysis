@@ -15,11 +15,8 @@ import sqlite3
 
 import pytest
 
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from build_budget_db import create_database, _ensure_fy_columns
+from pipeline.builder import create_database, _ensure_fy_columns
 
 
 @pytest.fixture()

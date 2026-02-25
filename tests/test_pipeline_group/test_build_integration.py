@@ -14,11 +14,11 @@ import sqlite3
 import threading
 from pathlib import Path
 
-import build_budget_db
+import pipeline.builder as build_budget_db
 import openpyxl
 import pytest
 
-from build_budget_db import (
+from pipeline.builder import (
     build_database,
     create_database,
     _file_needs_update,

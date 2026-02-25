@@ -21,7 +21,6 @@ Usage:
 """
 
 import argparse
-import signal
 import sys
 from pathlib import Path
 
@@ -119,16 +118,16 @@ def main():
         print(f"  Disk to parse:  {total_size / (1024*1024):.1f} MB")
 
         if need_stage and need_stage <= 20:
-            print(f"\n  Files to stage:")
+            print("\n  Files to stage:")
             for f in need_stage_xlsx + need_stage_pdf:
                 print(f"    - {f.relative_to(docs_dir)} ({f.stat().st_size / 1024:.0f} KB)")
         elif need_stage > 20:
-            print(f"\n  First 20 files to stage:")
+            print("\n  First 20 files to stage:")
             for f in (need_stage_xlsx + need_stage_pdf)[:20]:
                 print(f"    - {f.relative_to(docs_dir)} ({f.stat().st_size / 1024:.0f} KB)")
             print(f"    ... and {need_stage - 20} more")
 
-        print(f"\nTo stage these files, run without --dry-run.")
+        print("\nTo stage these files, run without --dry-run.")
         return
 
     # ── Phase 1: Stage ───────────────────────────────────────────────────
@@ -155,7 +154,7 @@ def main():
             print(f"ERROR: {e}")
             sys.exit(1)
 
-        print(f"\n  Staging complete:")
+        print("\n  Staging complete:")
         print(f"    Total files:  {summary['total_files']}")
         print(f"    Staged:       {summary['staged_count']}")
         print(f"    Skipped:      {summary['skipped_count']}")
@@ -164,7 +163,7 @@ def main():
         print(f"    Elapsed:      {summary['elapsed_sec']}s")
 
         if summary['errors']:
-            print(f"\n  Errors:")
+            print("\n  Errors:")
             for err in summary['errors'][:20]:
                 print(f"    - {err['file']}: {err['error']}")
             if len(summary['errors']) > 20:
@@ -191,7 +190,7 @@ def main():
             print(f"ERROR: {e}")
             sys.exit(1)
 
-        print(f"\n  Load complete:")
+        print("\n  Load complete:")
         print(f"    Budget rows: {summary['total_rows']:,}")
         print(f"    PDF pages:   {summary['total_pages']:,}")
         print(f"    FY columns:  {len(summary['fy_columns'])}")

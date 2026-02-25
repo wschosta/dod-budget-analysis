@@ -19,10 +19,20 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
+from starlette.responses import RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from api.database import get_db
 from pipeline.builder import EXHIBIT_TYPES as _EXHIBIT_TYPE_NAMES
+from utils.cache import TTLCache
+from utils.query import (
+    ALLOWED_SORT_COLUMNS,
+    build_where_clause,
+    validate_amount_column,
+    FISCAL_YEAR_COLUMN_LABELS,
+    DEFAULT_AMOUNT_COLUMN,
+)
+from utils import sanitize_fts5_query
 
 logger = logging.getLogger(__name__)
 
@@ -33,20 +43,6 @@ def _safe_int(value: str, default: int) -> int:
         return int(value)
     except (ValueError, TypeError):
         return default
-
-
-from utils.cache import TTLCache
-from utils.database import get_amount_columns
-from utils.query import (
-    ALLOWED_SORT_COLUMNS,
-    _AMOUNT_COL_RE,
-    build_where_clause,
-    validate_amount_column,
-    FISCAL_YEAR_COLUMN_LABELS,
-    DEFAULT_AMOUNT_COLUMN,
-    make_fiscal_year_column_labels,
-)
-from utils import sanitize_fts5_query
 
 router = APIRouter(tags=["frontend"])
 
@@ -89,10 +85,11 @@ def _format_fy(value: str | None) -> str:
     return f"FY {s}" if s else ""
 
 
-def set_templates(t: Jinja2Templates) -> None:
+def set_templates(t: Jinja2Templates | None) -> None:
     global _templates
     _templates = t
-    t.env.filters["format_fy"] = _format_fy
+    if t is not None:
+        t.env.filters["format_fy"] = _format_fy
 
 
 def _tmpl() -> Jinja2Templates:
@@ -344,17 +341,18 @@ def _query_results(
         try:
             from utils.search_parser import parse_search_query
             parsed = parse_search_query(q)
-            fts_terms = parsed.fts_terms
+            fts_terms = parsed.fts5_query
             parsed_query = {
                 "raw": q,
-                "fts_terms": parsed.fts_terms,
+                "fts_terms": parsed.fts5_query,
                 "field_filters": [
-                    {"field": f.field, "op": f.op, "value": f.value}
-                    for f in parsed.field_filters
+                    {"field": field, "op": "=", "value": val}
+                    for field, vals in parsed.filters.items()
+                    for val in vals
                 ],
                 "amount_filters": [
-                    {"op": f.op, "value": f.value}
-                    for f in parsed.amount_filters
+                    {"op": op, "value": val}
+                    for op, val in parsed.amount_filters
                 ],
             }
 
@@ -366,19 +364,19 @@ def _query_results(
                 "org": "organization_name",
                 "tag": None,  # tag filtering handled separately
             }
-            for ff in parsed.field_filters:
-                col = _FIELD_TO_COLUMN.get(ff.field)
+            for field, vals in parsed.filters.items():
+                col = _FIELD_TO_COLUMN.get(field)
                 if col:
-                    if ff.op == "=":
+                    for val in vals:
                         extra_field_conditions.append(f"{col} = ?")
-                        extra_field_params.append(ff.value)
+                        extra_field_params.append(val)
 
             # Convert amount filters to SQL WHERE conditions
             amt_col = filters.get("amount_column", DEFAULT_AMOUNT_COLUMN)
-            for af in parsed.amount_filters:
-                if af.op in (">", "<", ">=", "<="):
-                    extra_field_conditions.append(f"{amt_col} {af.op} ?")
-                    extra_field_params.append(af.value)
+            for af_op, af_val in parsed.amount_filters:
+                if af_op in (">", "<", ">=", "<="):
+                    extra_field_conditions.append(f"{amt_col} {af_op} ?")
+                    extra_field_params.append(af_val)
         except Exception:
             parsed_query = {
                 "raw": q, "fts_terms": q,
@@ -522,11 +520,10 @@ def charts(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTML
 def results_partial(
     request: Request,
     conn: sqlite3.Connection = Depends(get_db),
-) -> HTMLResponse:
+) -> Response:
     """HTMX partial: filtered/paginated results table."""
     # FIX-010: Non-HTMX requests (e.g. browser refresh) redirect to full page
     if not request.headers.get("HX-Request"):
-        from starlette.responses import RedirectResponse
         qs = str(request.query_params)
         return RedirectResponse(url=f"/?{qs}" if qs else "/", status_code=302)
 
@@ -561,11 +558,10 @@ def detail_partial(
     item_id: int,
     request: Request,
     conn: sqlite3.Connection = Depends(get_db),
-) -> HTMLResponse:
+) -> Response:
     """HTMX partial: full detail panel for a single budget line."""
     # FIX-010: Non-HTMX requests redirect to the search page
     if not request.headers.get("HX-Request"):
-        from starlette.responses import RedirectResponse
         return RedirectResponse(url="/", status_code=302)
 
     row = conn.execute(

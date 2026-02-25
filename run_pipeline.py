@@ -57,7 +57,7 @@ HERE = Path(__file__).resolve().parent
 STEP_DOWNLOAD = HERE / "dod_budget_downloader.py"
 
 # Progress file for external monitors
-_PROGRESS_FILE = Path("pipeline_progress.json")
+_PROGRESS_FILE = Path("logs/pipeline_progress.json")
 
 # Track completed steps for progress reporting
 _completed_steps: dict[str, str] = {}
@@ -100,6 +100,7 @@ def _write_progress(step: str, status: str, elapsed: float, detail: str = "") ->
         "steps_completed": dict(_completed_steps),
     }
     try:
+        _PROGRESS_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(_PROGRESS_FILE, "w") as f:
             json.dump(progress, f, indent=2)
     except OSError:
@@ -527,8 +528,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Generate a data quality report after validation",
     )
     val_group.add_argument(
-        "--report-path", default="data_quality_report.json", metavar="PATH",
-        help="Path for the quality report (default: data_quality_report.json)",
+        "--report-path", default="logs/data_quality_report.json", metavar="PATH",
+        help="Path for the quality report (default: logs/data_quality_report.json)",
     )
 
     # Enrich options
@@ -788,7 +789,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Download summary
     if args.repair_only:
-        print(f"  Mode     : repair-only")
+        print("  Mode     : repair-only")
     elif not args.skip_download:
         dl_detail = "yes"
         if args.years:
@@ -797,16 +798,16 @@ def main(argv: list[str] | None = None) -> int:
             dl_detail += f" [sources: {' '.join(args.sources)}]"
         print(f"  Download : {dl_detail}")
     else:
-        print(f"  Download : skip")
+        print("  Download : skip")
 
     if use_staging and not args.repair_only:
         print(f"  Staging  : {staging_dir}")
         if args.stage_only:
-            print(f"  Mode     : stage-only (Phase 1)")
+            print("  Mode     : stage-only (Phase 1)")
         elif args.load_only:
-            print(f"  Mode     : load-only (Phase 2)")
+            print("  Mode     : load-only (Phase 2)")
         else:
-            print(f"  Mode     : full staging (Phase 1 + 2)")
+            print("  Mode     : full staging (Phase 1 + 2)")
 
     print(f"  Repair   : {'skip' if args.skip_repair else 'yes'}")
 

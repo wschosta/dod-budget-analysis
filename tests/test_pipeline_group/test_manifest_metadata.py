@@ -4,12 +4,8 @@ Unit tests for downloader/metadata.py detection functions.
 Tests exhibit type detection, category classification, budget cycle detection,
 and source-to-service mapping.
 """
-import sys
-from pathlib import Path
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from downloader.metadata import (
     detect_exhibit_type_from_filename,
@@ -220,5 +216,9 @@ class TestConstants:
     def test_all_known_types_classified(self):
         """Every known exhibit type is either summary or detail."""
         all_types = SUMMARY_EXHIBIT_KEYS | DETAIL_EXHIBIT_KEYS
-        expected = {"p1", "p1r", "r1", "o1", "m1", "c1", "rf1", "p5", "r2", "r3", "r4"}
+        expected = {
+            "p1", "p1r", "r1", "o1", "m1", "c1", "rf1",
+            "p5", "r2", "r3", "r4",
+            "ogsi", "supplemental", "amendment",
+        }
         assert all_types == expected

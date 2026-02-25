@@ -33,8 +33,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 # dod_budget_downloader requires bs4 (beautifulsoup4) which may not be installed
 pytest.importorskip("bs4", reason="bs4 (beautifulsoup4) not installed")
 
@@ -62,7 +60,7 @@ def _make_tracker_stub():
     Uses ``object.__new__`` to skip ``__init__``, then sets ``_closed = True``
     to prevent any incidental GUI activity from methods under test.
     """
-    from dod_budget_downloader import GuiProgressTracker
+    from downloader import GuiProgressTracker
     tracker = object.__new__(GuiProgressTracker)
     tracker._closed = True
     return tracker
@@ -302,7 +300,7 @@ def test_no_deallocator_error_on_close():
     script = textwrap.dedent("""
         import sys, gc, time
         sys.path.insert(0, '.')
-        from dod_budget_downloader import GuiProgressTracker
+        from downloader import GuiProgressTracker
 
         tracker = GuiProgressTracker(total_files=3)
         time.sleep(0.3)   # let the GUI thread start and render
@@ -312,13 +310,16 @@ def test_no_deallocator_error_on_close():
         gc.collect()      # force GC from main thread — this triggered the bug
     """)
 
-    result = subprocess.run(
-        [sys.executable, '-c', script],
-        capture_output=True,
-        text=True,
-        timeout=15,
-        cwd=str(PROJECT_ROOT),
-    )
+    try:
+        result = subprocess.run(
+            [sys.executable, '-c', script],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            cwd=str(PROJECT_ROOT),
+        )
+    except OSError as e:
+        pytest.skip(f"subprocess pipes not supported in this environment: {e}")
 
     assert "main thread is not in main loop" not in result.stderr, (
         "StringVar deallocator error detected — cleanup on close is broken:\n"

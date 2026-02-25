@@ -323,7 +323,7 @@ def main():
     def check_checkpoint_system():
         """Verify checkpoint functions exist and work."""
         try:
-            from build_budget_db import (
+            from pipeline.builder import (
                 _create_session_id,
                 _save_checkpoint,  # noqa: F401
                 _mark_file_processed,  # noqa: F401

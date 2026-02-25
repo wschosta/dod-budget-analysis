@@ -12,7 +12,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 import copy
 from unittest.mock import patch
 
-import pytest
 
 from downloader.core import deduplicate_across_sources
 

@@ -12,7 +12,7 @@ from pathlib import Path
 for _mod in ("pdfplumber", "openpyxl"):
     sys.modules.setdefault(_mod, types.ModuleType(_mod))
 
-from build_budget_db import (  # noqa: E402
+from pipeline.builder import (  # noqa: E402
     _detect_exhibit_type,
     _safe_float,
     _extract_table_text,

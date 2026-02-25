@@ -11,14 +11,12 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 # Stub pdfplumber to avoid heavy import
 import types
 sys.modules.setdefault("pdfplumber", types.ModuleType("pdfplumber"))
 
-from build_budget_db import _detect_exhibit_type, _map_columns  # noqa: E402
-from exhibit_catalog import find_matching_columns  # noqa: E402
+from pipeline.builder import _detect_exhibit_type, _map_columns  # noqa: E402
+from pipeline.exhibit_catalog import find_matching_columns  # noqa: E402
 
 import openpyxl  # noqa: E402
 

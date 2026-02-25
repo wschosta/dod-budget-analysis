@@ -212,7 +212,7 @@ def test_likely_has_tables_heuristic():
     # Import the function from build_budget_db
     import sys
     sys.path.insert(0, str(Path.cwd()))
-    from build_budget_db import _likely_has_tables
+    from pipeline.builder import _likely_has_tables
 
     # Test 1: Page with many rects (likely table)
     page_with_rects = MockPage(20, 0)
@@ -245,7 +245,7 @@ def test_likely_has_tables_heuristic():
 def test_extract_text_parameter_compatibility():
     """Test that extract_text(layout=False) is a valid pdfplumber parameter."""
     # This is a compile-time check
-    from build_budget_db import ingest_pdf_file
+    from pipeline.builder import ingest_pdf_file
     import inspect
 
     # Verify the source code contains layout=False
@@ -258,7 +258,7 @@ def test_extract_text_parameter_compatibility():
 
 def test_table_settings_structure():
     """Test that table_settings are properly formatted."""
-    from build_budget_db import ingest_pdf_file
+    from pipeline.builder import ingest_pdf_file
     import inspect
 
     source = inspect.getsource(ingest_pdf_file)
@@ -272,7 +272,7 @@ def test_table_settings_structure():
 
 def test_extract_table_text_output():
     """Test that streaming _extract_table_text produces correct output."""
-    from build_budget_db import _extract_table_text
+    from pipeline.builder import _extract_table_text
 
     # Test 1: Empty tables
     assert _extract_table_text([]) == ""
@@ -303,7 +303,7 @@ def test_pragmas_applied():
         db_path = Path(tmpdir) / "test.db"
 
         # Import and call create_database
-        from build_budget_db import create_database
+        from pipeline.builder import create_database
         conn = create_database(db_path)
 
         cursor = conn.cursor()
@@ -330,7 +330,7 @@ def test_database_integrity():
     """Test that optimizations don't corrupt database."""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "test.db"
-        from build_budget_db import create_database
+        from pipeline.builder import create_database
 
         conn = create_database(db_path)
 

@@ -1,0 +1,53 @@
+# DoD Budget API — Dockerfile
+#
+# Single-stage build (fast startup for development).
+# For production with embedded data, see docker/Dockerfile.multistage.
+#
+# Build:  docker build -f docker/Dockerfile -t dod-budget .
+# Run:    docker run -p 8000:8000 -v ./dod_budget.sqlite:/app/dod_budget.sqlite dod-budget
+#
+# Security note: run with --read-only --tmpfs /tmp for filesystem hardening.
+# Security scan: trivy image dod-budget or snyk container test dod-budget
+
+FROM python:3.12-slim
+
+LABEL org.opencontainers.image.title="DoD Budget API"
+LABEL org.opencontainers.image.description="REST API for DoD budget justification data"
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Non-root user for security
+RUN useradd --create-home --shell /bin/bash appuser
+
+WORKDIR /app
+
+# Install Python dependencies first (cached layer)
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip==24.3.1 && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Copy application source (exclude test/dev files via .dockerignore)
+COPY api/           api/
+COPY utils/         utils/
+COPY downloader/    downloader/
+COPY pipeline/      pipeline/
+COPY templates/     templates/
+COPY static/        static/
+COPY run_pipeline.py .
+
+# Database mount point — override with -v at runtime or COPY in CI builds
+# The health endpoint at /health returns 503 if the DB is absent.
+ENV APP_DB_PATH=/app/dod_budget.sqlite \
+    APP_HOST=0.0.0.0
+
+# Switch to non-root user
+RUN chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
+
+CMD ["uvicorn", "api.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

@@ -178,7 +178,7 @@ class TestPhase5Integration:
 
     def test_phase5_with_project_boundaries(self, enrichment_db):
         """Phase 5 decomposes text into project-level rows."""
-        from enrich_budget_db import run_phase5
+        from pipeline.enricher import run_phase5
 
         enrichment_db.execute("""
             INSERT INTO pe_descriptions (pe_number, fiscal_year, source_file,
@@ -206,7 +206,7 @@ In FY2025, integration testing was completed.')
 
     def test_phase5_pe_level_fallback(self, enrichment_db):
         """Phase 5 uses PE-level fallback when no project boundaries found."""
-        from enrich_budget_db import run_phase5
+        from pipeline.enricher import run_phase5
 
         enrichment_db.execute("""
             INSERT INTO pe_descriptions (pe_number, fiscal_year, source_file,
@@ -228,7 +228,7 @@ In FY2025, integration testing was completed.')
 
     def test_phase5_empty_descriptions(self, enrichment_db):
         """Phase 5 returns 0 when pe_descriptions is empty."""
-        from enrich_budget_db import run_phase5
+        from pipeline.enricher import run_phase5
 
         count = run_phase5(enrichment_db)
         assert count == 0

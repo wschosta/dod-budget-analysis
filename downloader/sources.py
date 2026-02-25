@@ -11,11 +11,8 @@ import json
 import logging
 import os
 import re
-import sys
 import time
 from datetime import datetime
-
-logger = logging.getLogger(__name__)
 from pathlib import Path
 from urllib.parse import urljoin, urlparse, unquote
 
@@ -25,6 +22,8 @@ from bs4 import BeautifulSoup
 # Shared utilities
 from utils import sanitize_filename
 from utils.patterns import DOWNLOADABLE_EXTENSIONS
+
+logger = logging.getLogger(__name__)
 
 # Optimization: Try to use lxml parser (3-5x faster), fall back to html.parser
 try:
@@ -44,7 +43,7 @@ DOWNLOADABLE_EXTENSIONS_SET = {".pdf", ".xlsx", ".xls", ".zip", ".csv"}
 IGNORED_HOSTS = {"dam.defense.gov"}
 
 # Optimization: Cache directory for discovery results
-DISCOVERY_CACHE_DIR = Path("discovery_cache")
+DISCOVERY_CACHE_DIR = Path("logs/discovery_cache")
 
 ALL_SOURCES = ["comptroller", "defense-wide", "army", "navy", "navy-archive", "airforce"]
 
@@ -546,7 +545,7 @@ def _load_cache(cache_key: str) -> list[dict] | None:
 def _save_cache(cache_key: str, files: list[dict]):
     """Save discovery results to cache."""
     try:
-        DISCOVERY_CACHE_DIR.mkdir(exist_ok=True)
+        DISCOVERY_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         cache_file = DISCOVERY_CACHE_DIR / f"{cache_key}.json"
 
         with open(cache_file, "w") as f:

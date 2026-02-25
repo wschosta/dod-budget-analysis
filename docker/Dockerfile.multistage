@@ -9,7 +9,7 @@
 #       (Playwright downloads Chromium, then scrapes DoD sites).
 #       For most deployments, mount a pre-built DB instead (see Dockerfile).
 #
-# Build:  docker build -f Dockerfile.multistage -t dod-budget-full .
+# Build:  docker build -f docker/Dockerfile.multistage -t dod-budget-full .
 # Run:    docker run -p 8000:8000 dod-budget-full
 
 # ── Stage 1: data builder ─────────────────────────────────────────────────────
@@ -48,9 +48,9 @@ COPY . .
 # Download source documents and build the SQLite database.
 # Set PLAYWRIGHT_BROWSERS_PATH to where we installed above.
 ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
-RUN python build_budget_db.py --skip-download || true
+RUN python -m pipeline.builder --skip-download || true
 # If download is needed (full build), uncomment the next line and comment above:
-# RUN python refresh_data.py --all-years -v
+# RUN python run_pipeline.py --all-years -v
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM python:3.12-slim AS runtime
@@ -76,13 +76,7 @@ COPY downloader/    downloader/
 COPY pipeline/      pipeline/
 COPY templates/     templates/
 COPY static/        static/
-# Backward-compatible shims
-COPY exhibit_catalog.py      .
-COPY validate_budget_data.py .
-COPY validate_budget_db.py   .
-COPY search_budget.py        .
-COPY build_budget_db.py      .
-COPY schema_design.py        .
+COPY run_pipeline.py .
 
 # Copy the pre-built database from the builder stage
 COPY --from=builder /build/dod_budget.sqlite /app/dod_budget.sqlite

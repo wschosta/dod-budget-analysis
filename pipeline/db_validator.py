@@ -32,23 +32,24 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
 # Shared utilities: Import from utils package for consistency across codebase
 from utils import get_connection
 from utils.database import _validate_identifier
 from pipeline.schema import check_database_integrity
 
-DEFAULT_DB_PATH = Path("dod_budget.sqlite")
-
 # Known exhibit types — imported from exhibit_catalog so it stays in sync
 # with the canonical catalog (Step 1.B1-g-validator).
-from pipeline.exhibit_catalog import list_all_exhibit_types  # noqa: E402
+from pipeline.exhibit_catalog import list_all_exhibit_types
+from pipeline.builder import ORG_MAP as _ORG_MAP
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_DB_PATH = Path("dod_budget.sqlite")
+
 KNOWN_EXHIBIT_TYPES = set(list_all_exhibit_types())
 
 # Known organizations — imported from build_budget_db.py so it stays in sync
 # with ORG_MAP (Step 1.B4-b).
-from pipeline.builder import ORG_MAP as _ORG_MAP  # noqa: E402
 KNOWN_ORGS = set(_ORG_MAP.values())
 
 # Amount columns in the budget_lines table — queried dynamically from the

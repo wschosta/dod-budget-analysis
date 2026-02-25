@@ -160,7 +160,7 @@ class TestParseArgs:
         assert args.use_staging is False
         assert args.no_rollback is False
         assert args.report is False
-        assert args.report_path == "data_quality_report.json"
+        assert args.report_path == "logs/data_quality_report.json"
         assert args.download_workers == 4
         assert args.download_delay == 0.1
 

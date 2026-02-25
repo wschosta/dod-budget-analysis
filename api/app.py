@@ -30,8 +30,6 @@ OPT-FMT-001: fmt_amount Jinja filter uses shared format_amount() from utils.
 import json
 import logging
 import logging.handlers
-import os
-import sqlite3
 import time
 import uuid
 from collections import defaultdict
@@ -479,7 +477,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
                 count = conn.execute("SELECT COUNT(*) FROM budget_lines").fetchone()[0]
                 conn.close()
                 return {"status": "ok", "database": str(db_path), "budget_lines": count}
-            except Exception as e:
+            except Exception:
                 logging.exception("Health check degraded: database error while querying budget_lines")
                 return JSONResponse(
                     status_code=503,
@@ -606,7 +604,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         def fmt_amount(value: object) -> str:
             """Jinja filter: format dollar amount in $K with comma separators."""
             try:
-                return f"{float(value):,.1f}"
+                return f"{float(value):,.1f}"  # type: ignore[arg-type]
             except (TypeError, ValueError):
                 return "—"
 

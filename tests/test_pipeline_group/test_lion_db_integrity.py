@@ -49,30 +49,30 @@ class TestPENumberExtraction:
     """Test _extract_pe_number and _extract_all_pe_numbers (LION-102)."""
 
     def test_extract_single_pe(self):
-        from build_budget_db import _extract_pe_number
+        from pipeline.builder import _extract_pe_number
         assert _extract_pe_number("0602702E") == "0602702E"
         assert _extract_pe_number("PE 0305116BB program") == "0305116BB"
 
     def test_extract_pe_returns_none_on_empty(self):
-        from build_budget_db import _extract_pe_number
+        from pipeline.builder import _extract_pe_number
         assert _extract_pe_number(None) is None
         assert _extract_pe_number("") is None
         assert _extract_pe_number("No PE here") is None
 
     def test_extract_all_pe_numbers(self):
-        from build_budget_db import _extract_all_pe_numbers
+        from pipeline.builder import _extract_all_pe_numbers
         text = "0602702E and 0305116BB are referenced, also 0601102D"
         result = _extract_all_pe_numbers(text)
         assert result == ["0602702E", "0305116BB", "0601102D"]
 
     def test_extract_all_deduplicates(self):
-        from build_budget_db import _extract_all_pe_numbers
+        from pipeline.builder import _extract_all_pe_numbers
         text = "0602702E appears twice: 0602702E"
         result = _extract_all_pe_numbers(text)
         assert result == ["0602702E"]
 
     def test_extract_all_empty_input(self):
-        from build_budget_db import _extract_all_pe_numbers
+        from pipeline.builder import _extract_all_pe_numbers
         assert _extract_all_pe_numbers(None) == []
         assert _extract_all_pe_numbers("") == []
         assert _extract_all_pe_numbers("no PE numbers") == []
@@ -84,42 +84,42 @@ class TestFYExtraction:
     """Test _extract_fy_from_path and _normalise_fiscal_year (LION-100/101)."""
 
     def test_extract_fy_from_path(self):
-        from build_budget_db import _extract_fy_from_path
+        from pipeline.builder import _extract_fy_from_path
         p = Path("/data/DoD_Budget_Documents/FY2026/Comptroller/file.xlsx")
         assert _extract_fy_from_path(p) == "FY 2026"
 
     def test_extract_fy_from_path_with_space(self):
-        from build_budget_db import _extract_fy_from_path
+        from pipeline.builder import _extract_fy_from_path
         p = Path("/data/FY 2025/file.pdf")
         assert _extract_fy_from_path(p) == "FY 2025"
 
     def test_extract_fy_from_path_none(self):
-        from build_budget_db import _extract_fy_from_path
+        from pipeline.builder import _extract_fy_from_path
         p = Path("/data/documents/file.pdf")
         assert _extract_fy_from_path(p) is None
 
     def test_extract_fy_from_path_new_layout(self):
         """New nested layout: FY{year}/{cycle}/{source}/{category}/file."""
-        from build_budget_db import _extract_fy_from_path
+        from pipeline.builder import _extract_fy_from_path
         p = Path("/data/DoD_Budget_Documents/FY2026/PB/Comptroller/summary/p1.xlsx")
         assert _extract_fy_from_path(p) == "FY 2026"
 
     def test_extract_fy_from_path_new_layout_enacted(self):
         """New nested layout with ENACTED cycle."""
-        from build_budget_db import _extract_fy_from_path
+        from pipeline.builder import _extract_fy_from_path
         p = Path("/data/DoD_Budget_Documents/FY2025/ENACTED/Navy/detail/r2.xlsx")
         assert _extract_fy_from_path(p) == "FY 2025"
 
     def test_normalise_fiscal_year_passthrough(self):
-        from build_budget_db import _normalise_fiscal_year
+        from pipeline.builder import _normalise_fiscal_year
         assert _normalise_fiscal_year("FY 2026") == "FY 2026"
 
     def test_normalise_fiscal_year_compact(self):
-        from build_budget_db import _normalise_fiscal_year
+        from pipeline.builder import _normalise_fiscal_year
         assert _normalise_fiscal_year("FY2026") == "FY 2026"
 
     def test_normalise_fiscal_year_digits_only(self):
-        from build_budget_db import _normalise_fiscal_year
+        from pipeline.builder import _normalise_fiscal_year
         assert _normalise_fiscal_year("2026") == "FY 2026"
 
 
@@ -129,15 +129,15 @@ class TestPDFExhibitTypeDetection:
     """Test _detect_pdf_exhibit_type (LION-100)."""
 
     def test_detect_r2(self):
-        from build_budget_db import _detect_pdf_exhibit_type
+        from pipeline.builder import _detect_pdf_exhibit_type
         assert _detect_pdf_exhibit_type("Army_r2_display.pdf") == "r2"
 
     def test_detect_p1(self):
-        from build_budget_db import _detect_pdf_exhibit_type
+        from pipeline.builder import _detect_pdf_exhibit_type
         assert _detect_pdf_exhibit_type("P1_Budget_Summary.pdf") == "p1"
 
     def test_detect_unknown_for_generic(self):
-        from build_budget_db import _detect_pdf_exhibit_type
+        from pipeline.builder import _detect_pdf_exhibit_type
         assert _detect_pdf_exhibit_type("budget_overview.pdf") == "unknown"
 
 
@@ -245,8 +245,8 @@ class TestEnrichment:
     def _enrich_db(self, fixtures_dir_excel_only, tmp_path):
         """Build a fresh DB and run enrichment for testing."""
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-        from build_budget_db import build_database
-        from enrich_budget_db import run_phase1, run_phase3, _drop_enrichment_tables
+        from pipeline.builder import build_database
+        from pipeline.enricher import run_phase1, run_phase3, _drop_enrichment_tables
         from utils import get_connection
 
         self.db_path = tmp_path / "enriched_test.sqlite"
@@ -361,7 +361,7 @@ class TestFYFallback:
     def test_fy_fallback_from_directory(self, tmp_path):
         """When sheet name has no FY, use directory-derived FY."""
         import openpyxl
-        from build_budget_db import create_database, ingest_excel_file
+        from pipeline.builder import create_database, ingest_excel_file
 
         # Create an Excel file with a non-FY sheet name in an FY directory.
         # Use "FY 2026" in the sheet title column header so the column

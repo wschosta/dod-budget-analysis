@@ -1237,9 +1237,9 @@ def run_phase4(conn: sqlite3.Connection, stop_event: threading.Event | None = No
                 # Fast pre-filter: skip regex unless all keywords appear
                 if not all(kw in text_lower for kw in keywords):
                     continue
-                m = pattern.search(text)
-                if m:
-                    snippet = _context_window(text, m.start())
+                name_m = pattern.search(text)
+                if name_m:
+                    snippet = _context_window(text, name_m.start())
                     insert_buf.append((
                         pe_num, ref_pe, fy, source_file, page_start,
                         snippet, "name_match", 0.6,

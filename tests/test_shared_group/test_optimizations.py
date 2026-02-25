@@ -75,10 +75,10 @@ class TestModuleImports:
     @_skip_bs4
     def test_main_modules_use_shared_utilities(self):
         """Test that main modules properly import shared utilities."""
-        import dod_budget_downloader
-        import search_budget
-        import validate_budget_db
-        import build_budget_db
+        import downloader as dod_budget_downloader
+        import pipeline.search as search_budget
+        import pipeline.db_validator as validate_budget_db
+        import pipeline.builder as build_budget_db
 
         assert hasattr(dod_budget_downloader, "format_bytes")
         assert hasattr(dod_budget_downloader, "elapsed")
@@ -98,21 +98,21 @@ class TestBackwardCompatibility:
     @_skip_bs4
     def test_dod_downloader_patterns_available(self):
         """Verify dod_budget_downloader has DOWNLOADABLE_PATTERN."""
-        import dod_budget_downloader
+        import downloader as dod_budget_downloader
 
         assert hasattr(dod_budget_downloader, "DOWNLOADABLE_PATTERN")
         assert dod_budget_downloader.DOWNLOADABLE_PATTERN.search("file.pdf")
 
     def test_build_db_pe_pattern_available(self):
         """Verify build_budget_db has _PE_PATTERN for backward compatibility."""
-        import build_budget_db
+        import pipeline.builder as build_budget_db
 
         assert hasattr(build_budget_db, "_PE_PATTERN")
         assert build_budget_db._PE_PATTERN.search("0602702E")
 
     def test_search_budget_function_behavior(self):
         """Verify search_budget functions work as before."""
-        import search_budget
+        import pipeline.search as search_budget
 
         result = search_budget.sanitize_fts5_query("test query")
         assert isinstance(result, str)

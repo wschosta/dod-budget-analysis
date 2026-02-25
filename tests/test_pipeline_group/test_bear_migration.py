@@ -12,13 +12,10 @@ Tests the schema migration framework handles version upgrades correctly:
 # DONE [Group: BEAR] BEAR-008: Add database migration framework tests (~2,500 tokens)
 
 import sqlite3
-import sys
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from schema_design import (
+from pipeline.schema import (
     migrate,
     _current_version,
     _MIGRATIONS,

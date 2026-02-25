@@ -6,18 +6,15 @@ Tests each new check function against a minimal in-memory SQLite database.
 import sqlite3
 import sys
 import types
-from pathlib import Path
 
 import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 # Stub pdfplumber to avoid cryptography import issues
 for _mod in ("pdfplumber", "openpyxl", "pandas"):
     sys.modules.setdefault(_mod, types.ModuleType(_mod))
 
-from build_budget_db import create_database  # noqa: E402
-from validate_budget_db import (  # noqa: E402
+from pipeline.builder import create_database  # noqa: E402
+from pipeline.db_validator import (  # noqa: E402
     check_yoy_budget_anomalies,
     check_appropriation_title_consistency,
     check_line_item_rollups,
@@ -267,6 +264,8 @@ class TestCheckReferentialIntegrity:
                 description TEXT
             )
         """)
+        # Clear any seeded data so only 'r1' exists in the lookup
+        conn.execute("DELETE FROM exhibit_types")
         conn.execute(
             "INSERT INTO exhibit_types (code, display_name, exhibit_class) "
             "VALUES ('r1', 'RDT&E Summary', 'rdte')"
@@ -292,9 +291,9 @@ class TestCheckReferentialIntegrity:
                 exhibit_class TEXT, description TEXT
             )
         """)
-        conn.execute("INSERT INTO services_agencies (code, full_name, category) "
+        conn.execute("INSERT OR IGNORE INTO services_agencies (code, full_name, category) "
                      "VALUES ('Army', 'Department of the Army', 'military')")
-        conn.execute("INSERT INTO exhibit_types (code, display_name, exhibit_class) "
+        conn.execute("INSERT OR IGNORE INTO exhibit_types (code, display_name, exhibit_class) "
                      "VALUES ('p1', 'Procurement P-1', 'procurement')")
         conn.commit()
         _insert_line(conn, organization_name="Army", exhibit_type="p1")

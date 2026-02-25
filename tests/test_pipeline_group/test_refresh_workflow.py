@@ -5,14 +5,11 @@ Verifies workflow orchestration, dry-run mode, stage sequencing,
 logging behaviour, and webhook notification logic without network calls.
 """
 import json
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from refresh_data import RefreshWorkflow
+from pipeline.refresh import RefreshWorkflow
 
 
 # ── RefreshWorkflow initialisation ────────────────────────────────────────────
@@ -87,7 +84,7 @@ class TestRunCommand:
         out = capsys.readouterr().out
         assert "DRY RUN" in out
 
-    @patch("refresh_data.subprocess.run")
+    @patch("pipeline.refresh.subprocess.run")
     def test_success(self, mock_run, capsys):
         mock_run.return_value = MagicMock(returncode=0)
         wf = RefreshWorkflow()
@@ -95,7 +92,7 @@ class TestRunCommand:
         assert result is True
         mock_run.assert_called_once()
 
-    @patch("refresh_data.subprocess.run")
+    @patch("pipeline.refresh.subprocess.run")
     def test_failure_exit_code(self, mock_run, capsys):
         mock_run.return_value = MagicMock(returncode=1)
         wf = RefreshWorkflow()
@@ -103,7 +100,7 @@ class TestRunCommand:
         assert result is False
         assert "Failed" in capsys.readouterr().out
 
-    @patch("refresh_data.subprocess.run", side_effect=Exception("boom"))
+    @patch("pipeline.refresh.subprocess.run", side_effect=Exception("boom"))
     def test_exception(self, mock_run, capsys):
         wf = RefreshWorkflow()
         result = wf.run_command(["bad"], "broken cmd")
@@ -156,7 +153,7 @@ class TestFullWorkflowDryRun:
 # ── Notification ──────────────────────────────────────────────────────────────
 
 class TestNotification:
-    @patch("refresh_data.urllib.request.urlopen")
+    @patch("pipeline.refresh.urllib.request.urlopen")
     def test_sends_notification(self, mock_urlopen):
         wf = RefreshWorkflow(dry_run=True, notify_url="https://hooks.example.com/wh")
         wf.results = {"download": "completed"}
@@ -170,7 +167,7 @@ class TestNotification:
         assert body["elapsed_seconds"] == 42.5
         assert "succeeded" in body["text"]
 
-    @patch("refresh_data.urllib.request.urlopen", side_effect=Exception("network down"))
+    @patch("pipeline.refresh.urllib.request.urlopen", side_effect=Exception("network down"))
     def test_notification_failure_is_non_fatal(self, mock_urlopen, capsys):
         wf = RefreshWorkflow(dry_run=True, notify_url="https://hooks.example.com/wh")
         wf.results = {}

@@ -53,7 +53,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 # REFRESH-004: Path for the progress file polled by external monitors
-_PROGRESS_FILE = Path("refresh_progress.json")
+_PROGRESS_FILE = Path("logs/refresh_progress.json")
 
 
 class RefreshWorkflow:
@@ -128,6 +128,7 @@ class RefreshWorkflow:
             "stages_completed": dict(self.results),
         }
         try:
+            _PROGRESS_FILE.parent.mkdir(parents=True, exist_ok=True)
             with open(_PROGRESS_FILE, "w") as f:
                 json.dump(progress, f, indent=2)
         except OSError as e:
@@ -407,7 +408,7 @@ class RefreshWorkflow:
             )
             quality_report = generate_quality_report(
                 self.db_path,
-                output_path=Path("data_quality_report.json"),
+                output_path=Path("logs/data_quality_report.json"),
                 print_console=self.verbose,
             )
 
@@ -421,7 +422,8 @@ class RefreshWorkflow:
                 "validation_summary": quality_report["validation_summary"],
                 "workflow_stages": self.results,
             }
-            report_path = Path("refresh_report.json")
+            report_path = Path("logs/refresh_report.json")
+            report_path.parent.mkdir(parents=True, exist_ok=True)
             with open(report_path, "w") as f:
                 json.dump(refresh_report, f, indent=2)
 
@@ -430,7 +432,7 @@ class RefreshWorkflow:
                 f"{quality_report['validation_summary']['total_warnings']} warning(s)",
                 "ok",
             )
-            self.log(f"Reports saved: data_quality_report.json, {report_path}", "ok")
+            self.log(f"Reports saved: logs/data_quality_report.json, {report_path}", "ok")
             self.results["report"] = "completed"
             self._write_progress("stage_4_report", "completed",
                                  f"{quality_report['total_budget_lines']:,} budget lines")

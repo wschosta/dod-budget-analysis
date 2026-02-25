@@ -5,7 +5,6 @@ Tests the ETA formatting function in isolation (no Tkinter required).
 The import is scoped to avoid loading Tkinter widgets.
 """
 import sys
-from pathlib import Path
 from unittest.mock import MagicMock
 
 
@@ -16,9 +15,7 @@ sys.modules.setdefault("tkinter.ttk", _tk_mock)
 sys.modules.setdefault("tkinter.filedialog", _tk_mock)
 sys.modules.setdefault("tkinter.messagebox", _tk_mock)
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from build_budget_gui import _fmt_eta  # noqa: E402
+from pipeline.gui import _fmt_eta  # noqa: E402
 
 
 class TestFmtEta:
