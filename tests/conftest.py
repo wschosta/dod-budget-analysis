@@ -324,15 +324,17 @@ def fixtures_dir(tmp_path_factory):
     d = tmp_path_factory.mktemp("budget_fixtures")
 
     # DONE 1.C1-a: Excel fixtures (summary exhibits)
-    _create_exhibit_xlsx(d / "p1_display.xlsx", "p1", _P1_ROWS)
-    _create_exhibit_xlsx(d / "r1_display.xlsx", "r1", _R1_ROWS)
-    _create_exhibit_xlsx(d / "c1_display.xlsx", "c1", _C1_ROWS)
-    _create_exhibit_xlsx(d / "o1_display.xlsx", "o1", _P1_ROWS[:2])
-    _create_exhibit_xlsx(d / "m1_display.xlsx", "m1", _P1_ROWS[:2])
-    _create_exhibit_xlsx(d / "rf1_display.xlsx", "rf1", _P1_ROWS[:1])
+    # NOTE: filenames must NOT contain "_display" — the builder excludes those
+    # as duplicate formatting variants of Comptroller data.
+    _create_exhibit_xlsx(d / "p1.xlsx", "p1", _P1_ROWS)
+    _create_exhibit_xlsx(d / "r1.xlsx", "r1", _R1_ROWS)
+    _create_exhibit_xlsx(d / "c1.xlsx", "c1", _C1_ROWS)
+    _create_exhibit_xlsx(d / "o1.xlsx", "o1", _P1_ROWS[:2])
+    _create_exhibit_xlsx(d / "m1.xlsx", "m1", _P1_ROWS[:2])
+    _create_exhibit_xlsx(d / "rf1.xlsx", "rf1", _P1_ROWS[:1])
     # TEST-001: Detail exhibit fixtures (P-5, R-2)
-    _create_exhibit_xlsx(d / "p5_display.xlsx", "p5", _P5_ROWS)
-    _create_exhibit_xlsx(d / "r2_display.xlsx", "r2", _R2_ROWS)
+    _create_exhibit_xlsx(d / "p5.xlsx", "p5", _P5_ROWS)
+    _create_exhibit_xlsx(d / "r2.xlsx", "r2", _R2_ROWS)
 
     # DONE 1.C1-b: PDF fixtures
     _create_sample_pdf(d / "text_only.pdf", title="Budget Overview FY2026",
@@ -351,8 +353,7 @@ def test_db(fixtures_dir, tmp_path_factory):
     query real data without repeating the build.  Implements TODO 1.C1-c.
     """
     # Import here so test collection works even without the full dep stack
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from build_budget_db import build_database  # type: ignore
+    from pipeline.builder import build_database  # type: ignore
 
     db_dir = tmp_path_factory.mktemp("test_db")
     db_path = db_dir / "test_budget.sqlite"
@@ -371,14 +372,15 @@ def fixtures_dir_excel_only(tmp_path_factory):
     exercise only Excel ingestion do not trigger pyo3/pdfplumber PanicException.
     """
     d = tmp_path_factory.mktemp("excel_only_fixtures")
-    _create_exhibit_xlsx(d / "p1_display.xlsx", "p1", _P1_ROWS)
-    _create_exhibit_xlsx(d / "r1_display.xlsx", "r1", _R1_ROWS)
-    _create_exhibit_xlsx(d / "c1_display.xlsx", "c1", _C1_ROWS)
-    _create_exhibit_xlsx(d / "o1_display.xlsx", "o1", _P1_ROWS[:2])
-    _create_exhibit_xlsx(d / "m1_display.xlsx", "m1", _P1_ROWS[:2])
-    _create_exhibit_xlsx(d / "rf1_display.xlsx", "rf1", _P1_ROWS[:1])
-    _create_exhibit_xlsx(d / "p5_display.xlsx", "p5", _P5_ROWS)
-    _create_exhibit_xlsx(d / "r2_display.xlsx", "r2", _R2_ROWS)
+    # NOTE: filenames must NOT contain "_display" — the builder excludes those.
+    _create_exhibit_xlsx(d / "p1.xlsx", "p1", _P1_ROWS)
+    _create_exhibit_xlsx(d / "r1.xlsx", "r1", _R1_ROWS)
+    _create_exhibit_xlsx(d / "c1.xlsx", "c1", _C1_ROWS)
+    _create_exhibit_xlsx(d / "o1.xlsx", "o1", _P1_ROWS[:2])
+    _create_exhibit_xlsx(d / "m1.xlsx", "m1", _P1_ROWS[:2])
+    _create_exhibit_xlsx(d / "rf1.xlsx", "rf1", _P1_ROWS[:1])
+    _create_exhibit_xlsx(d / "p5.xlsx", "p5", _P5_ROWS)
+    _create_exhibit_xlsx(d / "r2.xlsx", "r2", _R2_ROWS)
     return d
 
 
@@ -389,8 +391,7 @@ def test_db_excel_only(fixtures_dir_excel_only, tmp_path_factory):
     FIX-005: No PDF fixtures → no pyo3/pdfplumber PanicException.
     Tests that only need Excel data should use this fixture instead of test_db.
     """
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from build_budget_db import build_database  # type: ignore
+    from pipeline.builder import build_database  # type: ignore
 
     db_dir = tmp_path_factory.mktemp("test_db_excel_only")
     db_path = db_dir / "test_budget_excel.sqlite"
@@ -458,8 +459,7 @@ def tmp_db(tmp_path):
 
     Useful for tests that need a database but don't need pre-loaded data.
     """
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from build_budget_db import create_database  # type: ignore
+    from pipeline.builder import create_database  # type: ignore
 
     db_path = tmp_path / "unit_test.sqlite"
     conn = create_database(db_path)

@@ -311,7 +311,7 @@ class DownloadConfig(Config):
         """Initialize download configuration."""
         super().__init__()
         self.documents_dir = Path("DoD_Budget_Documents")
-        self.cache_dir = Path(".discovery_cache")
+        self.cache_dir = Path("logs/discovery_cache")
         self.cache_ttl_hours = 24
         self.max_retries = 3
         self.backoff_factor = 2.0

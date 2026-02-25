@@ -3535,7 +3535,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     logger.info("  Excel files:        %d", len(xlsx_files))
     logger.info("  PDF files:          %d", len(pdf_files))
 
-    print("\n  ── Build Summary ──────────────────────────────", flush=True)
+    print("\n  -- Build Summary ------------------------------------------------", flush=True)
     print(f"  Database:       {db_path.name} ({db_size:.1f} MB)", flush=True)
     print(f"  Budget lines:   {total_lines:,}", flush=True)
     print(f"  PDF pages:      {total_pages:,}", flush=True)
@@ -3584,7 +3584,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             logger.info("  [QUALITY REPORT] %s budget lines | %d checks | %d warning(s) | %d failure(s)",
                         f"{report['total_budget_lines']:,}",
                         val['total_checks'], val['total_warnings'], val['total_failures'])
-            logger.info("  [QUALITY REPORT] Written to data_quality_report.json")
+            logger.info("  [QUALITY REPORT] Written to logs/data_quality_report.json")
         except Exception as _val_err:
             logger.warning("  [VALIDATION] Skipped: %s", _val_err)
 

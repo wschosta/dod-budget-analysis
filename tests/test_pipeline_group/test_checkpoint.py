@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from build_budget_db import (
+from pipeline.builder import (
     create_database,
     _create_session_id,
     _save_checkpoint,

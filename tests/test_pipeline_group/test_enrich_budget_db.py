@@ -7,15 +7,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import sys
 import threading
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from enrich_budget_db import (
+from pipeline.enricher import (
     run_phase1,
     run_phase2,
     run_phase3,

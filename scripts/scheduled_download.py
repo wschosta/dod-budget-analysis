@@ -62,7 +62,7 @@ def run_scheduled_download(
 
     # Import the downloader components we need
     try:
-        from dod_budget_downloader import (
+        from downloader import (
             ALL_SOURCES,
             BROWSER_REQUIRED_SOURCES,  # noqa: F401
             SERVICE_PAGE_TEMPLATES,

@@ -4,7 +4,6 @@
 *.sqlite-shm
 *.sqlite-wal
 DoD_Budget_Documents/
-discovery_cache/
 
 # Temp/working directories
 _ul*
@@ -40,14 +39,11 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Generated output files
-data_quality_report.json
-refresh_progress.json
+# Generated output files (not under logs/)
 failed_downloads.json
 profile_report.json
-pipeline_progress.json
 
-# Pipeline run logs
+# Pipeline logs, progress files, reports, and discovery cache
 logs/
 
 # Claude Code

@@ -10,14 +10,12 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 # Stub pdfplumber to avoid cryptography import issues
 if "pdfplumber" not in sys.modules:
     sys.modules.setdefault("pdfplumber", types.ModuleType("pdfplumber"))
 
-from build_budget_db import create_database
-from validate_budget_data import (
+from pipeline.builder import create_database
+from pipeline.validator import (
     check_database_stats,
     check_duplicate_rows,
     check_null_heavy_rows,

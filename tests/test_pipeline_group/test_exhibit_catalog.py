@@ -4,14 +4,10 @@ Unit tests for exhibit_catalog.py public functions.
 Tests the catalog lookup, column spec retrieval, and header matching
 functions. No database, network, or file I/O required.
 """
-import sys
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from exhibit_catalog import (
+from pipeline.exhibit_catalog import (
     EXHIBIT_CATALOG,
     get_exhibit_spec,
     get_column_spec_for_exhibit,

@@ -8,20 +8,16 @@ Also covers build_budget_db.py fixes:
 """
 import sys
 import types
-from pathlib import Path
 
 import pytest
 
-# Ensure the project root is importable
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from pipeline.search import _sanitize_fts5_query, _highlight_terms, _extract_snippet
 
-from search_budget import _sanitize_fts5_query, _highlight_terms, _extract_snippet
-
-# Stub heavy third-party deps so we can import build_budget_db in test envs
+# Stub heavy third-party deps so we can import pipeline.builder in test envs
 for _mod in ("pdfplumber", "openpyxl", "pandas"):
     sys.modules.setdefault(_mod, types.ModuleType(_mod))
 
-from build_budget_db import create_database, build_database  # noqa: E402
+from pipeline.builder import create_database, build_database  # noqa: E402
 
 
 # ── _sanitize_fts5_query ─────────────────────────────────────────────────────

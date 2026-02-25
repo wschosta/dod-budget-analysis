@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import openpyxl
 
-from build_budget_db import _detect_exhibit_type
+from pipeline.builder import _detect_exhibit_type
 
 
 def _find_header_row(rows: list[tuple]) -> int | None:
@@ -150,7 +150,7 @@ def generate_report(results: dict[str, list[dict]], docs_dir: Path) -> str:
     lines.append("|-------------|-------------|--------|")
 
     try:
-        from exhibit_catalog import EXHIBIT_CATALOG
+        from pipeline.exhibit_catalog import EXHIBIT_CATALOG
         cataloged = set(EXHIBIT_CATALOG.keys())
     except ImportError:
         cataloged = set()

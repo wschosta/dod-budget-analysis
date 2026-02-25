@@ -377,15 +377,15 @@ class TestImportSmoke:
         __import__(module)
 
     @pytest.mark.parametrize("module", [
-        "dod_budget_downloader",
-        "build_budget_db",
-        "search_budget",
-        "validate_budget_data",
-        "exhibit_catalog",
-        "schema_design",
+        "pipeline.builder",
+        "pipeline.search",
+        "pipeline.validator",
+        "pipeline.schema",
+        "pipeline.exhibit_catalog",
+        "pipeline.refresh",
     ])
-    def test_root_script_imports(self, module: str):
-        """Root-level scripts should import (shims or direct)."""
+    def test_pipeline_module_imports(self, module: str):
+        """Pipeline modules should import without errors."""
         try:
             __import__(module)
         except ImportError as e:

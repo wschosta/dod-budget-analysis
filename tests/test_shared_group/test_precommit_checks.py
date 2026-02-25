@@ -25,7 +25,12 @@ class TestSyntaxValidation:
     def get_python_files(self):
         """Get all non-test Python files."""
         root = Path(".")
-        py_files = list(root.glob("*.py")) + list(root.glob("utils/*.py"))
+        py_files = (
+            list(root.glob("*.py"))
+            + list(root.glob("utils/*.py"))
+            + list(root.glob("pipeline/*.py"))
+            + list(root.glob("downloader/*.py"))
+        )
         # Exclude test files, __pycache__, and specific files
         return [
             f for f in py_files
@@ -56,10 +61,10 @@ class TestImportValidation:
 
         # Try importing main modules
         modules_to_test = [
-            "dod_budget_downloader",
-            "build_budget_db",
-            "search_budget",
-            "validate_budget_db",
+            "downloader",
+            "pipeline.builder",
+            "pipeline.search",
+            "pipeline.db_validator",
         ]
 
         for module_name in modules_to_test:
@@ -119,7 +124,12 @@ class TestCodeQuality:
     def get_python_files(self):
         """Get all non-test Python files."""
         root = Path(".")
-        py_files = list(root.glob("*.py")) + list(root.glob("utils/*.py"))
+        py_files = (
+            list(root.glob("*.py"))
+            + list(root.glob("utils/*.py"))
+            + list(root.glob("pipeline/*.py"))
+            + list(root.glob("downloader/*.py"))
+        )
         return [
             f for f in py_files
             if f.name not in ["test_*.py", "conftest.py"]
@@ -181,9 +191,9 @@ class TestCodeQuality:
         CLI tools.
         """
         library_modules = [
-            "build_budget_db.py",
-            "search_budget.py",
-            "validate_budget_db.py",
+            "pipeline/builder.py",
+            "pipeline/search.py",
+            "pipeline/db_validator.py",
         ]
 
         # Patterns that indicate accidental debug prints (not user-facing output)
@@ -218,9 +228,9 @@ class TestNamingShadowing:
     def test_no_obvious_shadowing(self):
         """Detect obvious imported function shadowing."""
         files_to_check = [
-            "dod_budget_downloader.py",
-            "build_budget_db.py",
-            "search_budget.py",
+            "downloader/__init__.py",
+            "pipeline/builder.py",
+            "pipeline/search.py",
         ]
 
         shadowing_patterns = [
@@ -258,7 +268,12 @@ class TestLineLength:
         """Lines should not exceed 100 characters (except URLs and data files)."""
         max_length = 100
         root = Path(".")
-        py_files = list(root.glob("*.py")) + list(root.glob("utils/*.py"))
+        py_files = (
+            list(root.glob("*.py"))
+            + list(root.glob("utils/*.py"))
+            + list(root.glob("pipeline/*.py"))
+            + list(root.glob("downloader/*.py"))
+        )
 
         # Data-declaration and generated files where long lines are unavoidable:
         # exhibit_catalog.py  — column_spec dicts with long string literals
@@ -324,17 +339,17 @@ class TestDocumentation:
     def test_function_docstrings(self):
         """Critical functions should have docstrings."""
         critical_functions = {
-            "dod_budget_downloader.py": [
+            "downloader/__init__.py": [
                 "download_file",
                 "download_all",
                 "discover_",  # All discover_* functions
             ],
-            "build_budget_db.py": [
+            "pipeline/builder.py": [
                 "build_database",
                 "ingest_excel_file",
                 "ingest_pdf_file",
             ],
-            "search_budget.py": [
+            "pipeline/search.py": [
                 "search_",  # All search_* functions
             ],
         }
@@ -377,7 +392,7 @@ class TestDatabaseConsistency:
             pytest.skip("Database not created yet")
 
         try:
-            conn = sqlite3.connect(str(db_path))
+            conn = sqlite3.connect(str(db_path), timeout=10)
             cursor = conn.cursor()
 
             # Verify critical tables exist
@@ -396,6 +411,10 @@ class TestDatabaseConsistency:
                 pytest.skip("Database exists but pdf_pages table not yet created")
 
             conn.close()
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower():
+                pytest.skip(f"Database is locked (concurrent access): {e}")
+            pytest.fail(f"Database integrity issue: {e}")
         except sqlite3.DatabaseError as e:
             pytest.fail(f"Database integrity issue: {e}")
 

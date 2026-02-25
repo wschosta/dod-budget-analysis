@@ -57,7 +57,7 @@ HERE = Path(__file__).resolve().parent
 STEP_DOWNLOAD = HERE / "dod_budget_downloader.py"
 
 # Progress file for external monitors
-_PROGRESS_FILE = Path("pipeline_progress.json")
+_PROGRESS_FILE = Path("logs/pipeline_progress.json")
 
 # Track completed steps for progress reporting
 _completed_steps: dict[str, str] = {}
@@ -100,6 +100,7 @@ def _write_progress(step: str, status: str, elapsed: float, detail: str = "") ->
         "steps_completed": dict(_completed_steps),
     }
     try:
+        _PROGRESS_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(_PROGRESS_FILE, "w") as f:
             json.dump(progress, f, indent=2)
     except OSError:
@@ -527,8 +528,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Generate a data quality report after validation",
     )
     val_group.add_argument(
-        "--report-path", default="data_quality_report.json", metavar="PATH",
-        help="Path for the quality report (default: data_quality_report.json)",
+        "--report-path", default="logs/data_quality_report.json", metavar="PATH",
+        help="Path for the quality report (default: logs/data_quality_report.json)",
     )
 
     # Enrich options

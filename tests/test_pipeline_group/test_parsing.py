@@ -10,16 +10,13 @@ from pathlib import Path
 
 import pytest
 
-# Ensure the project root is importable
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-# build_budget_db imports heavy third-party modules at module level, which may
+# pipeline.builder imports heavy third-party modules at module level, which may
 # fail in environments without the full dependency stack.  Stub them out so we
 # can import the pure-Python utilities we actually test.
 for _mod in ("pdfplumber", "openpyxl"):
     sys.modules.setdefault(_mod, types.ModuleType(_mod))
 
-from build_budget_db import (  # noqa: E402
+from pipeline.builder import (  # noqa: E402
     _detect_exhibit_type,
     _safe_float,
     _extract_table_text,
@@ -33,7 +30,7 @@ from build_budget_db import (  # noqa: E402
     _detect_currency_year,
 )
 from utils.common import sanitize_filename  # noqa: E402
-from exhibit_catalog import find_matching_columns  # noqa: E402
+from pipeline.exhibit_catalog import find_matching_columns  # noqa: E402
 
 
 # ── DONE 1.C2-a: _detect_exhibit_type ────────────────────────────────────────

@@ -43,7 +43,7 @@ DOWNLOADABLE_EXTENSIONS_SET = {".pdf", ".xlsx", ".xls", ".zip", ".csv"}
 IGNORED_HOSTS = {"dam.defense.gov"}
 
 # Optimization: Cache directory for discovery results
-DISCOVERY_CACHE_DIR = Path("discovery_cache")
+DISCOVERY_CACHE_DIR = Path("logs/discovery_cache")
 
 ALL_SOURCES = ["comptroller", "defense-wide", "army", "navy", "navy-archive", "airforce"]
 
@@ -545,7 +545,7 @@ def _load_cache(cache_key: str) -> list[dict] | None:
 def _save_cache(cache_key: str, files: list[dict]):
     """Save discovery results to cache."""
     try:
-        DISCOVERY_CACHE_DIR.mkdir(exist_ok=True)
+        DISCOVERY_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         cache_file = DISCOVERY_CACHE_DIR / f"{cache_key}.json"
 
         with open(cache_file, "w") as f:

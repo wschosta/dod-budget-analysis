@@ -221,7 +221,7 @@ def main():
         # Import DDL from schema_design
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
         try:
-            from schema_design import _DDL_001_CORE, _DDL_001_SEEDS
+            from pipeline.schema import _DDL_001_CORE, _DDL_001_SEEDS
             conn.executescript(_DDL_001_CORE)
             conn.executescript(_DDL_001_SEEDS)
         except ImportError:

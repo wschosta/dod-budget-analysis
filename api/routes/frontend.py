@@ -85,10 +85,11 @@ def _format_fy(value: str | None) -> str:
     return f"FY {s}" if s else ""
 
 
-def set_templates(t: Jinja2Templates) -> None:
+def set_templates(t: Jinja2Templates | None) -> None:
     global _templates
     _templates = t
-    t.env.filters["format_fy"] = _format_fy
+    if t is not None:
+        t.env.filters["format_fy"] = _format_fy
 
 
 def _tmpl() -> Jinja2Templates:

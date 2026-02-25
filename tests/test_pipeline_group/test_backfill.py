@@ -5,14 +5,10 @@ Verifies the backfill logic populates reference tables from budget_lines
 data with correct classification and deduplication.
 """
 import sqlite3
-import sys
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from backfill_reference_tables import backfill, main
+from pipeline.backfill import backfill, main
 
 
 def _create_test_db(conn: sqlite3.Connection) -> None:

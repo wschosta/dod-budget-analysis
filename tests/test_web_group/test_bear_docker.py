@@ -25,13 +25,13 @@ class TestDockerfile:
     """Validate Dockerfile contents."""
 
     def test_dockerfile_exists(self):
-        assert (PROJECT_ROOT / "Dockerfile").is_file()
+        assert (PROJECT_ROOT / "docker" / "Dockerfile").is_file()
 
     def test_dockerfile_multistage_exists(self):
         assert (PROJECT_ROOT / "docker" / "Dockerfile.multistage").is_file()
 
     def test_dockerfile_has_required_directives(self):
-        content = (PROJECT_ROOT / "Dockerfile").read_text()
+        content = (PROJECT_ROOT / "docker" / "Dockerfile").read_text()
         assert "FROM" in content, "Missing FROM directive"
         assert "COPY" in content, "Missing COPY directive"
         assert "HEALTHCHECK" in content, "Missing HEALTHCHECK directive"
@@ -39,15 +39,15 @@ class TestDockerfile:
         assert "EXPOSE" in content, "Missing EXPOSE directive"
 
     def test_dockerfile_exposes_port_8000(self):
-        content = (PROJECT_ROOT / "Dockerfile").read_text()
+        content = (PROJECT_ROOT / "docker" / "Dockerfile").read_text()
         assert "EXPOSE 8000" in content
 
     def test_dockerfile_uses_nonroot_user(self):
-        content = (PROJECT_ROOT / "Dockerfile").read_text()
+        content = (PROJECT_ROOT / "docker" / "Dockerfile").read_text()
         assert "USER appuser" in content or "USER nonroot" in content
 
     def test_dockerfile_sets_python_env_vars(self):
-        content = (PROJECT_ROOT / "Dockerfile").read_text()
+        content = (PROJECT_ROOT / "docker" / "Dockerfile").read_text()
         assert "PYTHONDONTWRITEBYTECODE" in content
         assert "PYTHONUNBUFFERED" in content
 
@@ -56,14 +56,14 @@ class TestDockerCompose:
     """Validate docker-compose.yml."""
 
     def test_docker_compose_exists(self):
-        assert (PROJECT_ROOT / "docker-compose.yml").is_file()
+        assert (PROJECT_ROOT / "docker" / "docker-compose.yml").is_file()
 
     def test_docker_compose_valid_yaml(self):
         try:
             import yaml
         except ImportError:
             pytest.skip("pyyaml not installed")
-        content = (PROJECT_ROOT / "docker-compose.yml").read_text()
+        content = (PROJECT_ROOT / "docker" / "docker-compose.yml").read_text()
         data = yaml.safe_load(content)
         assert isinstance(data, dict)
 
@@ -72,13 +72,13 @@ class TestDockerCompose:
             import yaml
         except ImportError:
             pytest.skip("pyyaml not installed")
-        content = (PROJECT_ROOT / "docker-compose.yml").read_text()
+        content = (PROJECT_ROOT / "docker" / "docker-compose.yml").read_text()
         data = yaml.safe_load(content)
         assert "services" in data
         assert "web" in data["services"]
 
     def test_docker_compose_has_healthcheck(self):
-        content = (PROJECT_ROOT / "docker-compose.yml").read_text()
+        content = (PROJECT_ROOT / "docker" / "docker-compose.yml").read_text()
         assert "healthcheck" in content
 
 
@@ -133,7 +133,7 @@ class TestDockerfileCopiedFiles:
     """Verify all Python files referenced in Dockerfile COPY exist."""
 
     def test_copied_files_exist(self):
-        content = (PROJECT_ROOT / "Dockerfile").read_text()
+        content = (PROJECT_ROOT / "docker" / "Dockerfile").read_text()
         # Extract COPY source paths (lines like "COPY api/ api/" or "COPY schema_design.py .")
         for line in content.split("\n"):
             line = line.strip()

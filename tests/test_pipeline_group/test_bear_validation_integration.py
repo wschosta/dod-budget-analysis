@@ -15,13 +15,10 @@ catch them:
 
 import json
 import sqlite3
-import sys
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from build_budget_db import create_database
+from pipeline.builder import create_database
 
 
 def _build_bad_db(tmp_path):
@@ -145,7 +142,7 @@ class TestValidationIntegration:
     """Run individual validation checks against a DB with known issues."""
 
     def test_check_duplicates_finds_duplicates(self, bad_db):
-        from validate_budget_db import check_duplicates
+        from pipeline.db_validator import check_duplicates
         conn, _ = bad_db
         issues = check_duplicates(conn)
         assert len(issues) > 0
@@ -153,7 +150,7 @@ class TestValidationIntegration:
         assert any(i["severity"] == "error" for i in issues)
 
     def test_check_missing_years_finds_gaps(self, bad_db):
-        from validate_budget_db import check_missing_years
+        from pipeline.db_validator import check_missing_years
         conn, _ = bad_db
         issues = check_missing_years(conn)
         # Navy is missing FY2025 that Army has
@@ -161,35 +158,35 @@ class TestValidationIntegration:
         assert any("missing" in str(i.get("detail", "")).lower() for i in issues)
 
     def test_check_zero_amounts_finds_zeros(self, bad_db):
-        from validate_budget_db import check_zero_amounts
+        from pipeline.db_validator import check_zero_amounts
         conn, _ = bad_db
         issues = check_zero_amounts(conn)
         assert len(issues) > 0
         assert any(i["check"] == "zero_amounts" for i in issues)
 
     def test_check_pe_number_format_finds_invalid(self, bad_db):
-        from validate_budget_db import check_pe_number_format
+        from pipeline.db_validator import check_pe_number_format
         conn, _ = bad_db
         issues = check_pe_number_format(conn)
         assert len(issues) > 0
         assert any("INVALID_PE" in str(i.get("samples", [])) for i in issues)
 
     def test_check_negative_amounts_finds_negatives(self, bad_db):
-        from validate_budget_db import check_negative_amounts
+        from pipeline.db_validator import check_negative_amounts
         conn, _ = bad_db
         issues = check_negative_amounts(conn)
         assert len(issues) > 0
         assert any(i["severity"] == "info" for i in issues)
 
     def test_check_unknown_exhibits_finds_unknown(self, bad_db):
-        from validate_budget_db import check_unknown_exhibits
+        from pipeline.db_validator import check_unknown_exhibits
         conn, _ = bad_db
         issues = check_unknown_exhibits(conn)
         assert len(issues) > 0
         assert any("z99" in str(i.get("exhibit_type", "")) for i in issues)
 
     def test_check_column_alignment_finds_misalignment(self, bad_db):
-        from validate_budget_db import check_column_alignment
+        from pipeline.db_validator import check_column_alignment
         conn, _ = bad_db
         issues = check_column_alignment(conn)
         assert len(issues) > 0
@@ -197,7 +194,7 @@ class TestValidationIntegration:
 
     def test_generate_json_report_includes_all_issues(self, bad_db):
         """JSON report aggregates all checks and includes all issue types."""
-        from validate_budget_db import generate_json_report
+        from pipeline.db_validator import generate_json_report
         conn, _ = bad_db
         report = generate_json_report(conn)
 
@@ -221,7 +218,7 @@ class TestValidationIntegration:
 
     def test_generate_json_report_is_serializable(self, bad_db):
         """JSON report can be serialized to JSON string."""
-        from validate_budget_db import generate_json_report
+        from pipeline.db_validator import generate_json_report
         conn, _ = bad_db
         report = generate_json_report(conn)
         # Should not raise

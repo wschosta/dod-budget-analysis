@@ -7,13 +7,9 @@ in-memory database with minimal schema.
 """
 import csv
 import json
-import sys
-from pathlib import Path
 
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from search_budget import (
+from pipeline.search import (
     export_results,
     display_budget_results,
     display_pdf_results,

@@ -14,13 +14,10 @@ Uses time.monotonic() for timing assertions.
 
 import sqlite3
 import time
-import sys
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from build_budget_db import create_database
+from pipeline.builder import create_database
 
 # Organizations and exhibit types for realistic data distribution
 _ORGS = ["Army", "Navy", "Air Force", "Space Force", "Marine Corps", "Defense-Wide"]

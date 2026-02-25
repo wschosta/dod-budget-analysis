@@ -508,7 +508,7 @@ def print_report(summary: dict) -> None:
 
 def generate_quality_report(
     db_path: Path = DEFAULT_DB_PATH,
-    output_path: Path = Path("data_quality_report.json"),
+    output_path: Path = Path("logs/data_quality_report.json"),
     print_console: bool = True,
 ) -> dict:
     """Generate a JSON data-quality report after a build (2.B3-a).
@@ -603,6 +603,7 @@ def generate_quality_report(
         },
     }
 
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(report, indent=2))
     return report
 
