@@ -297,10 +297,208 @@ Changed to "FY20XX = Oct 20XX-1 – Sep 20XX" — generic, timeless.
 
 ---
 
+## Round 3 — Data Quality Audit & Future Directions (2026-02-26)
+
+Findings from database investigation and consolidated view development. These are
+not UI bugs — they are data pipeline gaps and architecture issues to address in
+future sprints.
+
+### Data Quality Issues
+
+#### 51. Project-Level Tags Are Empty (0 tags) **[OPEN — Pipeline]**
+
+Despite 412,071 `project_descriptions` records, the `pe_tags` table has **zero**
+rows where `project_number IS NOT NULL`. The enricher's project-level keyword
+matching (`enricher.py:985-993`) either isn't running or the taxonomy patterns
+find no hits in project description text.
+
+**Impact:** Consolidated view sub-project panels show no tags. Users see tags at
+PE level but not at sub-project level.
+
+```sql
+SELECT COUNT(*) FROM pe_tags WHERE project_number IS NOT NULL;
+-- Result: 0
+SELECT COUNT(*) FROM project_descriptions;
+-- Result: 412,071
+```
+
+**Suggested fix:** Debug the enricher Phase 3 project-level tagging loop. The
+keyword regex patterns may not match the shorter, more technical project titles.
+Consider adding a broader second-tier taxonomy or running LLM tagging on project
+descriptions.
+
+---
+
+#### 52. Detail Rows Have NULL budget_type Despite Valid appropriation_code **[OPEN — DB]**
+
+2,161 rows in `budget_lines` have `appropriation_code` populated but `budget_type`
+is NULL. These are detail exhibit rows (r2, p5, amendment, ogsi). Summary rows
+(p1, r1) have `budget_type` populated.
+
+**Workaround applied:** Dashboard and aggregation endpoints now use a shared
+`BUDGET_TYPE_CASE_EXPR` (`utils/database.py`) to derive budget type from
+appropriation code at query time.
+
+**Permanent fix:** Populate `budget_type` during ingestion for all rows, not just
+summary exhibits.
+
+```sql
+SELECT appropriation_code, COUNT(*) FROM budget_lines
+WHERE budget_type IS NULL AND appropriation_code IS NOT NULL
+GROUP BY appropriation_code ORDER BY COUNT(*) DESC;
+```
+
+---
+
+#### 53. 67% of budget_lines Have No PE Number **[OPEN — DB]**
+
+83,497 of 124,670 rows (67%) have NULL `pe_number`. These rows cannot be enriched,
+tagged, or linked to PE-centric views (Programs, Consolidated).
+
+**Root cause:** PE numbers only appear in certain exhibit types (R-2, P-5). Summary
+exhibits (R-1, P-1, O-1) and many O&M/MilPers exhibits don't include PE numbers
+at the line level.
+
+```sql
+SELECT exhibit_type, COUNT(*) as cnt,
+       SUM(CASE WHEN pe_number IS NULL THEN 1 ELSE 0 END) as null_pe
+FROM budget_lines GROUP BY exhibit_type ORDER BY cnt DESC;
+```
+
+---
+
+#### 54. Keyword Taxonomy May Be Too Restrictive (41 terms) **[OPEN — Pipeline]**
+
+The domain taxonomy in `enricher.py:64-127` has 41 keyword patterns. Current tag
+distribution: 39,059 keyword tags + 4,140 structured tags across 3,357 PEs (~12.9
+tags/PE average).
+
+**Potential expansion terms:** JADC2, kill-chain, integrated-air-defense, SIGINT,
+ELINT, COMINT, GEOINT, PNT, GPS, EMP, CBRNE, force-protection, readiness,
+mobility, airlift, tanker, refueling, amphibious, counter-intelligence,
+information-warfare, cyber-operations, unmanned-systems.
+
+**Suggested fix:** Add a second tier of tags with confidence 0.6-0.7. Consider
+running LLM-based tagging (Phase 3 optional) for broader coverage.
+
+---
+
+#### 55. 12 PEs Without Mission Descriptions **[OPEN — Pipeline]**
+
+```sql
+SELECT pe_number FROM pe_index
+WHERE pe_number NOT IN (SELECT DISTINCT pe_number FROM pe_descriptions);
+-- Returns 12 PEs
+```
+
+These PEs get no keyword tags from narrative text. They rely solely on structured
+tags from budget_lines fields.
+
+---
+
+#### 56. Fiscal Year Gaps in PE Funding Matrices **[OPEN — DB]**
+
+Some PEs show funding for FY2025-2026 but nothing earlier, even when historical
+data should exist. Requires cross-referencing `line_item_amounts` coverage per PE.
+
+```sql
+SELECT li.pe_number, MIN(a.target_fy) as fy_min, MAX(a.target_fy) as fy_max,
+       COUNT(DISTINCT a.target_fy) as fy_count
+FROM line_items li JOIN line_item_amounts a ON a.line_item_id = li.id
+GROUP BY li.pe_number HAVING fy_count < 3 ORDER BY fy_count;
+```
+
+---
+
+#### 57. appropriation_code NULL Rows **[OPEN — DB]**
+
+Rows where `appropriation_code` is NULL fall through the CASE mapping and appear
+as "Unknown" in budget type breakdowns.
+
+```sql
+SELECT COUNT(*) FROM budget_lines WHERE appropriation_code IS NULL;
+```
+
+---
+
+### Performance Issues
+
+#### 58. Missing Composite Database Indexes **[OPEN — Perf]**
+
+No composite index on commonly co-filtered columns:
+- `(pe_number, fiscal_year)` — used by PE detail, funding matrix, aggregations
+- `(organization_name, fiscal_year)` — used by service-filtered queries
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_bl_pe_fy ON budget_lines(pe_number, fiscal_year);
+CREATE INDEX IF NOT EXISTS idx_bl_org_fy ON budget_lines(organization_name, fiscal_year);
+```
+
+---
+
+#### 59. TTL Cache Too Short for Production (300s) **[OPEN — Perf]**
+
+Dashboard and aggregation caches use 300-second TTL. Data rarely changes between
+database rebuilds. Consider increasing to 3600s for production or invalidating on
+rebuild via webhook/signal.
+
+---
+
+#### 60. FTS Queries With Large Result Sets **[OPEN — Perf]**
+
+FTS5 `MATCH` returns all matches before pagination is applied. Consider using
+`LIMIT` inside the FTS subquery for early termination when only the first page
+is needed.
+
+---
+
+#### 61. Full Table Scans for Aggregation Queries **[OPEN — Perf]**
+
+Most aggregation queries scan 124K+ rows in `budget_lines`. Consider materialized
+summary tables or pre-computed aggregations for common groupings (by service, by
+fiscal year, by budget type).
+
+---
+
+### Future Directions (No Code Changes Yet)
+
+#### Programs Tab Evolution: Weapon System Grouping
+
+The Programs page should evolve to group PEs by weapon system or major program
+(e.g., "B-52" would show its RDT&E PE, Procurement PE, O&M PE, and MilPers PE
+together). This is the path toward a "Spruill chart" showing total cost of
+ownership across all appropriation types.
+
+**Data requirements:**
+- New `program_groups` + `pe_group_membership` tables
+- Initial mapping: manual curation for top 20-50 weapon systems
+- Future: LLM-assisted classification, fuzzy title matching
+
+---
+
+#### Search Results: Funding Timeline View
+
+Add a "Timeline View" toggle to search results on `/` that replaces the tabular
+amount columns with horizontal funding bars per row. The amount data already
+exists in `data-raw` attributes — a client-side sparkline renderer can build
+mini bar charts without API changes.
+
+---
+
+#### Sub-PE Programs in Tag-Search View
+
+When `/programs?tag=X` matches project-level tags (once they exist), expand PE
+cards to show which sub-projects matched with badges linking to
+`/consolidated/{pe}#project-{projNum}`.
+
+---
+
 ## Summary
 
 | Status | Count | Issues |
 |--------|-------|--------|
+| **Round 3 OPEN (Data)** | 7 | #51-57 (pipeline/DB data quality) |
+| **Round 3 OPEN (Perf)** | 4 | #58-61 (performance optimization) |
 | **Round 2 RESOLVED** | 20 | #29-37, #40-48, #50 |
 | **Round 2 OPEN** | 2 | #38 (service normalization — DB), #39 (tag quality — pipeline) |
 | **Round 2 GRADUAL** | 1 | #49 (inline styles — ongoing) |
@@ -311,5 +509,6 @@ Changed to "FY20XX = Oct 20XX-1 – Sep 20XX" — generic, timeless.
 - `validate_amount_column()` uses regex `^amount_fy\d{4}_[a-z]+$` — prevents SQL injection while accepting any valid FY column
 - `get_amount_columns(conn)` discovers columns from DB schema at runtime — no manual update needed when new FY data is added
 - `make_fiscal_year_column_labels()` builds human-readable labels from column names
+- `BUDGET_TYPE_CASE_EXPR` in `utils/database.py` — shared CASE expression for deriving budget_type from appropriation_code, used by dashboard and aggregations
 - `tests/test_shared_group/test_dynamic_fy_columns.py` — 32-case test suite covering regex validation, label generation, and WHERE clause building with dynamic columns
 - All template FY rendering uses `{% for %}` loops over dynamic data — no hardcoded FY references remain in Round 2 scope

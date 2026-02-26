@@ -334,6 +334,26 @@ def vacuum_database(db_path: Path) -> None:
     conn.close()
 
 
+# ── Shared SQL expressions ───────────────────────────────────────────────────
+
+# CASE expression to derive budget_type from appropriation_code when budget_type
+# is NULL (common for detail exhibit rows like r2, p5, amendment, ogsi).
+# Used by dashboard.py and aggregations.py to ensure consistent "colors of money"
+# grouping across the application.
+BUDGET_TYPE_CASE_EXPR = """COALESCE(budget_type, CASE appropriation_code
+    WHEN 'RDTE' THEN 'RDT&E'
+    WHEN 'OPROC' THEN 'Procurement' WHEN 'PROC' THEN 'Procurement'
+    WHEN 'APAF' THEN 'Procurement' WHEN 'MPAF' THEN 'Procurement'
+    WHEN 'WPN' THEN 'Procurement' WHEN 'SCN' THEN 'Procurement'
+    WHEN 'NGRE' THEN 'Procurement' WHEN 'DPA' THEN 'Procurement'
+    WHEN 'CHEM' THEN 'Procurement'
+    WHEN 'O&M' THEN 'O&M' WHEN 'ER' THEN 'O&M' WHEN 'DRUG' THEN 'O&M'
+    WHEN 'MILCON' THEN 'Construction' WHEN 'FHSG' THEN 'Construction'
+    WHEN 'MILPERS' THEN 'MilPers'
+    WHEN 'RFUND' THEN 'Revolving'
+    ELSE appropriation_code END, 'Unknown')"""
+
+
 # ── OPT-DBUTIL-001: Dynamic schema introspection ──────────────────────────────
 
 def get_amount_columns(conn: sqlite3.Connection, table: str = "budget_lines") -> List[str]:

@@ -7,11 +7,19 @@ from fastapi import APIRouter, Depends, Query
 
 from api.database import get_db
 from utils.cache import TTLCache
-from utils.database import _validate_identifier, get_amount_columns
+from utils.database import BUDGET_TYPE_CASE_EXPR, _validate_identifier, get_amount_columns
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 _summary_cache: TTLCache = TTLCache(maxsize=32, ttl_seconds=300)
+
+
+@router.post("/cache-clear", summary="Clear dashboard cache (dev)")
+def clear_dashboard_cache() -> dict:
+    """Clear the dashboard summary cache. Useful during development."""
+    _summary_cache.clear()
+    return {"status": "ok", "message": "Dashboard cache cleared"}
+
 
 
 def _detect_fy_columns(conn: sqlite3.Connection) -> tuple[str, str]:
@@ -144,35 +152,25 @@ def dashboard_summary(
     by_service = sections.get("by_service", [])
     by_fy = sections.get("by_fiscal_year", [])
 
-    # Budget type distribution — derive budget_type from appropriation_code
-    # for detail rows where budget_type is NULL.
-    _BT_CASE = """COALESCE(budget_type, CASE appropriation_code
-        WHEN 'RDTE' THEN 'RDT&E'
-        WHEN 'OPROC' THEN 'Procurement' WHEN 'PROC' THEN 'Procurement'
-        WHEN 'APAF' THEN 'Procurement' WHEN 'MPAF' THEN 'Procurement'
-        WHEN 'WPN' THEN 'Procurement' WHEN 'SCN' THEN 'Procurement'
-        WHEN 'NGRE' THEN 'Procurement' WHEN 'DPA' THEN 'Procurement'
-        WHEN 'CHEM' THEN 'Procurement'
-        WHEN 'O&M' THEN 'O&M' WHEN 'ER' THEN 'O&M' WHEN 'DRUG' THEN 'O&M'
-        WHEN 'MILCON' THEN 'Construction' WHEN 'FHSG' THEN 'Construction'
-        WHEN 'MILPERS' THEN 'MilPers'
-        WHEN 'RFUND' THEN 'Revolving'
-        ELSE appropriation_code END, 'Unknown')"""
-    bt_conditions = [f"{_BT_CASE} != 'Unknown'"]
+    # Budget type distribution — uses shared CASE expression to derive
+    # budget_type from appropriation_code for detail rows where budget_type
+    # is NULL. The filter_params list is reused from the base filter above.
+    _BT = BUDGET_TYPE_CASE_EXPR
+    bt_conditions = [f"{_BT} != 'Unknown'"]
     bt_params: list = list(filter_params)  # re-use base filter params
     if budget_type:
-        bt_conditions.append(f"{_BT_CASE} = ?")
+        bt_conditions.append(f"{_BT} = ?")
         bt_params.append(budget_type)
     bt_extra = " AND ".join(bt_conditions)
     by_btype_rows = conn.execute(f"""
-        SELECT {_BT_CASE} AS budget_type,
+        SELECT {_BT} AS budget_type,
                SUM({fy26_col}) AS total,
                SUM({fy25_col}) AS prev_total,
                COUNT(*) AS line_count
         FROM budget_lines
         {fy_filter}
         {"AND " + bt_extra if bt_extra else ""}
-        GROUP BY {_BT_CASE}
+        GROUP BY {_BT}
         ORDER BY SUM(COALESCE({fy26_col}, 0)) DESC
     """, bt_params).fetchall()
     by_btype_cte = [dict(r) for r in by_btype_rows]

@@ -18,7 +18,7 @@ from fastapi import Query as FQuery
 from api.database import get_db
 from api.models import AggregationResponse, AggregationRow
 from utils.cache import TTLCache
-from utils.database import _validate_identifier, get_amount_columns
+from utils.database import BUDGET_TYPE_CASE_EXPR, _validate_identifier, get_amount_columns
 from utils.query import build_where_clause
 
 router = APIRouter(prefix="/aggregations", tags=["aggregations"])
@@ -96,6 +96,9 @@ def aggregate(
         return cached
 
     col = _ALLOWED_GROUPS[group_by]
+    # For budget_type grouping, derive from appropriation_code when NULL
+    if group_by == "budget_type":
+        col = BUDGET_TYPE_CASE_EXPR
     where, params = build_where_clause(
         fiscal_year=fiscal_year,
         service=service,

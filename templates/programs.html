@@ -73,7 +73,7 @@
         <label for="pe-tag">Tags</label>
         <select id="pe-tag" name="tag" multiple>
           {% for t in tags %}
-          <option value="{{ t.tag }}">{{ t.tag }} ({{ t.pe_count }})</option>
+          <option value="{{ t.tag }}" {% if t.tag in request.query_params.getlist('tag') %}selected{% endif %}>{{ t.tag }} ({{ t.pe_count }})</option>
           {% endfor %}
         </select>
       </div>

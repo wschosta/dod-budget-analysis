@@ -340,6 +340,17 @@ async function loadComparison() {
         scales: {
           y: { ticks: { callback: function(v) { return '$' + v.toLocaleString() + 'M'; } } },
         },
+        onHover: function(e, elements) {
+          e.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+        },
+        onClick: function(e, elements) {
+          if (elements.length) {
+            var idx = elements[0].index;
+            var fy = allLabels[idx];
+            var service = elements[0].datasetIndex === 0 ? a : b;
+            window.location.href = '/?fiscal_year=' + encodeURIComponent(fy) + '&service=' + encodeURIComponent(service);
+          }
+        },
       },
     });
   } catch (err) {
@@ -451,7 +462,9 @@ async function loadTreemap(fy) {
 async function loadAppropPie(fy) {
   clearChartError('err-approp-pie', 'chart-approp-pie');
   try {
-    var resp = await fetch(aggURL('appropriation', fy));
+    // Don't filter by fiscal_year — we want all rows grouped by budget_type,
+    // then pick the FY amount column from fy_totals for the selected year.
+    var resp = await fetch(aggURL('budget_type', null));
     if (!resp.ok) throw new Error('HTTP ' + resp.status);
     var data = await resp.json();
 
@@ -460,14 +473,39 @@ async function loadAppropPie(fy) {
       return;
     }
 
-    var labels = data.rows.map(function(r) { return r.group_value || 'Unknown'; });
-    var cols = extractFYColumns(data.rows);
-    var reqCol = cols.find(function(c) { return c.includes('request'); }) || cols[cols.length - 1];
-    if (!reqCol) {
-      showChartError('err-approp-pie', 'chart-approp-pie', 'No amount data.');
+    // Find the best FY request column from fy_totals.
+    // Prefer the selected year, but if it has data for fewer than 3 budget types,
+    // fall back to the latest request column with broad coverage.
+    var fyKey = 'amount_fy' + fy + '_request';
+    var amtKey = fyKey;
+    if (data.rows[0] && data.rows[0].fy_totals) {
+      var ftKeys = Object.keys(data.rows[0].fy_totals).sort();
+      var reqKeys = ftKeys.filter(function(k) { return k.includes('request'); });
+      // Check coverage of preferred key
+      var prefCoverage = data.rows.filter(function(r) {
+        return r.fy_totals[fyKey] && r.fy_totals[fyKey] > 0;
+      }).length;
+      if (prefCoverage < 3) {
+        // Pick the latest request column with data for 3+ budget types
+        for (var i = reqKeys.length - 1; i >= 0; i--) {
+          var k = reqKeys[i];
+          var cov = data.rows.filter(function(r) { return r.fy_totals[k] && r.fy_totals[k] > 0; }).length;
+          if (cov >= 3) { amtKey = k; break; }
+        }
+      }
+    }
+
+    // Extract amounts from fy_totals, filter out null/zero
+    var filtered = data.rows.filter(function(r) {
+      var val = r.fy_totals ? r.fy_totals[amtKey] : null;
+      return val && val > 0 && r.group_value !== 'Unknown';
+    });
+    if (!filtered.length) {
+      showChartError('err-approp-pie', 'chart-approp-pie', 'No amount data for FY' + fy + '.');
       return;
     }
-    var amounts = data.rows.map(function(r) { return (r[reqCol] || 0) / 1000; });
+    var labels = filtered.map(function(r) { return r.group_value || 'Unknown'; });
+    var amounts = filtered.map(function(r) { return (r.fy_totals[amtKey] || 0) / 1000; });
 
     if (chartAppropPie) chartAppropPie.destroy();
     chartAppropPie = new Chart(document.getElementById('chart-approp-pie'), {
@@ -500,8 +538,8 @@ async function loadAppropPie(fy) {
         onClick: function(e, elements) {
           if (elements.length) {
             var idx = elements[0].index;
-            var approp = data.rows[idx].group_value;
-            if (approp) window.location.href = '/?appropriation_code=' + encodeURIComponent(approp);
+            var approp = filtered[idx].group_value;
+            if (approp) window.location.href = '/?budget_type=' + encodeURIComponent(approp);
           }
         }
       }

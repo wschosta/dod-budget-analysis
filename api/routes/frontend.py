@@ -684,7 +684,10 @@ def programs(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HT
             tag_result = list_tags(tag_source=None, conn=conn)
             tags = tag_result.get("tags", [])[:30]
 
-            pe_result = list_pes(tag=None, q=None, service=None,
+            tag_values = params.getlist("tag") or None
+            pe_result = list_pes(tag=tag_values,
+                                q=params.get("q") or None,
+                                service=params.get("service") or None,
                                 budget_type=None, approp=None, account=None,
                                 ba=None, exhibit=None, fy=None,
                                 sort_by=None, sort_dir=None,
