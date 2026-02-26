@@ -1321,6 +1321,23 @@ def consolidated_detail(request: Request, pe_number: str) -> HTMLResponse:
         if not has_diff:
             diff_row = None
 
+        # ── PE-level mission descriptions (by FY) ──
+        pe_descriptions: list[dict] = []
+        try:
+            desc_rows = conn.execute(
+                """SELECT fiscal_year, description_text
+                   FROM pe_mission_descriptions
+                   WHERE pe_number = ?
+                   ORDER BY fiscal_year""",
+                (pe_number,),
+            ).fetchall()
+            pe_descriptions = [
+                {"fiscal_year": r["fiscal_year"], "text": r["description_text"]}
+                for r in desc_rows
+            ]
+        except Exception:
+            pass  # table may not exist yet
+
     finally:
         conn.close()
 
@@ -1335,4 +1352,5 @@ def consolidated_detail(request: Request, pe_number: str) -> HTMLResponse:
         "pe_row": pe_row,
         "project_rows": project_rows,
         "diff_row": diff_row,
+        "pe_descriptions": pe_descriptions,
     })

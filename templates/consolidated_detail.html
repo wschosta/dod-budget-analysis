@@ -53,12 +53,85 @@
   {% endif %}
 </div>
 
-{# ── Description ─────────────────────────────────────────────────────────── #}
-{% if item.description %}
-<section style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:1rem;margin-bottom:1.5rem">
-  <h3 style="font-size:.9rem;margin-bottom:.5rem;color:var(--text-secondary)">Program Description</h3>
-  <p style="font-size:.85rem;line-height:1.6;white-space:pre-line">{{ item.description }}</p>
+{# ── PE Mission Description (tabbed by FY, expandable) ───────────────────── #}
+{% if pe_descriptions %}
+<section id="pe-desc-section" style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:1rem;margin-bottom:1.5rem">
+  <h3 style="font-size:.9rem;margin-bottom:.75rem;color:var(--text-secondary)">Mission Description</h3>
+  {# Tab bar — oldest FY on left, newest on right (active) #}
+  <div id="pe-desc-tabs" style="display:flex;gap:0;border-bottom:2px solid var(--border-color);margin-bottom:.75rem">
+    {% for desc in pe_descriptions %}
+    <button class="pe-desc-tab" data-idx="{{ loop.index0 }}"
+            onclick="switchPeDescTab({{ loop.index0 }})"
+            style="padding:.35rem .75rem;font-size:.75rem;border:none;cursor:pointer;margin-bottom:-2px;
+                   background:{% if loop.last %}var(--bg-surface){% else %}transparent{% endif %};
+                   border-bottom:2px solid {% if loop.last %}var(--clr-blue){% else %}transparent{% endif %};
+                   color:{% if loop.last %}var(--clr-blue){% else %}var(--text-secondary){% endif %};
+                   font-weight:{% if loop.last %}600{% else %}400{% endif %}">
+      FY{{ desc.fiscal_year }}
+    </button>
+    {% endfor %}
+  </div>
+  {# Tab content panes #}
+  {% for desc in pe_descriptions %}
+  <div class="pe-desc-pane" data-idx="{{ loop.index0 }}" style="display:{% if loop.last %}block{% else %}none{% endif %}">
+    <div id="pe-desc-text-{{ loop.index0 }}" style="font-size:.82rem;line-height:1.6;white-space:pre-line;max-height:6em;overflow:hidden;position:relative;transition:max-height .3s ease">{{ desc.text }}</div>
+    <button id="pe-desc-toggle-{{ loop.index0 }}" onclick="togglePeDescExpand({{ loop.index0 }})"
+            style="display:none;background:none;border:none;color:var(--clr-blue);cursor:pointer;font-size:.78rem;padding:.25rem 0;margin-top:.25rem">
+      Show more &darr;
+    </button>
+  </div>
+  {% endfor %}
 </section>
+<script>
+/* Check each pane and show "Show more" if text overflows the collapsed height */
+(function() {
+  var panes = document.querySelectorAll('.pe-desc-pane');
+  panes.forEach(function(pane) {
+    var idx = pane.getAttribute('data-idx');
+    var textEl = document.getElementById('pe-desc-text-' + idx);
+    var toggleBtn = document.getElementById('pe-desc-toggle-' + idx);
+    /* Wait a tick for rendering so scrollHeight is accurate */
+    setTimeout(function() {
+      if (textEl.scrollHeight > textEl.clientHeight + 4) {
+        toggleBtn.style.display = 'inline-block';
+      }
+    }, 50);
+  });
+})();
+
+function switchPeDescTab(idx) {
+  var tabs = document.querySelectorAll('.pe-desc-tab');
+  tabs.forEach(function(t) {
+    var active = (parseInt(t.getAttribute('data-idx')) === idx);
+    t.style.background = active ? 'var(--bg-surface)' : 'transparent';
+    t.style.borderBottomColor = active ? 'var(--clr-blue)' : 'transparent';
+    t.style.color = active ? 'var(--clr-blue)' : 'var(--text-secondary)';
+    t.style.fontWeight = active ? '600' : '400';
+  });
+  var panes = document.querySelectorAll('.pe-desc-pane');
+  panes.forEach(function(p) {
+    p.style.display = (parseInt(p.getAttribute('data-idx')) === idx) ? 'block' : 'none';
+  });
+  /* Re-check overflow for newly shown pane */
+  var textEl = document.getElementById('pe-desc-text-' + idx);
+  var toggleBtn = document.getElementById('pe-desc-toggle-' + idx);
+  if (textEl.scrollHeight > textEl.clientHeight + 4) {
+    toggleBtn.style.display = 'inline-block';
+  }
+}
+
+function togglePeDescExpand(idx) {
+  var textEl = document.getElementById('pe-desc-text-' + idx);
+  var btn = document.getElementById('pe-desc-toggle-' + idx);
+  if (textEl.style.maxHeight === 'none') {
+    textEl.style.maxHeight = '6em';
+    btn.innerHTML = 'Show more &darr;';
+  } else {
+    textEl.style.maxHeight = 'none';
+    btn.innerHTML = 'Show less &uarr;';
+  }
+}
+</script>
 {% endif %}
 
 {# ── Funding Matrix (transposed: FYs as columns, PE + projects as rows) ── #}
@@ -180,16 +253,17 @@
     if (!data || !data.submissions.length) {
       html += '<p style="font-size:.8rem;color:var(--text-secondary);font-style:italic;margin:0">No narrative text available for this project.</p>';
     } else {
-      /* Filter to submissions that have text */
-      var subs = data.submissions.filter(function(s) { return !!s.text; });
+      /* Filter to submissions that have text, reverse so oldest FY is on the left */
+      var subs = data.submissions.filter(function(s) { return !!s.text; }).reverse();
+      var defaultIdx = subs.length - 1; /* newest FY = last tab = active by default */
       if (subs.length === 0) {
         html += '<p style="font-size:.8rem;color:var(--text-secondary);font-style:italic;margin:0">No narrative text available for this project.</p>';
       } else {
-        /* Tab bar */
+        /* Tab bar — oldest left, newest right (active) */
         var tabId = 'tabs-' + projNum.replace(/[^a-zA-Z0-9]/g, '_');
         html += '<div style="display:flex;gap:0;border-bottom:2px solid var(--border-color);margin-bottom:.5rem">';
         subs.forEach(function(sub, i) {
-          var active = (i === 0);
+          var active = (i === defaultIdx);
           html += '<button class="proj-tab" data-tabgroup="' + tabId + '" data-idx="' + i + '"'
             + ' onclick="switchTab(\'' + tabId + '\',' + i + ')"'
             + ' style="padding:.35rem .75rem;font-size:.75rem;border:none;background:' + (active ? 'var(--bg-surface)' : 'transparent')
@@ -203,7 +277,7 @@
         /* Tab content panes */
         subs.forEach(function(sub, i) {
           html += '<div class="proj-tab-pane" data-tabgroup="' + tabId + '" data-idx="' + i + '"'
-            + ' style="display:' + (i === 0 ? 'block' : 'none') + '">'
+            + ' style="display:' + (i === defaultIdx ? 'block' : 'none') + '">'
             + '<pre style="font-size:.75rem;line-height:1.5;white-space:pre-wrap;word-break:break-word;background:var(--bg-body);border:1px solid var(--border-color);border-radius:var(--radius);padding:.75rem;max-height:350px;overflow-y:auto;margin:0">'
             + _escHtml(sub.text) + '</pre></div>';
         });
