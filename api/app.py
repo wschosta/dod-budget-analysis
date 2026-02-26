@@ -618,7 +618,21 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             ]
             return urlencode(pairs)
 
+        def fmt_dollars(value: object) -> str:
+            """Jinja filter: format dollar amount ($K input) with auto-scaling to $M/$B."""
+            try:
+                k = float(value)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return "—"
+            m = k / 1_000
+            if abs(m) >= 1_000:
+                return f"${m / 1_000:,.1f}B"
+            if abs(m) >= 1:
+                return f"${m:,.0f}M"
+            return f"${k:,.0f}K"
+
         templates.env.filters["fmt_amount"] = fmt_amount
+        templates.env.filters["fmt_dollars"] = fmt_dollars
         templates.env.filters["remove_filter_param"] = remove_filter_param
 
         # Wire templates into the frontend router

@@ -53,6 +53,22 @@
   {% endif %}
 </div>
 
+{# ── PE-level Tags ────────────────────────────────────────────────────────── #}
+{% if pe_tags %}
+<div style="display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1.25rem">
+  {% for t in pe_tags %}
+  <a href="/programs?tag={{ t.tag }}" class="filter-chip tag-chip"
+     title="Source: {{ t.tag_source }} | Confidence: {{ '%.0f' | format((t.confidence or 0) * 100) }}%"
+     style="display:inline-flex;align-items:center;gap:.3rem;padding:.2rem .6rem;border-radius:1rem;font-size:.72rem;text-decoration:none;
+            border:1px solid {% if t.confidence >= 0.9 %}var(--clr-blue){% elif t.confidence >= 0.7 %}var(--text-secondary){% else %}var(--border-color){% endif %};
+            color:{% if t.confidence >= 0.9 %}var(--clr-blue){% else %}var(--text-secondary){% endif %};
+            background:transparent">
+    {{ t.tag }}
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
 {# ── PE Mission Description (tabbed by FY, expandable) ───────────────────── #}
 {% if pe_descriptions %}
 <section id="pe-desc-section" style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:1rem;margin-bottom:1.5rem">
@@ -215,6 +231,13 @@ function togglePeDescExpand(idx) {
   </script>
   {% endif %}
 
+  {# ── Project-level tags for JS ── #}
+  {% if project_tags %}
+  <script>
+  var _projectTags = {{ project_tags | tojson }};
+  </script>
+  {% endif %}
+
   <script>
   /* ── Inline panel logic: panels inserted as <tr> directly below clicked row ── */
   var _colCount = {{ matrix_fys | length }} + 1;
@@ -249,6 +272,20 @@ function togglePeDescExpand(idx) {
     html += '<span style="font-size:.82rem;font-weight:600"><span class="badge" style="font-size:.72rem;font-family:var(--font-mono);margin-right:.4rem">' + _escHtml(projNum) + '</span>' + _escHtml(title) + '</span>';
     html += '<button onclick="closeInlinePanel(\'' + projNum + '\')" style="background:none;border:none;font-size:1.1rem;cursor:pointer;color:var(--text-secondary);padding:.15rem .4rem;line-height:1" aria-label="Close">&times;</button>';
     html += '</div>';
+
+    /* Project-level tags */
+    var tags = (typeof _projectTags !== 'undefined') ? _projectTags[projNum] : null;
+    if (tags && tags.length) {
+      html += '<div style="display:flex;flex-wrap:wrap;gap:.25rem;margin-bottom:.5rem">';
+      tags.forEach(function(t) {
+        var borderColor = (t.confidence >= 0.9) ? 'var(--clr-blue)' : 'var(--text-secondary)';
+        var textColor = (t.confidence >= 0.9) ? 'var(--clr-blue)' : 'var(--text-secondary)';
+        html += '<span style="display:inline-block;padding:.1rem .5rem;border-radius:1rem;font-size:.68rem;'
+          + 'border:1px solid ' + borderColor + ';color:' + textColor + '">'
+          + _escHtml(t.tag) + '</span>';
+      });
+      html += '</div>';
+    }
 
     if (!data || !data.submissions.length) {
       html += '<p style="font-size:.8rem;color:var(--text-secondary);font-style:italic;margin:0">No narrative text available for this project.</p>';
@@ -382,6 +419,17 @@ function togglePeDescExpand(idx) {
   </details>
 </section>
 {% endif %}
+
+{# ── Related Programs (HTMX lazy-loaded) ────────────────────────────────── #}
+<section style="margin-bottom:1.5rem">
+  <h3 style="font-size:1rem;margin-bottom:.75rem">Related Programs</h3>
+  <div id="pe-related"
+       hx-get="/partials/program-related/{{ item.pe_number }}?min_confidence=0.6&limit=20"
+       hx-trigger="load"
+       hx-swap="innerHTML">
+    <p style="color:var(--text-secondary);font-size:.8rem"><span class="spinner" style="display:inline-block;width:14px;height:14px;vertical-align:middle;margin-right:.3rem"></span> Loading related programs&hellip;</p>
+  </div>
+</section>
 
 <div style="margin-top:1rem">
   <a href="/consolidated" class="btn btn-secondary btn-sm">&larr; Back to list</a>

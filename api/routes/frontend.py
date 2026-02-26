@@ -204,54 +204,16 @@ def _get_fiscal_years(conn: sqlite3.Connection) -> list[dict]:
     return result
 
 
-_APPROP_KEYWORDS: dict[str, str] = {
-    "aircraft procurement": "APAF",
-    "missile procurement": "MPAF",
-    "weapons procurement": "WPN",
-    "ammunition procurement": "AMMO",
-    "other procurement": "OPROC",
-    "procurement": "PROC",
-    "shipbuilding and conversion": "SCN",
-    "research, development, test & eval": "RDTE",
-    "research, development, test and eval": "RDTE",
-    "rdt&e": "RDTE",
-    "operation and maintenance": "O&M",
-    "operations and maintenance": "O&M",
-    "military personnel": "MILPERS",
-    "military construction": "MILCON",
-    "revolving fund": "RFUND",
-    "family housing": "FHSG",
-}
-
-def _get_appropriations(conn: sqlite3.Connection) -> list[dict]:
-    """FE-002: Return distinct appropriation codes and titles."""
+def _get_budget_types(conn: sqlite3.Connection) -> list[dict]:
+    """Return distinct budget_type values (colors of money)."""
     rows = conn.execute(
-        "SELECT DISTINCT appropriation_code AS code, appropriation_title AS title "
+        "SELECT budget_type, COUNT(*) AS cnt "
         "FROM budget_lines "
-        "WHERE appropriation_code IS NOT NULL AND appropriation_code != '' "
-        "ORDER BY appropriation_code"
+        "WHERE budget_type IS NOT NULL AND budget_type != '' "
+        "GROUP BY budget_type "
+        "ORDER BY COUNT(*) DESC"
     ).fetchall()
-    if rows:
-        return [{"code": r["code"], "title": r["title"]} for r in rows]
-    # Fallback: derive categories from appropriation_title
-    try:
-        title_rows = conn.execute(
-            "SELECT DISTINCT appropriation_title AS title "
-            "FROM budget_lines "
-            "WHERE appropriation_title IS NOT NULL AND appropriation_title != '' "
-            "ORDER BY appropriation_title"
-        ).fetchall()
-    except Exception:
-        return []
-    seen: dict[str, str] = {}
-    for r in title_rows:
-        title = r["title"]
-        lower = title.lower()
-        for keyword, code in _APPROP_KEYWORDS.items():
-            if keyword in lower and code not in seen:
-                seen[code] = title
-                break
-    return [{"code": code, "title": title} for code, title in sorted(seen.items())]
+    return [{"code": r["budget_type"], "title": r["budget_type"]} for r in rows]
 
 
 def _parse_filters(request: Request) -> dict[str, Any]:
@@ -272,7 +234,7 @@ def _parse_filters(request: Request) -> dict[str, Any]:
         "service":           params.getlist("service"),
         "exhibit_type":      params.getlist("exhibit_type"),
         "pe_number":         params.getlist("pe_number"),
-        "appropriation_code": params.getlist("appropriation_code"),
+        "budget_type":       params.getlist("budget_type"),
         "min_amount":        min_amt,
         "max_amount":        max_amt,
         "amount_column":     amount_column,
@@ -327,7 +289,7 @@ def _query_results(
         service=filters["service"] or None,
         exhibit_type=filters["exhibit_type"] or None,
         pe_number=filters["pe_number"] or None,
-        appropriation_code=filters.get("appropriation_code") or None,
+        budget_type=filters.get("budget_type") or None,
         min_amount=min_amt_val,
         max_amount=max_amt_val,
         amount_column=filters.get("amount_column"),
@@ -449,8 +411,43 @@ def _query_results(
         params + [page_size, offset],
     ).fetchall()
 
+    items = [dict(r) for r in rows]
+
+    # ── Total program value from golden record (line_item_amounts) ─────────
+    # Batch-query total value + FY range for PE numbers in current results.
+    pe_numbers = list({r["pe_number"] for r in items if r.get("pe_number")})
+    pe_totals: dict[str, dict] = {}
+    if pe_numbers and _table_exists(conn, "line_item_amounts"):
+        try:
+            placeholders = ",".join("?" * len(pe_numbers))
+            total_rows = conn.execute(
+                f"SELECT li.pe_number, "
+                f"       SUM(a.amount) AS total_value, "
+                f"       MIN(a.target_fy) AS fy_min, "
+                f"       MAX(a.target_fy) AS fy_max "
+                f"FROM line_items li "
+                f"JOIN line_item_amounts a ON a.line_item_id = li.id "
+                f"WHERE li.pe_number IN ({placeholders}) "
+                f"GROUP BY li.pe_number",
+                pe_numbers,
+            ).fetchall()
+            for tr in total_rows:
+                pe_totals[tr["pe_number"]] = {
+                    "total_value": tr["total_value"],
+                    "fy_min": tr["fy_min"],
+                    "fy_max": tr["fy_max"],
+                }
+        except Exception:
+            logger.debug("Failed to load golden record totals", exc_info=True)
+
+    # Attach total program value to each item
+    for item in items:
+        pe = item.get("pe_number")
+        if pe and pe in pe_totals:
+            item["_pe_total"] = pe_totals[pe]
+
     return {
-        "items":       [dict(r) for r in rows],
+        "items":       items,
         "total":       total,
         "page":        page,
         "total_pages": total_pages,
@@ -474,7 +471,7 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLR
     fiscal_years   = _get_fiscal_years(conn)
     services       = _get_services(conn)
     exhibit_types  = _get_exhibit_types(conn)
-    appropriations = _get_appropriations(conn)
+    budget_types   = _get_budget_types(conn)
 
     # Build dynamic FY column labels from discovered amount columns
     amt_cols = results.get("amount_columns", [])
@@ -488,7 +485,7 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLR
             "fiscal_years":   fiscal_years,
             "services":       services,
             "exhibit_types":  exhibit_types,
-            "appropriations": appropriations,
+            "budget_types":   budget_types,
             # Dynamic amount column context — discovered from DB schema
             "amount_column":        filters.get("amount_column", DEFAULT_AMOUNT_COLUMN),
             "fiscal_year_columns":  fy_col_labels,
@@ -1338,6 +1335,33 @@ def consolidated_detail(request: Request, pe_number: str) -> HTMLResponse:
         except Exception:
             pass  # table may not exist yet
 
+        # ── Tags (PE-level and project-level) ──
+        pe_tags: list[dict] = []
+        project_tags: dict[str, list[dict]] = {}
+        try:
+            tag_rows = conn.execute(
+                """SELECT tag, tag_source, confidence, project_number
+                   FROM pe_tags
+                   WHERE pe_number = ?
+                   ORDER BY confidence DESC, tag""",
+                (pe_number,),
+            ).fetchall()
+            for t in tag_rows:
+                entry = {
+                    "tag": t["tag"],
+                    "tag_source": t["tag_source"],
+                    "confidence": t["confidence"],
+                }
+                if t["project_number"]:
+                    pn = t["project_number"]
+                    if pn not in project_tags:
+                        project_tags[pn] = []
+                    project_tags[pn].append(entry)
+                else:
+                    pe_tags.append(entry)
+        except Exception:
+            pass  # pe_tags table may not exist
+
     finally:
         conn.close()
 
@@ -1353,4 +1377,6 @@ def consolidated_detail(request: Request, pe_number: str) -> HTMLResponse:
         "project_rows": project_rows,
         "diff_row": diff_row,
         "pe_descriptions": pe_descriptions,
+        "pe_tags": pe_tags,
+        "project_tags": project_tags,
     })

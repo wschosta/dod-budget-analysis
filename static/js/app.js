@@ -216,7 +216,7 @@ function restoreFiltersFromURL() {
   });
 
   // Multi-selects — set option.selected then sync checkbox-select UI
-  ["fiscal_year", "service", "exhibit_type", "appropriation_code"].forEach(name => {
+  ["fiscal_year", "service", "exhibit_type", "budget_type"].forEach(name => {
     const el = form.elements[name];
     if (!el || !params.has(name)) return;
     const vals = params.getAll(name);
@@ -885,7 +885,7 @@ function loadLandingVisuals() {
               if (el.length) {
                 var idx = el[0].index;
                 var approp = data.rows[idx].group_value;
-                if (approp) window.location.href = "/?appropriation_code=" + encodeURIComponent(approp);
+                if (approp) window.location.href = "/?budget_type=" + encodeURIComponent(approp);
               }
             }
           }

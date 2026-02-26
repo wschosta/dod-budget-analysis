@@ -22,7 +22,7 @@
 {% for fy in filters.fiscal_year %}{% set _ = active.append(("fiscal_year", "FY", fy)) %}{% endfor %}
 {% for svc in filters.service %}{% set _ = active.append(("service", "Service", svc)) %}{% endfor %}
 {% for et in filters.exhibit_type %}{% set _ = active.append(("exhibit_type", "Exhibit", et)) %}{% endfor %}
-{% for ac in filters.appropriation_code %}{% set _ = active.append(("appropriation_code", "Approp.", ac)) %}{% endfor %}
+{% for bt in filters.budget_type %}{% set _ = active.append(("budget_type", "Budget Type", bt)) %}{% endfor %}
 {% set amt_label = "Amount" %}{% for fc in fiscal_year_columns %}{% if fc.column == amount_column %}{% set amt_label = fc.label %}{% endif %}{% endfor %}
 {% if filters.min_amount %}{% set _ = active.append(("min_amount", amt_label ~ " Min $K", filters.min_amount)) %}{% endif %}
 {% if filters.max_amount %}{% set _ = active.append(("max_amount", amt_label ~ " Max $K", filters.max_amount)) %}{% endif %}
@@ -155,6 +155,12 @@
             {% if item.budget_activity_title %}
             <div style="font-size:.78rem;color:var(--text-secondary)">{{ item.budget_activity_title }}</div>
             {% endif %}
+            {% if item._pe_total %}
+            <div style="font-size:.72rem;color:var(--text-secondary);margin-top:.15rem">
+              Total Program Value: <strong style="color:var(--text-primary)">{{ item._pe_total.total_value | fmt_dollars }}</strong>
+              <span style="font-size:.68rem">(FY{{ item._pe_total.fy_min }}–FY{{ item._pe_total.fy_max }})</span>
+            </div>
+            {% endif %}
           </td>
           <td class="col-org td-org">{{ item.organization_name or "—" }}</td>
           <td class="col-fy">{{ item.fiscal_year or "—" }}</td>
@@ -225,7 +231,7 @@
     <div class="empty-state-icon" aria-hidden="true">&#128269;</div>
     <p><strong>No data found for the selected filters.</strong></p>
     <p style="font-size:.85rem;max-width:480px;margin:0 auto">
-      {% if filters is defined and (filters.q or filters.fiscal_year or filters.service or filters.exhibit_type or filters.appropriation_code or filters.min_amount or filters.max_amount) %}
+      {% if filters is defined and (filters.q or filters.fiscal_year or filters.service or filters.exhibit_type or filters.budget_type or filters.min_amount or filters.max_amount) %}
       Your current filters returned no results. Try broadening your search or removing some filters.
       {% else %}
       No budget data is loaded. Run <code>python build_budget_db.py</code> to ingest data.

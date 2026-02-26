@@ -68,6 +68,10 @@
       {% if rel.mention_count and rel.mention_count > 1 %}
       <span style="font-size:.7rem;color:var(--text-secondary)">{{ rel.mention_count }} mentions</span>
       {% endif %}
+      {% if rel.sample_snippet %}
+      <span style="font-size:.72rem;color:var(--text-secondary);font-style:italic;display:block;margin-top:.25rem;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%"
+            title="{{ rel.sample_snippet }}">&ldquo;{{ rel.sample_snippet[:120] }}{% if rel.sample_snippet|length > 120 %}&hellip;{% endif %}&rdquo;</span>
+      {% endif %}
     </a>
     {% endfor %}
   </div>
@@ -107,6 +111,10 @@
       {% if rel.mention_count and rel.mention_count > 1 %}
       <span style="font-size:.7rem;color:var(--text-secondary)">{{ rel.mention_count }} mentions</span>
       {% endif %}
+      {% if rel.sample_snippet %}
+      <span style="font-size:.72rem;color:var(--text-secondary);font-style:italic;display:block;margin-top:.25rem;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%"
+            title="{{ rel.sample_snippet }}">&ldquo;{{ rel.sample_snippet[:120] }}{% if rel.sample_snippet|length > 120 %}&hellip;{% endif %}&rdquo;</span>
+      {% endif %}
     </a>
     {% endfor %}
   </div>
@@ -142,6 +150,10 @@
       </span>
       {% if rel.mention_count and rel.mention_count > 1 %}
       <span style="font-size:.7rem;color:var(--text-secondary)">{{ rel.mention_count }} mentions</span>
+      {% endif %}
+      {% if rel.sample_snippet %}
+      <span style="font-size:.72rem;color:var(--text-secondary);font-style:italic;display:block;margin-top:.25rem;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%"
+            title="{{ rel.sample_snippet }}">&ldquo;{{ rel.sample_snippet[:120] }}{% if rel.sample_snippet|length > 120 %}&hellip;{% endif %}&rdquo;</span>
       {% endif %}
     </a>
     {% endfor %}
