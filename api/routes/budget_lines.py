@@ -50,6 +50,7 @@ def list_budget_lines(
     pe_number: list[str] | None = Query(None, description="Filter by PE number(s)"),
     appropriation_code: list[str] | None = Query(None, description="Filter by appropriation"),
     budget_type: list[str] | None = Query(None, description="Filter by budget type (RDT&E, Procurement, etc.)"),
+    exclude_summary: bool = Query(False, description="Exclude summary exhibits (P-1, R-1, etc.) to avoid double-counting"),
     q: str | None = Query(None, max_length=500, description="Free-text search across account/line-item titles"),
     min_amount: float | None = Query(None, description="Min FY2026 request amount (thousands)"),
     max_amount: float | None = Query(None, description="Max FY2026 request amount (thousands)"),
@@ -91,6 +92,16 @@ def list_budget_lines(
         max_amount=max_amount,
         fts_ids=fts_ids,
     )
+
+    # Exclude summary exhibits (P-1, R-1, O-1, M-1, C-1, RF-1, P-1R) to avoid
+    # double-counting with detail exhibits
+    if exclude_summary:
+        summary_clause = "exhibit_type NOT IN ('p1','r1','o1','m1','c1','rf1','p1r')"
+        if where:
+            where += f" AND {summary_clause}"
+        else:
+            where = f"WHERE {summary_clause}"
+
     direction = "DESC" if sort_dir == "desc" else "ASC"
 
     count_sql = f"SELECT COUNT(*) FROM budget_lines {where}"

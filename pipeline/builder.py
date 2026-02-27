@@ -3421,6 +3421,33 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     _elapsed = time.time() - _t0
     print(f" done ({_elapsed:.1f}s)", flush=True)
 
+    # ── Backfill budget_type from appropriation_code ──────────────────────
+    # Detail exhibits (r2, p5, amendment, ogsi) often have appropriation_code
+    # but NULL budget_type.  Backfill using the canonical mapping so that
+    # downstream GROUP BY budget_type queries produce clean results without
+    # needing runtime CASE expressions.
+    from scripts.fix_budget_types import APPROP_TO_BUDGET_TYPE
+
+    _t0 = time.time()
+    _bt_before = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines WHERE budget_type IS NULL"
+    ).fetchone()[0]
+    _bt_updated = 0
+    for _approp, _bt in APPROP_TO_BUDGET_TYPE.items():
+        _bt_updated += conn.execute(
+            "UPDATE budget_lines SET budget_type = ? "
+            "WHERE budget_type IS NULL AND appropriation_code = ?",
+            (_bt, _approp),
+        ).rowcount
+    conn.commit()
+    _bt_after = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines WHERE budget_type IS NULL"
+    ).fetchone()[0]
+    _elapsed = time.time() - _t0
+    print(f"  Backfilled budget_type: {_bt_updated:,} rows "
+          f"({_bt_before:,} -> {_bt_after:,} NULL) ({_elapsed:.1f}s)", flush=True)
+    logger.info("Backfilled budget_type for %d rows", _bt_updated)
+
     # ── Deduplicate budget_lines rows ──────────────────────────────────────
     # Remove exact duplicate rows (same source, fiscal_year, PE, line_item,
     # org) keeping only the row with the lowest id.

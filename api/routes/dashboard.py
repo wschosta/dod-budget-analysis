@@ -11,7 +11,7 @@ from utils.database import BUDGET_TYPE_CASE_EXPR, _validate_identifier, get_amou
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
-_summary_cache: TTLCache = TTLCache(maxsize=32, ttl_seconds=300)
+_summary_cache: TTLCache = TTLCache(maxsize=32, ttl_seconds=900)
 
 
 @router.post("/cache-clear", summary="Clear dashboard cache (dev)")

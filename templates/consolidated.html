@@ -98,9 +98,14 @@
         {% endif %}
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:.5rem;font-size:.78rem">
           {% if item.fy_min and item.fy_max %}
-          <span style="color:var(--text-secondary)">FY{{ item.fy_min }}–{{ item.fy_max }}</span>
+          <span style="color:var(--text-secondary)">FY{{ item.fy_min }}–{{ item.fy_max }}{% if item.fy_count %} ({{ item.fy_count }} FYs){% endif %}</span>
           {% endif %}
-          {% if item.best_amount is not none %}
+          {% if item.total_program_value is not none and item.total_program_value %}
+          <span style="font-family:var(--font-mono);color:var(--clr-blue)" title="Total program value across all fiscal years">
+            ${{ "{:,.0f}".format(item.total_program_value) }}K
+            <span style="font-size:.7rem;color:var(--text-secondary)">(total)</span>
+          </span>
+          {% elif item.best_amount is not none %}
           <span style="font-family:var(--font-mono);color:var(--clr-blue)">
             ${{ "{:,.0f}".format(item.best_amount) }}K
             {% if item.best_label %}

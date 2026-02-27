@@ -834,7 +834,7 @@ function loadLandingVisuals() {
             onClick: function(e, el) {
               if (el.length) {
                 var idx = el[0].index;
-                window.location.href = "/?service=" + encodeURIComponent(labels[idx]);
+                window.location.href = "/?service=" + encodeURIComponent(labels[idx]) + "#results-container";
               }
             }
           }
@@ -843,55 +843,14 @@ function loadLandingVisuals() {
       .catch(function() {});
   }
 
-  // Load appropriation stacked bar chart
+  // Load budget type doughnut chart (shared utility from budget-charts.js)
   if (appCanvas) {
-    fetch("/api/v1/aggregations?group_by=appropriation")
-      .then(function(r) { return r.ok ? r.json() : null; })
-      .then(function(data) {
-        if (!data || !data.rows || !data.rows.length) return;
-        var cols = Object.keys(data.rows[0]).filter(function(k) { return /^total_fy\d+/.test(k); }).sort();
-        var reqCol = cols.find(function(c) { return c.includes("request"); }) || cols[cols.length - 1];
-        if (!reqCol) return;
-
-        var labels = data.rows.map(function(r) { return r.group_value || "Unknown"; });
-        var amounts = data.rows.map(function(r) { return (r[reqCol] || 0) / 1000; });
-
-        new Chart(appCanvas, {
-          type: "doughnut",
-          data: {
-            labels: labels,
-            datasets: [{
-              data: amounts,
-              backgroundColor: LANDING_COLORS.slice(0, labels.length),
-              borderWidth: 2,
-              borderColor: getComputedStyle(document.documentElement).getPropertyValue("--bg-surface").trim() || "#fff"
-            }]
-          },
-          options: {
-            plugins: {
-              legend: { position: "right", labels: { boxWidth: 12, font: { size: 11 } } },
-              tooltip: {
-                callbacks: {
-                  label: function(ctx) {
-                    var total = ctx.dataset.data.reduce(function(a, b) { return a + b; }, 0);
-                    var pct = total > 0 ? (ctx.parsed / total * 100).toFixed(1) : 0;
-                    return ctx.label + ": $" + ctx.parsed.toLocaleString() + "M (" + pct + "%)";
-                  }
-                }
-              }
-            },
-            onHover: function(e, el) { e.native.target.style.cursor = el.length ? "pointer" : "default"; },
-            onClick: function(e, el) {
-              if (el.length) {
-                var idx = el[0].index;
-                var approp = data.rows[idx].group_value;
-                if (approp) window.location.href = "/?budget_type=" + encodeURIComponent(approp);
-              }
-            }
-          }
-        });
-      })
-      .catch(function() {});
+    renderBudgetTypeDoughnut("landing-approp-chart", {
+      colors: LANDING_COLORS,
+      onClick: function(budgetType) {
+        window.location.href = "/?budget_type=" + encodeURIComponent(budgetType) + "#results-container";
+      },
+    });
   }
 }
 

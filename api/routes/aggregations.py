@@ -32,8 +32,8 @@ _ALLOWED_GROUPS = {
     "budget_type":    "budget_type",
 }
 
-# OPT-AGG-001: 300-second TTL cache (matches dashboard) keyed on filter params
-_agg_cache: TTLCache = TTLCache(maxsize=128, ttl_seconds=300)
+# OPT-AGG-001: 600-second TTL cache keyed on filter params (data changes only on DB rebuild)
+_agg_cache: TTLCache = TTLCache(maxsize=128, ttl_seconds=600)
 
 
 def _cache_key(
@@ -80,7 +80,7 @@ def aggregate(
     AGG-001: Amount columns are discovered dynamically from the schema so new
     fiscal year columns (FY2027+) are included automatically.
     AGG-002: Each row includes pct_of_total and yoy_change_pct.
-    OPT-AGG-001: Results are cached for 300 seconds per unique filter combination.
+    OPT-AGG-001: Results are cached for 600 seconds per unique filter combination.
     """
     if group_by not in _ALLOWED_GROUPS:
         raise HTTPException(
@@ -179,7 +179,7 @@ def aggregate(
     return result
 
 
-_hierarchy_cache: TTLCache = TTLCache(maxsize=16, ttl_seconds=300)
+_hierarchy_cache: TTLCache = TTLCache(maxsize=16, ttl_seconds=600)
 
 
 @router.get("/hierarchy", summary="Hierarchical budget breakdown for treemap")

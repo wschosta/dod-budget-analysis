@@ -36,8 +36,16 @@ function showDashError(id, canvasId, msg) {
   var chartsEl = document.getElementById("dash-charts");
   var programsEl = document.getElementById("dash-programs");
 
+  // 3.6: Show extended loading message after 3 seconds
+  var loadingTimer = setTimeout(function() {
+    if (loadingEl) {
+      loadingEl.innerHTML = '<span class="spinner"></span> Still loading dashboard data&hellip; This may take a moment for large datasets.';
+    }
+  }, 3000);
+
   try {
     var resp = await fetch("/api/v1/dashboard/summary");
+    clearTimeout(loadingTimer);
     if (!resp.ok) throw new Error("HTTP " + resp.status);
     var data = await resp.json();
 
@@ -207,6 +215,7 @@ function showDashError(id, canvasId, msg) {
     }
 
   } catch (err) {
+    clearTimeout(loadingTimer);
     if (loadingEl) {
       loadingEl.innerHTML =
         '<div class="empty-state">' +

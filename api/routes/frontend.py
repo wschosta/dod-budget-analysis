@@ -119,22 +119,26 @@ def _get_services(conn: sqlite3.Connection) -> list[dict]:
         return cached
     try:
         rows = conn.execute(
-            "SELECT DISTINCT b.organization_name AS code, "
-            "COALESCE(s.full_name, b.organization_name) AS full_name "
+            "SELECT b.organization_name AS code, "
+            "COALESCE(s.full_name, b.organization_name) AS full_name, "
+            "COUNT(*) AS row_count "
             "FROM budget_lines b "
             "LEFT JOIN services_agencies s ON LOWER(b.organization_name) = LOWER(s.code) "
             "WHERE b.organization_name IS NOT NULL AND b.organization_name != '' "
-            "ORDER BY b.organization_name"
+            "GROUP BY b.organization_name "
+            "ORDER BY COUNT(*) DESC"
         ).fetchall()
     except sqlite3.OperationalError:
         rows = conn.execute(
-            "SELECT DISTINCT organization_name AS code, "
-            "organization_name AS full_name "
+            "SELECT organization_name AS code, "
+            "organization_name AS full_name, "
+            "COUNT(*) AS row_count "
             "FROM budget_lines "
             "WHERE organization_name IS NOT NULL AND organization_name != '' "
-            "ORDER BY organization_name"
+            "GROUP BY organization_name "
+            "ORDER BY COUNT(*) DESC"
         ).fetchall()
-    result = [{"code": r["code"], "full_name": r["full_name"]} for r in rows]
+    result = [{"code": r["code"], "full_name": r["full_name"], "row_count": r["row_count"]} for r in rows]
     _services_cache.set(cache_key, result)
     return result
 
@@ -511,7 +515,8 @@ def dashboard(request: Request) -> HTMLResponse:
 @router.get("/charts", response_class=HTMLResponse, include_in_schema=False)
 def charts(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
     """Chart.js visualisations page."""
-    fiscal_years = _get_fiscal_years(conn)
+    # Reverse so latest fiscal year (e.g. 2026) is at the top of the dropdown
+    fiscal_years = list(reversed(_get_fiscal_years(conn)))
     return _tmpl().TemplateResponse(
         "charts.html",
         {"request": request, "fiscal_years": fiscal_years},
@@ -1143,7 +1148,15 @@ def consolidated_list(request: Request) -> HTMLResponse:
                         WHERE a.line_item_id = li.id
                           AND a.amount IS NOT NULL
                         ORDER BY a.precedence_rank, a.target_fy DESC
-                        LIMIT 1) AS best_label
+                        LIMIT 1) AS best_label,
+                       (SELECT ROUND(SUM(a.amount), 0)
+                        FROM line_item_amounts a
+                        WHERE a.line_item_id = li.id
+                          AND a.amount IS NOT NULL) AS total_program_value,
+                       (SELECT COUNT(DISTINCT a.target_fy)
+                        FROM line_item_amounts a
+                        WHERE a.line_item_id = li.id
+                          AND a.amount IS NOT NULL) AS fy_count
                 FROM line_items li {where}
                 ORDER BY {order_clause}
                 LIMIT ? OFFSET ?""",

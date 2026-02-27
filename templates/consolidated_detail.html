@@ -186,8 +186,21 @@ function togglePeDescExpand(idx) {
             onclick="toggleInlinePanel('{{ row.project_number }}', this)"
             onmouseover="this.style.background='color-mix(in srgb, var(--clr-blue) 6%, transparent)'"
             onmouseout="if(!this.classList.contains('proj-selected'))this.style.background=''">
-          <td style="padding:.4rem .5rem;border-bottom:1px solid var(--border-color);position:sticky;left:0;background:inherit;z-index:1;overflow:hidden;text-overflow:ellipsis;max-width:220px" title="{{ row.project_number }} — {{ row.label }}">
-            <span style="font-family:var(--font-mono);font-size:.7rem;color:var(--clr-blue);margin-right:.35rem">{{ row.project_number }}</span>{{ row.label }}
+          <td style="padding:.4rem .5rem;border-bottom:1px solid var(--border-color);position:sticky;left:0;background:inherit;z-index:1;max-width:280px" title="{{ row.project_number }} — {{ row.label }}">
+            <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+              <span style="font-family:var(--font-mono);font-size:.7rem;color:var(--clr-blue);margin-right:.35rem">{{ row.project_number }}</span>{{ row.label }}
+            </div>
+            {# 4.2: Show project-level tags as small badge chips #}
+            {% if project_tags and project_tags.get(row.project_number) %}
+            <div style="display:flex;flex-wrap:wrap;gap:.15rem;margin-top:.2rem">
+              {% for t in project_tags[row.project_number][:5] %}
+              <span style="display:inline-block;padding:0 .35rem;border-radius:.6rem;font-size:.6rem;
+                           border:1px solid {% if t.confidence >= 0.9 %}var(--clr-blue){% else %}var(--border-color){% endif %};
+                           color:{% if t.confidence >= 0.9 %}var(--clr-blue){% else %}var(--text-secondary){% endif %}"
+                    title="{{ t.tag_source }} ({{ '%.0f' | format((t.confidence or 0) * 100) }}%)">{{ t.tag }}</span>
+              {% endfor %}
+            </div>
+            {% endif %}
           </td>
           {% for fy in matrix_fys %}
           <td style="text-align:right;padding:.4rem .5rem;border-bottom:1px solid var(--border-color);font-family:var(--font-mono);color:var(--text-secondary)">
@@ -424,7 +437,7 @@ function togglePeDescExpand(idx) {
 <section style="margin-bottom:1.5rem">
   <h3 style="font-size:1rem;margin-bottom:.75rem">Related Programs</h3>
   <div id="pe-related"
-       hx-get="/partials/program-related/{{ item.pe_number }}?min_confidence=0.6&limit=20"
+       hx-get="/partials/program-related/{{ item.pe_number }}?min_confidence=0.8&limit=20"
        hx-trigger="load"
        hx-swap="innerHTML">
     <p style="color:var(--text-secondary);font-size:.8rem"><span class="spinner" style="display:inline-block;width:14px;height:14px;vertical-align:middle;margin-right:.3rem"></span> Loading related programs&hellip;</p>
