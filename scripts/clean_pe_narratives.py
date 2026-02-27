@@ -189,7 +189,6 @@ def main() -> None:
 
     # Group pages by (pe_number, fiscal_year) in memory
     from itertools import groupby
-    from operator import itemgetter
 
     extracted = 0
     pe_fy_count = 0

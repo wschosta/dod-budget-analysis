@@ -250,21 +250,22 @@ class TestFix005MoreFYColumns:
     def test_results_have_fy25_total_column(self, gui_client):
         resp = gui_client.get("/partials/results", headers={"HX-Request": "true"})
         assert resp.status_code == 200
-        assert "col-fy25tot" in resp.text
-        assert "FY25 Total" in resp.text
+        # Template generates col-fy2025_total from amount_fy2025_total
+        assert "col-fy2025_total" in resp.text
+        assert "FY2025 Total" in resp.text
 
     def test_results_have_fy26_total_column(self, gui_client):
         resp = gui_client.get("/partials/results", headers={"HX-Request": "true"})
         assert resp.status_code == 200
-        assert "col-fy26tot" in resp.text
-        assert "FY26 Total" in resp.text
+        assert "col-fy2026_total" in resp.text
+        assert "FY2026 Total" in resp.text
 
     def test_column_toggle_buttons_include_new_cols(self, gui_client):
         resp = gui_client.get("/partials/results", headers={"HX-Request": "true"})
         assert resp.status_code == 200
-        # Toggle buttons for new columns should exist
-        assert 'data-col="fy25tot"' in resp.text
-        assert 'data-col="fy26tot"' in resp.text
+        # Toggle buttons use data-col generated from amount column names
+        assert 'data-col="col-fy2025_total"' in resp.text
+        assert 'data-col="col-fy2026_total"' in resp.text
 
 
 # ── FIX-006: Dashboard double-counting ───────────────────────────────────────

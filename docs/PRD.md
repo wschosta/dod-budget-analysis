@@ -1,7 +1,7 @@
 # Program Requirements Document (PRD)
 
-> **Version:** 1.0
-> **Last Updated:** 2026-02-24
+> **Version:** 1.1
+> **Last Updated:** 2026-02-26
 > **Update Policy:** This document must be updated whenever features are added, changed, or removed. It is the canonical description of what the system does. Reference this document before implementing new features to avoid duplicating or overwriting existing functionality.
 
 ---
@@ -106,6 +106,7 @@ FastAPI application serving the database through versioned endpoints (`/api/v1`)
 | `/api/v1/pe/{pe_number}/sub-elements` | GET | PE sub-element breakdown |
 | `/api/v1/dashboard/summary` | GET | Dashboard summary statistics |
 | `/api/v1/dashboard/top-programs` | GET | Top programs by funding amount |
+| `/api/v1/facets` | GET | Faceted filter counts with cross-filtering per dimension |
 | `/api/v1/feedback` | POST | User feedback submission |
 | `/health` | GET | Health check (DB connectivity) |
 | `/health/detailed` | GET | Uptime, request/error counts, query stats, DB metrics |
@@ -131,8 +132,8 @@ Server-side rendered HTML using Jinja2 templates with HTMX for dynamic updates.
 
 | Page | Route | Description |
 |------|-------|-------------|
-| **Search** | `/` | Full-text keyword search with filter sidebar: fiscal year, service/agency, exhibit type, appropriation, amount range. HTMX-driven results table with sorting, pagination, column toggle. |
-| **Charts** | `/charts` | Year-over-year budget trends (grouped bar), service comparison (horizontal bar), Top-N programs, appropriation breakdown (donut). Fiscal year and service filter dropdowns. |
+| **Search** | `/` | Full-text keyword search with filter sidebar: fiscal year, service/agency (sorted by count), exhibit type, budget type, amount range. Faceted filter counts show result counts per option with zero-result options disabled. HTMX-driven results table with sorting, pagination, column toggle. Landing page charts (service bar, budget type doughnut) using shared utility. |
+| **Charts** | `/charts` | Budget by service (horizontal bar), stacked budget totals by service & FY, Top-N programs (excludes summary exhibits), multi-entity comparison (2-6 services across all FY columns), budget hierarchy treemap, budget type breakdown (shared doughnut utility). FY selector (newest first) and multi-select service filter. |
 | **Dashboard** | `/dashboard` | Summary cards (FY totals, YOY change), budget-by-service bar chart, Top-10 programs, appropriation breakdown. |
 | **Programs** | `/programs` | Program element browsing with tag filters, search, and funding history table. |
 | **Program Detail** | `/programs/{pe}` | Individual PE detail: funding breakdown by FY, narrative descriptions, related exhibits, source documents. |

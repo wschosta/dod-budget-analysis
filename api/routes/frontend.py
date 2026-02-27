@@ -31,6 +31,7 @@ from pipeline.builder import EXHIBIT_TYPES as _EXHIBIT_TYPE_NAMES
 from utils.cache import TTLCache
 from utils.query import (
     ALLOWED_SORT_COLUMNS,
+    _AMOUNT_COL_RE,
     build_where_clause,
     validate_amount_column,
     FISCAL_YEAR_COLUMN_LABELS,

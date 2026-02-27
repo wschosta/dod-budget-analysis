@@ -198,6 +198,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 - Full web UI implemented: search/filter interface, results table, detail panel, download modal, charts page
 - All 3 data visualization charts implemented (year-over-year, service comparison, top-N dashboard)
 - All 6 user documentation pages complete (getting started, data dictionary, FAQ, API reference, contextual help, methodology)
+- **Round 4 UI/UX fixes:** Shared budget type donut utility, stacked YoY chart by service, multi-entity comparison (2-6), faceted filter counts with cross-filtering, service dropdown sorted by count, FY dropdown ordered newest-first, chart click-through scroll anchors, dashboard loading feedback, consolidated view total program value, sub-PE tag visibility
 - Remaining: Lighthouse/axe-core accessibility audit (requires running UI)
 
 **Phase 4 (Publish, Feedback & Iteration):** 🔄 **~50% COMPLETE**
@@ -206,6 +207,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 - Monitoring & backup complete: `/health/detailed` metrics, `scripts/backup_db.py`, structured logging
 - Automated data refresh complete: `refresh_data.py` + GitHub Actions weekly cron
 - `CONTRIBUTING.md` with full development guidelines
+- **Round 4 backend fixes:** `budget_type` column backfill, composite DB indexes, `exclude_summary` parameter, related programs confidence ≥0.8, PE search prefix matching, faceted counts endpoint (`/api/v1/facets`), cache TTL tuning
 - Remaining: hosting platform selection, domain/TLS, CD deployment workflow, feedback mechanism, public launch
 
 ### Component Summary
@@ -222,11 +224,11 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | **Data reconciliation** | `scripts/reconcile_budget_data.py` | 481 | ✅ Complete — cross-service + cross-exhibit checks |
 | **PDF quality audit** | `scripts/pdf_quality_audit.py` | 312 | ✅ Complete — automated extraction quality scoring |
 | **Refresh workflow** | `refresh_data.py` | — | ✅ Complete — staged pipeline with dry-run, webhooks, rollback, progress tracking, scheduling |
-| **REST API** | `api/` (app, models, routes) | 1,239 | ✅ Complete — FastAPI with 6 route modules, CORS, CSP headers, rate limiting, connection pooling |
+| **REST API** | `api/` (app, models, routes) | 1,239 | ✅ Complete — FastAPI with 8 route modules, CORS, CSP headers, rate limiting, connection pooling |
 | **Web UI** | `templates/` + `static/` | — | ✅ Complete — HTMX + Jinja2 with search, filters, results, detail panel, download modal, charts |
 | **User documentation** | `docs/` (6 guides) | — | ✅ Complete — getting started, data dictionary, FAQ, API reference, methodology, deployment |
 | **Utility libraries** | `utils/` (14 modules) | 2,093 | ✅ Complete — config, database, HTTP, patterns, strings, validation, cache, query, formatting |
-| **Test suite** | `tests/` (63 files) | — | ✅ **1,183 tests** — comprehensive coverage across all modules |
+| **Test suite** | `tests/` (63 files) | — | ✅ **1,248 tests** — comprehensive coverage across all modules |
 | **CI/CD** | `.github/workflows/` (4 files) | — | ✅ Complete — CI pipeline, data refresh, optimization tests, scheduled downloads |
 | **Containerization** | `Dockerfile*`, `docker-compose*.yml` | — | ✅ Complete — production, multistage, dev, staging configurations |
 | **Backup & monitoring** | `scripts/backup_db.py`, `api/app.py` | — | ✅ Complete — automated backups, /health/detailed, structured logging |

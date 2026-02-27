@@ -493,12 +493,78 @@ cards to show which sub-projects matched with badges linking to
 
 ---
 
+## Round 4 — Tag Coverage Assessment & Fixes (2026-02-26)
+
+### ~~52. budget_type NULL Rows~~ **[RESOLVED]**
+
+Created `scripts/fix_budget_types.py` migration that backfills budget_type from
+appropriation_code. 2,161 rows fixed. Also added post-ingestion step in
+`pipeline/builder.py`. 388 rows remain NULL (no appropriation_code to derive from).
+
+---
+
+### ~~58. Missing Composite Indexes~~ **[RESOLVED]**
+
+Added 4 composite indexes via migration script and pipeline:
+`idx_bl_org_fy`, `idx_bl_bt_fy`, `idx_bl_et_fy`, `idx_bl_pe_fy`.
+Also runs ANALYZE for query planner optimization.
+
+---
+
+### ~~59. TTL Cache Too Short~~ **[RESOLVED]**
+
+Dashboard cache: 300 -> 900 seconds. Aggregation cache: 300 -> 600 seconds.
+
+---
+
+### 62. Tag Coverage Assessment **[DOCUMENTED]**
+
+Assessment of PE-level tagging quality (2026-02-26):
+
+| Metric | Value |
+|--------|-------|
+| Total PEs in pe_index | 3,442 |
+| PEs with at least 1 tag | 3,357 (97.5%) |
+| Keyword tags | 39,059 (across 3,340 PEs, 34 unique tags) |
+| Structured tags | 4,140 (across 1,498 PEs, 12 unique tags) |
+| Classification tags (rdte, procurement, etc.) | 1,477 (3.4% of total) |
+| Discovery tags (keyword/domain) | 41,722 (96.6%) |
+| Project-level tags | **0** (unchanged from #51) |
+| Average tags per PE | ~12.6 |
+
+**Tag quality assessment:**
+- Classification tags (rdte, procurement, om, milpers) are 3.4% of total — this is
+  acceptable; they serve as budget category markers, not the main discovery mechanism.
+- Top discovery tags: communications (2,679), aviation (2,521), training (2,499),
+  space (2,275), logistics (2,242), missile (2,169). These cover 60-78% of PEs each.
+- The high-coverage tags (communications at 78%) are still meaningful for defense
+  budget context — most programs involve some communications component.
+- Lower-coverage tags are more selective: autonomy (987, 29%), directed-energy (814,
+  24%), special-operations (761, 22%), hypersonics (506, 15%).
+- **Project-level tags remain at 0** — this is the main gap. See #51 for details.
+
+**Related programs (PE lineage):**
+- Total links: 783,845
+- explicit_pe_ref: 773,974 (confidence 0.95)
+- name_match: 9,871 (confidence 0.60)
+- With confidence >= 0.8: 773,974 (only explicit refs survive)
+- The 773K explicit links is high — suggests many cross-references in budget docs.
+  The 0.8 threshold effectively filters to explicit PE references only.
+
+**Recommendation:** No immediate changes needed for PE-level tags. The pipeline
+produces reasonable coverage with meaningful domain-specific tags. The main gap
+is project-level tags (#51) which requires pipeline debugging.
+
+---
+
 ## Summary
 
 | Status | Count | Issues |
 |--------|-------|--------|
-| **Round 3 OPEN (Data)** | 7 | #51-57 (pipeline/DB data quality) |
-| **Round 3 OPEN (Perf)** | 4 | #58-61 (performance optimization) |
+| **Round 4 RESOLVED** | 3 | #52, #58, #59 |
+| **Round 4 DOCUMENTED** | 1 | #62 (tag assessment) |
+| **Round 3 OPEN (Data)** | 6 | #51, 53-57 (pipeline/DB data quality) |
+| **Round 3 OPEN (Perf)** | 2 | #60-61 (performance optimization) |
 | **Round 2 RESOLVED** | 20 | #29-37, #40-48, #50 |
 | **Round 2 OPEN** | 2 | #38 (service normalization — DB), #39 (tag quality — pipeline) |
 | **Round 2 GRADUAL** | 1 | #49 (inline styles — ongoing) |
