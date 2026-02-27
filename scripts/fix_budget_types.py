@@ -34,6 +34,8 @@ APPROP_TO_BUDGET_TYPE = {
     "FHSG": "Construction",
     "MILPERS": "MilPers",
     "RFUND": "Revolving",
+    "DHP": "O&M",
+    "AMMO": "Procurement",
 }
 
 # Composite indexes to ensure exist (may already be created by builder.py)

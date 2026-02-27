@@ -557,13 +557,83 @@ is project-level tags (#51) which requires pipeline debugging.
 
 ---
 
+## Round 5 — Database Data Quality Fixes (2026-02-27)
+
+9-step migration (`scripts/fix_data_quality.py`) plus pipeline hardening to address
+duplicate rows, NULL fields, and reference table noise.
+
+### ~~5. "By Appropriation Type" donut — all "Unknown"~~ **[RESOLVED]**
+
+Budget type backfill expanded: added DHP to O&M and AMMO to Procurement mappings in
+`scripts/fix_budget_types.py`; exact title mapping added in `repair_database.py`.
+NULL budget_type reduced from 388 to 116.
+
+---
+
+### ~~6/14. "Budget by Service" — large "Unknown" bucket~~ **[RESOLVED]**
+
+Empty `organization_name` rows (311) filled via source-file path inference in
+migration step 5. Empty organization count: 311 to 0.
+
+---
+
+### ~~7/17/22. Duplicate/repetitive results~~ **[RESOLVED]**
+
+Cross-file deduplication added to `pipeline/builder.py` (excludes `*a.xlsx` amendment
+files when base file exists) plus migration step 1 dedup by
+`(pe_number, line_item, fiscal_year, organization, exhibit_type, source_file)`.
+Total rows: 124,670 to 47,531 (62% reduction). Cross-file duplicates: 28,276+ to 0.
+
+---
+
+### ~~57. appropriation_code NULL rows~~ **[RESOLVED — Partial]**
+
+Enhanced keyword matching in `repair_database.py` with broader appropriation patterns.
+NULL appropriation_code reduced from 21,831 (17.5%) to 3,531 (7.4%). Remaining NULLs
+are rows without enough context to infer an appropriation code.
+
+---
+
+### 63. Footnote entries in appropriation_titles reference table **[RESOLVED]**
+
+`pipeline/backfill.py` modified to filter footnote-like entries from the
+`appropriation_titles` query. Cleaned 31 footnote rows; title count: 256 to 225.
+
+---
+
+### Round 5 Files Changed
+
+| File | Change |
+|------|--------|
+| `scripts/fix_data_quality.py` | New — 9-step migration (steps 0-8) |
+| `pipeline/builder.py` | `*a.xlsx` exclusion + cross-file dedup logic |
+| `repair_database.py` | Enhanced appropriation keyword matching + exact title mapping |
+| `scripts/fix_budget_types.py` | Added DHP to O&M, AMMO to Procurement |
+| `pipeline/backfill.py` | Footnote filtering in appropriation_titles query |
+| `tests/test_pipeline_group/test_data_quality_fixes.py` | New — 34 tests |
+
+### Round 5 Results Summary
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Total rows | 124,670 | 47,531 (62% reduction) |
+| Cross-file duplicates | 28,276+ | 0 |
+| NULL appropriation_code | 21,831 (17.5%) | 3,531 (7.4%) |
+| NULL budget_type | 388 | 116 |
+| Empty organization_name | 311 | 0 |
+| Footnote entries in ref table | 31 | 0 |
+| Appropriation titles | 256 | 225 (clean) |
+
+---
+
 ## Summary
 
 | Status | Count | Issues |
 |--------|-------|--------|
+| **Round 5 RESOLVED** | 5 | #5, #6/14, #7/17/22, #57, #63 |
 | **Round 4 RESOLVED** | 3 | #52, #58, #59 |
 | **Round 4 DOCUMENTED** | 1 | #62 (tag assessment) |
-| **Round 3 OPEN (Data)** | 6 | #51, 53-57 (pipeline/DB data quality) |
+| **Round 3 OPEN (Data)** | 5 | #51, 53-56 (pipeline/DB data quality) |
 | **Round 3 OPEN (Perf)** | 2 | #60-61 (performance optimization) |
 | **Round 2 RESOLVED** | 20 | #29-37, #40-48, #50 |
 | **Round 2 OPEN** | 2 | #38 (service normalization — DB), #39 (tag quality — pipeline) |

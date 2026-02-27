@@ -259,6 +259,30 @@ Each LION/TIGER/BEAR instruction file is prompt-ready: open a new branch and run
 
 ---
 
+## Recent Improvements
+
+### Round 5 — Database Data Quality Fixes (2026-02-27)
+
+Ran a 9-step migration (`scripts/fix_data_quality.py`) and hardened the ingestion
+pipeline to eliminate duplicates, fill NULL fields, and clean reference tables.
+
+| Change | Result |
+|--------|--------|
+| Cross-file deduplication (`pipeline/builder.py` + migration) | 124,670 rows to 47,531 (62% reduction) |
+| Appropriation code backfill (`repair_database.py`) | NULL appropriation_code: 17.5% to 7.4% |
+| Budget type expansion (`scripts/fix_budget_types.py`) | NULL budget_type: 388 to 116 |
+| Organization name fill (migration step 5) | Empty organization_name: 311 to 0 |
+| Footnote cleanup (`pipeline/backfill.py`) | Reference table footnotes: 31 to 0 |
+| `*a.xlsx` exclusion in builder | Prevents amendment file duplicates at ingestion |
+
+**New files:** `scripts/fix_data_quality.py`, `tests/test_pipeline_group/test_data_quality_fixes.py` (34 tests)
+
+**Modified:** `pipeline/builder.py`, `repair_database.py`, `scripts/fix_budget_types.py`, `pipeline/backfill.py`
+
+See [NOTICED_ISSUES.md](NOTICED_ISSUES.md) Round 5 for full details.
+
+---
+
 ## How to Reference Tasks
 
 Use the ID column when referencing tasks in issues, PRs, or discussions:
