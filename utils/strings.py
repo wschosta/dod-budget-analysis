@@ -67,7 +67,7 @@ def normalize_whitespace(s: str) -> str:
     return WHITESPACE.sub(' ', s).strip()
 
 
-def sanitize_fts5_query(query: str) -> str:
+def sanitize_fts5_query(query: str, prefix: bool = False) -> str:
     """Sanitize user input for safe use in SQLite FTS5 MATCH expressions.
 
     FTS5 has special operators (AND, OR, NOT, NEAR) and special characters
@@ -76,13 +76,17 @@ def sanitize_fts5_query(query: str) -> str:
     2. Removes FTS5 boolean keywords
     3. Wraps terms in quotes for literal matching
     4. Joins with OR for broad matching
+    5. Optionally appends * for prefix matching
 
     Example:
         'missile defense system' -> '"missile" OR "defense" OR "system"'
         'army "R&D"' -> '"army" OR "rd"'
+        'conventional prompt' (prefix=True) ->
+            '"conventional" OR "conventional"* OR "prompt" OR "prompt"*'
 
     Args:
         query: Raw user search query
+        prefix: If True, also add prefix-wildcard variants for partial matching
 
     Returns:
         Sanitized FTS5 query string safe for MATCH expressions
@@ -98,6 +102,14 @@ def sanitize_fts5_query(query: str) -> str:
 
     if not terms:
         return ""
+
+    if prefix:
+        # Include both exact and prefix-wildcard variants for broader matching
+        parts = []
+        for t in terms:
+            parts.append(f'"{t}"')
+            parts.append(f'"{t}"*')
+        return " OR ".join(parts)
 
     # Wrap each term in double quotes for literal matching
     return " OR ".join(f'"{t}"' for t in terms)

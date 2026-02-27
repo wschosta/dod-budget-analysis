@@ -45,7 +45,7 @@ from starlette.responses import Response
 
 from api.database import get_db_path, _make_conn
 from utils.database import get_slow_queries, get_query_stats
-from api.routes import aggregations, budget_lines, dashboard, download, feedback, metadata, pe, reference, search
+from api.routes import aggregations, budget_lines, dashboard, download, facets, feedback, metadata, pe, reference, search
 from api.routes import frontend as frontend_routes
 from utils.config import AppConfig
 
@@ -587,6 +587,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     app.include_router(feedback.router,     prefix=prefix)
     app.include_router(dashboard.router,   prefix=prefix)
     app.include_router(metadata.router,    prefix=prefix)
+    app.include_router(facets.router,     prefix=prefix)
 
     # ── Static files + Jinja2 templates (3.A0-a) ──────────────────────────────
     _here = Path(__file__).parent.parent  # project root
@@ -618,7 +619,21 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             ]
             return urlencode(pairs)
 
+        def fmt_dollars(value: object) -> str:
+            """Jinja filter: format dollar amount ($K input) with auto-scaling to $M/$B."""
+            try:
+                k = float(value)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                return "—"
+            m = k / 1_000
+            if abs(m) >= 1_000:
+                return f"${m / 1_000:,.1f}B"
+            if abs(m) >= 1:
+                return f"${m:,.0f}M"
+            return f"${k:,.0f}K"
+
         templates.env.filters["fmt_amount"] = fmt_amount
+        templates.env.filters["fmt_dollars"] = fmt_dollars
         templates.env.filters["remove_filter_param"] = remove_filter_param
 
         # Wire templates into the frontend router

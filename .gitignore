@@ -50,4 +50,7 @@ logs/
 .claude/
 plan.md
 
+# Playwright MCP logs
+.playwright-mcp/
+
 nul

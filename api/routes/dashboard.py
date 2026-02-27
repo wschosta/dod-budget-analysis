@@ -7,11 +7,19 @@ from fastapi import APIRouter, Depends, Query
 
 from api.database import get_db
 from utils.cache import TTLCache
-from utils.database import _validate_identifier, get_amount_columns
+from utils.database import BUDGET_TYPE_CASE_EXPR, _validate_identifier, get_amount_columns
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
-_summary_cache: TTLCache = TTLCache(maxsize=32, ttl_seconds=300)
+_summary_cache: TTLCache = TTLCache(maxsize=32, ttl_seconds=900)
+
+
+@router.post("/cache-clear", summary="Clear dashboard cache (dev)")
+def clear_dashboard_cache() -> dict:
+    """Clear the dashboard summary cache. Useful during development."""
+    _summary_cache.clear()
+    return {"status": "ok", "message": "Dashboard cache cleared"}
+
 
 
 def _detect_fy_columns(conn: sqlite3.Connection) -> tuple[str, str]:
@@ -29,7 +37,7 @@ def dashboard_summary(
     fiscal_year: str | None = Query(None, description="Filter by fiscal year (e.g. '2026')"),
     service: str | None = Query(None, description="Filter by service/organization name"),
     exhibit_type: str | None = Query(None, description="Filter by exhibit type (e.g. 'R-2')"),
-    appropriation_code: str | None = Query(None, description="Filter by appropriation code"),
+    budget_type: str | None = Query(None, description="Filter by budget type (color of money)"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
     """Return aggregated statistics for the dashboard overview page.
@@ -39,15 +47,15 @@ def dashboard_summary(
     - Top 6 services by FY26 request amount
     - Top 10 programs with PE numbers
     - Year-over-year by fiscal year
-    - Top 6 appropriation categories
+    - Budget type distribution (colors of money)
     - Budget type distribution (RDT&E, Procurement, O&M, etc.)
     - Enrichment coverage metrics
 
-    Pass fiscal_year, service, exhibit_type, and/or appropriation_code
+    Pass fiscal_year, service, exhibit_type, and/or budget_type
     to restrict all aggregations.
     """
     cache_key = ("dashboard_summary", fiscal_year, service,
-                 exhibit_type, appropriation_code)
+                 exhibit_type, budget_type)
     cached = _summary_cache.get(cache_key)
     if cached is not None:
         return cached
@@ -75,9 +83,9 @@ def dashboard_summary(
     if exhibit_type:
         conditions.append("exhibit_type = ?")
         filter_params.append(exhibit_type)
-    if appropriation_code:
-        conditions.append("appropriation_code = ?")
-        filter_params.append(appropriation_code)
+    if budget_type:
+        conditions.append("budget_type = ?")
+        filter_params.append(budget_type)
     fy_filter = "WHERE " + " AND ".join(conditions)
 
     # Batch the main budget_lines aggregations into a single CTE query.
@@ -85,7 +93,7 @@ def dashboard_summary(
     batch_result = conn.execute(f"""
         WITH base AS (
             SELECT organization_name, fiscal_year,
-                   appropriation_code, appropriation_title,
+                   budget_type,
                    id, line_item_title, pe_number,
                    {fy26_col} AS fy26, {fy25_col} AS fy25
             FROM budget_lines
@@ -115,13 +123,6 @@ def dashboard_summary(
                    SUM(fy25) AS fy25_total
             FROM base WHERE fiscal_year IS NOT NULL
             GROUP BY fiscal_year ORDER BY fiscal_year
-        ),
-        by_approp AS (
-            SELECT appropriation_code, appropriation_title,
-                   SUM(fy26) AS total
-            FROM base WHERE appropriation_code IS NOT NULL
-            GROUP BY appropriation_code
-            ORDER BY SUM(COALESCE(fy26, 0)) DESC LIMIT 6
         )
         SELECT
             'totals' AS section, json_object(
@@ -143,12 +144,6 @@ def dashboard_summary(
             json_object('fiscal_year', f.fiscal_year,
                         'fy26_total', f.fy26_total, 'fy25_total', f.fy25_total)
         ) FROM by_fy f
-        UNION ALL
-        SELECT 'by_appropriation', json_group_array(
-            json_object('appropriation_code', a.appropriation_code,
-                        'appropriation_title', a.appropriation_title,
-                        'total', a.total)
-        ) FROM by_approp a
     """, filter_params).fetchall()
 
     # Parse the batch result
@@ -156,7 +151,29 @@ def dashboard_summary(
     totals = sections.get("totals", {})
     by_service = sections.get("by_service", [])
     by_fy = sections.get("by_fiscal_year", [])
-    by_approp = sections.get("by_appropriation", [])
+
+    # Budget type distribution — uses shared CASE expression to derive
+    # budget_type from appropriation_code for detail rows where budget_type
+    # is NULL. The filter_params list is reused from the base filter above.
+    _BT = BUDGET_TYPE_CASE_EXPR
+    bt_conditions = [f"{_BT} != 'Unknown'"]
+    bt_params: list = list(filter_params)  # re-use base filter params
+    if budget_type:
+        bt_conditions.append(f"{_BT} = ?")
+        bt_params.append(budget_type)
+    bt_extra = " AND ".join(bt_conditions)
+    by_btype_rows = conn.execute(f"""
+        SELECT {_BT} AS budget_type,
+               SUM({fy26_col}) AS total,
+               SUM({fy25_col}) AS prev_total,
+               COUNT(*) AS line_count
+        FROM budget_lines
+        {fy_filter}
+        {"AND " + bt_extra if bt_extra else ""}
+        GROUP BY {_BT}
+        ORDER BY SUM(COALESCE({fy26_col}, 0)) DESC
+    """, bt_params).fetchall()
+    by_btype_cte = [dict(r) for r in by_btype_rows]
 
     # Top 10 programs — needs its own query since it returns individual rows
     tp_conditions = [f"{fy26_col} IS NOT NULL", summary_filter]
@@ -166,8 +183,8 @@ def dashboard_summary(
         tp_conditions.append("organization_name = ?")
     if exhibit_type:
         tp_conditions.append("exhibit_type = ?")
-    if appropriation_code:
-        tp_conditions.append("appropriation_code = ?")
+    if budget_type:
+        tp_conditions.append("budget_type = ?")
     tp_where = "WHERE " + " AND ".join(tp_conditions)
     top_programs_rows = conn.execute(
         f"SELECT id, line_item_title, organization_name, pe_number, "
@@ -206,24 +223,6 @@ def dashboard_summary(
         }
     except sqlite3.OperationalError:
         pass  # Enrichment tables may not exist yet
-
-    # Budget type distribution — separate query since budget_type
-    # isn't in the base CTE and may not exist in older schemas.
-    by_budget_type: list[dict] = []
-    try:
-        bt_rows = conn.execute(f"""
-            SELECT COALESCE(budget_type, 'Unknown') AS budget_type,
-                   SUM({fy26_col}) AS total,
-                   SUM({fy25_col}) AS prev_total,
-                   COUNT(*) AS line_count
-            FROM budget_lines
-            {fy_filter}
-            GROUP BY COALESCE(budget_type, 'Unknown')
-            ORDER BY SUM(COALESCE({fy26_col}, 0)) DESC
-        """, filter_params).fetchall()
-        by_budget_type = [dict(r) for r in bt_rows]
-    except sqlite3.OperationalError:
-        pass  # budget_type column may not exist
 
     # Exhibit type distribution
     by_exhibit_type: list[dict] = []
@@ -292,8 +291,7 @@ def dashboard_summary(
         "by_service": by_service,
         "top_programs": [dict(r) for r in top_programs_rows],
         "by_fiscal_year": by_fy,
-        "by_appropriation": by_approp,
-        "by_budget_type": by_budget_type,
+        "by_budget_type": by_btype_cte,
         "by_exhibit_type": by_exhibit_type,
         "source_stats": source_stats,
         "enrichment": enrichment,

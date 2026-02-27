@@ -22,15 +22,21 @@ from fastapi.responses import HTMLResponse
 from starlette.responses import RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
+import json as _json
+from pathlib import Path as _Path
+
 from api.database import get_db
+from utils.database import get_amount_columns
 from pipeline.builder import EXHIBIT_TYPES as _EXHIBIT_TYPE_NAMES
 from utils.cache import TTLCache
 from utils.query import (
     ALLOWED_SORT_COLUMNS,
+    _AMOUNT_COL_RE,
     build_where_clause,
     validate_amount_column,
     FISCAL_YEAR_COLUMN_LABELS,
     DEFAULT_AMOUNT_COLUMN,
+    make_fiscal_year_column_labels,
 )
 from utils import sanitize_fts5_query
 
@@ -114,22 +120,26 @@ def _get_services(conn: sqlite3.Connection) -> list[dict]:
         return cached
     try:
         rows = conn.execute(
-            "SELECT DISTINCT b.organization_name AS code, "
-            "COALESCE(s.full_name, b.organization_name) AS full_name "
+            "SELECT b.organization_name AS code, "
+            "COALESCE(s.full_name, b.organization_name) AS full_name, "
+            "COUNT(*) AS row_count "
             "FROM budget_lines b "
             "LEFT JOIN services_agencies s ON LOWER(b.organization_name) = LOWER(s.code) "
             "WHERE b.organization_name IS NOT NULL AND b.organization_name != '' "
-            "ORDER BY b.organization_name"
+            "GROUP BY b.organization_name "
+            "ORDER BY COUNT(*) DESC"
         ).fetchall()
     except sqlite3.OperationalError:
         rows = conn.execute(
-            "SELECT DISTINCT organization_name AS code, "
-            "organization_name AS full_name "
+            "SELECT organization_name AS code, "
+            "organization_name AS full_name, "
+            "COUNT(*) AS row_count "
             "FROM budget_lines "
             "WHERE organization_name IS NOT NULL AND organization_name != '' "
-            "ORDER BY organization_name"
+            "GROUP BY organization_name "
+            "ORDER BY COUNT(*) DESC"
         ).fetchall()
-    result = [{"code": r["code"], "full_name": r["full_name"]} for r in rows]
+    result = [{"code": r["code"], "full_name": r["full_name"], "row_count": r["row_count"]} for r in rows]
     _services_cache.set(cache_key, result)
     return result
 
@@ -199,54 +209,16 @@ def _get_fiscal_years(conn: sqlite3.Connection) -> list[dict]:
     return result
 
 
-_APPROP_KEYWORDS: dict[str, str] = {
-    "aircraft procurement": "APAF",
-    "missile procurement": "MPAF",
-    "weapons procurement": "WPN",
-    "ammunition procurement": "AMMO",
-    "other procurement": "OPROC",
-    "procurement": "PROC",
-    "shipbuilding and conversion": "SCN",
-    "research, development, test & eval": "RDTE",
-    "research, development, test and eval": "RDTE",
-    "rdt&e": "RDTE",
-    "operation and maintenance": "O&M",
-    "operations and maintenance": "O&M",
-    "military personnel": "MILPERS",
-    "military construction": "MILCON",
-    "revolving fund": "RFUND",
-    "family housing": "FHSG",
-}
-
-def _get_appropriations(conn: sqlite3.Connection) -> list[dict]:
-    """FE-002: Return distinct appropriation codes and titles."""
+def _get_budget_types(conn: sqlite3.Connection) -> list[dict]:
+    """Return distinct budget_type values (colors of money)."""
     rows = conn.execute(
-        "SELECT DISTINCT appropriation_code AS code, appropriation_title AS title "
+        "SELECT budget_type, COUNT(*) AS cnt "
         "FROM budget_lines "
-        "WHERE appropriation_code IS NOT NULL AND appropriation_code != '' "
-        "ORDER BY appropriation_code"
+        "WHERE budget_type IS NOT NULL AND budget_type != '' "
+        "GROUP BY budget_type "
+        "ORDER BY COUNT(*) DESC"
     ).fetchall()
-    if rows:
-        return [{"code": r["code"], "title": r["title"]} for r in rows]
-    # Fallback: derive categories from appropriation_title
-    try:
-        title_rows = conn.execute(
-            "SELECT DISTINCT appropriation_title AS title "
-            "FROM budget_lines "
-            "WHERE appropriation_title IS NOT NULL AND appropriation_title != '' "
-            "ORDER BY appropriation_title"
-        ).fetchall()
-    except Exception:
-        return []
-    seen: dict[str, str] = {}
-    for r in title_rows:
-        title = r["title"]
-        lower = title.lower()
-        for keyword, code in _APPROP_KEYWORDS.items():
-            if keyword in lower and code not in seen:
-                seen[code] = title
-                break
-    return [{"code": code, "title": title} for code, title in sorted(seen.items())]
+    return [{"code": r["budget_type"], "title": r["budget_type"]} for r in rows]
 
 
 def _parse_filters(request: Request) -> dict[str, Any]:
@@ -267,7 +239,7 @@ def _parse_filters(request: Request) -> dict[str, Any]:
         "service":           params.getlist("service"),
         "exhibit_type":      params.getlist("exhibit_type"),
         "pe_number":         params.getlist("pe_number"),
-        "appropriation_code": params.getlist("appropriation_code"),
+        "budget_type":       params.getlist("budget_type"),
         "min_amount":        min_amt,
         "max_amount":        max_amt,
         "amount_column":     amount_column,
@@ -322,7 +294,7 @@ def _query_results(
         service=filters["service"] or None,
         exhibit_type=filters["exhibit_type"] or None,
         pe_number=filters["pe_number"] or None,
-        appropriation_code=filters.get("appropriation_code") or None,
+        budget_type=filters.get("budget_type") or None,
         min_amount=min_amt_val,
         max_amount=max_amt_val,
         amount_column=filters.get("amount_column"),
@@ -444,8 +416,43 @@ def _query_results(
         params + [page_size, offset],
     ).fetchall()
 
+    items = [dict(r) for r in rows]
+
+    # ── Total program value from golden record (line_item_amounts) ─────────
+    # Batch-query total value + FY range for PE numbers in current results.
+    pe_numbers = list({r["pe_number"] for r in items if r.get("pe_number")})
+    pe_totals: dict[str, dict] = {}
+    if pe_numbers and _table_exists(conn, "line_item_amounts"):
+        try:
+            placeholders = ",".join("?" * len(pe_numbers))
+            total_rows = conn.execute(
+                f"SELECT li.pe_number, "
+                f"       SUM(a.amount) AS total_value, "
+                f"       MIN(a.target_fy) AS fy_min, "
+                f"       MAX(a.target_fy) AS fy_max "
+                f"FROM line_items li "
+                f"JOIN line_item_amounts a ON a.line_item_id = li.id "
+                f"WHERE li.pe_number IN ({placeholders}) "
+                f"GROUP BY li.pe_number",
+                pe_numbers,
+            ).fetchall()
+            for tr in total_rows:
+                pe_totals[tr["pe_number"]] = {
+                    "total_value": tr["total_value"],
+                    "fy_min": tr["fy_min"],
+                    "fy_max": tr["fy_max"],
+                }
+        except Exception:
+            logger.debug("Failed to load golden record totals", exc_info=True)
+
+    # Attach total program value to each item
+    for item in items:
+        pe = item.get("pe_number")
+        if pe and pe in pe_totals:
+            item["_pe_total"] = pe_totals[pe]
+
     return {
-        "items":       [dict(r) for r in rows],
+        "items":       items,
         "total":       total,
         "page":        page,
         "total_pages": total_pages,
@@ -469,7 +476,7 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLR
     fiscal_years   = _get_fiscal_years(conn)
     services       = _get_services(conn)
     exhibit_types  = _get_exhibit_types(conn)
-    appropriations = _get_appropriations(conn)
+    budget_types   = _get_budget_types(conn)
 
     # Build dynamic FY column labels from discovered amount columns
     amt_cols = results.get("amount_columns", [])
@@ -483,7 +490,7 @@ def index(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLR
             "fiscal_years":   fiscal_years,
             "services":       services,
             "exhibit_types":  exhibit_types,
-            "appropriations": appropriations,
+            "budget_types":   budget_types,
             # Dynamic amount column context — discovered from DB schema
             "amount_column":        filters.get("amount_column", DEFAULT_AMOUNT_COLUMN),
             "fiscal_year_columns":  fy_col_labels,
@@ -509,7 +516,8 @@ def dashboard(request: Request) -> HTMLResponse:
 @router.get("/charts", response_class=HTMLResponse, include_in_schema=False)
 def charts(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
     """Chart.js visualisations page."""
-    fiscal_years = _get_fiscal_years(conn)
+    # Reverse so latest fiscal year (e.g. 2026) is at the top of the dropdown
+    fiscal_years = list(reversed(_get_fiscal_years(conn)))
     return _tmpl().TemplateResponse(
         "charts.html",
         {"request": request, "fiscal_years": fiscal_years},
@@ -682,7 +690,10 @@ def programs(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HT
             tag_result = list_tags(tag_source=None, conn=conn)
             tags = tag_result.get("tags", [])[:30]
 
-            pe_result = list_pes(tag=None, q=None, service=None,
+            tag_values = params.getlist("tag") or None
+            pe_result = list_pes(tag=tag_values,
+                                q=params.get("q") or None,
+                                service=params.get("service") or None,
                                 budget_type=None, approp=None, account=None,
                                 ba=None, exhibit=None, fy=None,
                                 sort_by=None, sort_dir=None,
@@ -1055,4 +1066,334 @@ def top_changes_partial(
         "request": request,
         "increases": increases,
         "decreases": decreases,
+    })
+
+
+# ── Consolidated PE browser ─────────────────────────────────────────────────
+
+_WORK_DB = _Path(__file__).resolve().parents[2] / "dod_budget_work.sqlite"
+
+
+def _get_work_conn() -> sqlite3.Connection:
+    """Open a read-only connection to the consolidated work database."""
+    if not _WORK_DB.exists():
+        raise HTTPException(
+            status_code=503,
+            detail="Consolidated database not available. Run scripts/consolidate_pe_lines.py first.",
+        )
+    conn = sqlite3.connect(f"file:{_WORK_DB}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+@router.get("/consolidated", response_class=HTMLResponse, include_in_schema=False)
+def consolidated_list(request: Request) -> HTMLResponse:
+    """Consolidated PE line items — list view."""
+    conn = _get_work_conn()
+    try:
+        q = request.query_params.get("q", "").strip()
+        service = request.query_params.get("service", "").strip()
+        budget_type = request.query_params.get("budget_type", "").strip()
+        sort_by = request.query_params.get("sort_by", "pe_number").strip()
+        page = max(1, _safe_int(request.query_params.get("page", "1"), 1))
+        page_size = 24
+
+        _SORT_MAP = {
+            "pe_number": "li.pe_number ASC",
+            "name": "li.line_item_title ASC",
+            "funding_desc": "best_amount DESC",
+            "funding_asc": "best_amount ASC",
+            "submissions": "li.submission_count DESC",
+            "service": "li.organization_name ASC, li.pe_number ASC",
+        }
+        order_clause = _SORT_MAP.get(sort_by, _SORT_MAP["pe_number"])
+        if sort_by not in _SORT_MAP:
+            sort_by = "pe_number"
+
+        where_parts: list[str] = []
+        params: list[Any] = []
+
+        if q:
+            where_parts.append(
+                "(li.pe_number LIKE ? OR li.line_item_title LIKE ? "
+                "OR li.organization_name LIKE ?)"
+            )
+            like = f"%{q}%"
+            params.extend([like, like, like])
+        if service:
+            where_parts.append("li.organization_name = ?")
+            params.append(service)
+        if budget_type:
+            where_parts.append("li.budget_type = ?")
+            params.append(budget_type)
+
+        where = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM line_items li {where}", params
+        ).fetchone()[0]
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        page = min(page, total_pages)
+        offset = (page - 1) * page_size
+
+        items = conn.execute(
+            f"""SELECT li.*,
+                       (SELECT ROUND(a.amount, 0)
+                        FROM line_item_amounts a
+                        WHERE a.line_item_id = li.id
+                          AND a.amount IS NOT NULL
+                        ORDER BY a.precedence_rank, a.target_fy DESC
+                        LIMIT 1) AS best_amount,
+                       (SELECT a.target_fy || ' ' || a.amount_type
+                        FROM line_item_amounts a
+                        WHERE a.line_item_id = li.id
+                          AND a.amount IS NOT NULL
+                        ORDER BY a.precedence_rank, a.target_fy DESC
+                        LIMIT 1) AS best_label,
+                       (SELECT ROUND(SUM(a.amount), 0)
+                        FROM line_item_amounts a
+                        WHERE a.line_item_id = li.id
+                          AND a.amount IS NOT NULL) AS total_program_value,
+                       (SELECT COUNT(DISTINCT a.target_fy)
+                        FROM line_item_amounts a
+                        WHERE a.line_item_id = li.id
+                          AND a.amount IS NOT NULL) AS fy_count
+                FROM line_items li {where}
+                ORDER BY {order_clause}
+                LIMIT ? OFFSET ?""",
+            params + [page_size, offset],
+        ).fetchall()
+
+        services = [
+            r[0] for r in conn.execute(
+                "SELECT DISTINCT organization_name FROM line_items ORDER BY organization_name"
+            ).fetchall()
+        ]
+        budget_types = [
+            r[0] for r in conn.execute(
+                "SELECT DISTINCT budget_type FROM line_items "
+                "WHERE budget_type IS NOT NULL ORDER BY budget_type"
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+
+    return _tmpl().TemplateResponse("consolidated.html", {
+        "request": request,
+        "items": [dict(r) for r in items],
+        "total": total,
+        "page": page,
+        "total_pages": total_pages,
+        "page_size": page_size,
+        "services": services,
+        "budget_types": budget_types,
+        "q": q,
+        "service": service,
+        "budget_type": budget_type,
+        "sort_by": sort_by,
+    })
+
+
+@router.get("/consolidated/{pe_number}", response_class=HTMLResponse, include_in_schema=False)
+def consolidated_detail(request: Request, pe_number: str) -> HTMLResponse:
+    """Consolidated PE detail — golden record + time series + submissions."""
+    conn = _get_work_conn()
+    try:
+        item = conn.execute(
+            "SELECT * FROM line_items WHERE pe_number = ? LIMIT 1",
+            (pe_number,),
+        ).fetchone()
+        if not item:
+            raise HTTPException(status_code=404, detail=f"PE {pe_number} not found")
+
+        li_id = item["id"]
+
+        amounts = conn.execute(
+            """SELECT a.target_fy, a.amount_type, a.amount, a.quantity,
+                      a.source_submission_fy, a.precedence_rank
+               FROM line_item_amounts a
+               INNER JOIN (
+                   SELECT target_fy, MIN(precedence_rank) AS best_rank
+                   FROM line_item_amounts
+                   WHERE line_item_id = ?
+                   GROUP BY target_fy
+               ) best ON a.target_fy = best.target_fy
+                      AND a.precedence_rank = best.best_rank
+               WHERE a.line_item_id = ?
+               ORDER BY a.target_fy""",
+            (li_id, li_id),
+        ).fetchall()
+
+        submissions = conn.execute(
+            """SELECT fiscal_year, source_file, raw_amounts, raw_quantities
+               FROM budget_submissions
+               WHERE line_item_id = ?
+               ORDER BY fiscal_year, source_file""",
+            (li_id,),
+        ).fetchall()
+
+        # Parse raw_amounts JSON for display.
+        parsed_subs = []
+        for s in submissions:
+            raw = {}
+            if s["raw_amounts"]:
+                try:
+                    raw = _json.loads(s["raw_amounts"])
+                except (ValueError, TypeError):
+                    pass
+            parsed_subs.append({
+                "fiscal_year": s["fiscal_year"],
+                "source_file": s["source_file"],
+                "amounts": raw,
+            })
+
+        # Group submissions by fiscal_year for the template.
+        sub_groups: dict[str, list] = {}
+        for ps in parsed_subs:
+            fy = ps["fiscal_year"]
+            if fy not in sub_groups:
+                sub_groups[fy] = []
+            sub_groups[fy].append(ps)
+
+        # ── R-2A Sub-Projects ────────────────────────────────────
+        projects_by_num: dict[str, dict] = {}
+        try:
+            proj_rows = conn.execute(
+                """SELECT project_number, project_title,
+                          fiscal_year, fy_columns, amounts, narrative_text
+                   FROM pe_projects
+                   WHERE pe_number = ?
+                   ORDER BY project_number, fiscal_year DESC""",
+                (pe_number,),
+            ).fetchall()
+            for pr in proj_rows:
+                pnum = pr["project_number"]
+                fy_cols = _json.loads(pr["fy_columns"]) if pr["fy_columns"] else []
+                amts = _json.loads(pr["amounts"]) if pr["amounts"] else []
+                entry = {
+                    "fiscal_year": pr["fiscal_year"],
+                    "fy_columns": fy_cols,
+                    "amounts": amts,
+                    "narrative_text": pr["narrative_text"] or "",
+                }
+                if pnum not in projects_by_num:
+                    projects_by_num[pnum] = {
+                        "project_number": pnum,
+                        "project_title": pr["project_title"],
+                        "submissions": [entry],
+                    }
+                else:
+                    projects_by_num[pnum]["submissions"].append(entry)
+        except Exception:
+            pass  # pe_projects table may not exist
+
+        # ── Build funding matrix (transposed: FYs as columns) ────
+        all_fys_set: set[int] = set()
+        pe_row: dict = {"label": "PE Total", "project_number": None, "fy_vals": {}}
+        for a in amounts:
+            fy = a["target_fy"]
+            pe_row["fy_vals"][fy] = a["amount"]
+            all_fys_set.add(fy)
+
+        project_rows: list[dict] = []
+        for proj in projects_by_num.values():
+            row: dict = {
+                "label": proj["project_title"],
+                "project_number": proj["project_number"],
+                "fy_vals": {},
+            }
+            # Submissions are already sorted newest-first (fiscal_year DESC)
+            for sub in proj["submissions"]:
+                if not sub["amounts"] or not sub["fy_columns"]:
+                    continue
+                sorted_fys = sorted(sub["fy_columns"], key=lambda x: int(x))
+                for i, fy_str in enumerate(sorted_fys):
+                    if i >= len(sub["amounts"]):
+                        break
+                    fy_int = int(fy_str)
+                    if fy_int not in row["fy_vals"]:  # latest submission wins
+                        val_m = sub["amounts"][i]
+                        row["fy_vals"][fy_int] = round(val_m * 1000, 1)  # $M → $K
+                        all_fys_set.add(fy_int)
+            if row["fy_vals"]:
+                project_rows.append(row)
+
+        matrix_fys = sorted(all_fys_set)
+
+        # ── "Not accounted for" difference row ──
+        diff_row: dict = {"label": "Not accounted for", "fy_vals": {}}
+        has_diff = False
+        for fy in matrix_fys:
+            pe_val = pe_row["fy_vals"].get(fy)
+            if pe_val is None:
+                continue
+            sub_sum = sum(r["fy_vals"].get(fy, 0) or 0 for r in project_rows)
+            diff = round(pe_val - sub_sum, 1)
+            if abs(diff) > 0.5:  # ignore rounding noise
+                diff_row["fy_vals"][fy] = diff
+                has_diff = True
+        if not has_diff:
+            diff_row = None
+
+        # ── PE-level mission descriptions (by FY) ──
+        pe_descriptions: list[dict] = []
+        try:
+            desc_rows = conn.execute(
+                """SELECT fiscal_year, description_text
+                   FROM pe_mission_descriptions
+                   WHERE pe_number = ?
+                   ORDER BY fiscal_year""",
+                (pe_number,),
+            ).fetchall()
+            pe_descriptions = [
+                {"fiscal_year": r["fiscal_year"], "text": r["description_text"]}
+                for r in desc_rows
+            ]
+        except Exception:
+            pass  # table may not exist yet
+
+        # ── Tags (PE-level and project-level) ──
+        pe_tags: list[dict] = []
+        project_tags: dict[str, list[dict]] = {}
+        try:
+            tag_rows = conn.execute(
+                """SELECT tag, tag_source, confidence, project_number
+                   FROM pe_tags
+                   WHERE pe_number = ?
+                   ORDER BY confidence DESC, tag""",
+                (pe_number,),
+            ).fetchall()
+            for t in tag_rows:
+                entry = {
+                    "tag": t["tag"],
+                    "tag_source": t["tag_source"],
+                    "confidence": t["confidence"],
+                }
+                if t["project_number"]:
+                    pn = t["project_number"]
+                    if pn not in project_tags:
+                        project_tags[pn] = []
+                    project_tags[pn].append(entry)
+                else:
+                    pe_tags.append(entry)
+        except Exception:
+            pass  # pe_tags table may not exist
+
+    finally:
+        conn.close()
+
+    return _tmpl().TemplateResponse("consolidated_detail.html", {
+        "request": request,
+        "item": dict(item),
+        "amounts": [dict(a) for a in amounts],
+        "sub_groups": sub_groups,
+        "sub_count": len(parsed_subs),
+        "projects": list(projects_by_num.values()),
+        "matrix_fys": matrix_fys,
+        "pe_row": pe_row,
+        "project_rows": project_rows,
+        "diff_row": diff_row,
+        "pe_descriptions": pe_descriptions,
+        "pe_tags": pe_tags,
+        "project_tags": project_tags,
     })

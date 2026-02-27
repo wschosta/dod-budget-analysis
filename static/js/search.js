@@ -11,7 +11,7 @@ var ADV_FIELDS = [
   { value: "service",    label: "Service / Agency" },
   { value: "fiscal_year",label: "Fiscal Year" },
   { value: "exhibit_type",label: "Exhibit Type" },
-  { value: "appropriation_code", label: "Appropriation" },
+  { value: "budget_type", label: "Budget Type" },
   { value: "min_amount", label: "Min Amount ($K)" },
   { value: "max_amount", label: "Max Amount ($K)" },
   { value: "line_item_title", label: "Line Item Title" },

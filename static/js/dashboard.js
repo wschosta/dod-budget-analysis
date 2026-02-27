@@ -36,8 +36,16 @@ function showDashError(id, canvasId, msg) {
   var chartsEl = document.getElementById("dash-charts");
   var programsEl = document.getElementById("dash-programs");
 
+  // 3.6: Show extended loading message after 3 seconds
+  var loadingTimer = setTimeout(function() {
+    if (loadingEl) {
+      loadingEl.innerHTML = '<span class="spinner"></span> Still loading dashboard data&hellip; This may take a moment for large datasets.';
+    }
+  }, 3000);
+
   try {
     var resp = await fetch("/api/v1/dashboard/summary");
+    clearTimeout(loadingTimer);
     if (!resp.ok) throw new Error("HTTP " + resp.status);
     var data = await resp.json();
 
@@ -113,20 +121,20 @@ function showDashError(id, canvasId, msg) {
       showDashError("err-dash-service", "dash-service-chart", "No service data available.");
     }
 
-    // ── Appropriation doughnut chart ────────────────────────────────────────
-    if (data.by_appropriation && data.by_appropriation.length) {
-      var appLabels = data.by_appropriation.map(function(r) {
-        return r.appropriation_title || r.appropriation_code || "Unknown";
+    // ── Budget Type doughnut chart ───────────────────────────────────────────
+    if (data.by_budget_type && data.by_budget_type.length) {
+      var btLabels = data.by_budget_type.map(function(r) {
+        return r.budget_type || "Unknown";
       });
-      var appAmounts = data.by_appropriation.map(function(r) { return (r.total || 0) / 1000; });
+      var btAmounts = data.by_budget_type.map(function(r) { return (r.total || 0) / 1000; });
 
       new Chart(document.getElementById("dash-approp-chart"), {
         type: "doughnut",
         data: {
-          labels: appLabels,
+          labels: btLabels,
           datasets: [{
-            data: appAmounts,
-            backgroundColor: DASH_COLORS.slice(0, appLabels.length),
+            data: btAmounts,
+            backgroundColor: DASH_COLORS.slice(0, btLabels.length),
             borderWidth: 2,
             borderColor: getComputedStyle(document.documentElement).getPropertyValue("--bg-surface").trim() || "#fff"
           }]
@@ -153,20 +161,19 @@ function showDashError(id, canvasId, msg) {
           onClick: function(e, elements) {
             if (elements.length) {
               var idx = elements[0].index;
-              var approp = data.by_appropriation[idx];
-              if (approp.appropriation_code) {
-                window.location.href = "/?appropriation_code=" + encodeURIComponent(approp.appropriation_code);
+              var bt = data.by_budget_type[idx];
+              if (bt.budget_type) {
+                window.location.href = "/?budget_type=" + encodeURIComponent(bt.budget_type);
               }
             }
           }
         }
       });
-      // A4.3: Add export button for appropriation chart
       if (typeof addChartExportButton === "function") {
-        addChartExportButton("dash-approp-chart", "dashboard-appropriation-chart.png");
+        addChartExportButton("dash-approp-chart", "dashboard-budget-type-chart.png");
       }
     } else {
-      showDashError("err-dash-approp", "dash-approp-chart", "No appropriation data available.");
+      showDashError("err-dash-approp", "dash-approp-chart", "No budget type data available.");
     }
 
     // ── Top 10 programs table ───────────────────────────────────────────────
@@ -208,6 +215,7 @@ function showDashError(id, canvasId, msg) {
     }
 
   } catch (err) {
+    clearTimeout(loadingTimer);
     if (loadingEl) {
       loadingEl.innerHTML =
         '<div class="empty-state">' +

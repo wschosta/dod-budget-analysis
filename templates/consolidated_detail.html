@@ -1,0 +1,453 @@
+{% extends "base.html" %}
+
+{% block title %}{{ item.line_item_title or item.pe_number }} — Consolidated PE{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="/consolidated">Consolidated</a> &rsaquo; <span>{{ item.pe_number }}</span>
+</nav>
+
+{# ── Header ──────────────────────────────────────────────────────────────── #}
+<h2>{{ item.line_item_title or item.pe_number }}</h2>
+<div class="pe-meta" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.75rem 0 1.25rem">
+  <span class="badge" style="font-size:.85rem">{{ item.pe_number }}</span>
+  {% if item.organization_name %}
+  <span>{{ item.organization_name }}</span>
+  {% endif %}
+  {% if item.budget_type %}
+  <span style="color:var(--text-secondary)">{{ item.budget_type }}</span>
+  {% endif %}
+</div>
+
+{# ── Metadata grid ───────────────────────────────────────────────────────── #}
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.75rem;margin-bottom:1.5rem">
+  {% if item.appropriation_name %}
+  <div style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:.75rem">
+    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin-bottom:.25rem">Appropriation</div>
+    <div style="font-size:.85rem">{{ item.appropriation_name }}</div>
+  </div>
+  {% endif %}
+  {% if item.account %}
+  <div style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:.75rem">
+    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin-bottom:.25rem">Account</div>
+    <div style="font-size:.85rem">{{ item.account }}</div>
+  </div>
+  {% endif %}
+  {% if item.exhibit_type %}
+  <div style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:.75rem">
+    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin-bottom:.25rem">Exhibit Type</div>
+    <div style="font-size:.85rem">{{ item.exhibit_type | upper }}</div>
+  </div>
+  {% endif %}
+  {% if item.fy_min and item.fy_max %}
+  <div style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:.75rem">
+    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin-bottom:.25rem">FY Coverage</div>
+    <div style="font-size:.85rem">FY{{ item.fy_min }} – FY{{ item.fy_max }}</div>
+  </div>
+  {% endif %}
+  {% if item.submission_count %}
+  <div style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:.75rem">
+    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin-bottom:.25rem">Submissions</div>
+    <div style="font-size:.85rem">{{ item.submission_count }} budget document{{ "s" if item.submission_count != 1 }}</div>
+  </div>
+  {% endif %}
+</div>
+
+{# ── PE-level Tags ────────────────────────────────────────────────────────── #}
+{% if pe_tags %}
+<div style="display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1.25rem">
+  {% for t in pe_tags %}
+  <a href="/programs?tag={{ t.tag }}" class="filter-chip tag-chip"
+     title="Source: {{ t.tag_source }} | Confidence: {{ '%.0f' | format((t.confidence or 0) * 100) }}%"
+     style="display:inline-flex;align-items:center;gap:.3rem;padding:.2rem .6rem;border-radius:1rem;font-size:.72rem;text-decoration:none;
+            border:1px solid {% if t.confidence >= 0.9 %}var(--clr-blue){% elif t.confidence >= 0.7 %}var(--text-secondary){% else %}var(--border-color){% endif %};
+            color:{% if t.confidence >= 0.9 %}var(--clr-blue){% else %}var(--text-secondary){% endif %};
+            background:transparent">
+    {{ t.tag }}
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# ── PE Mission Description (tabbed by FY, expandable) ───────────────────── #}
+{% if pe_descriptions %}
+<section id="pe-desc-section" style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:1rem;margin-bottom:1.5rem">
+  <h3 style="font-size:.9rem;margin-bottom:.75rem;color:var(--text-secondary)">Mission Description</h3>
+  {# Tab bar — oldest FY on left, newest on right (active) #}
+  <div id="pe-desc-tabs" style="display:flex;gap:0;border-bottom:2px solid var(--border-color);margin-bottom:.75rem">
+    {% for desc in pe_descriptions %}
+    <button class="pe-desc-tab" data-idx="{{ loop.index0 }}"
+            onclick="switchPeDescTab({{ loop.index0 }})"
+            style="padding:.35rem .75rem;font-size:.75rem;border:none;cursor:pointer;margin-bottom:-2px;
+                   background:{% if loop.last %}var(--bg-surface){% else %}transparent{% endif %};
+                   border-bottom:2px solid {% if loop.last %}var(--clr-blue){% else %}transparent{% endif %};
+                   color:{% if loop.last %}var(--clr-blue){% else %}var(--text-secondary){% endif %};
+                   font-weight:{% if loop.last %}600{% else %}400{% endif %}">
+      FY{{ desc.fiscal_year }}
+    </button>
+    {% endfor %}
+  </div>
+  {# Tab content panes #}
+  {% for desc in pe_descriptions %}
+  <div class="pe-desc-pane" data-idx="{{ loop.index0 }}" style="display:{% if loop.last %}block{% else %}none{% endif %}">
+    <div id="pe-desc-text-{{ loop.index0 }}" style="font-size:.82rem;line-height:1.6;white-space:pre-line;max-height:6em;overflow:hidden;position:relative;transition:max-height .3s ease">{{ desc.text }}</div>
+    <button id="pe-desc-toggle-{{ loop.index0 }}" onclick="togglePeDescExpand({{ loop.index0 }})"
+            style="display:none;background:none;border:none;color:var(--clr-blue);cursor:pointer;font-size:.78rem;padding:.25rem 0;margin-top:.25rem">
+      Show more &darr;
+    </button>
+  </div>
+  {% endfor %}
+</section>
+<script>
+/* Check each pane and show "Show more" if text overflows the collapsed height */
+(function() {
+  var panes = document.querySelectorAll('.pe-desc-pane');
+  panes.forEach(function(pane) {
+    var idx = pane.getAttribute('data-idx');
+    var textEl = document.getElementById('pe-desc-text-' + idx);
+    var toggleBtn = document.getElementById('pe-desc-toggle-' + idx);
+    /* Wait a tick for rendering so scrollHeight is accurate */
+    setTimeout(function() {
+      if (textEl.scrollHeight > textEl.clientHeight + 4) {
+        toggleBtn.style.display = 'inline-block';
+      }
+    }, 50);
+  });
+})();
+
+function switchPeDescTab(idx) {
+  var tabs = document.querySelectorAll('.pe-desc-tab');
+  tabs.forEach(function(t) {
+    var active = (parseInt(t.getAttribute('data-idx')) === idx);
+    t.style.background = active ? 'var(--bg-surface)' : 'transparent';
+    t.style.borderBottomColor = active ? 'var(--clr-blue)' : 'transparent';
+    t.style.color = active ? 'var(--clr-blue)' : 'var(--text-secondary)';
+    t.style.fontWeight = active ? '600' : '400';
+  });
+  var panes = document.querySelectorAll('.pe-desc-pane');
+  panes.forEach(function(p) {
+    p.style.display = (parseInt(p.getAttribute('data-idx')) === idx) ? 'block' : 'none';
+  });
+  /* Re-check overflow for newly shown pane */
+  var textEl = document.getElementById('pe-desc-text-' + idx);
+  var toggleBtn = document.getElementById('pe-desc-toggle-' + idx);
+  if (textEl.scrollHeight > textEl.clientHeight + 4) {
+    toggleBtn.style.display = 'inline-block';
+  }
+}
+
+function togglePeDescExpand(idx) {
+  var textEl = document.getElementById('pe-desc-text-' + idx);
+  var btn = document.getElementById('pe-desc-toggle-' + idx);
+  if (textEl.style.maxHeight === 'none') {
+    textEl.style.maxHeight = '6em';
+    btn.innerHTML = 'Show more &darr;';
+  } else {
+    textEl.style.maxHeight = 'none';
+    btn.innerHTML = 'Show less &uarr;';
+  }
+}
+</script>
+{% endif %}
+
+{# ── Funding Matrix (transposed: FYs as columns, PE + projects as rows) ── #}
+{% if matrix_fys %}
+<section style="margin-bottom:1.5rem">
+  <h3 style="font-size:1rem;margin-bottom:.75rem">Funding Matrix</h3>
+  <p style="font-size:.8rem;color:var(--text-secondary);margin-bottom:.5rem">
+    Best available amount per fiscal year ($K). PE total from golden time series; sub-project amounts from R-2A exhibits.
+    Click a sub-project row to view narrative text.
+  </p>
+  <div class="table-wrapper">
+    <table id="matrix-table" style="font-size:.75rem;border-collapse:collapse;width:100%;white-space:nowrap">
+      <thead>
+        <tr>
+          <th style="text-align:left;padding:.4rem .5rem;border-bottom:2px solid var(--border-color);position:sticky;left:0;background:var(--bg-surface);z-index:1;min-width:180px;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary)">Program</th>
+          {% for fy in matrix_fys %}
+          <th style="text-align:right;padding:.4rem .5rem;border-bottom:2px solid var(--border-color);font-family:var(--font-mono);font-size:.72rem;color:var(--text-secondary);min-width:70px">FY{{ fy }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {# PE Total row — highlighted #}
+        <tr style="background:color-mix(in srgb, var(--clr-blue) 8%, transparent);font-weight:600">
+          <td style="padding:.4rem .5rem;border-bottom:1px solid var(--border-color);position:sticky;left:0;background:color-mix(in srgb, var(--clr-blue) 8%, var(--bg-surface));z-index:1">
+            {{ pe_row.label }}
+          </td>
+          {% for fy in matrix_fys %}
+          <td style="text-align:right;padding:.4rem .5rem;border-bottom:1px solid var(--border-color);font-family:var(--font-mono)">
+            {% if pe_row.fy_vals.get(fy) is not none %}${{ "{:,.0f}".format(pe_row.fy_vals[fy]) }}{% else %}—{% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {# Sub-project rows — clickable #}
+        {% for row in project_rows %}
+        <tr data-project="{{ row.project_number }}" style="cursor:pointer"
+            onclick="toggleInlinePanel('{{ row.project_number }}', this)"
+            onmouseover="this.style.background='color-mix(in srgb, var(--clr-blue) 6%, transparent)'"
+            onmouseout="if(!this.classList.contains('proj-selected'))this.style.background=''">
+          <td style="padding:.4rem .5rem;border-bottom:1px solid var(--border-color);position:sticky;left:0;background:inherit;z-index:1;max-width:280px" title="{{ row.project_number }} — {{ row.label }}">
+            <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+              <span style="font-family:var(--font-mono);font-size:.7rem;color:var(--clr-blue);margin-right:.35rem">{{ row.project_number }}</span>{{ row.label }}
+            </div>
+            {# 4.2: Show project-level tags as small badge chips #}
+            {% if project_tags and project_tags.get(row.project_number) %}
+            <div style="display:flex;flex-wrap:wrap;gap:.15rem;margin-top:.2rem">
+              {% for t in project_tags[row.project_number][:5] %}
+              <span style="display:inline-block;padding:0 .35rem;border-radius:.6rem;font-size:.6rem;
+                           border:1px solid {% if t.confidence >= 0.9 %}var(--clr-blue){% else %}var(--border-color){% endif %};
+                           color:{% if t.confidence >= 0.9 %}var(--clr-blue){% else %}var(--text-secondary){% endif %}"
+                    title="{{ t.tag_source }} ({{ '%.0f' | format((t.confidence or 0) * 100) }}%)">{{ t.tag }}</span>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </td>
+          {% for fy in matrix_fys %}
+          <td style="text-align:right;padding:.4rem .5rem;border-bottom:1px solid var(--border-color);font-family:var(--font-mono);color:var(--text-secondary)">
+            {% if row.fy_vals.get(fy) is not none %}{% if row.fy_vals[fy] == 0.0 %}—{% else %}${{ "{:,.0f}".format(row.fy_vals[fy]) }}{% endif %}{% else %}{% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+        {# "Not accounted for" difference row #}
+        {% if diff_row %}
+        <tr style="border-top:2px solid var(--border-color);font-style:italic;color:var(--text-secondary);font-size:.72rem">
+          <td style="padding:.4rem .5rem;border-bottom:1px solid var(--border-color);position:sticky;left:0;background:var(--bg-surface);z-index:1">
+            {{ diff_row.label }}
+          </td>
+          {% for fy in matrix_fys %}
+          <td style="text-align:right;padding:.4rem .5rem;border-bottom:1px solid var(--border-color);font-family:var(--font-mono)">
+            {% if diff_row.fy_vals.get(fy) is not none %}{% set v = diff_row.fy_vals[fy] %}{% if v > 0 %}+${{ "{:,.0f}".format(v) }}{% elif v < 0 %}-${{ "{:,.0f}".format(v | abs) }}{% else %}—{% endif %}{% else %}{% endif %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  {# ── Project narrative data for JS ── #}
+  {% if projects %}
+  <script>
+  var _projectData = {
+    {% for proj in projects %}
+    "{{ proj.project_number }}": {
+      "title": {{ proj.project_title | tojson }},
+      "submissions": [
+        {% for sub in proj.submissions %}
+        {"fy": {{ sub.fiscal_year | tojson }}, "text": {{ sub.narrative_text | tojson }}}{{ "," if not loop.last }}
+        {% endfor %}
+      ]
+    }{{ "," if not loop.last }}
+    {% endfor %}
+  };
+  </script>
+  {% endif %}
+
+  {# ── Project-level tags for JS ── #}
+  {% if project_tags %}
+  <script>
+  var _projectTags = {{ project_tags | tojson }};
+  </script>
+  {% endif %}
+
+  <script>
+  /* ── Inline panel logic: panels inserted as <tr> directly below clicked row ── */
+  var _colCount = {{ matrix_fys | length }} + 1;
+
+  function toggleInlinePanel(projNum, clickedRow) {
+    var existingPanel = document.getElementById('panel-' + projNum);
+
+    if (existingPanel) {
+      /* Toggle off — remove the panel row and deselect */
+      existingPanel.remove();
+      clickedRow.classList.remove('proj-selected');
+      clickedRow.style.background = '';
+      return;
+    }
+
+    /* Build new panel row */
+    clickedRow.classList.add('proj-selected');
+    clickedRow.style.background = 'color-mix(in srgb, var(--clr-blue) 10%, transparent)';
+
+    var data = (typeof _projectData !== 'undefined') ? _projectData[projNum] : null;
+    var title = data ? data.title : projNum;
+
+    var panelRow = document.createElement('tr');
+    panelRow.id = 'panel-' + projNum;
+    var td = document.createElement('td');
+    td.colSpan = _colCount;
+    td.style.cssText = 'padding:0;border-bottom:1px solid var(--border-color)';
+
+    var html = '<div style="background:var(--bg-surface);border-left:3px solid var(--clr-blue);padding:.75rem 1rem;margin:0">';
+    /* Header */
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">';
+    html += '<span style="font-size:.82rem;font-weight:600"><span class="badge" style="font-size:.72rem;font-family:var(--font-mono);margin-right:.4rem">' + _escHtml(projNum) + '</span>' + _escHtml(title) + '</span>';
+    html += '<button onclick="closeInlinePanel(\'' + projNum + '\')" style="background:none;border:none;font-size:1.1rem;cursor:pointer;color:var(--text-secondary);padding:.15rem .4rem;line-height:1" aria-label="Close">&times;</button>';
+    html += '</div>';
+
+    /* Project-level tags */
+    var tags = (typeof _projectTags !== 'undefined') ? _projectTags[projNum] : null;
+    if (tags && tags.length) {
+      html += '<div style="display:flex;flex-wrap:wrap;gap:.25rem;margin-bottom:.5rem">';
+      tags.forEach(function(t) {
+        var borderColor = (t.confidence >= 0.9) ? 'var(--clr-blue)' : 'var(--text-secondary)';
+        var textColor = (t.confidence >= 0.9) ? 'var(--clr-blue)' : 'var(--text-secondary)';
+        html += '<span style="display:inline-block;padding:.1rem .5rem;border-radius:1rem;font-size:.68rem;'
+          + 'border:1px solid ' + borderColor + ';color:' + textColor + '">'
+          + _escHtml(t.tag) + '</span>';
+      });
+      html += '</div>';
+    }
+
+    if (!data || !data.submissions.length) {
+      html += '<p style="font-size:.8rem;color:var(--text-secondary);font-style:italic;margin:0">No narrative text available for this project.</p>';
+    } else {
+      /* Filter to submissions that have text, reverse so oldest FY is on the left */
+      var subs = data.submissions.filter(function(s) { return !!s.text; }).reverse();
+      var defaultIdx = subs.length - 1; /* newest FY = last tab = active by default */
+      if (subs.length === 0) {
+        html += '<p style="font-size:.8rem;color:var(--text-secondary);font-style:italic;margin:0">No narrative text available for this project.</p>';
+      } else {
+        /* Tab bar — oldest left, newest right (active) */
+        var tabId = 'tabs-' + projNum.replace(/[^a-zA-Z0-9]/g, '_');
+        html += '<div style="display:flex;gap:0;border-bottom:2px solid var(--border-color);margin-bottom:.5rem">';
+        subs.forEach(function(sub, i) {
+          var active = (i === defaultIdx);
+          html += '<button class="proj-tab" data-tabgroup="' + tabId + '" data-idx="' + i + '"'
+            + ' onclick="switchTab(\'' + tabId + '\',' + i + ')"'
+            + ' style="padding:.35rem .75rem;font-size:.75rem;border:none;background:' + (active ? 'var(--bg-surface)' : 'transparent')
+            + ';border-bottom:2px solid ' + (active ? 'var(--clr-blue)' : 'transparent')
+            + ';margin-bottom:-2px;cursor:pointer;color:' + (active ? 'var(--clr-blue)' : 'var(--text-secondary)')
+            + ';font-weight:' + (active ? '600' : '400') + '">'
+            + 'FY' + _escHtml(String(sub.fy))
+            + '</button>';
+        });
+        html += '</div>';
+        /* Tab content panes */
+        subs.forEach(function(sub, i) {
+          html += '<div class="proj-tab-pane" data-tabgroup="' + tabId + '" data-idx="' + i + '"'
+            + ' style="display:' + (i === defaultIdx ? 'block' : 'none') + '">'
+            + '<pre style="font-size:.75rem;line-height:1.5;white-space:pre-wrap;word-break:break-word;background:var(--bg-body);border:1px solid var(--border-color);border-radius:var(--radius);padding:.75rem;max-height:350px;overflow-y:auto;margin:0">'
+            + _escHtml(sub.text) + '</pre></div>';
+        });
+      }
+    }
+    html += '</div>';
+    td.innerHTML = html;
+    panelRow.appendChild(td);
+
+    /* Insert directly after the clicked row */
+    clickedRow.parentNode.insertBefore(panelRow, clickedRow.nextSibling);
+    panelRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function closeInlinePanel(projNum) {
+    var panel = document.getElementById('panel-' + projNum);
+    if (panel) panel.remove();
+    var row = document.querySelector('tr[data-project="' + projNum + '"]');
+    if (row) { row.classList.remove('proj-selected'); row.style.background = ''; }
+  }
+
+  function switchTab(tabGroup, idx) {
+    /* Activate the clicked tab button */
+    var btns = document.querySelectorAll('.proj-tab[data-tabgroup="' + tabGroup + '"]');
+    btns.forEach(function(b) {
+      var active = (parseInt(b.getAttribute('data-idx')) === idx);
+      b.style.background = active ? 'var(--bg-surface)' : 'transparent';
+      b.style.borderBottomColor = active ? 'var(--clr-blue)' : 'transparent';
+      b.style.color = active ? 'var(--clr-blue)' : 'var(--text-secondary)';
+      b.style.fontWeight = active ? '600' : '400';
+    });
+    /* Show the right pane */
+    var panes = document.querySelectorAll('.proj-tab-pane[data-tabgroup="' + tabGroup + '"]');
+    panes.forEach(function(p) {
+      p.style.display = (parseInt(p.getAttribute('data-idx')) === idx) ? 'block' : 'none';
+    });
+  }
+
+  function _escHtml(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+  </script>
+</section>
+{% endif %}
+
+{# ── Submission Archive (collapsed by default) ────────────────────────── #}
+{% if sub_groups %}
+<section style="margin-bottom:1.5rem">
+  <details>
+    <summary style="font-size:1rem;font-weight:700;cursor:pointer;padding:.5rem 0">
+      Submission Archive
+      <span style="font-size:.8rem;color:var(--text-secondary);font-weight:400">({{ sub_count }} document{{ "s" if sub_count != 1 }})</span>
+    </summary>
+    <p style="font-size:.8rem;color:var(--text-secondary);margin:.5rem 0">
+      Raw data from each budget submission document, grouped by fiscal year.
+    </p>
+
+    {% for fy, subs in sub_groups.items() | sort(attribute='0', reverse=True) %}
+    <details style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);margin-bottom:.5rem">
+      <summary style="padding:.75rem 1rem;cursor:pointer;font-size:.85rem;font-weight:600">
+        FY{{ fy }} Submissions
+        <span style="font-size:.78rem;font-weight:400;color:var(--text-secondary)">({{ subs | length }})</span>
+      </summary>
+      <div style="padding:0 1rem .75rem">
+        {% for sub in subs %}
+        <div style="border-top:1px solid var(--border-color);padding:.75rem 0{% if loop.first %};border-top:none{% endif %}">
+          <div style="font-size:.78rem;color:var(--text-secondary);margin-bottom:.35rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+               title="{{ sub.source_file or '' }}">
+            {{ sub.source_file or "unknown source" }}
+          </div>
+          {% if sub.amounts %}
+          <div class="table-wrapper" style="margin-top:.25rem">
+            <table style="font-size:.78rem;width:100%;border-collapse:collapse">
+              <thead>
+                <tr>
+                  <th style="text-align:left;padding:.25rem .5rem;border-bottom:1px solid var(--border-color);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary)">Column</th>
+                  <th style="text-align:right;padding:.25rem .5rem;border-bottom:1px solid var(--border-color);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary)">Value ($K)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for col, val in sub.amounts.items() | sort %}
+                <tr>
+                  <td style="padding:.2rem .5rem;font-size:.78rem">{{ col.replace("amount_", "").replace("_", " ").title() }}</td>
+                  <td style="padding:.2rem .5rem;text-align:right;font-family:var(--font-mono);font-size:.78rem">
+                    {% if val is not none %}${{ "{:,.0f}".format(val) }}{% else %}—{% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div style="font-size:.78rem;color:var(--text-secondary);font-style:italic">No amount data in this submission</div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </details>
+    {% endfor %}
+  </details>
+</section>
+{% endif %}
+
+{# ── Related Programs (HTMX lazy-loaded) ────────────────────────────────── #}
+<section style="margin-bottom:1.5rem">
+  <h3 style="font-size:1rem;margin-bottom:.75rem">Related Programs</h3>
+  <div id="pe-related"
+       hx-get="/partials/program-related/{{ item.pe_number }}?min_confidence=0.8&limit=20"
+       hx-trigger="load"
+       hx-swap="innerHTML">
+    <p style="color:var(--text-secondary);font-size:.8rem"><span class="spinner" style="display:inline-block;width:14px;height:14px;vertical-align:middle;margin-right:.3rem"></span> Loading related programs&hellip;</p>
+  </div>
+</section>
+
+<div style="margin-top:1rem">
+  <a href="/consolidated" class="btn btn-secondary btn-sm">&larr; Back to list</a>
+  {% if item.pe_number %}
+  <a href="/programs/{{ item.pe_number }}" class="btn btn-secondary btn-sm" style="margin-left:.5rem">View in Program Explorer</a>
+  {% endif %}
+</div>
+{% endblock %}

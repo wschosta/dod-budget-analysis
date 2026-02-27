@@ -297,10 +297,344 @@ Changed to "FY20XX = Oct 20XX-1 – Sep 20XX" — generic, timeless.
 
 ---
 
+## Round 3 — Data Quality Audit & Future Directions (2026-02-26)
+
+Findings from database investigation and consolidated view development. These are
+not UI bugs — they are data pipeline gaps and architecture issues to address in
+future sprints.
+
+### Data Quality Issues
+
+#### 51. Project-Level Tags Are Empty (0 tags) **[OPEN — Pipeline]**
+
+Despite 412,071 `project_descriptions` records, the `pe_tags` table has **zero**
+rows where `project_number IS NOT NULL`. The enricher's project-level keyword
+matching (`enricher.py:985-993`) either isn't running or the taxonomy patterns
+find no hits in project description text.
+
+**Impact:** Consolidated view sub-project panels show no tags. Users see tags at
+PE level but not at sub-project level.
+
+```sql
+SELECT COUNT(*) FROM pe_tags WHERE project_number IS NOT NULL;
+-- Result: 0
+SELECT COUNT(*) FROM project_descriptions;
+-- Result: 412,071
+```
+
+**Suggested fix:** Debug the enricher Phase 3 project-level tagging loop. The
+keyword regex patterns may not match the shorter, more technical project titles.
+Consider adding a broader second-tier taxonomy or running LLM tagging on project
+descriptions.
+
+---
+
+#### 52. Detail Rows Have NULL budget_type Despite Valid appropriation_code **[OPEN — DB]**
+
+2,161 rows in `budget_lines` have `appropriation_code` populated but `budget_type`
+is NULL. These are detail exhibit rows (r2, p5, amendment, ogsi). Summary rows
+(p1, r1) have `budget_type` populated.
+
+**Workaround applied:** Dashboard and aggregation endpoints now use a shared
+`BUDGET_TYPE_CASE_EXPR` (`utils/database.py`) to derive budget type from
+appropriation code at query time.
+
+**Permanent fix:** Populate `budget_type` during ingestion for all rows, not just
+summary exhibits.
+
+```sql
+SELECT appropriation_code, COUNT(*) FROM budget_lines
+WHERE budget_type IS NULL AND appropriation_code IS NOT NULL
+GROUP BY appropriation_code ORDER BY COUNT(*) DESC;
+```
+
+---
+
+#### 53. 67% of budget_lines Have No PE Number **[OPEN — DB]**
+
+83,497 of 124,670 rows (67%) have NULL `pe_number`. These rows cannot be enriched,
+tagged, or linked to PE-centric views (Programs, Consolidated).
+
+**Root cause:** PE numbers only appear in certain exhibit types (R-2, P-5). Summary
+exhibits (R-1, P-1, O-1) and many O&M/MilPers exhibits don't include PE numbers
+at the line level.
+
+```sql
+SELECT exhibit_type, COUNT(*) as cnt,
+       SUM(CASE WHEN pe_number IS NULL THEN 1 ELSE 0 END) as null_pe
+FROM budget_lines GROUP BY exhibit_type ORDER BY cnt DESC;
+```
+
+---
+
+#### 54. Keyword Taxonomy May Be Too Restrictive (41 terms) **[OPEN — Pipeline]**
+
+The domain taxonomy in `enricher.py:64-127` has 41 keyword patterns. Current tag
+distribution: 39,059 keyword tags + 4,140 structured tags across 3,357 PEs (~12.9
+tags/PE average).
+
+**Potential expansion terms:** JADC2, kill-chain, integrated-air-defense, SIGINT,
+ELINT, COMINT, GEOINT, PNT, GPS, EMP, CBRNE, force-protection, readiness,
+mobility, airlift, tanker, refueling, amphibious, counter-intelligence,
+information-warfare, cyber-operations, unmanned-systems.
+
+**Suggested fix:** Add a second tier of tags with confidence 0.6-0.7. Consider
+running LLM-based tagging (Phase 3 optional) for broader coverage.
+
+---
+
+#### 55. 12 PEs Without Mission Descriptions **[OPEN — Pipeline]**
+
+```sql
+SELECT pe_number FROM pe_index
+WHERE pe_number NOT IN (SELECT DISTINCT pe_number FROM pe_descriptions);
+-- Returns 12 PEs
+```
+
+These PEs get no keyword tags from narrative text. They rely solely on structured
+tags from budget_lines fields.
+
+---
+
+#### 56. Fiscal Year Gaps in PE Funding Matrices **[OPEN — DB]**
+
+Some PEs show funding for FY2025-2026 but nothing earlier, even when historical
+data should exist. Requires cross-referencing `line_item_amounts` coverage per PE.
+
+```sql
+SELECT li.pe_number, MIN(a.target_fy) as fy_min, MAX(a.target_fy) as fy_max,
+       COUNT(DISTINCT a.target_fy) as fy_count
+FROM line_items li JOIN line_item_amounts a ON a.line_item_id = li.id
+GROUP BY li.pe_number HAVING fy_count < 3 ORDER BY fy_count;
+```
+
+---
+
+#### 57. appropriation_code NULL Rows **[OPEN — DB]**
+
+Rows where `appropriation_code` is NULL fall through the CASE mapping and appear
+as "Unknown" in budget type breakdowns.
+
+```sql
+SELECT COUNT(*) FROM budget_lines WHERE appropriation_code IS NULL;
+```
+
+---
+
+### Performance Issues
+
+#### 58. Missing Composite Database Indexes **[OPEN — Perf]**
+
+No composite index on commonly co-filtered columns:
+- `(pe_number, fiscal_year)` — used by PE detail, funding matrix, aggregations
+- `(organization_name, fiscal_year)` — used by service-filtered queries
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_bl_pe_fy ON budget_lines(pe_number, fiscal_year);
+CREATE INDEX IF NOT EXISTS idx_bl_org_fy ON budget_lines(organization_name, fiscal_year);
+```
+
+---
+
+#### 59. TTL Cache Too Short for Production (300s) **[OPEN — Perf]**
+
+Dashboard and aggregation caches use 300-second TTL. Data rarely changes between
+database rebuilds. Consider increasing to 3600s for production or invalidating on
+rebuild via webhook/signal.
+
+---
+
+#### 60. FTS Queries With Large Result Sets **[OPEN — Perf]**
+
+FTS5 `MATCH` returns all matches before pagination is applied. Consider using
+`LIMIT` inside the FTS subquery for early termination when only the first page
+is needed.
+
+---
+
+#### 61. Full Table Scans for Aggregation Queries **[OPEN — Perf]**
+
+Most aggregation queries scan 124K+ rows in `budget_lines`. Consider materialized
+summary tables or pre-computed aggregations for common groupings (by service, by
+fiscal year, by budget type).
+
+---
+
+### Future Directions (No Code Changes Yet)
+
+#### Programs Tab Evolution: Weapon System Grouping
+
+The Programs page should evolve to group PEs by weapon system or major program
+(e.g., "B-52" would show its RDT&E PE, Procurement PE, O&M PE, and MilPers PE
+together). This is the path toward a "Spruill chart" showing total cost of
+ownership across all appropriation types.
+
+**Data requirements:**
+- New `program_groups` + `pe_group_membership` tables
+- Initial mapping: manual curation for top 20-50 weapon systems
+- Future: LLM-assisted classification, fuzzy title matching
+
+---
+
+#### Search Results: Funding Timeline View
+
+Add a "Timeline View" toggle to search results on `/` that replaces the tabular
+amount columns with horizontal funding bars per row. The amount data already
+exists in `data-raw` attributes — a client-side sparkline renderer can build
+mini bar charts without API changes.
+
+---
+
+#### Sub-PE Programs in Tag-Search View
+
+When `/programs?tag=X` matches project-level tags (once they exist), expand PE
+cards to show which sub-projects matched with badges linking to
+`/consolidated/{pe}#project-{projNum}`.
+
+---
+
+## Round 4 — Tag Coverage Assessment & Fixes (2026-02-26)
+
+### ~~52. budget_type NULL Rows~~ **[RESOLVED]**
+
+Created `scripts/fix_budget_types.py` migration that backfills budget_type from
+appropriation_code. 2,161 rows fixed. Also added post-ingestion step in
+`pipeline/builder.py`. 388 rows remain NULL (no appropriation_code to derive from).
+
+---
+
+### ~~58. Missing Composite Indexes~~ **[RESOLVED]**
+
+Added 4 composite indexes via migration script and pipeline:
+`idx_bl_org_fy`, `idx_bl_bt_fy`, `idx_bl_et_fy`, `idx_bl_pe_fy`.
+Also runs ANALYZE for query planner optimization.
+
+---
+
+### ~~59. TTL Cache Too Short~~ **[RESOLVED]**
+
+Dashboard cache: 300 -> 900 seconds. Aggregation cache: 300 -> 600 seconds.
+
+---
+
+### 62. Tag Coverage Assessment **[DOCUMENTED]**
+
+Assessment of PE-level tagging quality (2026-02-26):
+
+| Metric | Value |
+|--------|-------|
+| Total PEs in pe_index | 3,442 |
+| PEs with at least 1 tag | 3,357 (97.5%) |
+| Keyword tags | 39,059 (across 3,340 PEs, 34 unique tags) |
+| Structured tags | 4,140 (across 1,498 PEs, 12 unique tags) |
+| Classification tags (rdte, procurement, etc.) | 1,477 (3.4% of total) |
+| Discovery tags (keyword/domain) | 41,722 (96.6%) |
+| Project-level tags | **0** (unchanged from #51) |
+| Average tags per PE | ~12.6 |
+
+**Tag quality assessment:**
+- Classification tags (rdte, procurement, om, milpers) are 3.4% of total — this is
+  acceptable; they serve as budget category markers, not the main discovery mechanism.
+- Top discovery tags: communications (2,679), aviation (2,521), training (2,499),
+  space (2,275), logistics (2,242), missile (2,169). These cover 60-78% of PEs each.
+- The high-coverage tags (communications at 78%) are still meaningful for defense
+  budget context — most programs involve some communications component.
+- Lower-coverage tags are more selective: autonomy (987, 29%), directed-energy (814,
+  24%), special-operations (761, 22%), hypersonics (506, 15%).
+- **Project-level tags remain at 0** — this is the main gap. See #51 for details.
+
+**Related programs (PE lineage):**
+- Total links: 783,845
+- explicit_pe_ref: 773,974 (confidence 0.95)
+- name_match: 9,871 (confidence 0.60)
+- With confidence >= 0.8: 773,974 (only explicit refs survive)
+- The 773K explicit links is high — suggests many cross-references in budget docs.
+  The 0.8 threshold effectively filters to explicit PE references only.
+
+**Recommendation:** No immediate changes needed for PE-level tags. The pipeline
+produces reasonable coverage with meaningful domain-specific tags. The main gap
+is project-level tags (#51) which requires pipeline debugging.
+
+---
+
+## Round 5 — Database Data Quality Fixes (2026-02-27)
+
+9-step migration (`scripts/fix_data_quality.py`) plus pipeline hardening to address
+duplicate rows, NULL fields, and reference table noise.
+
+### ~~5. "By Appropriation Type" donut — all "Unknown"~~ **[RESOLVED]**
+
+Budget type backfill expanded: added DHP to O&M and AMMO to Procurement mappings in
+`scripts/fix_budget_types.py`; exact title mapping added in `repair_database.py`.
+NULL budget_type reduced from 388 to 116.
+
+---
+
+### ~~6/14. "Budget by Service" — large "Unknown" bucket~~ **[RESOLVED]**
+
+Empty `organization_name` rows (311) filled via source-file path inference in
+migration step 5. Empty organization count: 311 to 0.
+
+---
+
+### ~~7/17/22. Duplicate/repetitive results~~ **[RESOLVED]**
+
+Cross-file deduplication added to `pipeline/builder.py` (excludes `*a.xlsx` amendment
+files when base file exists) plus migration step 1 dedup by
+`(pe_number, line_item, fiscal_year, organization, exhibit_type, source_file)`.
+Total rows: 124,670 to 47,531 (62% reduction). Cross-file duplicates: 28,276+ to 0.
+
+---
+
+### ~~57. appropriation_code NULL rows~~ **[RESOLVED — Partial]**
+
+Enhanced keyword matching in `repair_database.py` with broader appropriation patterns.
+NULL appropriation_code reduced from 21,831 (17.5%) to 3,531 (7.4%). Remaining NULLs
+are rows without enough context to infer an appropriation code.
+
+---
+
+### 63. Footnote entries in appropriation_titles reference table **[RESOLVED]**
+
+`pipeline/backfill.py` modified to filter footnote-like entries from the
+`appropriation_titles` query. Cleaned 31 footnote rows; title count: 256 to 225.
+
+---
+
+### Round 5 Files Changed
+
+| File | Change |
+|------|--------|
+| `scripts/fix_data_quality.py` | New — 9-step migration (steps 0-8) |
+| `pipeline/builder.py` | `*a.xlsx` exclusion + cross-file dedup logic |
+| `repair_database.py` | Enhanced appropriation keyword matching + exact title mapping |
+| `scripts/fix_budget_types.py` | Added DHP to O&M, AMMO to Procurement |
+| `pipeline/backfill.py` | Footnote filtering in appropriation_titles query |
+| `tests/test_pipeline_group/test_data_quality_fixes.py` | New — 34 tests |
+
+### Round 5 Results Summary
+
+| Metric | Before | After |
+|--------|--------|-------|
+| Total rows | 124,670 | 47,531 (62% reduction) |
+| Cross-file duplicates | 28,276+ | 0 |
+| NULL appropriation_code | 21,831 (17.5%) | 3,531 (7.4%) |
+| NULL budget_type | 388 | 116 |
+| Empty organization_name | 311 | 0 |
+| Footnote entries in ref table | 31 | 0 |
+| Appropriation titles | 256 | 225 (clean) |
+
+---
+
 ## Summary
 
 | Status | Count | Issues |
 |--------|-------|--------|
+| **Round 5 RESOLVED** | 5 | #5, #6/14, #7/17/22, #57, #63 |
+| **Round 4 RESOLVED** | 3 | #52, #58, #59 |
+| **Round 4 DOCUMENTED** | 1 | #62 (tag assessment) |
+| **Round 3 OPEN (Data)** | 5 | #51, 53-56 (pipeline/DB data quality) |
+| **Round 3 OPEN (Perf)** | 2 | #60-61 (performance optimization) |
 | **Round 2 RESOLVED** | 20 | #29-37, #40-48, #50 |
 | **Round 2 OPEN** | 2 | #38 (service normalization — DB), #39 (tag quality — pipeline) |
 | **Round 2 GRADUAL** | 1 | #49 (inline styles — ongoing) |
@@ -311,5 +645,6 @@ Changed to "FY20XX = Oct 20XX-1 – Sep 20XX" — generic, timeless.
 - `validate_amount_column()` uses regex `^amount_fy\d{4}_[a-z]+$` — prevents SQL injection while accepting any valid FY column
 - `get_amount_columns(conn)` discovers columns from DB schema at runtime — no manual update needed when new FY data is added
 - `make_fiscal_year_column_labels()` builds human-readable labels from column names
+- `BUDGET_TYPE_CASE_EXPR` in `utils/database.py` — shared CASE expression for deriving budget_type from appropriation_code, used by dashboard and aggregations
 - `tests/test_shared_group/test_dynamic_fy_columns.py` — 32-case test suite covering regex validation, label generation, and WHERE clause building with dynamic columns
 - All template FY rendering uses `{% for %}` loops over dynamic data — no hardcoded FY references remain in Round 2 scope

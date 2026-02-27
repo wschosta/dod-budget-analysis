@@ -34,17 +34,17 @@
   <span class="spinner"></span> Loading dashboard data&hellip;
 </div>
 
-<!-- Charts row 1: Service breakdown + Appropriation pie -->
-<div class="dashboard-grid" id="dash-charts" style="display:none" role="region" aria-label="Service and appropriation charts">
+<!-- Charts row 1: Service breakdown + Budget Type pie -->
+<div class="dashboard-grid" id="dash-charts" style="display:none" role="region" aria-label="Service and budget type charts">
   <div class="chart-card">
     <h3>Budget by Service ($M)</h3>
     <div id="err-dash-service" style="display:none" class="empty-state" role="alert"></div>
     <canvas id="dash-service-chart" height="250" role="img" aria-label="Bar chart showing budget by service in millions"></canvas>
   </div>
   <div class="chart-card">
-    <h3>By Appropriation</h3>
+    <h3>By Budget Type</h3>
     <div id="err-dash-approp" style="display:none" class="empty-state" role="alert"></div>
-    <canvas id="dash-approp-chart" height="250" role="img" aria-label="Doughnut chart showing budget by appropriation type"></canvas>
+    <canvas id="dash-approp-chart" height="250" role="img" aria-label="Doughnut chart showing budget by type (color of money)"></canvas>
   </div>
 </div>
 

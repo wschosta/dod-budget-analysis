@@ -108,11 +108,16 @@ def backfill(conn: sqlite3.Connection, dry_run: bool = False) -> dict:
     approp_rows = conn.execute(
         "SELECT DISTINCT account, account_title FROM budget_lines "
         "WHERE account IS NOT NULL AND account != '' "
+        "AND account NOT LIKE '*%' "
+        "AND LENGTH(TRIM(account)) > 1 "
         "ORDER BY account"
     ).fetchall()
 
     for (account, account_title) in approp_rows:
         code = account.strip()
+        # Skip footnote-style entries that slipped through the SQL filter
+        if code.startswith("*") or len(code) <= 1:
+            continue
         title = (account_title or code).strip()
 
         if not dry_run:

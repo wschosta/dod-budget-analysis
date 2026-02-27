@@ -2496,6 +2496,18 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         print(f"  Excluded {_display_count} *_display* Excel files "
               f"(duplicate formatting variants)", flush=True)
 
+    # Exclude *a.xlsx alternate Comptroller files (e.g. r1a.xlsx, p1a.xlsx).
+    # These contain identical data to the base files and create duplicate rows.
+    # Pattern is conservative: only matches known exhibit stems + 'a'.
+    _ALT_RE = re.compile(r"^(c1|m1|o1|p1|p1r|r1|rf1)a$", re.IGNORECASE)
+    _alt_count = sum(1 for f in xlsx_files if _ALT_RE.match(f.stem))
+    xlsx_files = [f for f in xlsx_files if not _ALT_RE.match(f.stem)]
+    if _alt_count:
+        logger.info("Excluded %d *a.xlsx alternate files (duplicate data)",
+                    _alt_count)
+        print(f"  Excluded {_alt_count} *a.xlsx alternate files "
+              f"(duplicate data variants)", flush=True)
+
     # Legacy .xls support: convert to .xlsx on-the-fly if xlrd is available.
     # FY1998-2009 era documents use the older OLE2 .xls format that openpyxl
     # cannot read directly.
@@ -3421,6 +3433,33 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     _elapsed = time.time() - _t0
     print(f" done ({_elapsed:.1f}s)", flush=True)
 
+    # ── Backfill budget_type from appropriation_code ──────────────────────
+    # Detail exhibits (r2, p5, amendment, ogsi) often have appropriation_code
+    # but NULL budget_type.  Backfill using the canonical mapping so that
+    # downstream GROUP BY budget_type queries produce clean results without
+    # needing runtime CASE expressions.
+    from scripts.fix_budget_types import APPROP_TO_BUDGET_TYPE
+
+    _t0 = time.time()
+    _bt_before = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines WHERE budget_type IS NULL"
+    ).fetchone()[0]
+    _bt_updated = 0
+    for _approp, _bt in APPROP_TO_BUDGET_TYPE.items():
+        _bt_updated += conn.execute(
+            "UPDATE budget_lines SET budget_type = ? "
+            "WHERE budget_type IS NULL AND appropriation_code = ?",
+            (_bt, _approp),
+        ).rowcount
+    conn.commit()
+    _bt_after = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines WHERE budget_type IS NULL"
+    ).fetchone()[0]
+    _elapsed = time.time() - _t0
+    print(f"  Backfilled budget_type: {_bt_updated:,} rows "
+          f"({_bt_before:,} -> {_bt_after:,} NULL) ({_elapsed:.1f}s)", flush=True)
+    logger.info("Backfilled budget_type for %d rows", _bt_updated)
+
     # ── Deduplicate budget_lines rows ──────────────────────────────────────
     # Remove exact duplicate rows (same source, fiscal_year, PE, line_item,
     # org) keeping only the row with the lowest id.
@@ -3432,10 +3471,21 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
           end="", flush=True)
     dup_count = conn.execute("""
         DELETE FROM budget_lines WHERE id NOT IN (
-            SELECT MIN(id) FROM budget_lines
-            GROUP BY source_file, fiscal_year, pe_number,
-                     line_item_title, organization_name,
-                     exhibit_type, amount_type
+            SELECT id FROM (
+                SELECT id,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY fiscal_year, pe_number, line_item_title,
+                                     organization_name, exhibit_type,
+                                     amount_type, appropriation_code
+                        ORDER BY
+                            CASE WHEN source_file LIKE '%' || fiscal_year || '%'
+                                 THEN 0 ELSE 1 END,
+                            source_file DESC,
+                            id ASC
+                    ) AS rn
+                FROM budget_lines
+            )
+            WHERE rn = 1
         )
     """).rowcount
     if dup_count:
@@ -3482,9 +3532,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     try:
         conn.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_bl_dedup
-            ON budget_lines(source_file, fiscal_year, pe_number,
-                            line_item_title, organization_name,
-                            exhibit_type, amount_type)
+            ON budget_lines(fiscal_year, pe_number, line_item_title,
+                            organization_name, exhibit_type,
+                            amount_type, appropriation_code)
         """)
         conn.commit()
     except Exception:

@@ -216,7 +216,7 @@ function restoreFiltersFromURL() {
   });
 
   // Multi-selects — set option.selected then sync checkbox-select UI
-  ["fiscal_year", "service", "exhibit_type", "appropriation_code"].forEach(name => {
+  ["fiscal_year", "service", "exhibit_type", "budget_type"].forEach(name => {
     const el = form.elements[name];
     if (!el || !params.has(name)) return;
     const vals = params.getAll(name);
@@ -834,7 +834,7 @@ function loadLandingVisuals() {
             onClick: function(e, el) {
               if (el.length) {
                 var idx = el[0].index;
-                window.location.href = "/?service=" + encodeURIComponent(labels[idx]);
+                window.location.href = "/?service=" + encodeURIComponent(labels[idx]) + "#results-container";
               }
             }
           }
@@ -843,55 +843,14 @@ function loadLandingVisuals() {
       .catch(function() {});
   }
 
-  // Load appropriation stacked bar chart
+  // Load budget type doughnut chart (shared utility from budget-charts.js)
   if (appCanvas) {
-    fetch("/api/v1/aggregations?group_by=appropriation")
-      .then(function(r) { return r.ok ? r.json() : null; })
-      .then(function(data) {
-        if (!data || !data.rows || !data.rows.length) return;
-        var cols = Object.keys(data.rows[0]).filter(function(k) { return /^total_fy\d+/.test(k); }).sort();
-        var reqCol = cols.find(function(c) { return c.includes("request"); }) || cols[cols.length - 1];
-        if (!reqCol) return;
-
-        var labels = data.rows.map(function(r) { return r.group_value || "Unknown"; });
-        var amounts = data.rows.map(function(r) { return (r[reqCol] || 0) / 1000; });
-
-        new Chart(appCanvas, {
-          type: "doughnut",
-          data: {
-            labels: labels,
-            datasets: [{
-              data: amounts,
-              backgroundColor: LANDING_COLORS.slice(0, labels.length),
-              borderWidth: 2,
-              borderColor: getComputedStyle(document.documentElement).getPropertyValue("--bg-surface").trim() || "#fff"
-            }]
-          },
-          options: {
-            plugins: {
-              legend: { position: "right", labels: { boxWidth: 12, font: { size: 11 } } },
-              tooltip: {
-                callbacks: {
-                  label: function(ctx) {
-                    var total = ctx.dataset.data.reduce(function(a, b) { return a + b; }, 0);
-                    var pct = total > 0 ? (ctx.parsed / total * 100).toFixed(1) : 0;
-                    return ctx.label + ": $" + ctx.parsed.toLocaleString() + "M (" + pct + "%)";
-                  }
-                }
-              }
-            },
-            onHover: function(e, el) { e.native.target.style.cursor = el.length ? "pointer" : "default"; },
-            onClick: function(e, el) {
-              if (el.length) {
-                var idx = el[0].index;
-                var approp = data.rows[idx].group_value;
-                if (approp) window.location.href = "/?appropriation_code=" + encodeURIComponent(approp);
-              }
-            }
-          }
-        });
-      })
-      .catch(function() {});
+    renderBudgetTypeDoughnut("landing-approp-chart", {
+      colors: LANDING_COLORS,
+      onClick: function(budgetType) {
+        window.location.href = "/?budget_type=" + encodeURIComponent(budgetType) + "#results-container";
+      },
+    });
   }
 }
 
@@ -969,6 +928,86 @@ function loadTagCloud() {
     });
 }
 
+// ── 3.1: Faceted counts — show result counts per filter option ────────────────
+
+var _facetTimer = null;
+
+function loadFacetCounts() {
+  // Only on the home page with filters
+  var form = document.getElementById("filter-form");
+  if (!form) return;
+
+  // Debounce to avoid rapid-fire fetches
+  clearTimeout(_facetTimer);
+  _facetTimer = setTimeout(function() { _doLoadFacets(form); }, 200);
+}
+
+function _doLoadFacets(form) {
+  // Build query from current filter state
+  var params = new URLSearchParams();
+  var fySelect = document.getElementById("fiscal_year");
+  if (fySelect) {
+    Array.from(fySelect.selectedOptions).forEach(function(o) {
+      params.append("fiscal_year", o.value);
+    });
+  }
+  var svcSelect = document.getElementById("service");
+  if (svcSelect) {
+    Array.from(svcSelect.selectedOptions).forEach(function(o) {
+      params.append("service", o.value);
+    });
+  }
+  var etSelect = document.getElementById("exhibit_type");
+  if (etSelect) {
+    Array.from(etSelect.selectedOptions).forEach(function(o) {
+      params.append("exhibit_type", o.value);
+    });
+  }
+  var btSelect = document.getElementById("budget_type");
+  if (btSelect) {
+    Array.from(btSelect.selectedOptions).forEach(function(o) {
+      params.append("budget_type", o.value);
+    });
+  }
+
+  fetch("/api/v1/facets?" + params.toString())
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(data) {
+      if (!data) return;
+      _applyFacetCounts("fiscal_year", data.fiscal_year || []);
+      _applyFacetCounts("service", data.service || []);
+      _applyFacetCounts("exhibit_type", data.exhibit_type || []);
+      _applyFacetCounts("budget_type", data.budget_type || []);
+    })
+    .catch(function() { /* ignore facet errors */ });
+}
+
+function _applyFacetCounts(selectId, facets) {
+  var sel = document.getElementById(selectId);
+  if (!sel) return;
+
+  // Build a map of value -> count
+  var countMap = {};
+  facets.forEach(function(f) { countMap[f.value] = f.count; });
+
+  Array.from(sel.options).forEach(function(opt) {
+    if (!opt.value) return; // skip placeholder
+    var count = countMap[opt.value];
+    // Strip any existing count suffix like " (1,234)"
+    var baseText = opt.textContent.replace(/\s*\(\d[\d,]*\s*rows?\)$/, "")
+                                   .replace(/\s*\(\d[\d,]*\)$/, "");
+    if (count !== undefined) {
+      opt.textContent = baseText + " (" + count.toLocaleString() + ")";
+      opt.disabled = false;
+      opt.style.color = "";
+    } else {
+      opt.textContent = baseText + " (0)";
+      opt.disabled = !opt.selected;
+      opt.style.color = opt.selected ? "" : "var(--text-secondary)";
+    }
+  });
+}
+
 // ── Initialise ─────────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", function () {
@@ -1026,6 +1065,13 @@ document.addEventListener("DOMContentLoaded", function () {
     });
     form.addEventListener("input", updateDownloadLinks);
   }
+
+  // 3.1: Load faceted counts to show result counts on filter options
+  loadFacetCounts();
+  // Re-load facets after HTMX swap (filter change)
+  document.body.addEventListener("htmx:afterSwap", function() {
+    loadFacetCounts();
+  });
 
   // JS-003: Add keyboard hint near search box
   const qInput = document.getElementById("q");

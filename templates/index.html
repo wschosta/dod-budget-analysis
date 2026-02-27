@@ -38,8 +38,8 @@
       <canvas id="landing-service-chart" height="200" role="img" aria-label="Bar chart showing budget totals by military service"></canvas>
     </div>
     <div class="chart-card landing-chart" id="landing-approp-chart-card">
-      <h3>By Appropriation Type</h3>
-      <canvas id="landing-approp-chart" height="200" role="img" aria-label="Doughnut chart showing budget by appropriation type"></canvas>
+      <h3>By Budget Type</h3>
+      <canvas id="landing-approp-chart" height="200" role="img" aria-label="Doughnut chart showing budget by type (color of money)"></canvas>
     </div>
   </div>
 </section>
@@ -130,12 +130,12 @@
         </div>
 
         <div class="filter-group">
-          <label for="appropriation_code" data-tooltip="Appropriation 'color of money' — e.g., RDT&amp;E, Procurement, O&amp;M. Select multiple with Ctrl+click (Windows) or Cmd+click (Mac).">Appropriation</label>
-          <select id="appropriation_code" name="appropriation_code" multiple>
-            {% for ap in appropriations %}
-            <option value="{{ ap.code }}"
-                    {% if ap.code in filters.appropriation_code %}selected{% endif %}>
-              {{ ap.code }}{% if ap.title %} — {{ ap.title }}{% endif %}
+          <label for="budget_type" data-tooltip="Color of money — e.g., RDT&amp;E, Procurement, O&amp;M. Select multiple with Ctrl+click (Windows) or Cmd+click (Mac).">Budget Type</label>
+          <select id="budget_type" name="budget_type" multiple>
+            {% for bt in budget_types %}
+            <option value="{{ bt.code }}"
+                    {% if bt.code in filters.budget_type %}selected{% endif %}>
+              {{ bt.code }}
             </option>
             {% endfor %}
           </select>
@@ -285,6 +285,7 @@
 {% endblock %}
 
 {% block extra_scripts %}
+<script src="/static/js/budget-charts.js"></script>
 <script src="/static/js/app.js"></script>
 <!-- FALCON-4: Advanced search UI -->
 <script src="/static/js/search.js"></script>

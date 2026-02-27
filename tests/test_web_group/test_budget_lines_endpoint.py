@@ -104,6 +104,7 @@ def _list(db, **kwargs):
     defaults = dict(
         fiscal_year=None, service=None, exhibit_type=None,
         pe_number=None, appropriation_code=None, budget_type=None,
+        exclude_summary=False,
         q=None, min_amount=None, max_amount=None,
         sort_by="id", sort_dir="asc", limit=25, offset=0, conn=db,
     )

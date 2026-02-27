@@ -10,7 +10,7 @@
   <label style="font-size:.85rem">Fiscal Year:
     <select id="chart-fy" onchange="loadCharts()" style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid var(--border-color)">
       {% for fy in fiscal_years %}
-      <option value="{{ fy.fiscal_year }}" {% if loop.last %}selected{% endif %}>{{ fy.fiscal_year }}</option>
+      <option value="{{ fy.fiscal_year }}" {% if loop.first %}selected{% endif %}>{{ fy.fiscal_year }}</option>
       {% endfor %}
     </select>
   </label>
@@ -47,11 +47,11 @@
     <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-service','service-chart.png')">Download as PNG</button>
   </div>
 
-  {# 3.B1-a: Year-over-year trend #}
+  {# 3.4: Stacked bar by service across FY columns #}
   <div class="chart-card" id="card-yoy">
-    <h3>Year-over-Year Totals by Exhibit Type</h3>
+    <h3>Budget Totals by Service &amp; Fiscal Year</h3>
     <div id="err-yoy" style="display:none" class="empty-state" role="alert"></div>
-    <canvas id="chart-yoy" height="200" role="img" aria-label="Line chart showing year-over-year budget totals by exhibit type"></canvas>
+    <canvas id="chart-yoy" height="200" role="img" aria-label="Stacked bar chart showing budget totals by service across fiscal years"></canvas>
     <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-yoy','yoy-chart.png')">Download as PNG</button>
   </div>
 
@@ -63,25 +63,22 @@
     <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-topn','top10-chart.png')">Download as PNG</button>
   </div>
 
-  {# VIZ-005: Budget comparison chart #}
+  {# 3.5: Multi-entity budget comparison across all FY columns #}
   <div class="chart-card" id="card-compare" style="grid-column: 1 / -1">
-    <h3>Budget Comparison</h3>
-    <div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:.75rem;align-items:center">
-      <label style="font-size:.85rem">Entity A:
-        <select id="compare-a" onchange="loadComparison()"
-                style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid var(--border-color)">
-          <option value="">— Select service —</option>
-        </select>
-      </label>
-      <label style="font-size:.85rem">Entity B:
-        <select id="compare-b" onchange="loadComparison()"
-                style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid var(--border-color)">
-          <option value="">— Select service —</option>
-        </select>
-      </label>
+    <h3>Budget Comparison (Multi-Entity)</h3>
+    <div id="compare-entities" style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:.75rem;align-items:center">
+      <select class="compare-entity-select" onchange="loadComparison()"
+              style="padding:.3rem .5rem;border-radius:4px;border:1px solid var(--border-color)">
+        <option value="">-- Select service --</option>
+      </select>
+      <select class="compare-entity-select" onchange="loadComparison()"
+              style="padding:.3rem .5rem;border-radius:4px;border:1px solid var(--border-color)">
+        <option value="">-- Select service --</option>
+      </select>
+      <button class="btn btn-secondary btn-sm" onclick="addCompareEntity()" title="Add another entity (max 6)">+ Add Entity</button>
     </div>
     <div id="err-compare" style="display:none" class="empty-state" role="alert"></div>
-    <canvas id="chart-compare" height="120" role="img" aria-label="Grouped bar chart comparing budgets between two selected services"></canvas>
+    <canvas id="chart-compare" height="120" role="img" aria-label="Grouped bar chart comparing budgets between selected services across fiscal years"></canvas>
     <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-compare','comparison-chart.png')">Download as PNG</button>
   </div>
 
@@ -95,19 +92,12 @@
 
   {# Appropriation breakdown doughnut #}
   <div class="chart-card" id="card-approp-pie">
-    <h3>Appropriation Breakdown</h3>
+    <h3>Budget Type Breakdown</h3>
     <div id="err-approp-pie" style="display:none" class="empty-state" role="alert"></div>
     <canvas id="chart-approp-pie" height="250" role="img" aria-label="Doughnut chart showing appropriation type breakdown"></canvas>
     <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-approp-pie','appropriation-pie.png')">Download as PNG</button>
   </div>
 
-  {# YoY delta by service #}
-  <div class="chart-card" id="card-delta">
-    <h3>Year-over-Year Change by Service (%)</h3>
-    <div id="err-delta" style="display:none" class="empty-state" role="alert"></div>
-    <canvas id="chart-delta" height="200" role="img" aria-label="Bar chart showing year-over-year percentage change by service"></canvas>
-    <button class="btn btn-secondary btn-sm chart-export-btn" onclick="downloadChartAsPNG('chart-delta','yoy-delta.png')">Download as PNG</button>
-  </div>
 
 </div>
 </div>
@@ -115,6 +105,7 @@
 
 {% block extra_scripts %}
 <!-- FALCON-11: Chart JS extracted to external file -->
+<script src="/static/js/budget-charts.js"></script>
 <script src="/static/js/app.js"></script>
 <script src="/static/js/charts.js"></script>
 {% endblock %}

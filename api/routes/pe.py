@@ -393,11 +393,11 @@ def get_pe(
         ORDER BY confidence DESC, tag
     """, (pe_number,)).fetchall()
 
-    # Related PEs
+    # Related PEs — only high-confidence links (>=0.8)
     related_rows = conn.execute("""
         SELECT referenced_pe, link_type, confidence, fiscal_year, context_snippet
         FROM pe_lineage
-        WHERE source_pe = ?
+        WHERE source_pe = ? AND confidence >= 0.8
         ORDER BY confidence DESC, referenced_pe
         LIMIT 50
     """, (pe_number,)).fetchall()
@@ -818,7 +818,7 @@ def get_pe_pdf_pages(
 )
 def get_pe_related(
     pe_number: str,
-    min_confidence: float = Query(0.0, ge=0.0, le=1.0,
+    min_confidence: float = Query(0.8, ge=0.0, le=1.0,
                                   description="Minimum confidence threshold"),
     limit: int = Query(50, ge=1, le=200, description="Max results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
@@ -955,24 +955,28 @@ def list_pes(
         conditions.append("p.fiscal_years LIKE ?")
         params.append(f'%"{fy}"%')
 
-    # FTS5 topic search — restrict to PEs that have matching description text.
-    # Uses pe_descriptions_fts (FTS5) when available; falls back to LIKE scan.
+    # FTS5 topic search — restrict to PEs that have matching description text
+    # OR matching display_title. Uses prefix matching for broader results.
+    # Falls back to LIKE scan if FTS5 table doesn't exist.
     if q:
-        safe_q = sanitize_fts5_query(q)
+        safe_q = sanitize_fts5_query(q, prefix=True)
         if safe_q:
             # Try FTS5 first, fall back to LIKE if table doesn't exist
             try:
                 conn.execute("SELECT 1 FROM pe_descriptions_fts LIMIT 0")
-                conditions.append("""p.pe_number IN (
+                # Search both FTS5 descriptions AND display_title via LIKE
+                conditions.append("""(p.pe_number IN (
                     SELECT pe_number FROM pe_descriptions_fts
                     WHERE pe_descriptions_fts MATCH ?
-                )""")
+                ) OR p.display_title LIKE ?)""")
                 params.append(safe_q)
+                params.append(f"%{q}%")
             except (sqlite3.OperationalError, sqlite3.DatabaseError):
-                conditions.append("""p.pe_number IN (
+                conditions.append("""(p.pe_number IN (
                     SELECT DISTINCT pe_number FROM pe_descriptions
                     WHERE description_text LIKE ?
-                )""")
+                ) OR p.display_title LIKE ?)""")
+                params.append(f"%{q}%")
                 params.append(f"%{q}%")
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
