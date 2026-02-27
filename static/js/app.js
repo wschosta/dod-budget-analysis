@@ -928,6 +928,86 @@ function loadTagCloud() {
     });
 }
 
+// ── 3.1: Faceted counts — show result counts per filter option ────────────────
+
+var _facetTimer = null;
+
+function loadFacetCounts() {
+  // Only on the home page with filters
+  var form = document.getElementById("filter-form");
+  if (!form) return;
+
+  // Debounce to avoid rapid-fire fetches
+  clearTimeout(_facetTimer);
+  _facetTimer = setTimeout(function() { _doLoadFacets(form); }, 200);
+}
+
+function _doLoadFacets(form) {
+  // Build query from current filter state
+  var params = new URLSearchParams();
+  var fySelect = document.getElementById("fiscal_year");
+  if (fySelect) {
+    Array.from(fySelect.selectedOptions).forEach(function(o) {
+      params.append("fiscal_year", o.value);
+    });
+  }
+  var svcSelect = document.getElementById("service");
+  if (svcSelect) {
+    Array.from(svcSelect.selectedOptions).forEach(function(o) {
+      params.append("service", o.value);
+    });
+  }
+  var etSelect = document.getElementById("exhibit_type");
+  if (etSelect) {
+    Array.from(etSelect.selectedOptions).forEach(function(o) {
+      params.append("exhibit_type", o.value);
+    });
+  }
+  var btSelect = document.getElementById("budget_type");
+  if (btSelect) {
+    Array.from(btSelect.selectedOptions).forEach(function(o) {
+      params.append("budget_type", o.value);
+    });
+  }
+
+  fetch("/api/v1/facets?" + params.toString())
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .then(function(data) {
+      if (!data) return;
+      _applyFacetCounts("fiscal_year", data.fiscal_year || []);
+      _applyFacetCounts("service", data.service || []);
+      _applyFacetCounts("exhibit_type", data.exhibit_type || []);
+      _applyFacetCounts("budget_type", data.budget_type || []);
+    })
+    .catch(function() { /* ignore facet errors */ });
+}
+
+function _applyFacetCounts(selectId, facets) {
+  var sel = document.getElementById(selectId);
+  if (!sel) return;
+
+  // Build a map of value -> count
+  var countMap = {};
+  facets.forEach(function(f) { countMap[f.value] = f.count; });
+
+  Array.from(sel.options).forEach(function(opt) {
+    if (!opt.value) return; // skip placeholder
+    var count = countMap[opt.value];
+    // Strip any existing count suffix like " (1,234)"
+    var baseText = opt.textContent.replace(/\s*\(\d[\d,]*\s*rows?\)$/, "")
+                                   .replace(/\s*\(\d[\d,]*\)$/, "");
+    if (count !== undefined) {
+      opt.textContent = baseText + " (" + count.toLocaleString() + ")";
+      opt.disabled = false;
+      opt.style.color = "";
+    } else {
+      opt.textContent = baseText + " (0)";
+      opt.disabled = !opt.selected;
+      opt.style.color = opt.selected ? "" : "var(--text-secondary)";
+    }
+  });
+}
+
 // ── Initialise ─────────────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", function () {
@@ -985,6 +1065,13 @@ document.addEventListener("DOMContentLoaded", function () {
     });
     form.addEventListener("input", updateDownloadLinks);
   }
+
+  // 3.1: Load faceted counts to show result counts on filter options
+  loadFacetCounts();
+  // Re-load facets after HTMX swap (filter change)
+  document.body.addEventListener("htmx:afterSwap", function() {
+    loadFacetCounts();
+  });
 
   // JS-003: Add keyboard hint near search box
   const qInput = document.getElementById("q");
