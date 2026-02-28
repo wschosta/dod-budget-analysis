@@ -122,17 +122,13 @@ def _pdf_select(
     LION-100: Supports fiscal_year and exhibit_type filtering on pdf_pages
     columns added during LION-100 schema update.
     """
+    from utils.query import _add_in_condition
+
     conditions: list[str] = []
     params: list[Any] = [fts_query]
 
-    if fiscal_year:
-        placeholders = ",".join("?" * len(fiscal_year))
-        conditions.append(f"p.fiscal_year IN ({placeholders})")
-        params.extend(fiscal_year)
-    if exhibit_type:
-        placeholders = ",".join("?" * len(exhibit_type))
-        conditions.append(f"p.exhibit_type IN ({placeholders})")
-        params.extend(exhibit_type)
+    _add_in_condition(conditions, params, "p.fiscal_year", fiscal_year)
+    _add_in_condition(conditions, params, "p.exhibit_type", exhibit_type)
     if service:
         sub = " OR ".join("p.source_category LIKE ?" for _ in service)
         conditions.append(f"({sub})")

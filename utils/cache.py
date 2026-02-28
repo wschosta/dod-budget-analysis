@@ -110,3 +110,30 @@ class TTLCache:
         """
         with self._lock:
             self._store.pop(key, None)
+
+
+def make_cache_key(name: str, *args: Any) -> tuple:
+    """Build a hashable, order-stable cache key from filter arguments.
+
+    List/set/frozenset arguments are converted to sorted tuples so that
+    ``["B", "A"]`` and ``["A", "B"]`` produce the same key.  ``None``
+    values are preserved as-is.
+
+    Args:
+        name: Prefix string identifying the query (e.g. ``"aggregations"``).
+        *args: Filter values — may be ``str``, ``list``, ``None``, etc.
+
+    Returns:
+        Hashable tuple suitable for use as a :class:`TTLCache` key.
+
+    Examples:
+        >>> make_cache_key("agg", ["B", "A"], None, "x")
+        ('agg', ('A', 'B'), None, 'x')
+    """
+    parts: list[Any] = [name]
+    for arg in args:
+        if isinstance(arg, (list, set, frozenset)):
+            parts.append(tuple(sorted(arg)))
+        else:
+            parts.append(arg)
+    return tuple(parts)

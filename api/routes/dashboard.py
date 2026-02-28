@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query
 from api.database import get_db
 from utils.cache import TTLCache
 from utils.database import BUDGET_TYPE_CASE_EXPR
-from utils.query import detect_fy_columns
+from utils.query import EXCLUDE_SUMMARY_SQL, detect_fy_columns
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -65,7 +65,7 @@ def dashboard_summary(
     # double-counting with detail exhibits. Also exclude rows with invalid
     # fiscal_year values (non-numeric like "Details").
     summary_filter = (
-        "exhibit_type NOT IN ('p1','r1','o1','m1','c1','rf1','p1r') "
+        f"{EXCLUDE_SUMMARY_SQL} "
         "AND (fiscal_year IS NULL OR fiscal_year GLOB '[0-9][0-9][0-9][0-9]' "
         "     OR fiscal_year GLOB 'FY [0-9][0-9][0-9][0-9]' "
         "     OR fiscal_year GLOB 'FY[0-9][0-9][0-9][0-9]')"

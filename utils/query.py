@@ -251,3 +251,80 @@ def compute_yoy_change(
     if current is None or not previous:
         return None
     return round((current - previous) / abs(previous) * 100, 2)
+
+
+# ---------------------------------------------------------------------------
+# Summary exhibit exclusion
+# ---------------------------------------------------------------------------
+
+#: Exhibit types that represent summary-level aggregations (p1, r1, etc.).
+#: Queries that sum dollar amounts should exclude these to avoid double-counting
+#: with the detail-level exhibits (p5, r2, etc.).
+SUMMARY_EXHIBIT_TYPES: tuple[str, ...] = (
+    "p1", "r1", "o1", "m1", "c1", "rf1", "p1r",
+)
+
+#: Ready-to-interpolate SQL fragment for excluding summary exhibits.
+EXCLUDE_SUMMARY_SQL = (
+    "exhibit_type NOT IN ("
+    + ",".join(f"'{e}'" for e in SUMMARY_EXHIBIT_TYPES)
+    + ")"
+)
+
+
+# ---------------------------------------------------------------------------
+# Placeholder / IN-clause helpers (public API)
+# ---------------------------------------------------------------------------
+
+
+def make_placeholders(values: list[Any] | int) -> str:
+    """Return comma-separated ``?`` placeholders for a parameterised query.
+
+    Accepts either an integer count or a list (whose length is used).
+
+    Examples:
+        >>> make_placeholders(3)
+        '?,?,?'
+        >>> make_placeholders(["a", "b"])
+        '?,?'
+    """
+    n = values if isinstance(values, int) else len(values)
+    return ",".join("?" * n)
+
+
+# ---------------------------------------------------------------------------
+# Pagination helpers
+# ---------------------------------------------------------------------------
+
+
+def compute_pagination(
+    offset: int,
+    limit: int,
+    total: int,
+) -> dict[str, int | bool]:
+    """Derive page metadata from offset/limit/total.
+
+    Returns a dict with ``page`` (0-based), ``page_count``, and ``has_next``.
+    """
+    if limit <= 0:
+        return {"page": 0, "page_count": 1, "has_next": False}
+    return {
+        "page": offset // limit,
+        "page_count": max(1, (total + limit - 1) // limit),
+        "has_next": offset + limit < total,
+    }
+
+
+def fetch_with_has_more(
+    cursor: sqlite3.Cursor,
+    limit: int,
+) -> tuple[list[sqlite3.Row], bool]:
+    """Fetch *limit* + 1 rows to detect whether more results exist.
+
+    The cursor must already have been executed.  Returns
+    ``(rows[:limit], has_more)``.
+    """
+    rows = cursor.fetchmany(limit + 1)
+    if len(rows) > limit:
+        return rows[:limit], True
+    return rows, False

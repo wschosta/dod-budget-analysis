@@ -17,7 +17,7 @@ from fastapi import Query as FQuery
 
 from api.database import get_db
 from api.models import AggregationResponse, AggregationRow
-from utils.cache import TTLCache
+from utils.cache import TTLCache, make_cache_key
 from utils.database import BUDGET_TYPE_CASE_EXPR, _validate_identifier, get_amount_columns
 from utils.query import build_where_clause, compute_yoy_change
 
@@ -43,12 +43,9 @@ def _cache_key(
     exhibit_type: list[str] | None,
     appropriation_code: list[str] | None = None,
 ) -> tuple:
-    return (
-        group_by,
-        tuple(sorted(fiscal_year or [])),
-        tuple(sorted(service or [])),
-        tuple(sorted(exhibit_type or [])),
-        tuple(sorted(appropriation_code or [])),
+    return make_cache_key(
+        "agg", group_by, fiscal_year, service,
+        exhibit_type, appropriation_code,
     )
 
 

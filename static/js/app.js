@@ -11,6 +11,22 @@
 
 "use strict";
 
+// ── Shared fetch wrapper ────────────────────────────────────────────────────
+// Centralises the fetch→JSON pattern used throughout the app so callers
+// don't need to repeat the `.ok` check / `.json()` parse.
+
+/**
+ * Fetch a URL and return parsed JSON, or null on HTTP error.
+ * @param {string} url
+ * @param {RequestInit} [opts]
+ * @returns {Promise<any|null>}
+ */
+function apiFetch(url, opts) {
+  return fetch(url, opts).then(function (r) {
+    return r.ok ? r.json() : null;
+  });
+}
+
 // ── LION-010: Dark mode toggle ──────────────────────────────────────────────
 
 var THEME_KEY = "dod_theme";
@@ -734,8 +750,7 @@ function restoreAmountFormat() {
 function loadFooterMetadata() {
   var el = document.getElementById("footer-meta");
   if (!el) return;
-  fetch("/api/v1/metadata")
-    .then(function(r) { return r.ok ? r.json() : null; })
+  apiFetch("/api/v1/metadata")
     .then(function(data) {
       if (!data) return;
       var parts = [];
@@ -804,8 +819,7 @@ function loadLandingVisuals() {
 
   // Load service breakdown chart
   if (svcCanvas) {
-    fetch("/api/v1/aggregations?group_by=service")
-      .then(function(r) { return r.ok ? r.json() : null; })
+    apiFetch("/api/v1/aggregations?group_by=service")
       .then(function(data) {
         if (!data || !data.rows || !data.rows.length) return;
         var cols = Object.keys(data.rows[0]).filter(function(k) { return /^total_fy\d+/.test(k); }).sort();
@@ -861,8 +875,7 @@ function loadTagCloud() {
   var countEl = document.getElementById("tag-cloud-count");
   if (!container) return;
 
-  fetch("/api/v1/pe/tags/all")
-    .then(function(r) { return r.ok ? r.json() : null; })
+  apiFetch("/api/v1/pe/tags/all")
     .then(function(data) {
       if (!data) {
         container.innerHTML = '<p style="font-size:.85rem;color:var(--text-secondary)">Tags not available.</p>';
@@ -970,8 +983,7 @@ function _doLoadFacets(form) {
     });
   }
 
-  fetch("/api/v1/facets?" + params.toString())
-    .then(function(r) { return r.ok ? r.json() : null; })
+  apiFetch("/api/v1/facets?" + params.toString())
     .then(function(data) {
       if (!data) return;
       _applyFacetCounts("fiscal_year", data.fiscal_year || []);
