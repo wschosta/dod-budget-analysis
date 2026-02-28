@@ -4,8 +4,13 @@ Provides DRY WHERE clause and ORDER BY construction used by budget_lines.py,
 frontend.py, and download.py.
 """
 
+from __future__ import annotations
+
 import re
+import sqlite3
 from typing import Any
+
+from utils.database import _validate_identifier, get_amount_columns
 
 
 ALLOWED_SORT_COLUMNS = {
@@ -75,6 +80,24 @@ def validate_amount_column(column: str | None) -> str:
     return column
 
 
+def _add_in_condition(
+    conditions: list[str],
+    params: list[Any],
+    column: str,
+    values: list[Any] | None,
+) -> None:
+    """Append an ``IN (?, ?, ...)`` condition if *values* is non-empty.
+
+    Mutates *conditions* and *params* in place.  Does nothing when *values*
+    is ``None`` or empty.
+    """
+    if not values:
+        return
+    placeholders = ",".join("?" * len(values))
+    conditions.append(f"{column} IN ({placeholders})")
+    params.extend(values)
+
+
 def build_where_clause(
     fiscal_year: list[str] | None = None,
     service: list[str] | None = None,
@@ -111,37 +134,13 @@ def build_where_clause(
     conditions: list[str] = []
     params: list[Any] = []
 
-    if fiscal_year:
-        placeholders = ",".join("?" * len(fiscal_year))
-        conditions.append(f"fiscal_year IN ({placeholders})")
-        params.extend(fiscal_year)
-
-    # FIX-002b: Changed from LIKE %value% to exact IN() matching.
-    # LIKE was too broad — selecting "AF" would match "CAAF" and other orgs.
-    if service:
-        placeholders = ",".join("?" * len(service))
-        conditions.append(f"organization_name IN ({placeholders})")
-        params.extend(service)
-
-    if exhibit_type:
-        placeholders = ",".join("?" * len(exhibit_type))
-        conditions.append(f"exhibit_type IN ({placeholders})")
-        params.extend(exhibit_type)
-
-    if pe_number:
-        placeholders = ",".join("?" * len(pe_number))
-        conditions.append(f"pe_number IN ({placeholders})")
-        params.extend(pe_number)
-
-    if appropriation_code:
-        placeholders = ",".join("?" * len(appropriation_code))
-        conditions.append(f"appropriation_code IN ({placeholders})")
-        params.extend(appropriation_code)
-
-    if budget_type:
-        placeholders = ",".join("?" * len(budget_type))
-        conditions.append(f"budget_type IN ({placeholders})")
-        params.extend(budget_type)
+    _add_in_condition(conditions, params, "fiscal_year", fiscal_year)
+    # FIX-002b: exact IN() matching (LIKE was too broad).
+    _add_in_condition(conditions, params, "organization_name", service)
+    _add_in_condition(conditions, params, "exhibit_type", exhibit_type)
+    _add_in_condition(conditions, params, "pe_number", pe_number)
+    _add_in_condition(conditions, params, "appropriation_code", appropriation_code)
+    _add_in_condition(conditions, params, "budget_type", budget_type)
 
     # EAGLE-1: Use dynamic amount column (validated against whitelist)
     amt_col = validate_amount_column(amount_column)
@@ -158,9 +157,7 @@ def build_where_clause(
         if not fts_ids:
             # Empty FTS result → no rows match
             return "WHERE 1=0", []
-        id_placeholders = ",".join("?" * len(fts_ids))
-        conditions.append(f"id IN ({id_placeholders})")
-        params.extend(fts_ids)
+        _add_in_condition(conditions, params, "id", fts_ids)
 
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
     return where, params
@@ -189,3 +186,68 @@ def build_order_clause(
     col = sort_by if sort_by in allowed_sorts else default_sort
     direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
     return f"ORDER BY {col} {direction}"
+
+
+# ---------------------------------------------------------------------------
+# Shared FY column detection
+# ---------------------------------------------------------------------------
+
+
+def detect_fy_columns(
+    conn: sqlite3.Connection,
+    *,
+    request_fy: str = "fy2026_request",
+    baseline_fy: str = "fy2025_enacted",
+) -> tuple[str, str]:
+    """Detect the best FY request and baseline amount column names.
+
+    Queries the database schema via :func:`utils.database.get_amount_columns`
+    and returns validated column names for the requested and baseline fiscal
+    years.  Falls back to the given defaults when no match is found.
+
+    Args:
+        conn: Open SQLite connection.
+        request_fy: Substring to match for the "request" column
+            (default ``"fy2026_request"``).
+        baseline_fy: Substring to match for the "baseline" column
+            (default ``"fy2025_enacted"``).
+
+    Returns:
+        ``(request_col, baseline_col)`` — validated column names safe for
+        interpolation into SQL.
+    """
+    cols = get_amount_columns(conn)
+    req_col = next(
+        (c for c in cols if request_fy in c),
+        f"amount_{request_fy}",
+    )
+    base_col = next(
+        (c for c in cols if baseline_fy in c),
+        f"amount_{baseline_fy}",
+    )
+    _validate_identifier(req_col, "column name")
+    _validate_identifier(base_col, "column name")
+    return req_col, base_col
+
+
+# ---------------------------------------------------------------------------
+# Shared YoY (year-over-year) calculation
+# ---------------------------------------------------------------------------
+
+
+def compute_yoy_change(
+    current: float | None,
+    previous: float | None,
+) -> float | None:
+    """Compute year-over-year percentage change.
+
+    Returns ``None`` when *previous* is zero/``None`` or *current* is
+    ``None``, avoiding division-by-zero.
+
+    Example:
+        >>> compute_yoy_change(120, 100)
+        20.0
+    """
+    if current is None or not previous:
+        return None
+    return round((current - previous) / abs(previous) * 100, 2)

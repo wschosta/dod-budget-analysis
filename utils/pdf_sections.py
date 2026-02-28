@@ -80,6 +80,37 @@ _SECTION_PATTERN_STR = (
 
 SECTION_PATTERN = re.compile(_SECTION_PATTERN_STR, re.IGNORECASE)
 
+# Pre-compiled patterns for project boundary lines in R-2 exhibits.
+# Order matters: more specific patterns first to avoid greedy matches.
+# Previously compiled on every call to detect_project_boundaries().
+_PROJECT_BOUNDARY_PATTERNS: list[re.Pattern[str]] = [
+    # "Project Number: 1234   Project Title: Advanced Targeting System"
+    re.compile(
+        r"^[ \t]*Project\s+Number\s*:\s*(\w[\w\-\.]*)"
+        r"(?:\s+Project\s+Title\s*:\s*(.+?))?[ \t]*$",
+        re.MULTILINE | re.IGNORECASE,
+    ),
+    # "Project #1234 Advanced Targeting System"
+    re.compile(
+        r"^[ \t]*Project\s+#\s*(\w[\w\-\.]*)"
+        r"(?:\s+(.+?))?[ \t]*$",
+        re.MULTILINE | re.IGNORECASE,
+    ),
+    # "Project 1234: Advanced Targeting System"
+    # (must NOT match "Project Number:" — use negative lookahead)
+    re.compile(
+        r"^[ \t]*Project\s+(?!Number\s*:)(?!#)(\w[\w\-\.]*)\s*:\s*(.+?)[ \t]*$",
+        re.MULTILINE | re.IGNORECASE,
+    ),
+    # "Project: 1234 — Advanced Targeting System" or "Project: 1234 - Title"
+    # (must NOT match "Project Number:" — exclude "Number" after colon)
+    re.compile(
+        r"^[ \t]*Project\s*:\s*(?!Number\b)(\w[\w\-\.]*)"
+        r"(?:\s*[—\-–]\s*(.+?))?[ \t]*$",
+        re.MULTILINE | re.IGNORECASE,
+    ),
+]
+
 
 def parse_narrative_sections(
     page_text: str,
@@ -146,35 +177,8 @@ def detect_project_boundaries(page_text: str) -> list[dict[str, str]]:
     if not page_text:
         return []
 
-    # Patterns for project boundary lines in R-2 exhibits.
-    # Order matters: more specific patterns first to avoid greedy matches.
-    _project_patterns = [
-        # "Project Number: 1234   Project Title: Advanced Targeting System"
-        re.compile(
-            r"^[ \t]*Project\s+Number\s*:\s*(\w[\w\-\.]*)"
-            r"(?:\s+Project\s+Title\s*:\s*(.+?))?[ \t]*$",
-            re.MULTILINE | re.IGNORECASE,
-        ),
-        # "Project #1234 Advanced Targeting System"
-        re.compile(
-            r"^[ \t]*Project\s+#\s*(\w[\w\-\.]*)"
-            r"(?:\s+(.+?))?[ \t]*$",
-            re.MULTILINE | re.IGNORECASE,
-        ),
-        # "Project 1234: Advanced Targeting System"
-        # (must NOT match "Project Number:" — use negative lookahead)
-        re.compile(
-            r"^[ \t]*Project\s+(?!Number\s*:)(?!#)(\w[\w\-\.]*)\s*:\s*(.+?)[ \t]*$",
-            re.MULTILINE | re.IGNORECASE,
-        ),
-        # "Project: 1234 — Advanced Targeting System" or "Project: 1234 - Title"
-        # (must NOT match "Project Number:" — exclude "Number" after colon)
-        re.compile(
-            r"^[ \t]*Project\s*:\s*(?!Number\b)(\w[\w\-\.]*)"
-            r"(?:\s*[—\-–]\s*(.+?))?[ \t]*$",
-            re.MULTILINE | re.IGNORECASE,
-        ),
-    ]
+    # Patterns pre-compiled at module level (see _PROJECT_BOUNDARY_PATTERNS).
+    _project_patterns = _PROJECT_BOUNDARY_PATTERNS
 
     # Collect all project boundary matches with their positions
     boundaries: list[tuple[int, str, str | None]] = []

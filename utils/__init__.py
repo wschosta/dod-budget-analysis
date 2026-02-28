@@ -108,7 +108,21 @@ from utils.pdf_sections import (
 )
 
 # Query builder utilities (UTIL-001)
-from utils.query import build_where_clause, build_order_clause
+from utils.query import (
+    build_where_clause,
+    build_order_clause,
+    detect_fy_columns,
+    compute_yoy_change,
+)
+
+# Normalization mappings (centralized from repair_database/builder/fix_data_quality)
+from utils.normalization import (
+    ORG_NORMALIZE,
+    TITLE_TO_CODE,
+    APPROPRIATION_KEYWORDS,
+    normalize_org_name,
+    parse_appropriation,
+)
 
 # TTL cache (UTIL-002)
 from utils.cache import TTLCache
@@ -196,6 +210,14 @@ __all__ = [
     # Query builder
     "build_where_clause",
     "build_order_clause",
+    "detect_fy_columns",
+    "compute_yoy_change",
+    # Normalization
+    "ORG_NORMALIZE",
+    "TITLE_TO_CODE",
+    "APPROPRIATION_KEYWORDS",
+    "normalize_org_name",
+    "parse_appropriation",
     # Cache
     "TTLCache",
 ]

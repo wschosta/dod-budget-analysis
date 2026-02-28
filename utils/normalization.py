@@ -1,0 +1,284 @@
+"""Centralized normalization mappings for organization names and appropriation codes.
+
+Previously duplicated across repair_database.py, pipeline/builder.py, and
+scripts/fix_data_quality.py.  All consumers should import from this module
+to keep the mappings consistent.
+"""
+
+from __future__ import annotations
+
+# ---------------------------------------------------------------------------
+# Organization name normalization
+# ---------------------------------------------------------------------------
+# Maps raw codes / abbreviations found in filenames and spreadsheets to
+# canonical organization names.  The superset of repair_database._ORG_NORMALIZE
+# and pipeline.builder.ORG_MAP.
+
+ORG_NORMALIZE: dict[str, str] = {
+    # Single-letter codes (filename-level)
+    "A": "Army",
+    "N": "Navy",
+    "F": "Air Force",
+    "S": "Space Force",
+    "D": "Defense-Wide",
+    "M": "Marine Corps",
+    "J": "Joint Staff",
+    # Uppercase multi-letter variants
+    "ARMY": "Army",
+    "AF": "Air Force",
+    "NAVY": "Navy",
+    "USAF": "Air Force",
+    "USN": "Navy",
+    "USMC": "Marine Corps",
+    "AIR FORCE": "Air Force",
+    "MARINE CORPS": "Marine Corps",
+    "SPACE FORCE": "Space Force",
+    "DEFENSE-WIDE": "Defense-Wide",
+    "DEFENSEWIDE": "Defense-Wide",
+    "DW": "Defense-Wide",
+    # Title-case variants (identity)
+    "Army": "Army",
+    "Navy": "Navy",
+    "Air Force": "Air Force",
+    # Defense agencies and field activities
+    "SOCOM": "SOCOM",
+    "USSOCOM": "SOCOM",
+    "DISA": "DISA",
+    "DLA": "DLA",
+    "MDA": "MDA",
+    "DHA": "DHA",
+    "NGB": "NGB",
+    "DARPA": "DARPA",
+    "NSA": "NSA",
+    "DIA": "DIA",
+    "NRO": "NRO",
+    "NGA": "NGA",
+    "DTRA": "DTRA",
+    "DCSA": "DCSA",
+    "WHS": "WHS",
+    "DCMA": "DCMA",
+    "DFAS": "DFAS",
+    "DODEA": "DODEA",
+    "DPAA": "DPAA",
+    "TJS": "TJS",
+    "DSCA": "DSCA",
+    "DECA": "DECA",
+    "OSD": "OSD",
+    "DAU": "DAU",
+    "DTIC": "DTIC",
+    "DHRA": "DHRA",
+    "DLSA": "DLSA",
+    "DTSA": "DTSA",
+    "OTE": "OTE",
+    "CYBER": "CYBER",
+    "CMP": "CMP",
+    "DEPS": "DEPS",
+    "DEPSDDR": "DEPSDDR",
+    "DMACT": "DMACT",
+    "OLDCC": "OLDCC",
+    "CAAF": "CAAF",
+    "CBDP": "CBDP",
+    "SDA": "SDA",
+    "TRANSCOM": "TRANSCOM",
+    "TRANS": "TRANSCOM",
+    "BTA": "BTA",
+    "DEFW": "DEFW",
+    "DEFR": "DEFR",
+    "OEA": "OEA",
+    "UNDD": "UNDD",
+    "DPMO": "DPMO",
+    "DSS": "DSS",
+    "IG": "IG",
+    "TMA": "TMA",
+    "NDU": "NDU",
+}
+
+
+def normalize_org_name(raw: str) -> str:
+    """Normalize an organization name/code to its canonical form.
+
+    Looks up *raw* in :data:`ORG_NORMALIZE`.  Returns the canonical name if
+    found, otherwise returns *raw* unchanged.
+    """
+    return ORG_NORMALIZE.get(raw, raw)
+
+
+# ---------------------------------------------------------------------------
+# Appropriation title → code mapping (exact match, highest confidence)
+# ---------------------------------------------------------------------------
+# Superset of repair_database._TITLE_TO_CODE and
+# scripts/fix_data_quality._TITLE_TO_CODE.
+
+TITLE_TO_CODE: dict[str, str] = {
+    # Operation & Maintenance
+    "Operation & Maintenance, Navy": "O&M",
+    "Operation & Maintenance, Army": "O&M",
+    "Operation & Maintenance, Air Force": "O&M",
+    "Operation & Maintenance, Marine Corps": "O&M",
+    "Operation & Maintenance, Space Force": "O&M",
+    "Operation & Maintenance, Defense-Wide": "O&M",
+    "Operation & Maintenance, Army Natl Guard": "O&M",
+    "Operation & Maintenance, Army Reserve": "O&M",
+    "Operation & Maintenance, Navy Res": "O&M",
+    "Operation & Maintenance, Navy Reserve": "O&M",
+    "Operation & Maintenance, AF Reserve": "O&M",
+    "Operation & Maintenance, Air Natl Guard": "O&M",
+    "Operation & Maintenance, MC Reserve": "O&M",
+    "Operation & Maintenance, ARNG": "O&M",
+    "Operation & Maintenance, ANG": "O&M",
+    "Operational Test & Eval, Defense": "O&M",
+    # Defense Health
+    "Defense Health Program": "DHP",
+    # Military Construction
+    "Mil Con, Def-Wide": "MILCON",
+    "Mil Con, Army": "MILCON",
+    "Mil Con, Navy": "MILCON",
+    "Mil Con, Air Force": "MILCON",
+    "Mil Con, Army Natl Guard": "MILCON",
+    "Mil Con, AF Reserve": "MILCON",
+    "Mil Con, Navy Res": "MILCON",
+    "Mil Con, Navy Reserve": "MILCON",
+    "MilCon, Air Force": "MILCON",
+    "MilCon, ANG": "MILCON",
+    "MilCon, AF Res": "MILCON",
+    "MILCON, Army": "MILCON",
+    "MILCON, ARNG": "MILCON",
+    "MILCON, Army R": "MILCON",
+    # RDT&E
+    "RDT&E, Army": "RDTE",
+    "RDT&E, Navy": "RDTE",
+    "RDT&E, Air Force": "RDTE",
+    "RDT&E, Defense-Wide": "RDTE",
+    "RDT&E, Space Force": "RDTE",
+    "RDTE, Space Force": "RDTE",
+    "Research, Development, Test, and Evaluation, Space Force": "RDTE",
+    # Procurement
+    "Aircraft Procurement, Army": "APAF",
+    "Aircraft Procurement, Navy": "APAF",
+    "Aircraft Procurement, Air Force": "APAF",
+    "Weapons Procurement, Navy": "WPN",
+    "Other Procurement, Army": "OPROC",
+    "Other Procurement, Navy": "OPROC",
+    "Other Procurement, Air Force": "OPROC",
+    "Shipbuilding & Conversion, Navy": "SCN",
+    "Shipbuilding and Conversion, Navy": "SCN",
+    "Procurement of Ammunition, Army": "AMMO",
+    "Procurement of Ammunition, Navy/MC": "AMMO",
+    "Procurement, Marine Corps": "PROC",
+    "Procurement, Defense-Wide": "PROC",
+    "Procurement, Space Force": "PROC",
+    "Missile Procurement, Army": "MPAF",
+    # Family Housing
+    "Fam Hsg O&M, DW": "FHSG",
+    "Fam Hsg O&M, Army": "FHSG",
+    "Fam Hsg O&M, AF": "FHSG",
+    "Fam Hsg O&M, N/MC": "FHSG",
+    # Revolving / Working Capital
+    "Working Capital Fund, Air Force": "RFUND",
+    "Working Capital Fund, Defense-Wide": "RFUND",
+    "Working Capital Fund, DECA": "RFUND",
+    "Working Capital Fund, Army": "RFUND",
+    "Working Capital Fund, Navy": "RFUND",
+    "National Defense Sealift Fund": "RFUND",
+    # Chemical Agents
+    "Chem Agents & Munitions Destruction": "CHEM",
+}
+
+
+# ---------------------------------------------------------------------------
+# Keyword-based appropriation code detection (substring match, lower priority)
+# ---------------------------------------------------------------------------
+# Superset of repair_database._APPROPRIATION_KEYWORDS,
+# pipeline.builder._APPROPRIATION_KEYWORDS, and
+# scripts/fix_data_quality._EXTRA_KEYWORDS.
+
+APPROPRIATION_KEYWORDS: dict[str, str] = {
+    # Core keywords (shared across all consumers)
+    "aircraft procurement": "APAF",
+    "missile procurement": "MPAF",
+    "weapons procurement": "WPN",
+    "ammunition procurement": "AMMO",
+    "other procurement": "OPROC",
+    "shipbuilding and conversion": "SCN",
+    "shipbuilding & conversion": "SCN",
+    "research, development, test & eval": "RDTE",
+    "research, development, test and eval": "RDTE",
+    "rdt&e": "RDTE",
+    "operation and maintenance": "O&M",
+    "operations and maintenance": "O&M",
+    "operation & maintenance": "O&M",
+    "operations & maintenance": "O&M",
+    "operational test & eval": "O&M",
+    "operational test and eval": "O&M",
+    "military personnel": "MILPERS",
+    "military construction": "MILCON",
+    "mil con": "MILCON",
+    "milcon": "MILCON",
+    "revolving fund": "RFUND",
+    "working capital fund": "RFUND",
+    "sealift fund": "RFUND",
+    "family housing": "FHSG",
+    "fam hsg": "FHSG",
+    "national guard and reserve": "NGRE",
+    "chemical agents": "CHEM",
+    "chem agents": "CHEM",
+    "defense production act": "DPA",
+    "environmental restoration": "ER",
+    "drug interdiction": "DRUG",
+    "defense health program": "DHP",
+    "defense health": "DHP",
+    "brac": "MILCON",
+    "procurement": "PROC",
+    # Extended keywords (from fix_data_quality)
+    "procurement of ammunition": "AMMO",
+    "cooperative threat reduction": "O&M",
+    "inspector general": "O&M",
+    "court of appeals": "O&M",
+    "overseas humanitarian": "O&M",
+    "acquisition workforce": "O&M",
+    "sporting competitions": "O&M",
+    "counter isis": "O&M",
+    "improvised explosive device": "O&M",
+    "afghanistan security": "O&M",
+    "lease of dod": "O&M",
+    "disposal of dod": "O&M",
+    "operational test": "O&M",
+}
+
+
+def parse_appropriation(
+    account_title: str | None,
+) -> tuple[str | None, str | None]:
+    """Split an account title into (appropriation_code, appropriation_title).
+
+    Strategy order:
+      1. Exact match against :data:`TITLE_TO_CODE`.
+      2. Leading numeric code  (e.g. ``"2035 Aircraft Procurement, Army"``).
+      3. Keyword substring match against :data:`APPROPRIATION_KEYWORDS`.
+
+    Returns:
+        ``(code, title)`` tuple.  Either or both may be ``None``.
+    """
+    if not account_title:
+        return None, None
+    s = str(account_title).strip()
+    if not s:
+        return None, None
+
+    # Strategy 1: exact title match
+    code = TITLE_TO_CODE.get(s)
+    if code is not None:
+        return code, s
+
+    # Strategy 2: leading numeric code
+    parts = s.split(None, 1)
+    if len(parts) == 2 and parts[0].isdigit():
+        return parts[0], parts[1]
+
+    # Strategy 3: keyword substring match
+    lower = s.lower()
+    for keyword, code in APPROPRIATION_KEYWORDS.items():
+        if keyword in lower:
+            return code, s
+
+    return None, s

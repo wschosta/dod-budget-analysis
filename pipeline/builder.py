@@ -32,6 +32,10 @@ import logging
 import os
 
 from utils import safe_float
+from utils.normalization import (
+    ORG_NORMALIZE as ORG_MAP,
+    parse_appropriation as _parse_appropriation_util,
+)
 from utils.strings import normalize_fiscal_year as _normalize_fy_value
 from utils.patterns import PE_NUMBER
 
@@ -65,70 +69,8 @@ from pipeline.exhibit_catalog import find_matching_columns as _catalog_find_matc
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 DOCS_DIR = Path("DoD_Budget_Documents")
 
-# Map organization codes to names (Step 1.B4-b)
-# Single-letter codes from exhibit filename prefixes; longer codes from spreadsheet
-# Organization column cells.  Unknown codes are stored as-is.
-ORG_MAP = {
-    # Single-letter codes (filename-level)
-    "A": "Army", "N": "Navy", "F": "Air Force", "S": "Space Force",
-    "D": "Defense-Wide", "M": "Marine Corps", "J": "Joint Staff",
-    # Uppercase multi-letter variants found in spreadsheet Organization column
-    "ARMY": "Army", "AF": "Air Force", "NAVY": "Navy",
-    "USAF": "Air Force", "USMC": "Marine Corps", "USN": "Navy",
-    "AIR FORCE": "Air Force", "MARINE CORPS": "Marine Corps",
-    "SPACE FORCE": "Space Force", "DEFENSE-WIDE": "Defense-Wide",
-    "DEFENSEWIDE": "Defense-Wide", "DW": "Defense-Wide",
-    # Defense agencies and field activities (pass-through or normalize)
-    "SOCOM": "SOCOM", "USSOCOM": "SOCOM",
-    "DISA":  "DISA",
-    "DLA":   "DLA",
-    "MDA":   "MDA",
-    "DHA":   "DHA",
-    "NGB":   "NGB",
-    "DARPA": "DARPA",
-    "NSA":   "NSA",
-    "DIA":   "DIA",
-    "NRO":   "NRO",
-    "NGA":   "NGA",
-    "DTRA":  "DTRA",
-    "DCSA":  "DCSA",
-    "WHS":   "WHS",
-    "DCMA":  "DCMA",
-    "DFAS":  "DFAS",
-    "DODEA": "DODEA",
-    "DPAA":  "DPAA",
-    "TJS":   "TJS",
-    "DSCA":  "DSCA",
-    "DECA":  "DECA",
-    "OSD":   "OSD",
-    "DAU":   "DAU",
-    "DTIC":  "DTIC",
-    "DHRA":  "DHRA",
-    "DLSA":  "DLSA",
-    "DTSA":  "DTSA",
-    "OTE":   "OTE",
-    "CYBER": "CYBER",
-    "CMP":   "CMP",
-    "DEPS":  "DEPS",
-    "DEPSDDR": "DEPSDDR",
-    "DMACT": "DMACT",
-    "OLDCC": "OLDCC",
-    "CAAF":  "CAAF",
-    "CBDP":  "CBDP",
-    "SDA":   "SDA",
-    "TRANSCOM": "TRANSCOM",
-    "TRANS": "TRANSCOM",
-    "BTA":   "BTA",
-    "DEFW":  "DEFW",
-    "DEFR":  "DEFR",
-    "OEA":   "OEA",
-    "UNDD":  "UNDD",
-    "DPMO":  "DPMO",
-    "DSS":   "DSS",
-    "IG":    "IG",
-    "TMA":   "TMA",
-    "NDU":   "NDU",
-}
+# ORG_MAP is imported from utils.normalization (centralized)
+# and re-exported here for backward compatibility.
 
 # Map exhibit type prefixes to readable names (Step 1.B1-g)
 EXHIBIT_TYPES = {
@@ -798,51 +740,16 @@ def _extract_all_pe_numbers(text: str | None) -> list[str]:
     return result
 
 
-_APPROPRIATION_KEYWORDS: dict[str, str] = {
-    "aircraft procurement": "APAF",
-    "missile procurement": "MPAF",
-    "weapons procurement": "WPN",
-    "ammunition procurement": "AMMO",
-    "other procurement": "OPROC",
-    "shipbuilding and conversion": "SCN",
-    "research, development, test & eval": "RDTE",
-    "research, development, test and eval": "RDTE",
-    "rdt&e": "RDTE",
-    "operation and maintenance": "O&M",
-    "operations and maintenance": "O&M",
-    "military personnel": "MILPERS",
-    "military construction": "MILCON",
-    "revolving fund": "RFUND",
-    "family housing": "FHSG",
-    "national guard and reserve": "NGRE",
-    "chemical agents": "CHEM",
-    "defense production act": "DPA",
-    "environmental restoration": "ER",
-    "drug interdiction": "DRUG",
-}
+# _APPROPRIATION_KEYWORDS imported from utils.normalization (centralized).
+# _parse_appropriation delegates to utils.normalization.parse_appropriation.
 
 
 def _parse_appropriation(account_title: str | None) -> tuple[str | None, str | None]:
     """Split account_title into (appropriation_code, appropriation_title).
 
-    Strategy 1: Leading numeric code (e.g., "2035 Aircraft Procurement, Army").
-    Strategy 2: Keyword-based detection from title text.
+    Delegates to the centralized :func:`utils.normalization.parse_appropriation`.
     """
-    if not account_title:
-        return None, None
-    s = str(account_title).strip()
-    if not s:
-        return None, None
-    # Strategy 1: Leading numeric code
-    parts = s.split(None, 1)
-    if len(parts) == 2 and parts[0].isdigit():
-        return parts[0], parts[1]
-    # Strategy 2: Keyword-based appropriation type
-    lower = s.lower()
-    for keyword, code in _APPROPRIATION_KEYWORDS.items():
-        if keyword in lower:
-            return code, s
-    return None, s
+    return _parse_appropriation_util(account_title)
 
 
 def _detect_currency_year(sheet_name: str, filename: str) -> str:

@@ -12,6 +12,8 @@ TODOs for this file
 
 """
 
+import html as _html_mod
+import re
 from typing import Optional, List, Dict, Any
 
 
@@ -176,7 +178,6 @@ def highlight_terms(text: str, terms: List[str], marker: str = ">>>") -> str:
     result = text
     for term in terms:
         # Case-insensitive replacement
-        import re
         pattern = re.compile(re.escape(term), re.IGNORECASE)
         replacement = f"{marker}\\g<0>{marker}"
         result = pattern.sub(replacement, result)
@@ -391,8 +392,6 @@ def extract_snippet_highlighted(
     Returns:
         Snippet string, or None if text is empty.
     """
-    import html as _html_mod
-
     if not text or not query:
         return None
 
@@ -416,7 +415,6 @@ def extract_snippet_highlighted(
         suffix = "..." if end < len(text) else ""
 
     if html:
-        import re
         escaped = _html_mod.escape(snippet)
         for term in terms:
             pattern = re.compile(re.escape(_html_mod.escape(term)), re.IGNORECASE)

@@ -25,124 +25,16 @@ import sys
 import time
 from pathlib import Path
 
+from utils.normalization import (
+    APPROPRIATION_KEYWORDS as _APPROPRIATION_KEYWORDS,
+    ORG_NORMALIZE as _ORG_NORMALIZE,
+    TITLE_TO_CODE as _TITLE_TO_CODE,
+)
+
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
-
-
-# Organization name normalization map -- maps inconsistent values to canonical names
-_ORG_NORMALIZE: dict[str, str] = {
-    # Single-letter codes from filenames
-    "A": "Army",
-    "N": "Navy",
-    "F": "Air Force",
-    "S": "Space Force",
-    "D": "Defense-Wide",
-    "M": "Marine Corps",
-    "J": "Joint Staff",
-    # Uppercase multi-letter variants
-    "ARMY": "Army",
-    "AF": "Air Force",
-    "NAVY": "Navy",
-    "USAF": "Air Force",
-    "USN": "Navy",
-    "USMC": "Marine Corps",
-    "AIR FORCE": "Air Force",
-    "MARINE CORPS": "Marine Corps",
-    "SPACE FORCE": "Space Force",
-    "DEFENSE-WIDE": "Defense-Wide",
-    "DEFENSEWIDE": "Defense-Wide",
-    "DW": "Defense-Wide",
-    # Title-case variants that should stay as-is (map to themselves)
-    "Army": "Army",
-    "Navy": "Navy",
-    "Air Force": "Air Force",
-}
-
-# Keyword-based appropriation code detection
-_APPROPRIATION_KEYWORDS: dict[str, str] = {
-    "aircraft procurement": "APAF",
-    "missile procurement": "MPAF",
-    "weapons procurement": "WPN",
-    "ammunition procurement": "AMMO",
-    "other procurement": "OPROC",
-    "shipbuilding and conversion": "SCN",
-    "shipbuilding & conversion": "SCN",
-    "research, development, test & eval": "RDTE",
-    "research, development, test and eval": "RDTE",
-    "rdt&e": "RDTE",
-    "operation and maintenance": "O&M",
-    "operations and maintenance": "O&M",
-    "operation & maintenance": "O&M",
-    "operations & maintenance": "O&M",
-    "operational test & eval": "O&M",
-    "operational test and eval": "O&M",
-    "military personnel": "MILPERS",
-    "military construction": "MILCON",
-    "mil con": "MILCON",
-    "milcon": "MILCON",
-    "revolving fund": "RFUND",
-    "working capital fund": "RFUND",
-    "sealift fund": "RFUND",
-    "family housing": "FHSG",
-    "fam hsg": "FHSG",
-    "national guard and reserve": "NGRE",
-    "chemical agents": "CHEM",
-    "chem agents": "CHEM",
-    "defense production act": "DPA",
-    "environmental restoration": "ER",
-    "drug interdiction": "DRUG",
-    "defense health program": "DHP",
-    "defense health": "DHP",
-    "brac": "MILCON",
-    "procurement": "PROC",
-}
-
-# Direct exact-match mapping for common appropriation titles with NULL codes.
-# Applied before keyword matching for highest confidence.
-_TITLE_TO_CODE: dict[str, str] = {
-    "Operation & Maintenance, Navy": "O&M",
-    "Operation & Maintenance, Army": "O&M",
-    "Operation & Maintenance, Air Force": "O&M",
-    "Operation & Maintenance, Marine Corps": "O&M",
-    "Operation & Maintenance, Space Force": "O&M",
-    "Operation & Maintenance, Defense-Wide": "O&M",
-    "Operation & Maintenance, Army Natl Guard": "O&M",
-    "Operation & Maintenance, Army Reserve": "O&M",
-    "Operation & Maintenance, Navy Res": "O&M",
-    "Operation & Maintenance, Navy Reserve": "O&M",
-    "Operation & Maintenance, AF Reserve": "O&M",
-    "Operation & Maintenance, Air Natl Guard": "O&M",
-    "Operation & Maintenance, MC Reserve": "O&M",
-    "Operation & Maintenance, ARNG": "O&M",
-    "Operation & Maintenance, ANG": "O&M",
-    "Operational Test & Eval, Defense": "O&M",
-    "Defense Health Program": "DHP",
-    "Mil Con, Def-Wide": "MILCON",
-    "Mil Con, Army": "MILCON",
-    "Mil Con, Navy": "MILCON",
-    "Mil Con, Air Force": "MILCON",
-    "Mil Con, Army Natl Guard": "MILCON",
-    "Mil Con, AF Reserve": "MILCON",
-    "Mil Con, Navy Res": "MILCON",
-    "MilCon, Air Force": "MILCON",
-    "MilCon, ANG": "MILCON",
-    "MilCon, AF Res": "MILCON",
-    "MILCON, Army": "MILCON",
-    "MILCON, ARNG": "MILCON",
-    "MILCON, Army R": "MILCON",
-    "RDT&E, Army": "RDTE",
-    "RDT&E, Navy": "RDTE",
-    "RDT&E, Air Force": "RDTE",
-    "RDT&E, Defense-Wide": "RDTE",
-    "RDT&E, Space Force": "RDTE",
-    "RDTE, Space Force": "RDTE",
-    "Research, Development, Test, and Evaluation, Space Force": "RDTE",
-    "Shipbuilding & Conversion, Navy": "SCN",
-    "Chem Agents & Munitions Destruction": "CHEM",
-    "National Defense Sealift Fund": "RFUND",
-}
 
 
 def step_1_create_reference_tables(conn: sqlite3.Connection) -> None:

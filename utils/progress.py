@@ -9,6 +9,8 @@ Provides abstract base class and concrete implementations for:
 import time
 from abc import ABC, abstractmethod
 
+from utils.common import format_bytes
+
 
 class ProgressTracker(ABC):
     """Abstract base class for progress tracking.
@@ -204,20 +206,13 @@ class FileProgressTracker(TerminalProgressTracker):
         self.completed_bytes += bytes_count
         self.update()
 
-    def _format_bytes(self, b: int) -> str:
+    @staticmethod
+    def _format_bytes(b: int) -> str:
         """Format bytes into human-readable size string.
 
-        Args:
-            b: Number of bytes
-
-        Returns:
-            Formatted string like "512 KB", "1.5 MB", "2.34 GB"
+        Delegates to :func:`utils.common.format_bytes`.
         """
-        if b < 1024 * 1024:
-            return f"{b / 1024:.0f} KB"
-        if b < 1024 * 1024 * 1024:
-            return f"{b / (1024 * 1024):.1f} MB"
-        return f"{b / (1024 * 1024 * 1024):.2f} GB"
+        return format_bytes(b)
 
     def update(self) -> None:
         """Update and print file progress with byte counts."""

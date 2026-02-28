@@ -40,7 +40,7 @@ from pipeline.schema import check_database_integrity
 # Known exhibit types — imported from exhibit_catalog so it stays in sync
 # with the canonical catalog (Step 1.B1-g-validator).
 from pipeline.exhibit_catalog import list_all_exhibit_types
-from pipeline.builder import ORG_MAP as _ORG_MAP
+from utils.normalization import ORG_NORMALIZE as _ORG_MAP
 
 logger = logging.getLogger(__name__)
 

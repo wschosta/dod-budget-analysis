@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, Query
 
 from api.database import get_db
 from utils.cache import TTLCache
-from utils.database import BUDGET_TYPE_CASE_EXPR, _validate_identifier, get_amount_columns
+from utils.database import BUDGET_TYPE_CASE_EXPR
+from utils.query import detect_fy_columns
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -23,13 +24,11 @@ def clear_dashboard_cache() -> dict:
 
 
 def _detect_fy_columns(conn: sqlite3.Connection) -> tuple[str, str]:
-    """Detect the best FY request and enacted column names dynamically."""
-    cols = get_amount_columns(conn)
-    fy26_col = next((c for c in cols if "fy2026_request" in c), "amount_fy2026_request")
-    fy25_col = next((c for c in cols if "fy2025_enacted" in c), "amount_fy2025_enacted")
-    _validate_identifier(fy26_col, "column name")
-    _validate_identifier(fy25_col, "column name")
-    return fy26_col, fy25_col
+    """Detect the best FY request and enacted column names dynamically.
+
+    Delegates to :func:`utils.query.detect_fy_columns`.
+    """
+    return detect_fy_columns(conn)
 
 
 @router.get("/summary", summary="Dashboard summary statistics")
