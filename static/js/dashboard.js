@@ -5,24 +5,10 @@
 
 "use strict";
 
-var DASH_COLORS = [
-  "#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed",
-  "#0891b2", "#c2410c", "#065f46", "#92400e", "#1e1b4b"
-];
-
-function fmtDollarsM(val) {
-  if (val == null) return "--";
-  var m = val / 1000;  // amounts are in $K, convert to $M
-  if (Math.abs(m) >= 1000) {
-    return "$" + (m / 1000).toFixed(1) + "B";
-  }
-  return "$" + m.toLocaleString(undefined, {maximumFractionDigits: 0}) + "M";
-}
-
-function fmtCount(val) {
-  if (val == null) return "--";
-  return val.toLocaleString();
-}
+// Colors and formatters provided by fmt.js (loaded from base.html).
+var DASH_COLORS = BUDGET_COLORS;
+var fmtDollarsM = fmtDollars;
+var fmtCount = fmtInt;
 
 function showDashError(id, canvasId, msg) {
   var el = document.getElementById(id);
@@ -100,7 +86,7 @@ function showDashError(id, canvasId, msg) {
           indexAxis: "y",
           plugins: { legend: { display: false } },
           scales: {
-            x: { ticks: { callback: function(v) { return "$" + v.toLocaleString() + "M"; } } }
+            x: { ticks: { callback: tickDollarsM } }
           },
           onHover: function(e, elements) {
             e.native.target.style.cursor = elements.length ? "pointer" : "default";

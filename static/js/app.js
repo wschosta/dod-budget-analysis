@@ -807,10 +807,8 @@ function populateDataFreshness(data) {
 
 // ── FALCON-1: Landing page summary visuals ──────────────────────────────────
 
-var LANDING_COLORS = [
-  "#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed",
-  "#0891b2", "#c2410c", "#065f46", "#92400e", "#1e1b4b"
-];
+// Colour palette — provided by fmt.js (loaded from base.html).
+var LANDING_COLORS = BUDGET_COLORS;
 
 function loadLandingVisuals() {
   var svcCanvas = document.getElementById("landing-service-chart");
@@ -843,7 +841,7 @@ function loadLandingVisuals() {
           options: {
             indexAxis: "y",
             plugins: { legend: { display: false } },
-            scales: { x: { ticks: { callback: function(v) { return "$" + v.toLocaleString() + "M"; } } } },
+            scales: { x: { ticks: { callback: tickDollarsM } } },
             onHover: function(e, el) { e.native.target.style.cursor = el.length ? "pointer" : "default"; },
             onClick: function(e, el) {
               if (el.length) {

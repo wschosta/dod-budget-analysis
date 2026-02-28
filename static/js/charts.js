@@ -9,11 +9,8 @@
 
 var CHARTS_API = '/api/v1';
 
-// Colour palette
-var CHART_COLORS = [
-  '#2563eb','#16a34a','#d97706','#dc2626','#7c3aed',
-  '#0891b2','#c2410c','#065f46','#92400e','#1e1b4b',
-];
+// Colour palette — provided by fmt.js (loaded from base.html).
+var CHART_COLORS = BUDGET_COLORS;
 
 var chartService, chartYoY, chartTopN, chartCompare, chartTreemap, chartAppropPie;
 
@@ -144,7 +141,7 @@ async function loadServiceChart(fy) {
         indexAxis: 'y',
         plugins: { legend: { display: false } },
         scales: {
-          x: { ticks: { callback: function(v) { return '$' + v.toLocaleString() + 'M'; } } },
+          x: { ticks: { callback: tickDollarsM } },
         },
         onHover: function(e, elements) {
           e.native.target.style.cursor = elements.length ? 'pointer' : 'default';
@@ -219,10 +216,7 @@ async function loadYoYChart() {
           legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
           tooltip: {
             callbacks: {
-              label: function(ctx) {
-                var val = ctx.parsed.y || 0;
-                return ctx.dataset.label + ': $' + val.toLocaleString(undefined, {maximumFractionDigits: 0}) + 'M';
-              }
+              label: tooltipDollarsM
             }
           }
         },
@@ -230,7 +224,7 @@ async function loadYoYChart() {
           x: { stacked: true },
           y: {
             stacked: true,
-            ticks: { callback: function(v) { return '$' + v.toLocaleString() + 'M'; } }
+            ticks: { callback: tickDollarsM }
           }
         },
         onHover: function(e, elements) {
@@ -296,7 +290,7 @@ async function loadTopNChart(fy) {
         indexAxis: 'y',
         plugins: { legend: { display: false } },
         scales: {
-          x: { ticks: { callback: function(v) { return '$' + v.toLocaleString() + 'M'; } } },
+          x: { ticks: { callback: tickDollarsM } },
         },
         onHover: function(e, elements) {
           e.native.target.style.cursor = elements.length ? 'pointer' : 'default';
@@ -410,15 +404,12 @@ async function loadComparison() {
           legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
           tooltip: {
             callbacks: {
-              label: function(ctx) {
-                var val = ctx.parsed.y || 0;
-                return ctx.dataset.label + ': $' + val.toLocaleString(undefined, {maximumFractionDigits: 0}) + 'M';
-              }
+              label: tooltipDollarsM
             }
           }
         },
         scales: {
-          y: { ticks: { callback: function(v) { return '$' + v.toLocaleString() + 'M'; } } },
+          y: { ticks: { callback: tickDollarsM } },
         },
         onHover: function(e, elements) {
           e.native.target.style.cursor = elements.length ? 'pointer' : 'default';

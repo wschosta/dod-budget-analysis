@@ -84,8 +84,7 @@ async function renderBudgetTypeDoughnut(canvasId, opts) {
     var amounts = filtered.map(function(r) { return (r.fy_totals[amtKey] || 0) / 1000; });
 
     // Use provided colours or fall back to common palettes
-    var defaultColors = (typeof CHART_COLORS !== "undefined") ? CHART_COLORS
-                      : (typeof LANDING_COLORS !== "undefined") ? LANDING_COLORS
+    var defaultColors = (typeof BUDGET_COLORS !== "undefined") ? BUDGET_COLORS
                       : ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed",
                          "#0891b2", "#c2410c", "#065f46", "#92400e", "#1e1b4b"];
     var colors = opts.colors || defaultColors;

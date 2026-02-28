@@ -112,22 +112,7 @@ def create_connection(
 def get_connection(db_path: Path, cached: bool = False) -> sqlite3.Connection:
     """Get or create a SQLite connection.
 
-    Args:
-        db_path: Path to the SQLite database file.
-        cached: Unused legacy parameter (kept for backward compatibility).
-
-    Returns:
-        sqlite3.Connection with row_factory set to sqlite3.Row.
-
-    Raises:
-        FileNotFoundError: If database file does not exist.
+    Delegates to :func:`create_connection` with WAL-mode pragmas enabled.
+    The *cached* parameter is unused and kept only for backward compatibility.
     """
-    if not db_path.exists():
-        raise FileNotFoundError(
-            f"Database not found: {db_path}. "
-            "Run 'python build_budget_db.py' first to build the database."
-        )
-
-    conn = sqlite3.connect(str(db_path), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return create_connection(db_path, read_only=False, pragmas=True)

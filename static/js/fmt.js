@@ -1,0 +1,93 @@
+/**
+ * DoD Budget Explorer — fmt.js
+ *
+ * Shared formatting utilities and color palette used by dashboard.js,
+ * charts.js, app.js, and program-detail.js.  Load this BEFORE any page-
+ * specific JS file that needs formatting or chart helpers.
+ *
+ * Previously each file duplicated its own fmtDollarsM / formatAmount /
+ * CHART_COLORS / tick callback.  Now they all import from here.
+ */
+
+"use strict";
+
+// ── Color palette ────────────────────────────────────────────────────────────
+// 10-color palette matching the CSS design tokens.
+var BUDGET_COLORS = [
+  "#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed",
+  "#0891b2", "#c2410c", "#065f46", "#92400e", "#1e1b4b"
+];
+
+// ── Number formatters ────────────────────────────────────────────────────────
+
+/**
+ * Format a dollar amount (in $K) for display.
+ *
+ * - >= 1 000 000 K  → "$X.XB"
+ * - >= 1 000 K      → "$X,XXXM"  (locale-grouped, no decimals)
+ * - < 1 000 K       → "$XXXK"
+ * - null / NaN       → "—"
+ *
+ * @param {number|null} valK - Amount in thousands of dollars.
+ * @returns {string}
+ */
+function fmtDollars(valK) {
+  if (valK == null || isNaN(valK)) return "\u2014";
+  var m = valK / 1000;
+  if (Math.abs(m) >= 1000) {
+    return "$" + (m / 1000).toFixed(1) + "B";
+  }
+  return "$" + m.toLocaleString(undefined, { maximumFractionDigits: 0 }) + "M";
+}
+
+/**
+ * Format an integer count with locale grouping (e.g. 1,234,567).
+ * Returns "—" for null/undefined.
+ *
+ * @param {number|null} val
+ * @returns {string}
+ */
+function fmtInt(val) {
+  if (val == null) return "\u2014";
+  return val.toLocaleString();
+}
+
+/**
+ * Format a percentage with sign prefix (e.g. "+12.3%" or "−4.0%").
+ *
+ * @param {number|null} pct
+ * @param {number} [digits=1] - decimal places
+ * @returns {string}
+ */
+function fmtPct(pct, digits) {
+  if (pct == null || isNaN(pct)) return "\u2014";
+  if (digits === undefined) digits = 1;
+  return (pct >= 0 ? "+" : "") + pct.toFixed(digits) + "%";
+}
+
+// ── Chart.js helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Reusable Chart.js tick callback that formats values as "$X,XXXM".
+ * Use directly: `ticks: { callback: tickDollarsM }`.
+ *
+ * @param {number} v - Axis value (already in $M).
+ * @returns {string}
+ */
+function tickDollarsM(v) {
+  return "$" + v.toLocaleString() + "M";
+}
+
+/**
+ * Reusable Chart.js tooltip label callback for dollar amounts in $M.
+ *
+ * @param {object} ctx - Chart.js tooltip context.
+ * @returns {string}
+ */
+function tooltipDollarsM(ctx) {
+  var val = ctx.parsed !== undefined ? ctx.parsed : (ctx.raw || 0);
+  if (typeof val === "object" && val !== null) val = val.y || val.x || 0;
+  var label = ctx.dataset ? ctx.dataset.label : "";
+  return (label ? label + ": " : "") +
+    "$" + Number(val).toLocaleString(undefined, { maximumFractionDigits: 0 }) + "M";
+}
