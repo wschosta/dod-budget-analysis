@@ -105,6 +105,33 @@ function tooltipDoughnutPct(ctx) {
   return ctx.label + ": $" + ctx.parsed.toLocaleString() + "M (" + pct + "%)";
 }
 
+/**
+ * Chart.js onHover callback that sets pointer cursor over chart elements.
+ * Previously duplicated 8 times across dashboard.js, charts.js, app.js,
+ * and budget-charts.js.
+ *
+ * Usage: `onHover: chartPointerHover`
+ */
+function chartPointerHover(e, elements) {
+  e.native.target.style.cursor = elements.length ? "pointer" : "default";
+}
+
+/**
+ * Show an error message in place of a chart canvas.
+ * Previously duplicated as showDashError (dashboard.js) and
+ * showChartError (charts.js).
+ *
+ * @param {string} errId   - ID of the error text element.
+ * @param {string} canvasId - ID of the canvas to hide.
+ * @param {string} msg     - Error message to display.
+ */
+function showChartError(errId, canvasId, msg) {
+  var el = document.getElementById(errId);
+  var canvas = document.getElementById(canvasId);
+  if (el) { el.textContent = msg; el.style.display = ""; }
+  if (canvas) canvas.style.display = "none";
+}
+
 // ── DOM helpers ──────────────────────────────────────────────────────────────
 
 /**

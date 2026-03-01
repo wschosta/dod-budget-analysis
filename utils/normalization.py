@@ -104,6 +104,34 @@ def normalize_org_name(raw: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Case-insensitive org alias resolution (includes historical renames)
+# ---------------------------------------------------------------------------
+# Extends ORG_NORMALIZE with lowercase keys and historical agency renames
+# (e.g., DSS → DCSA, DHP/TMA → DHA, DPMO → DPAA).
+# Previously duplicated in pipeline/validator.py as _ORG_ALIASES.
+
+_ORG_ALIASES_LOWER: dict[str, str] = {
+    k.lower(): v for k, v in ORG_NORMALIZE.items()
+}
+# Historical renames not in ORG_NORMALIZE
+_ORG_ALIASES_LOWER.update({
+    "dss": "DCSA",
+    "dhp": "DHA",
+    "tma": "DHA",
+    "dpmo": "DPAA",
+})
+
+
+def normalize_org_loose(name: str) -> str:
+    """Case-insensitive org normalization with historical alias support.
+
+    Strips whitespace, lower-cases *name*, and resolves via
+    :data:`_ORG_ALIASES_LOWER`.  Returns *name* unchanged if no match.
+    """
+    return _ORG_ALIASES_LOWER.get(name.lower().strip(), name)
+
+
+# ---------------------------------------------------------------------------
 # Appropriation title → code mapping (exact match, highest confidence)
 # ---------------------------------------------------------------------------
 # Superset of repair_database._TITLE_TO_CODE and

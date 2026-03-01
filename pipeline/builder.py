@@ -32,6 +32,7 @@ import logging
 import os
 
 from utils import safe_float
+from utils.database import init_pragmas
 from utils.normalization import (
     ORG_NORMALIZE as ORG_MAP,
     parse_appropriation as _parse_appropriation_util,
@@ -301,11 +302,9 @@ def _seed_reference_tables(conn: sqlite3.Connection) -> None:
 def create_database(db_path: Path) -> sqlite3.Connection:
     """Create the SQLite database with all tables."""
     conn = sqlite3.connect(str(db_path))
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
+    init_pragmas(conn)
     # Additional performance pragmas for bulk operations
-    conn.execute("PRAGMA temp_store=MEMORY")           # Use RAM for temp tables
-    conn.execute("PRAGMA cache_size=-262144")          # 256MB cache (was 64MB)
+    conn.execute("PRAGMA cache_size=-262144")          # 256MB cache (overrides init_pragmas 64MB)
     conn.execute("PRAGMA mmap_size=536870912")         # 512MB memory-mapped I/O (was 30MB)
     conn.execute("PRAGMA wal_autocheckpoint=0")        # Disable auto-checkpoint; manual at end
 

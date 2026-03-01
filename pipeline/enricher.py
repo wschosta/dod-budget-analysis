@@ -1558,12 +1558,8 @@ def enrich(
         sys.exit(1)
 
     conn = get_connection(db_path)
-
-    # Performance PRAGMAs for bulk enrichment operations
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA temp_store=MEMORY")
-    conn.execute("PRAGMA cache_size=-262144")      # 256MB cache
+    # init_pragmas already applied by get_connection; add bulk overrides
+    conn.execute("PRAGMA cache_size=-262144")      # 256MB cache (overrides 64MB)
     conn.execute("PRAGMA mmap_size=536870912")     # 512MB mmap
     conn.execute("PRAGMA wal_autocheckpoint=0")    # manual checkpoint at end
 

@@ -43,13 +43,7 @@ function fyColLabel(col) {
   return 'FY' + m[1].slice(-2) + ' ' + m[2].charAt(0).toUpperCase() + m[2].slice(1);
 }
 
-// VIZ-002: Show error in a chart card
-function showChartError(errId, canvasId, msg) {
-  var errEl = document.getElementById(errId);
-  var canvas = document.getElementById(canvasId);
-  if (errEl) { errEl.textContent = msg; errEl.style.display = ''; }
-  if (canvas) canvas.style.display = 'none';
-}
+// showChartError provided by fmt.js (loaded from base.html).
 
 function clearChartError(errId, canvasId) {
   var errEl = document.getElementById(errId);
@@ -144,7 +138,7 @@ async function loadServiceChart(fy) {
           x: { ticks: { callback: tickDollarsM } },
         },
         onHover: function(e, elements) {
-          e.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+          chartPointerHover(e, elements);
         },
         onClick: function(e, elements) {
           if (elements.length) {
@@ -228,7 +222,7 @@ async function loadYoYChart() {
           }
         },
         onHover: function(e, elements) {
-          e.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+          chartPointerHover(e, elements);
         },
         onClick: function(e, elements) {
           if (elements.length) {
@@ -293,7 +287,7 @@ async function loadTopNChart(fy) {
           x: { ticks: { callback: tickDollarsM } },
         },
         onHover: function(e, elements) {
-          e.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+          chartPointerHover(e, elements);
         },
         onClick: function(e, elements) {
           if (elements.length) {
@@ -412,7 +406,7 @@ async function loadComparison() {
           y: { ticks: { callback: tickDollarsM } },
         },
         onHover: function(e, elements) {
-          e.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+          chartPointerHover(e, elements);
         },
         onClick: function(e, elements) {
           if (elements.length) {

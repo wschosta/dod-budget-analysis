@@ -20,6 +20,8 @@ Current schema (build_budget_db.py):
 import sqlite3
 from pathlib import Path
 
+from utils.database import init_pragmas
+
 
 # -- 2.A3-a  FTS Strategy Decision --------------------------------------------
 #
@@ -476,8 +478,7 @@ def create_normalized_db(db_path: Path) -> sqlite3.Connection:
         An open sqlite3.Connection with WAL mode and all migrations applied.
     """
     conn = sqlite3.connect(str(db_path))
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
+    init_pragmas(conn)
     conn.execute("PRAGMA foreign_keys=ON")
     migrate(conn)
     return conn

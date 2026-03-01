@@ -842,7 +842,7 @@ function loadLandingVisuals() {
             indexAxis: "y",
             plugins: { legend: { display: false } },
             scales: { x: { ticks: { callback: tickDollarsM } } },
-            onHover: function(e, el) { e.native.target.style.cursor = el.length ? "pointer" : "default"; },
+            onHover: chartPointerHover,
             onClick: function(e, el) {
               if (el.length) {
                 var idx = el[0].index;

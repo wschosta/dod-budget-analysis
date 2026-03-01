@@ -10,12 +10,8 @@ var DASH_COLORS = BUDGET_COLORS;
 var fmtDollarsM = fmtDollars;
 var fmtCount = fmtInt;
 
-function showDashError(id, canvasId, msg) {
-  var el = document.getElementById(id);
-  var canvas = document.getElementById(canvasId);
-  if (el) { el.textContent = msg; el.style.display = ""; }
-  if (canvas) canvas.style.display = "none";
-}
+// showDashError provided by fmt.js as showChartError(); alias kept.
+var showDashError = showChartError;
 
 (async function initDashboard() {
   var loadingEl = document.getElementById("dash-loading");
@@ -88,9 +84,7 @@ function showDashError(id, canvasId, msg) {
           scales: {
             x: { ticks: { callback: tickDollarsM } }
           },
-          onHover: function(e, elements) {
-            e.native.target.style.cursor = elements.length ? "pointer" : "default";
-          },
+          onHover: chartPointerHover,
           onClick: function(e, elements) {
             if (elements.length) {
               var idx = elements[0].index;
@@ -133,9 +127,7 @@ function showDashError(id, canvasId, msg) {
             },
             tooltip: { callbacks: { label: tooltipDoughnutPct } }
           },
-          onHover: function(e, elements) {
-            e.native.target.style.cursor = elements.length ? "pointer" : "default";
-          },
+          onHover: chartPointerHover,
           onClick: function(e, elements) {
             if (elements.length) {
               var idx = elements[0].index;

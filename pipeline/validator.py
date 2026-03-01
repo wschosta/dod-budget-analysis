@@ -33,6 +33,8 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+from utils.normalization import normalize_org_loose as _normalize_org
+
 # Shared utilities: Import from utils package for consistency across codebase
 from utils import get_connection
 from utils.database import _validate_identifier
@@ -91,34 +93,7 @@ KNOWN_EXHIBIT_TYPES = {"m1", "o1", "p1", "p1r", "p5", "r1", "r2", "r3", "r4", "r
 # Canonical organization name mapping — merges aliases that refer to the same
 # service/agency.  Keys are lowercased raw values; values are the canonical name.
 # Includes DoD reorganizations (DSS→DCSA 2019, DHP/TMA→DHA 2013, DPMO→DPAA 2015).
-_ORG_ALIASES: dict[str, str] = {
-    # Military services
-    "af":        "Air Force",
-    "air force": "Air Force",
-    "f":         "Air Force",
-    "army":      "Army",
-    "a":         "Army",
-    "navy":      "Navy",
-    "n":         "Navy",
-    # DSS renamed to DCSA in 2019
-    "dss":       "DCSA",
-    "dcsa":      "DCSA",
-    # DHP and TMA consolidated into DHA (~2013)
-    "dhp":       "DHA",
-    "tma":       "DHA",
-    "dha":       "DHA",
-    # DPMO reorganized into DPAA in 2015
-    "dpmo":      "DPAA",
-    "dpaa":      "DPAA",
-    # TRANSCOM aliases
-    "trans":     "TRANSCOM",
-    "transcom":  "TRANSCOM",
-}
-
-
-def _normalize_org(name: str) -> str:
-    """Return canonical org name, collapsing known aliases."""
-    return _ORG_ALIASES.get(name.lower().strip(), name)
+## _normalize_org imported from utils.normalization.normalize_org_loose
 
 
 # ── Individual checks ────────────────────────────────────────────────────────

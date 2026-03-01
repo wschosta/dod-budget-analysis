@@ -111,9 +111,7 @@ async function renderBudgetTypeDoughnut(canvasId, opts) {
           },
           tooltip: { callbacks: { label: tooltipDoughnutPct } },
         },
-        onHover: function(e, elements) {
-          e.native.target.style.cursor = elements.length ? "pointer" : "default";
-        },
+        onHover: chartPointerHover,
         onClick: function(e, elements) {
           if (elements.length && opts.onClick) {
             var idx = elements[0].index;
