@@ -91,3 +91,35 @@ function tooltipDollarsM(ctx) {
   return (label ? label + ": " : "") +
     "$" + Number(val).toLocaleString(undefined, { maximumFractionDigits: 0 }) + "M";
 }
+
+/**
+ * Chart.js doughnut tooltip callback showing "$X,XXXM (XX.X%)".
+ * Computes percentage from the dataset total automatically.
+ *
+ * @param {object} ctx - Chart.js tooltip context.
+ * @returns {string}
+ */
+function tooltipDoughnutPct(ctx) {
+  var total = ctx.dataset.data.reduce(function(a, b) { return a + b; }, 0);
+  var pct = total > 0 ? (ctx.parsed / total * 100).toFixed(1) : 0;
+  return ctx.label + ": $" + ctx.parsed.toLocaleString() + "M (" + pct + "%)";
+}
+
+// ── DOM helpers ──────────────────────────────────────────────────────────────
+
+/**
+ * Escape HTML special characters to prevent XSS when inserting into the DOM.
+ * Previously duplicated in app.js (_escapeHtml) and dashboard.js (escapeHtml).
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+function escapeHtml(s) {
+  if (!s) return "";
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}

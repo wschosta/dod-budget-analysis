@@ -1125,16 +1125,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
 // ── Autocomplete for keyword search ─────────────────────────────────────────
 
-function _escapeHtml(s) {
-  if (!s) return "";
-  // Escape characters that are dangerous in both text and attribute contexts
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+// _escapeHtml provided by fmt.js as escapeHtml(); alias kept for local refs.
+var _escapeHtml = escapeHtml;
 
 function initAutocomplete() {
   var qInput = document.getElementById("q");

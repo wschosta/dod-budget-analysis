@@ -5,6 +5,8 @@ import sqlite3
 import time
 from pathlib import Path
 
+from utils.database import init_pragmas
+
 logger = logging.getLogger(__name__)
 
 
@@ -102,10 +104,7 @@ def create_connection(
         conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     if pragmas:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
-        conn.execute("PRAGMA temp_store=MEMORY")
-        conn.execute("PRAGMA cache_size=-64000")
+        init_pragmas(conn)
     return conn
 
 

@@ -109,15 +109,7 @@ async function renderBudgetTypeDoughnut(canvasId, opts) {
             position: "right",
             labels: { boxWidth: 12, font: { size: 11 } },
           },
-          tooltip: {
-            callbacks: {
-              label: function(ctx) {
-                var total = ctx.dataset.data.reduce(function(a, b) { return a + b; }, 0);
-                var pct = total > 0 ? (ctx.parsed / total * 100).toFixed(1) : 0;
-                return ctx.label + ": $" + ctx.parsed.toLocaleString() + "M (" + pct + "%)";
-              },
-            },
-          },
+          tooltip: { callbacks: { label: tooltipDoughnutPct } },
         },
         onHover: function(e, elements) {
           e.native.target.style.cursor = elements.length ? "pointer" : "default";
