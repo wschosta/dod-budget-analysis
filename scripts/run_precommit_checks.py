@@ -22,6 +22,11 @@ import sys
 import traceback
 from pathlib import Path
 
+# Ensure the project root is on sys.path so package imports work
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 
 class PreCommitChecker:
     """Runs pre-commit validation checks."""
@@ -118,10 +123,10 @@ def main():
 
     def check_imports():
         modules = [
-            "dod_budget_downloader",
-            "build_budget_db",
-            "search_budget",
-            "validate_budget_db",
+            "downloader",
+            "pipeline.builder",
+            "pipeline.search",
+            "pipeline.validator",
         ]
 
         errors = []
@@ -279,7 +284,7 @@ def main():
     def check_config_files():
         required = [
             ".github/workflows/ci.yml",
-            ".pre-commit-hook.py",
+            "scripts/hooks/pre-commit-hook.py",
             "utils/__init__.py",
             "utils/common.py",
             "utils/patterns.py",
