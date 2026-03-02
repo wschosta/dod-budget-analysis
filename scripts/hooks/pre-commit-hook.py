@@ -48,10 +48,10 @@ def check_imports():
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
     try:
-        import dod_budget_downloader  # noqa: F401
-        import search_budget  # noqa: F401
-        import validate_budget_db  # noqa: F401
-        import build_budget_db  # noqa: F401
+        import downloader  # noqa: F401
+        import pipeline.search  # noqa: F401
+        import pipeline.validator  # noqa: F401
+        import pipeline.builder  # noqa: F401
 
         print("[PASSED] All modules import successfully.")
         return True

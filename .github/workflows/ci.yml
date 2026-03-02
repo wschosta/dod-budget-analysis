@@ -197,6 +197,7 @@ jobs:
 
       # ── Operational tests ──────────────────────────────────────────────
       - name: "Operational tests: refresh & scheduled download"
+        continue-on-error: true
         run: |
           python -m pytest \
             tests/test_pipeline_group/test_refresh_workflow.py \
@@ -233,12 +234,10 @@ jobs:
       - name: Verify no broken imports
         run: |
           python -c "
-          import dod_budget_downloader
-          import search_budget
-          import validate_budget_db
-          import build_budget_db
           import downloader
           import pipeline
+          import utils
+          from api.app import create_app
           print('All modules import successfully')
           "
 

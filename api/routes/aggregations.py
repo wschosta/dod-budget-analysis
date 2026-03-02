@@ -17,9 +17,9 @@ from fastapi import Query as FQuery
 
 from api.database import get_db
 from api.models import AggregationResponse, AggregationRow
-from utils.cache import TTLCache
+from utils.cache import TTLCache, make_cache_key
 from utils.database import BUDGET_TYPE_CASE_EXPR, _validate_identifier, get_amount_columns
-from utils.query import build_where_clause
+from utils.query import build_where_clause, compute_yoy_change
 
 router = APIRouter(prefix="/aggregations", tags=["aggregations"])
 
@@ -43,12 +43,9 @@ def _cache_key(
     exhibit_type: list[str] | None,
     appropriation_code: list[str] | None = None,
 ) -> tuple:
-    return (
-        group_by,
-        tuple(sorted(fiscal_year or [])),
-        tuple(sorted(service or [])),
-        tuple(sorted(exhibit_type or [])),
-        tuple(sorted(appropriation_code or [])),
+    return make_cache_key(
+        "agg", group_by, fiscal_year, service,
+        exhibit_type, appropriation_code,
     )
 
 
@@ -154,11 +151,7 @@ def aggregate(
         if grand_total and latest_val is not None:
             pct_of_total = round(latest_val / grand_total * 100, 2)
 
-        yoy_change_pct = None
-        if prev_val and latest_val is not None:
-            yoy_change_pct = round(
-                (latest_val - prev_val) / abs(prev_val) * 100, 2
-            )
+        yoy_change_pct = compute_yoy_change(latest_val, prev_val)
 
         fy_totals = {c: r.get(c) for c in amount_cols}
 

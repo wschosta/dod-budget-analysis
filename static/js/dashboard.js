@@ -5,31 +5,13 @@
 
 "use strict";
 
-var DASH_COLORS = [
-  "#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed",
-  "#0891b2", "#c2410c", "#065f46", "#92400e", "#1e1b4b"
-];
+// Colors and formatters provided by fmt.js (loaded from base.html).
+var DASH_COLORS = BUDGET_COLORS;
+var fmtDollarsM = fmtDollars;
+var fmtCount = fmtInt;
 
-function fmtDollarsM(val) {
-  if (val == null) return "--";
-  var m = val / 1000;  // amounts are in $K, convert to $M
-  if (Math.abs(m) >= 1000) {
-    return "$" + (m / 1000).toFixed(1) + "B";
-  }
-  return "$" + m.toLocaleString(undefined, {maximumFractionDigits: 0}) + "M";
-}
-
-function fmtCount(val) {
-  if (val == null) return "--";
-  return val.toLocaleString();
-}
-
-function showDashError(id, canvasId, msg) {
-  var el = document.getElementById(id);
-  var canvas = document.getElementById(canvasId);
-  if (el) { el.textContent = msg; el.style.display = ""; }
-  if (canvas) canvas.style.display = "none";
-}
+// showDashError provided by fmt.js as showChartError(); alias kept.
+var showDashError = showChartError;
 
 (async function initDashboard() {
   var loadingEl = document.getElementById("dash-loading");
@@ -100,11 +82,9 @@ function showDashError(id, canvasId, msg) {
           indexAxis: "y",
           plugins: { legend: { display: false } },
           scales: {
-            x: { ticks: { callback: function(v) { return "$" + v.toLocaleString() + "M"; } } }
+            x: { ticks: { callback: tickDollarsM } }
           },
-          onHover: function(e, elements) {
-            e.native.target.style.cursor = elements.length ? "pointer" : "default";
-          },
+          onHover: chartPointerHover,
           onClick: function(e, elements) {
             if (elements.length) {
               var idx = elements[0].index;
@@ -145,19 +125,9 @@ function showDashError(id, canvasId, msg) {
               position: "right",
               labels: { boxWidth: 12, font: { size: 11 } }
             },
-            tooltip: {
-              callbacks: {
-                label: function(ctx) {
-                  var total = ctx.dataset.data.reduce(function(a, b) { return a + b; }, 0);
-                  var pct = total > 0 ? (ctx.parsed / total * 100).toFixed(1) : 0;
-                  return ctx.label + ": $" + ctx.parsed.toLocaleString() + "M (" + pct + "%)";
-                }
-              }
-            }
+            tooltip: { callbacks: { label: tooltipDoughnutPct } }
           },
-          onHover: function(e, elements) {
-            e.native.target.style.cursor = elements.length ? "pointer" : "default";
-          },
+          onHover: chartPointerHover,
           onClick: function(e, elements) {
             if (elements.length) {
               var idx = elements[0].index;
@@ -229,9 +199,5 @@ function showDashError(id, canvasId, msg) {
         '</div></div>';
     }
   }
-
-  function escapeHtml(s) {
-    if (!s) return "";
-    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  }
+  // escapeHtml provided by fmt.js (loaded from base.html).
 })();

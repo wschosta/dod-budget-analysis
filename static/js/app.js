@@ -11,6 +11,22 @@
 
 "use strict";
 
+// ── Shared fetch wrapper ────────────────────────────────────────────────────
+// Centralises the fetch→JSON pattern used throughout the app so callers
+// don't need to repeat the `.ok` check / `.json()` parse.
+
+/**
+ * Fetch a URL and return parsed JSON, or null on HTTP error.
+ * @param {string} url
+ * @param {RequestInit} [opts]
+ * @returns {Promise<any|null>}
+ */
+function apiFetch(url, opts) {
+  return fetch(url, opts).then(function (r) {
+    return r.ok ? r.json() : null;
+  });
+}
+
 // ── LION-010: Dark mode toggle ──────────────────────────────────────────────
 
 var THEME_KEY = "dod_theme";
@@ -734,8 +750,7 @@ function restoreAmountFormat() {
 function loadFooterMetadata() {
   var el = document.getElementById("footer-meta");
   if (!el) return;
-  fetch("/api/v1/metadata")
-    .then(function(r) { return r.ok ? r.json() : null; })
+  apiFetch("/api/v1/metadata")
     .then(function(data) {
       if (!data) return;
       var parts = [];
@@ -792,10 +807,8 @@ function populateDataFreshness(data) {
 
 // ── FALCON-1: Landing page summary visuals ──────────────────────────────────
 
-var LANDING_COLORS = [
-  "#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed",
-  "#0891b2", "#c2410c", "#065f46", "#92400e", "#1e1b4b"
-];
+// Colour palette — provided by fmt.js (loaded from base.html).
+var LANDING_COLORS = BUDGET_COLORS;
 
 function loadLandingVisuals() {
   var svcCanvas = document.getElementById("landing-service-chart");
@@ -804,8 +817,7 @@ function loadLandingVisuals() {
 
   // Load service breakdown chart
   if (svcCanvas) {
-    fetch("/api/v1/aggregations?group_by=service")
-      .then(function(r) { return r.ok ? r.json() : null; })
+    apiFetch("/api/v1/aggregations?group_by=service")
       .then(function(data) {
         if (!data || !data.rows || !data.rows.length) return;
         var cols = Object.keys(data.rows[0]).filter(function(k) { return /^total_fy\d+/.test(k); }).sort();
@@ -829,8 +841,8 @@ function loadLandingVisuals() {
           options: {
             indexAxis: "y",
             plugins: { legend: { display: false } },
-            scales: { x: { ticks: { callback: function(v) { return "$" + v.toLocaleString() + "M"; } } } },
-            onHover: function(e, el) { e.native.target.style.cursor = el.length ? "pointer" : "default"; },
+            scales: { x: { ticks: { callback: tickDollarsM } } },
+            onHover: chartPointerHover,
             onClick: function(e, el) {
               if (el.length) {
                 var idx = el[0].index;
@@ -861,8 +873,7 @@ function loadTagCloud() {
   var countEl = document.getElementById("tag-cloud-count");
   if (!container) return;
 
-  fetch("/api/v1/pe/tags/all")
-    .then(function(r) { return r.ok ? r.json() : null; })
+  apiFetch("/api/v1/pe/tags/all")
     .then(function(data) {
       if (!data) {
         container.innerHTML = '<p style="font-size:.85rem;color:var(--text-secondary)">Tags not available.</p>';
@@ -970,8 +981,7 @@ function _doLoadFacets(form) {
     });
   }
 
-  fetch("/api/v1/facets?" + params.toString())
-    .then(function(r) { return r.ok ? r.json() : null; })
+  apiFetch("/api/v1/facets?" + params.toString())
     .then(function(data) {
       if (!data) return;
       _applyFacetCounts("fiscal_year", data.fiscal_year || []);
@@ -1115,16 +1125,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
 // ── Autocomplete for keyword search ─────────────────────────────────────────
 
-function _escapeHtml(s) {
-  if (!s) return "";
-  // Escape characters that are dangerous in both text and attribute contexts
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+// _escapeHtml provided by fmt.js as escapeHtml(); alias kept for local refs.
+var _escapeHtml = escapeHtml;
 
 function initAutocomplete() {
   var qInput = document.getElementById("q");

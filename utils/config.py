@@ -22,8 +22,11 @@ import re
 # Used by both downloader (folder layout) and pipeline (data source registration).
 # Canonical source; downloader.metadata duplicates for import isolation.
 
-SUMMARY_EXHIBIT_KEYS = frozenset({
-    "p1", "r1", "o1", "m1", "c1", "rf1", "p1r",
+# The 7 standard summary exhibit type codes (p1, r1, o1, m1, c1, rf1, p1r).
+# Used directly by query.py for SQL exclusion and by builder/repair for seeding.
+CORE_SUMMARY_TYPES = frozenset({"p1", "r1", "o1", "m1", "c1", "rf1", "p1r"})
+
+SUMMARY_EXHIBIT_KEYS = CORE_SUMMARY_TYPES | frozenset({
     "ogsi", "supplemental", "amendment",
 })
 DETAIL_EXHIBIT_KEYS = frozenset({"p5", "r2", "r3", "r4"})

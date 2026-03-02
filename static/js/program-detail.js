@@ -13,10 +13,8 @@
   var canvas = document.getElementById("pe-funding-chart");
   if (!canvas) return;
 
-  var COLORS = [
-    "#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed",
-    "#0891b2", "#c2410c", "#065f46"
-  ];
+  // Colour palette — provided by fmt.js (loaded from base.html).
+  var COLORS = BUDGET_COLORS;
 
   try {
     var resp = await fetch("/api/v1/pe/" + encodeURIComponent(pe) + "/years");
@@ -73,7 +71,7 @@
         scales: {
           y: {
             ticks: {
-              callback: function (v) { return "$" + v.toLocaleString() + "M"; }
+              callback: tickDollarsM
             }
           }
         }

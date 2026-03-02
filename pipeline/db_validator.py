@@ -26,7 +26,6 @@ DONE LION-108-val: Validation checks for LION schema changes.
 import argparse
 import json
 import logging
-import re
 import sqlite3
 import sys
 from datetime import datetime
@@ -34,13 +33,14 @@ from pathlib import Path
 
 # Shared utilities: Import from utils package for consistency across codebase
 from utils import get_connection
+from utils.patterns import PE_NUMBER_STRICT as _PE_PATTERN
 from utils.database import _validate_identifier
 from pipeline.schema import check_database_integrity
 
 # Known exhibit types — imported from exhibit_catalog so it stays in sync
 # with the canonical catalog (Step 1.B1-g-validator).
 from pipeline.exhibit_catalog import list_all_exhibit_types
-from pipeline.builder import ORG_MAP as _ORG_MAP
+from utils.normalization import ORG_NORMALIZE as _ORG_MAP
 
 logger = logging.getLogger(__name__)
 
@@ -308,7 +308,7 @@ def check_empty_files(conn: sqlite3.Connection) -> list[dict]:
 
 
 # VALDB-001: PE number format validation
-_PE_PATTERN = re.compile(r"^[0-9]{7}[A-Z]{1,2}$")
+# _PE_PATTERN imported from utils.patterns.PE_NUMBER_STRICT
 
 
 def check_pe_number_format(conn: sqlite3.Connection) -> list[dict]:

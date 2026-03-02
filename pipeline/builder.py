@@ -32,6 +32,12 @@ import logging
 import os
 
 from utils import safe_float
+from utils.config import SUMMARY_EXHIBIT_KEYS, _SHORT_SUMMARY_KEYS
+from utils.database import init_pragmas
+from utils.normalization import (
+    ORG_NORMALIZE as ORG_MAP,
+    parse_appropriation as _parse_appropriation_util,
+)
 from utils.strings import normalize_fiscal_year as _normalize_fy_value
 from utils.patterns import PE_NUMBER
 
@@ -52,6 +58,13 @@ _SCHEMA_DESCRIPTION = (
 import openpyxl  # noqa: E402
 import pdfplumber  # noqa: E402
 
+# Optional: python-calamine (Rust-based xlsx reader, ~8x faster than openpyxl)
+try:
+    from python_calamine import CalamineWorkbook  # noqa: E402
+    _HAS_CALAMINE = True
+except ImportError:
+    _HAS_CALAMINE = False
+
 # Optional: xlrd for legacy .xls files (FY1998-2009 era)
 try:
     import xlrd  # noqa: E402, F401
@@ -60,75 +73,61 @@ except ImportError:
     _HAS_XLRD = False
 from pipeline.exhibit_catalog import find_matching_columns as _catalog_find_matching_columns  # noqa: E402
 
+
+# ── Calamine fast-path abstraction ────────────────────────────────────────────
+# When python-calamine is available (Rust-based xlsx reader), we use it for
+# ~8x faster Excel reading.  The wrapper exposes the same iteration interface
+# that the rest of the builder expects: sheetnames, iter_rows(values_only=True).
+
+class _CalamineSheet:
+    """Thin wrapper around a calamine sheet to match openpyxl iteration API."""
+
+    __slots__ = ("_rows",)
+
+    def __init__(self, rows: list[list]):
+        # Calamine returns '' for empty cells; openpyxl returns None.
+        # Normalize to None for compatibility with downstream code.
+        self._rows = rows
+
+    def iter_rows(self, values_only: bool = False):
+        for r in self._rows:
+            yield tuple(None if v == '' else v for v in r)
+
+
+class _CalamineWorkbook:
+    """Thin wrapper around CalamineWorkbook matching the openpyxl interface."""
+
+    __slots__ = ("_wb", "sheetnames")
+
+    def __init__(self, path: str):
+        self._wb = CalamineWorkbook.from_path(path)
+        self.sheetnames = self._wb.sheet_names
+
+    def __getitem__(self, name: str) -> _CalamineSheet:
+        return _CalamineSheet(self._wb.get_sheet_by_name(name).to_python())
+
+    def close(self):
+        pass
+
+
+def _open_xlsx(path: str):
+    """Open an xlsx file using calamine (fast) or openpyxl (fallback)."""
+    if _HAS_CALAMINE:
+        try:
+            return _CalamineWorkbook(path)
+        except Exception:
+            # Calamine can't handle some edge cases — fall back to openpyxl
+            pass
+    return openpyxl.load_workbook(path, read_only=True, data_only=True)
+
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 DOCS_DIR = Path("DoD_Budget_Documents")
 
-# Map organization codes to names (Step 1.B4-b)
-# Single-letter codes from exhibit filename prefixes; longer codes from spreadsheet
-# Organization column cells.  Unknown codes are stored as-is.
-ORG_MAP = {
-    # Single-letter codes (filename-level)
-    "A": "Army", "N": "Navy", "F": "Air Force", "S": "Space Force",
-    "D": "Defense-Wide", "M": "Marine Corps", "J": "Joint Staff",
-    # Uppercase multi-letter variants found in spreadsheet Organization column
-    "ARMY": "Army", "AF": "Air Force", "NAVY": "Navy",
-    "USAF": "Air Force", "USMC": "Marine Corps", "USN": "Navy",
-    "AIR FORCE": "Air Force", "MARINE CORPS": "Marine Corps",
-    "SPACE FORCE": "Space Force", "DEFENSE-WIDE": "Defense-Wide",
-    "DEFENSEWIDE": "Defense-Wide", "DW": "Defense-Wide",
-    # Defense agencies and field activities (pass-through or normalize)
-    "SOCOM": "SOCOM", "USSOCOM": "SOCOM",
-    "DISA":  "DISA",
-    "DLA":   "DLA",
-    "MDA":   "MDA",
-    "DHA":   "DHA",
-    "NGB":   "NGB",
-    "DARPA": "DARPA",
-    "NSA":   "NSA",
-    "DIA":   "DIA",
-    "NRO":   "NRO",
-    "NGA":   "NGA",
-    "DTRA":  "DTRA",
-    "DCSA":  "DCSA",
-    "WHS":   "WHS",
-    "DCMA":  "DCMA",
-    "DFAS":  "DFAS",
-    "DODEA": "DODEA",
-    "DPAA":  "DPAA",
-    "TJS":   "TJS",
-    "DSCA":  "DSCA",
-    "DECA":  "DECA",
-    "OSD":   "OSD",
-    "DAU":   "DAU",
-    "DTIC":  "DTIC",
-    "DHRA":  "DHRA",
-    "DLSA":  "DLSA",
-    "DTSA":  "DTSA",
-    "OTE":   "OTE",
-    "CYBER": "CYBER",
-    "CMP":   "CMP",
-    "DEPS":  "DEPS",
-    "DEPSDDR": "DEPSDDR",
-    "DMACT": "DMACT",
-    "OLDCC": "OLDCC",
-    "CAAF":  "CAAF",
-    "CBDP":  "CBDP",
-    "SDA":   "SDA",
-    "TRANSCOM": "TRANSCOM",
-    "TRANS": "TRANSCOM",
-    "BTA":   "BTA",
-    "DEFW":  "DEFW",
-    "DEFR":  "DEFR",
-    "OEA":   "OEA",
-    "UNDD":  "UNDD",
-    "DPMO":  "DPMO",
-    "DSS":   "DSS",
-    "IG":    "IG",
-    "TMA":   "TMA",
-    "NDU":   "NDU",
-}
+# ORG_MAP is imported from utils.normalization (centralized)
+# and re-exported here for backward compatibility.
 
 # Map exhibit type prefixes to readable names (Step 1.B1-g)
 EXHIBIT_TYPES = {
@@ -335,8 +334,7 @@ def _migrate_add_columns(conn: sqlite3.Connection) -> None:
 def _seed_reference_tables(conn: sqlite3.Connection) -> None:
     """Seed reference tables with canonical display names."""
     # Exhibit types
-    _summary_codes = {"p1", "r1", "o1", "m1", "c1", "rf1", "p1r",
-                       "oco", "ogsi", "supplemental", "amendment", "enl", "toa"}
+    _summary_codes = SUMMARY_EXHIBIT_KEYS | _SHORT_SUMMARY_KEYS
     # Seed both standard exhibit types and keyword-only types
     all_exhibit_types = {**EXHIBIT_TYPES, **KEYWORD_ONLY_EXHIBIT_TYPES}
     for code, display_name in all_exhibit_types.items():
@@ -359,11 +357,9 @@ def _seed_reference_tables(conn: sqlite3.Connection) -> None:
 def create_database(db_path: Path) -> sqlite3.Connection:
     """Create the SQLite database with all tables."""
     conn = sqlite3.connect(str(db_path))
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
+    init_pragmas(conn)
     # Additional performance pragmas for bulk operations
-    conn.execute("PRAGMA temp_store=MEMORY")           # Use RAM for temp tables
-    conn.execute("PRAGMA cache_size=-262144")          # 256MB cache (was 64MB)
+    conn.execute("PRAGMA cache_size=-262144")          # 256MB cache (overrides init_pragmas 64MB)
     conn.execute("PRAGMA mmap_size=536870912")         # 512MB memory-mapped I/O (was 30MB)
     conn.execute("PRAGMA wal_autocheckpoint=0")        # Disable auto-checkpoint; manual at end
 
@@ -798,51 +794,16 @@ def _extract_all_pe_numbers(text: str | None) -> list[str]:
     return result
 
 
-_APPROPRIATION_KEYWORDS: dict[str, str] = {
-    "aircraft procurement": "APAF",
-    "missile procurement": "MPAF",
-    "weapons procurement": "WPN",
-    "ammunition procurement": "AMMO",
-    "other procurement": "OPROC",
-    "shipbuilding and conversion": "SCN",
-    "research, development, test & eval": "RDTE",
-    "research, development, test and eval": "RDTE",
-    "rdt&e": "RDTE",
-    "operation and maintenance": "O&M",
-    "operations and maintenance": "O&M",
-    "military personnel": "MILPERS",
-    "military construction": "MILCON",
-    "revolving fund": "RFUND",
-    "family housing": "FHSG",
-    "national guard and reserve": "NGRE",
-    "chemical agents": "CHEM",
-    "defense production act": "DPA",
-    "environmental restoration": "ER",
-    "drug interdiction": "DRUG",
-}
+# _APPROPRIATION_KEYWORDS imported from utils.normalization (centralized).
+# _parse_appropriation delegates to utils.normalization.parse_appropriation.
 
 
 def _parse_appropriation(account_title: str | None) -> tuple[str | None, str | None]:
     """Split account_title into (appropriation_code, appropriation_title).
 
-    Strategy 1: Leading numeric code (e.g., "2035 Aircraft Procurement, Army").
-    Strategy 2: Keyword-based detection from title text.
+    Delegates to the centralized :func:`utils.normalization.parse_appropriation`.
     """
-    if not account_title:
-        return None, None
-    s = str(account_title).strip()
-    if not s:
-        return None, None
-    # Strategy 1: Leading numeric code
-    parts = s.split(None, 1)
-    if len(parts) == 2 and parts[0].isdigit():
-        return parts[0], parts[1]
-    # Strategy 2: Keyword-based appropriation type
-    lower = s.lower()
-    for keyword, code in _APPROPRIATION_KEYWORDS.items():
-        if keyword in lower:
-            return code, s
-    return None, s
+    return _parse_appropriation_util(account_title)
 
 
 def _detect_currency_year(sheet_name: str, filename: str) -> str:
@@ -1191,7 +1152,7 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
                       ensure_columns: bool = True) -> int:
     """Ingest a single Excel file into the database."""
     _docs_dir = (docs_dir or DOCS_DIR).resolve()
-    wb = openpyxl.load_workbook(str(file_path), read_only=True, data_only=True)
+    wb = _open_xlsx(str(file_path))
     exhibit_type = _detect_exhibit_type(file_path.name)
     total_rows = 0
 
@@ -1335,19 +1296,17 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
             # Lookup by exact code first, then uppercase, then title-case (Step 1.B4-b)
             org_name = ORG_MAP.get(org_code) or ORG_MAP.get(org_code.upper()) or ORG_MAP.get(org_code.title(), org_code)
 
-            # Extract PE number from line_item, account, or account_title (Step 1.B4-a)
+            # Single-pass PE extraction from all relevant fields (4 regex → 1)
             line_item_val = get_str(row, "line_item")
             account_val = str(acct).strip()
             acct_title_val = get_str(row, "account_title")
-            pe_number = (
-                _extract_pe_number(line_item_val)
-                or _extract_pe_number(account_val)
-                or _extract_pe_number(acct_title_val)
+            _pe_text = (
+                f"{line_item_val or ''} {account_val}"
+                f" {acct_title_val or ''} {get_str(row, 'line_item_title') or ''}"
             )
-            # LION-102: Capture additional PE numbers for cross-referencing
-            all_pes = _extract_all_pe_numbers(
-                f"{line_item_val or ''} {account_val} {get_str(row, 'line_item_title') or ''}")
-            additional_pes = [p for p in all_pes if p != pe_number] if pe_number else all_pes[1:]
+            all_pes = _extract_all_pe_numbers(_pe_text)
+            pe_number = all_pes[0] if all_pes else None
+            additional_pes = all_pes[1:]
 
             # Split appropriation code and title from account_title (Step 1.B4-c implementation)
             approp_code, approp_title = _parse_appropriation(acct_title_val)
@@ -1456,7 +1415,7 @@ def _extract_excel_rows(args: tuple) -> dict:
     }
 
     try:
-        wb = openpyxl.load_workbook(str(file_path), read_only=True, data_only=True)
+        wb = _open_xlsx(str(file_path))
     except Exception as e:
         result["error"] = str(e)
         return result
@@ -1569,17 +1528,15 @@ def _extract_excel_rows(args: tuple) -> dict:
             line_item_val = _get_str(row, "line_item")
             account_val = str(acct).strip()
             acct_title_val = _get_str(row, "account_title")
-            # Extract PE from line_item, account, or account_title
-            pe_number = (
-                _extract_pe_number(line_item_val)
-                or _extract_pe_number(account_val)
-                or _extract_pe_number(acct_title_val)
-            )
-            # LION-102: Capture additional PE numbers in parallel worker
             line_item_title_val = _get_str(row, "line_item_title")
-            all_pes = _extract_all_pe_numbers(
-                f"{line_item_val or ''} {account_val} {line_item_title_val or ''}")
-            additional_pes = [p for p in all_pes if p != pe_number] if pe_number else all_pes[1:]
+            # Single-pass PE extraction: search all fields at once (4 regex → 1)
+            _pe_text = (
+                f"{line_item_val or ''} {account_val}"
+                f" {acct_title_val or ''} {line_item_title_val or ''}"
+            )
+            all_pes = _extract_all_pe_numbers(_pe_text)
+            pe_number = all_pes[0] if all_pes else None
+            additional_pes = all_pes[1:]
             approp_code, approp_title = _parse_appropriation(acct_title_val)
 
             fy_dict: dict[str, float | None] = {}
@@ -1671,34 +1628,23 @@ def _convert_xls_to_xlsx(xls_files: list[Path]) -> list[Path]:
             for sheet_name in wb_old.sheet_names():
                 old_sheet = wb_old.sheet_by_name(sheet_name)
                 new_sheet = wb_new.create_sheet(title=sheet_name[:31])
+                datemode = wb_old.datemode
                 for row_idx in range(old_sheet.nrows):
+                    row_vals: list = []
                     for col_idx in range(old_sheet.ncols):
                         cell = old_sheet.cell(row_idx, col_idx)
-                        # Handle xlrd cell types
                         if cell.ctype == xlrd.XL_CELL_DATE:
                             try:
-                                dt = xlrd.xldate_as_datetime(
-                                    cell.value, wb_old.datemode
-                                )
-                                new_sheet.cell(
-                                    row=row_idx + 1, column=col_idx + 1,
-                                    value=dt,
+                                row_vals.append(
+                                    xlrd.xldate_as_datetime(cell.value, datemode)
                                 )
                             except Exception:
-                                new_sheet.cell(
-                                    row=row_idx + 1, column=col_idx + 1,
-                                    value=cell.value,
-                                )
+                                row_vals.append(cell.value)
                         elif cell.ctype == xlrd.XL_CELL_BOOLEAN:
-                            new_sheet.cell(
-                                row=row_idx + 1, column=col_idx + 1,
-                                value=bool(cell.value),
-                            )
+                            row_vals.append(bool(cell.value))
                         else:
-                            new_sheet.cell(
-                                row=row_idx + 1, column=col_idx + 1,
-                                value=cell.value,
-                            )
+                            row_vals.append(cell.value)
+                    new_sheet.append(row_vals)
 
             wb_new.save(str(xlsx_path))
             wb_old.release_resources()
@@ -2498,10 +2444,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
     # Exclude *a.xlsx alternate Comptroller files (e.g. r1a.xlsx, p1a.xlsx).
     # These contain identical data to the base files and create duplicate rows.
-    # Pattern is conservative: only matches known exhibit stems + 'a'.
-    _ALT_RE = re.compile(r"^(c1|m1|o1|p1|p1r|r1|rf1)a$", re.IGNORECASE)
-    _alt_count = sum(1 for f in xlsx_files if _ALT_RE.match(f.stem))
-    xlsx_files = [f for f in xlsx_files if not _ALT_RE.match(f.stem)]
+    from utils.patterns import ALTERNATE_EXHIBIT_FILE
+    _alt_count = sum(1 for f in xlsx_files if ALTERNATE_EXHIBIT_FILE.match(f.stem))
+    xlsx_files = [f for f in xlsx_files if not ALTERNATE_EXHIBIT_FILE.match(f.stem)]
     if _alt_count:
         logger.info("Excluded %d *a.xlsx alternate files (duplicate data)",
                     _alt_count)

@@ -84,8 +84,7 @@ async function renderBudgetTypeDoughnut(canvasId, opts) {
     var amounts = filtered.map(function(r) { return (r.fy_totals[amtKey] || 0) / 1000; });
 
     // Use provided colours or fall back to common palettes
-    var defaultColors = (typeof CHART_COLORS !== "undefined") ? CHART_COLORS
-                      : (typeof LANDING_COLORS !== "undefined") ? LANDING_COLORS
+    var defaultColors = (typeof BUDGET_COLORS !== "undefined") ? BUDGET_COLORS
                       : ["#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed",
                          "#0891b2", "#c2410c", "#065f46", "#92400e", "#1e1b4b"];
     var colors = opts.colors || defaultColors;
@@ -110,19 +109,9 @@ async function renderBudgetTypeDoughnut(canvasId, opts) {
             position: "right",
             labels: { boxWidth: 12, font: { size: 11 } },
           },
-          tooltip: {
-            callbacks: {
-              label: function(ctx) {
-                var total = ctx.dataset.data.reduce(function(a, b) { return a + b; }, 0);
-                var pct = total > 0 ? (ctx.parsed / total * 100).toFixed(1) : 0;
-                return ctx.label + ": $" + ctx.parsed.toLocaleString() + "M (" + pct + "%)";
-              },
-            },
-          },
+          tooltip: { callbacks: { label: tooltipDoughnutPct } },
         },
-        onHover: function(e, elements) {
-          e.native.target.style.cursor = elements.length ? "pointer" : "default";
-        },
+        onHover: chartPointerHover,
         onClick: function(e, elements) {
           if (elements.length && opts.onClick) {
             var idx = elements[0].index;

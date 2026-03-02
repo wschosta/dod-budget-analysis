@@ -12,7 +12,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.database import get_db
 from api.models import BudgetLineDetailOut, BudgetLineOut, PaginatedResponse
-from utils.query import ALLOWED_SORT_COLUMNS, build_where_clause
+from utils.query import (
+    ALLOWED_SORT_COLUMNS,
+    EXCLUDE_SUMMARY_SQL,
+    build_where_clause,
+    compute_pagination,
+)
 from utils.strings import sanitize_fts5_query
 
 router = APIRouter(prefix="/budget-lines", tags=["budget-lines"])
@@ -96,11 +101,10 @@ def list_budget_lines(
     # Exclude summary exhibits (P-1, R-1, O-1, M-1, C-1, RF-1, P-1R) to avoid
     # double-counting with detail exhibits
     if exclude_summary:
-        summary_clause = "exhibit_type NOT IN ('p1','r1','o1','m1','c1','rf1','p1r')"
         if where:
-            where += f" AND {summary_clause}"
+            where += f" AND {EXCLUDE_SUMMARY_SQL}"
         else:
-            where = f"WHERE {summary_clause}"
+            where = f"WHERE {EXCLUDE_SUMMARY_SQL}"
 
     direction = "DESC" if sort_dir == "desc" else "ASC"
 
@@ -114,14 +118,11 @@ def list_budget_lines(
     rows = conn.execute(data_sql, params + [limit, offset]).fetchall()
     items = [BudgetLineOut(**dict(row)) for row in rows]
 
-    page = offset // limit if limit > 0 else 0
-    page_count = max(1, (total + limit - 1) // limit) if limit > 0 else 1
-    has_next = offset + limit < total
+    pag = compute_pagination(offset, limit, total)
 
     return PaginatedResponse(
         total=total, limit=limit, offset=offset,
-        page=page, page_count=page_count, has_next=has_next,
-        items=items,
+        items=items, **pag,
     )
 
 

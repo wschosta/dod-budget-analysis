@@ -14,6 +14,7 @@ from fastapi import Query as FQuery
 
 from api.database import get_db
 from utils.cache import TTLCache
+from utils.query import _add_in_condition
 
 router = APIRouter(prefix="/facets", tags=["facets"])
 
@@ -31,22 +32,14 @@ def _build_conditions(
     conditions: list[str] = []
     params: list[Any] = []
 
-    if fiscal_year and exclude_dim != "fiscal_year":
-        ph = ",".join("?" * len(fiscal_year))
-        conditions.append(f"fiscal_year IN ({ph})")
-        params.extend(fiscal_year)
-    if service and exclude_dim != "service":
-        ph = ",".join("?" * len(service))
-        conditions.append(f"organization_name IN ({ph})")
-        params.extend(service)
-    if exhibit_type and exclude_dim != "exhibit_type":
-        ph = ",".join("?" * len(exhibit_type))
-        conditions.append(f"exhibit_type IN ({ph})")
-        params.extend(exhibit_type)
-    if budget_type and exclude_dim != "budget_type":
-        ph = ",".join("?" * len(budget_type))
-        conditions.append(f"budget_type IN ({ph})")
-        params.extend(budget_type)
+    if exclude_dim != "fiscal_year":
+        _add_in_condition(conditions, params, "fiscal_year", fiscal_year)
+    if exclude_dim != "service":
+        _add_in_condition(conditions, params, "organization_name", service)
+    if exclude_dim != "exhibit_type":
+        _add_in_condition(conditions, params, "exhibit_type", exhibit_type)
+    if exclude_dim != "budget_type":
+        _add_in_condition(conditions, params, "budget_type", budget_type)
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     return where, params

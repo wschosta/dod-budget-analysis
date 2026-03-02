@@ -38,14 +38,8 @@ COPY pipeline/      pipeline/
 # DOCKER-001: Add frontend templates and static assets
 COPY templates/     templates/
 COPY static/        static/
-# Backward-compatible shims (root-level entry points)
-COPY schema_design.py       .
-COPY exhibit_catalog.py     .
-COPY validate_budget_data.py .
-COPY validate_budget_db.py  .
-COPY search_budget.py       .
-COPY build_budget_db.py     .
-COPY refresh_data.py        .
+# Pipeline orchestrator (root-level entry point)
+COPY run_pipeline.py        .
 
 # Database mount point — override with -v at runtime or COPY in CI builds
 # The health endpoint at /health returns 503 if the DB is absent.

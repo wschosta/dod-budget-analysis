@@ -26,7 +26,6 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-import re
 import shutil
 import sqlite3
 import sys
@@ -34,149 +33,15 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from utils.normalization import (
+    APPROPRIATION_KEYWORDS as _ALL_KEYWORDS,
+    TITLE_TO_CODE as _TITLE_TO_CODE,
+)
+
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
 logger = logging.getLogger("fix_data_quality")
-
-
-# ---------------------------------------------------------------------------
-# Shared mappings (kept in sync with repair_database.py)
-# ---------------------------------------------------------------------------
-
-# Direct title-to-appropriation-code mapping for the most common titles
-# with NULL appropriation_code.  Applied first for highest confidence.
-_TITLE_TO_CODE: dict[str, str] = {
-    # Operation & Maintenance
-    "Operation & Maintenance, Navy": "O&M",
-    "Operation & Maintenance, Army": "O&M",
-    "Operation & Maintenance, Air Force": "O&M",
-    "Operation & Maintenance, Marine Corps": "O&M",
-    "Operation & Maintenance, Space Force": "O&M",
-    "Operation & Maintenance, Defense-Wide": "O&M",
-    "Operation & Maintenance, Army Natl Guard": "O&M",
-    "Operation & Maintenance, Army Reserve": "O&M",
-    "Operation & Maintenance, Navy Res": "O&M",
-    "Operation & Maintenance, Navy Reserve": "O&M",
-    "Operation & Maintenance, AF Reserve": "O&M",
-    "Operation & Maintenance, Air Natl Guard": "O&M",
-    "Operation & Maintenance, MC Reserve": "O&M",
-    "Operation & Maintenance, ARNG": "O&M",
-    "Operation & Maintenance, ANG": "O&M",
-    "Operational Test & Eval, Defense": "O&M",
-    # Defense Health
-    "Defense Health Program": "DHP",
-    # Military Construction
-    "Mil Con, Def-Wide": "MILCON",
-    "Mil Con, Army": "MILCON",
-    "Mil Con, Navy": "MILCON",
-    "Mil Con, Air Force": "MILCON",
-    "Mil Con, Army Natl Guard": "MILCON",
-    "Mil Con, AF Reserve": "MILCON",
-    "Mil Con, Navy Res": "MILCON",
-    "Mil Con, Navy Reserve": "MILCON",
-    "MilCon, Air Force": "MILCON",
-    "MilCon, ANG": "MILCON",
-    "MilCon, AF Res": "MILCON",
-    "MILCON, Army": "MILCON",
-    "MILCON, ARNG": "MILCON",
-    "MILCON, Army R": "MILCON",
-    # RDT&E
-    "RDT&E, Army": "RDTE",
-    "RDT&E, Navy": "RDTE",
-    "RDT&E, Air Force": "RDTE",
-    "RDT&E, Defense-Wide": "RDTE",
-    "RDT&E, Space Force": "RDTE",
-    "RDTE, Space Force": "RDTE",
-    "Research, Development, Test, and Evaluation, Space Force": "RDTE",
-    # Procurement
-    "Aircraft Procurement, Army": "APAF",
-    "Aircraft Procurement, Navy": "APAF",
-    "Aircraft Procurement, Air Force": "APAF",
-    "Weapons Procurement, Navy": "WPN",
-    "Other Procurement, Army": "OPROC",
-    "Other Procurement, Navy": "OPROC",
-    "Other Procurement, Air Force": "OPROC",
-    "Shipbuilding & Conversion, Navy": "SCN",
-    "Shipbuilding and Conversion, Navy": "SCN",
-    "Procurement of Ammunition, Army": "AMMO",
-    "Procurement of Ammunition, Navy/MC": "AMMO",
-    "Procurement, Marine Corps": "PROC",
-    "Procurement, Defense-Wide": "PROC",
-    "Procurement, Space Force": "PROC",
-    "Missile Procurement, Army": "MPAF",
-    # Family Housing
-    "Fam Hsg O&M, DW": "FHSG",
-    "Fam Hsg O&M, Army": "FHSG",
-    "Fam Hsg O&M, AF": "FHSG",
-    "Fam Hsg O&M, N/MC": "FHSG",
-    # Revolving / Working Capital
-    "Working Capital Fund, Air Force": "RFUND",
-    "Working Capital Fund, Defense-Wide": "RFUND",
-    "Working Capital Fund, DECA": "RFUND",
-    "Working Capital Fund, Army": "RFUND",
-    "Working Capital Fund, Navy": "RFUND",
-    "National Defense Sealift Fund": "RFUND",
-    # Chemical Agents
-    "Chem Agents & Munitions Destruction": "CHEM",
-}
-
-# Expanded keyword matching (supplements repair_database.py _APPROPRIATION_KEYWORDS)
-_EXTRA_KEYWORDS: dict[str, str] = {
-    "operation & maintenance": "O&M",
-    "operations & maintenance": "O&M",
-    "mil con": "MILCON",
-    "milcon": "MILCON",
-    "defense health program": "DHP",
-    "defense health": "DHP",
-    "procurement of ammunition": "AMMO",
-    "working capital fund": "RFUND",
-    "sealift fund": "RFUND",
-    "chem agents": "CHEM",
-    "family housing": "FHSG",
-    "fam hsg": "FHSG",
-    "brac": "MILCON",
-    "cooperative threat reduction": "O&M",
-    "inspector general": "O&M",
-    "court of appeals": "O&M",
-    "overseas humanitarian": "O&M",
-    "acquisition workforce": "O&M",
-    "sporting competitions": "O&M",
-    "counter isis": "O&M",
-    "improvised explosive device": "O&M",
-    "afghanistan security": "O&M",
-    "lease of dod": "O&M",
-    "disposal of dod": "O&M",
-    "operational test": "O&M",
-}
-
-# Base keywords from repair_database.py
-_BASE_KEYWORDS: dict[str, str] = {
-    "aircraft procurement": "APAF",
-    "missile procurement": "MPAF",
-    "weapons procurement": "WPN",
-    "ammunition procurement": "AMMO",
-    "other procurement": "OPROC",
-    "shipbuilding and conversion": "SCN",
-    "research, development, test & eval": "RDTE",
-    "research, development, test and eval": "RDTE",
-    "rdt&e": "RDTE",
-    "operation and maintenance": "O&M",
-    "operations and maintenance": "O&M",
-    "military personnel": "MILPERS",
-    "military construction": "MILCON",
-    "revolving fund": "RFUND",
-    "family housing": "FHSG",
-    "national guard and reserve": "NGRE",
-    "chemical agents": "CHEM",
-    "defense production act": "DPA",
-    "environmental restoration": "ER",
-    "drug interdiction": "DRUG",
-    "procurement": "PROC",
-}
-
-# Merged keywords (extra takes precedence for more-specific matches)
-_ALL_KEYWORDS = {**_BASE_KEYWORDS, **_EXTRA_KEYWORDS}
 
 # Appropriation code → budget type (superset of fix_budget_types.py mapping)
 _APPROP_TO_BUDGET_TYPE: dict[str, str] = {
@@ -200,9 +65,6 @@ _APPROP_TO_BUDGET_TYPE: dict[str, str] = {
     "MILPERS": "MilPers",
     "RFUND": "Revolving",
 }
-
-# Known *a.xlsx alternate file patterns (exhibit stem + 'a')
-_ALTERNATE_RE = re.compile(r"^(c1|m1|o1|p1|p1r|r1|rf1)a$", re.IGNORECASE)
 
 # Source directory → organization mapping
 _DIR_TO_ORG: dict[str, str] = {

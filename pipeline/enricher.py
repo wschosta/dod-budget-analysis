@@ -481,88 +481,97 @@ def run_phase1(conn: sqlite3.Connection, stop_event: threading.Event | None = No
             logger.info("  Phase 1 stopped before Pass 2.")
             return pass1_count
 
+        pe_list = [row[0] for row in pdf_only_pes]
+
+        # ── Bulk fetch: replace 5 queries per PE with 3 bulk queries ──────
+        # 1) Page texts for title extraction (grouped by PE, limited per PE)
+        pe_texts: dict[str, list[str]] = {pe: [] for pe in pe_list}
+        try:
+            text_rows = conn.execute("""
+                SELECT ppn.pe_number, pp.page_text
+                FROM pdf_pe_numbers ppn
+                JOIN pdf_pages pp ON pp.id = ppn.pdf_page_id
+                WHERE ppn.pe_number IN ({ph})
+                  AND pp.page_text IS NOT NULL
+            """.format(ph=",".join("?" for _ in pe_list)), pe_list).fetchall()
+            for pe, text in text_rows:
+                if len(pe_texts[pe]) < 10:
+                    pe_texts[pe].append(text)
+        except sqlite3.OperationalError:
+            pass
+
+        # 2) Org + exhibit type (most common per PE) in one grouped query
+        pe_org: dict[str, str | None] = {pe: None for pe in pe_list}
+        pe_exhibit: dict[str, str | None] = {pe: None for pe in pe_list}
+        try:
+            meta_rows = conn.execute("""
+                SELECT ppn.pe_number,
+                       pp.source_category,
+                       pp.exhibit_type,
+                       COUNT(*) AS cnt
+                FROM pdf_pe_numbers ppn
+                JOIN pdf_pages pp ON pp.id = ppn.pdf_page_id
+                WHERE ppn.pe_number IN ({ph})
+                GROUP BY ppn.pe_number, pp.source_category, pp.exhibit_type
+                ORDER BY ppn.pe_number, cnt DESC
+            """.format(ph=",".join("?" for _ in pe_list)), pe_list).fetchall()
+            for pe, src_cat, et, cnt in meta_rows:
+                if src_cat and pe_org[pe] is None:
+                    pe_org[pe] = src_cat
+                if et and pe_exhibit[pe] is None:
+                    pe_exhibit[pe] = et
+        except sqlite3.OperationalError:
+            pass
+
+        # 3) Fiscal years + distinct exhibit types per PE
+        pe_fys: dict[str, list[str]] = {pe: [] for pe in pe_list}
+        pe_ets: dict[str, list[str]] = {pe: [] for pe in pe_list}
+        try:
+            fy_rows = conn.execute("""
+                SELECT ppn.pe_number, ppn.fiscal_year
+                FROM pdf_pe_numbers ppn
+                WHERE ppn.pe_number IN ({ph})
+                  AND ppn.fiscal_year IS NOT NULL
+                GROUP BY ppn.pe_number, ppn.fiscal_year
+            """.format(ph=",".join("?" for _ in pe_list)), pe_list).fetchall()
+            for pe, fy in fy_rows:
+                pe_fys[pe].append(fy)
+        except sqlite3.OperationalError:
+            pass
+        try:
+            et_rows = conn.execute("""
+                SELECT ppn.pe_number, pp.exhibit_type
+                FROM pdf_pe_numbers ppn
+                JOIN pdf_pages pp ON pp.id = ppn.pdf_page_id
+                WHERE ppn.pe_number IN ({ph})
+                  AND pp.exhibit_type IS NOT NULL
+                GROUP BY ppn.pe_number, pp.exhibit_type
+            """.format(ph=",".join("?" for _ in pe_list)), pe_list).fetchall()
+            for pe, et in et_rows:
+                pe_ets[pe].append(et)
+        except sqlite3.OperationalError:
+            pass
+
+        # ── Build insert buffer from pre-fetched data ─────────────────────
         insert_buf: list[tuple] = []
-        for row in pdf_only_pes:
-            pe = row[0]
-
-            # Try to extract title from PDF page text
+        for pe in pe_list:
             title = None
-            try:
-                page_rows = conn.execute("""
-                    SELECT pp.page_text
-                    FROM pdf_pe_numbers ppn
-                    JOIN pdf_pages pp ON pp.id = ppn.pdf_page_id
-                    WHERE ppn.pe_number = ?
-                    LIMIT 10
-                """, (pe,)).fetchall()
-                for pr in page_rows:
-                    if pr[0]:
-                        title = _extract_pe_title_from_text(pe, pr[0])
-                        if title:
-                            break
-            except sqlite3.OperationalError:
-                pass
+            for text in pe_texts[pe]:
+                title = _extract_pe_title_from_text(pe, text)
+                if title:
+                    break
 
-            # Infer organization from source_category (most common)
-            org_name = None
-            try:
-                org_row = conn.execute("""
-                    SELECT pp.source_category, COUNT(*) AS cnt
-                    FROM pdf_pe_numbers ppn
-                    JOIN pdf_pages pp ON pp.id = ppn.pdf_page_id
-                    WHERE ppn.pe_number = ?
-                      AND pp.source_category IS NOT NULL
-                    GROUP BY pp.source_category
-                    ORDER BY cnt DESC
-                    LIMIT 1
-                """, (pe,)).fetchone()
-                if org_row:
-                    org_name = org_row[0]
-            except sqlite3.OperationalError:
-                pass
+            org_name = pe_org[pe]
 
-            # Infer budget type from exhibit types of source files
             budget_type = None
-            try:
-                exhibit_row = conn.execute("""
-                    SELECT pp.exhibit_type, COUNT(*) AS cnt
-                    FROM pdf_pe_numbers ppn
-                    JOIN pdf_pages pp ON pp.id = ppn.pdf_page_id
-                    WHERE ppn.pe_number = ?
-                      AND pp.exhibit_type IS NOT NULL
-                    GROUP BY pp.exhibit_type
-                    ORDER BY cnt DESC
-                    LIMIT 1
-                """, (pe,)).fetchone()
-                if exhibit_row and exhibit_row[0]:
-                    budget_type = _EXHIBIT_TO_BUDGET_TYPE.get(
-                        exhibit_row[0].lower(), None
-                    )
-            except sqlite3.OperationalError:
-                pass
+            top_exhibit = pe_exhibit[pe]
+            if top_exhibit:
+                budget_type = _EXHIBIT_TO_BUDGET_TYPE.get(
+                    top_exhibit.lower(), None
+                )
 
-            # Collect fiscal years and exhibit types
-            fiscal_years_json = "[]"
-            exhibit_types_json = "[]"
-            try:
-                fy_rows = conn.execute("""
-                    SELECT DISTINCT ppn.fiscal_year
-                    FROM pdf_pe_numbers ppn
-                    WHERE ppn.pe_number = ? AND ppn.fiscal_year IS NOT NULL
-                """, (pe,)).fetchall()
-                if fy_rows:
-                    fiscal_years_json = json.dumps([r[0] for r in fy_rows])
-
-                et_rows = conn.execute("""
-                    SELECT DISTINCT pp.exhibit_type
-                    FROM pdf_pe_numbers ppn
-                    JOIN pdf_pages pp ON pp.id = ppn.pdf_page_id
-                    WHERE ppn.pe_number = ? AND pp.exhibit_type IS NOT NULL
-                """, (pe,)).fetchall()
-                if et_rows:
-                    exhibit_types_json = json.dumps([r[0] for r in et_rows])
-            except sqlite3.OperationalError:
-                pass
+            fiscal_years_json = json.dumps(pe_fys[pe]) if pe_fys[pe] else "[]"
+            exhibit_types_json = json.dumps(pe_ets[pe]) if pe_ets[pe] else "[]"
 
             insert_buf.append((
                 pe, title, org_name, budget_type,
@@ -638,7 +647,7 @@ def run_phase2(conn: sqlite3.Connection, stop_event: threading.Event | None = No
             """, (source_file,)).fetchall()
 
             # Group consecutive pages that mention the same PE into runs
-            # pe_number → (first_page, last_page, accumulated_text, sections)
+            # pe_number → (first_page, last_page, text_parts[])
             pe_runs: dict[str, dict] = {}
 
             for page_num, page_text in pages:
@@ -652,15 +661,16 @@ def run_phase2(conn: sqlite3.Connection, stop_event: threading.Event | None = No
                         pe_runs[pe] = {
                             "page_start": page_num,
                             "page_end": page_num,
-                            "text": page_text,
+                            "parts": [page_text],
                         }
                     else:
                         pe_runs[pe]["page_end"] = page_num
-                        pe_runs[pe]["text"] += "\n\n" + page_text
+                        pe_runs[pe]["parts"].append(page_text)
 
             # For each PE run in this file, extract narrative sections
             for pe, run in pe_runs.items():
-                sections = parse_narrative_sections(run["text"])
+                run_text = "\n\n".join(run["parts"])
+                sections = parse_narrative_sections(run_text)
                 if sections:
                     for sec in sections:
                         insert_buf.append((
@@ -670,7 +680,7 @@ def run_phase2(conn: sqlite3.Connection, stop_event: threading.Event | None = No
                         ))
                 else:
                     # No recognised section headers — store full text under blank header
-                    text = run["text"][:_MAX_NARRATIVE_TEXT_CHARS]
+                    text = run_text[:_MAX_NARRATIVE_TEXT_CHARS]
                     if text.strip():
                         insert_buf.append((
                             pe, fy, source_file,
@@ -1558,12 +1568,8 @@ def enrich(
         sys.exit(1)
 
     conn = get_connection(db_path)
-
-    # Performance PRAGMAs for bulk enrichment operations
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA temp_store=MEMORY")
-    conn.execute("PRAGMA cache_size=-262144")      # 256MB cache
+    # init_pragmas already applied by get_connection; add bulk overrides
+    conn.execute("PRAGMA cache_size=-262144")      # 256MB cache (overrides 64MB)
     conn.execute("PRAGMA mmap_size=536870912")     # 512MB mmap
     conn.execute("PRAGMA wal_autocheckpoint=0")    # manual checkpoint at end
 

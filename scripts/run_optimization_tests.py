@@ -245,13 +245,13 @@ def test_module_imports(runner):
     runner.test("utils.patterns exports required patterns", test_patterns_exports)
 
     def test_main_modules():
-        import dod_budget_downloader
-        import search_budget
+        import downloader
+        import pipeline.search
 
-        if not hasattr(dod_budget_downloader, "format_bytes"):
-            raise AssertionError("dod_budget_downloader missing format_bytes")
-        if not hasattr(search_budget, "get_connection"):
-            raise AssertionError("search_budget missing get_connection")
+        if not hasattr(downloader, "format_bytes"):
+            raise AssertionError("downloader missing format_bytes")
+        if not hasattr(pipeline.search, "get_connection"):
+            raise AssertionError("pipeline.search missing get_connection")
 
     runner.test("main modules import utilities correctly", test_main_modules)
 

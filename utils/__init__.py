@@ -108,10 +108,29 @@ from utils.pdf_sections import (
 )
 
 # Query builder utilities (UTIL-001)
-from utils.query import build_where_clause, build_order_clause
+from utils.query import (
+    EXCLUDE_SUMMARY_SQL,
+    SUMMARY_EXHIBIT_TYPES,
+    build_where_clause,
+    build_order_clause,
+    compute_pagination,
+    compute_yoy_change,
+    detect_fy_columns,
+    fetch_with_has_more,
+    make_placeholders,
+)
+
+# Normalization mappings (centralized from repair_database/builder/fix_data_quality)
+from utils.normalization import (
+    APPROPRIATION_KEYWORDS,
+    ORG_NORMALIZE,
+    TITLE_TO_CODE,
+    normalize_org_name,
+    parse_appropriation,
+)
 
 # TTL cache (UTIL-002)
-from utils.cache import TTLCache
+from utils.cache import TTLCache, make_cache_key
 
 __all__ = [
     # Common
@@ -194,8 +213,22 @@ __all__ = [
     "is_narrative_exhibit",
     "SECTION_PATTERN",
     # Query builder
+    "EXCLUDE_SUMMARY_SQL",
+    "SUMMARY_EXHIBIT_TYPES",
     "build_where_clause",
     "build_order_clause",
+    "compute_pagination",
+    "compute_yoy_change",
+    "detect_fy_columns",
+    "fetch_with_has_more",
+    "make_placeholders",
+    # Normalization
+    "APPROPRIATION_KEYWORDS",
+    "ORG_NORMALIZE",
+    "TITLE_TO_CODE",
+    "normalize_org_name",
+    "parse_appropriation",
     # Cache
     "TTLCache",
+    "make_cache_key",
 ]
