@@ -32,6 +32,7 @@ import logging
 import os
 
 from utils import safe_float
+from utils.config import SUMMARY_EXHIBIT_KEYS, _SHORT_SUMMARY_KEYS
 from utils.database import init_pragmas
 from utils.normalization import (
     ORG_NORMALIZE as ORG_MAP,
@@ -278,8 +279,7 @@ def _migrate_add_columns(conn: sqlite3.Connection) -> None:
 def _seed_reference_tables(conn: sqlite3.Connection) -> None:
     """Seed reference tables with canonical display names."""
     # Exhibit types
-    _summary_codes = {"p1", "r1", "o1", "m1", "c1", "rf1", "p1r",
-                       "oco", "ogsi", "supplemental", "amendment", "enl", "toa"}
+    _summary_codes = SUMMARY_EXHIBIT_KEYS | _SHORT_SUMMARY_KEYS
     # Seed both standard exhibit types and keyword-only types
     all_exhibit_types = {**EXHIBIT_TYPES, **KEYWORD_ONLY_EXHIBIT_TYPES}
     for code, display_name in all_exhibit_types.items():
@@ -2404,10 +2404,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
     # Exclude *a.xlsx alternate Comptroller files (e.g. r1a.xlsx, p1a.xlsx).
     # These contain identical data to the base files and create duplicate rows.
-    # Pattern is conservative: only matches known exhibit stems + 'a'.
-    _ALT_RE = re.compile(r"^(c1|m1|o1|p1|p1r|r1|rf1)a$", re.IGNORECASE)
-    _alt_count = sum(1 for f in xlsx_files if _ALT_RE.match(f.stem))
-    xlsx_files = [f for f in xlsx_files if not _ALT_RE.match(f.stem)]
+    from utils.patterns import ALTERNATE_EXHIBIT_FILE
+    _alt_count = sum(1 for f in xlsx_files if ALTERNATE_EXHIBIT_FILE.match(f.stem))
+    xlsx_files = [f for f in xlsx_files if not ALTERNATE_EXHIBIT_FILE.match(f.stem)]
     if _alt_count:
         logger.info("Excluded %d *a.xlsx alternate files (duplicate data)",
                     _alt_count)

@@ -33,6 +33,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
+from utils.config import CORE_SUMMARY_TYPES, DETAIL_EXHIBIT_KEYS
 from utils.normalization import normalize_org_loose as _normalize_org
 
 # Shared utilities: Import from utils package for consistency across codebase
@@ -88,7 +89,8 @@ def _get_amount_columns(conn: sqlite3.Connection) -> list[str]:
 # Legacy alias — kept for any external consumers
 AMOUNT_COLUMNS = _BASELINE_AMOUNT_COLUMNS
 
-KNOWN_EXHIBIT_TYPES = {"m1", "o1", "p1", "p1r", "p5", "r1", "r2", "r3", "r4", "rf1", "c1"}
+# Derived from canonical exhibit type sets in utils/config.py
+KNOWN_EXHIBIT_TYPES = CORE_SUMMARY_TYPES | DETAIL_EXHIBIT_KEYS
 
 # Canonical organization name mapping — merges aliases that refer to the same
 # service/agency.  Keys are lowercased raw values; values are the canonical name.

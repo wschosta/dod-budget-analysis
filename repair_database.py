@@ -25,6 +25,7 @@ import sys
 import time
 from pathlib import Path
 
+from utils.config import CORE_SUMMARY_TYPES
 from utils.normalization import (
     APPROPRIATION_KEYWORDS as _APPROPRIATION_KEYWORDS,
     ORG_NORMALIZE as _ORG_NORMALIZE,
@@ -76,10 +77,9 @@ def step_2_seed_reference_tables(conn: sqlite3.Connection) -> None:
     # Import EXHIBIT_TYPES from builder for canonical display names
     from pipeline.builder import EXHIBIT_TYPES
 
-    summary_types = {"p1", "r1", "o1", "m1", "c1", "rf1", "p1r"}
     seeded = 0
     for code, display_name in EXHIBIT_TYPES.items():
-        exhibit_class = "summary" if code in summary_types else "detail"
+        exhibit_class = "summary" if code in CORE_SUMMARY_TYPES else "detail"
         cur = conn.execute(
             "INSERT OR IGNORE INTO exhibit_types (code, display_name, exhibit_class) VALUES (?, ?, ?)",
             (code, display_name, exhibit_class),

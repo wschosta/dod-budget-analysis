@@ -12,6 +12,11 @@ from __future__ import annotations
 
 import re
 
+from utils.config import (
+    SUMMARY_EXHIBIT_KEYS,
+    DETAIL_EXHIBIT_KEYS,
+    _SHORT_SUMMARY_KEYS,
+)
 
 # ── Exhibit type constants (duplicated from builder to avoid heavy import) ──
 
@@ -32,16 +37,6 @@ _EXHIBIT_TYPES = {
     "supplemental": "Supplemental Budget Request",
     "amendment":    "Budget Amendment / Update",
 }
-
-SUMMARY_EXHIBIT_KEYS = frozenset({
-    "p1", "r1", "o1", "m1", "c1", "rf1", "p1r",
-    "ogsi", "supplemental", "amendment",
-})
-DETAIL_EXHIBIT_KEYS = frozenset({"p5", "r2", "r3", "r4"})
-
-# Short exhibit type keys that are summary-level but too short for safe
-# substring matching in filenames (e.g. "oco" is a substring of "socom").
-_SHORT_SUMMARY_KEYS = frozenset({"oco", "enl", "toa"})
 
 # Navy/DoN appropriation justification book → exhibit type mapping.
 # Mirrors NAVY_APPROPRIATION_TO_EXHIBIT in pipeline.builder (kept separate to

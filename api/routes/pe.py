@@ -18,7 +18,6 @@ import csv
 import io
 import json
 import logging
-import re
 import sqlite3
 import zipfile
 from pathlib import Path
@@ -28,13 +27,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
 from api.database import get_db
+from utils.patterns import PE_NUMBER_STRICT as _PE_FORMAT
 from utils.strings import sanitize_fts5_query
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/pe", tags=["pe"])
-
-_PE_FORMAT = re.compile(r"^[0-9]{7}[A-Z]{1,2}$")
 
 
 def _validate_pe_number(pe_number: str) -> None:

@@ -26,7 +26,6 @@ from __future__ import annotations
 import argparse
 import logging
 import os
-import re
 import shutil
 import sqlite3
 import sys
@@ -66,9 +65,6 @@ _APPROP_TO_BUDGET_TYPE: dict[str, str] = {
     "MILPERS": "MilPers",
     "RFUND": "Revolving",
 }
-
-# Known *a.xlsx alternate file patterns (exhibit stem + 'a')
-_ALTERNATE_RE = re.compile(r"^(c1|m1|o1|p1|p1r|r1|rf1)a$", re.IGNORECASE)
 
 # Source directory → organization mapping
 _DIR_TO_ORG: dict[str, str] = {

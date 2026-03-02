@@ -20,6 +20,10 @@ DOWNLOADABLE_EXTENSIONS = re.compile(r'\.(pdf|xlsx?|xls|zip|csv)$', re.IGNORECAS
 # Examples: 0602702E, 0801273F
 PE_NUMBER = re.compile(r'\b\d{7}[A-Z]{1,2}\b')
 
+# Anchored variant for validating that an entire string is a PE number
+# (no surrounding text allowed). Used by pipeline/db_validator.py.
+PE_NUMBER_STRICT = re.compile(r'^[0-9]{7}[A-Z]{1,2}$')
+
 # FTS5 special characters that need escaping in full-text search queries
 FTS5_SPECIAL_CHARS = re.compile(r'[\"()*:^+]')
 
@@ -36,3 +40,8 @@ WHITESPACE = re.compile(r'\s+')
 
 # Currency symbols for stripping during numeric conversion
 CURRENCY_SYMBOLS = re.compile(r'[\$€£¥₹₽]')
+
+# Alternate Comptroller Excel files: exhibit stem + 'a' (e.g. r1a.xlsx, p1a.xlsx).
+# These contain identical data to the base files and should be excluded.
+# Previously duplicated in pipeline/builder.py and scripts/fix_data_quality.py.
+ALTERNATE_EXHIBIT_FILE = re.compile(r'^(c1|m1|o1|p1|p1r|r1|rf1)a$', re.IGNORECASE)

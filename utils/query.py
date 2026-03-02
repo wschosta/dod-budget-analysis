@@ -10,6 +10,7 @@ import re
 import sqlite3
 from typing import Any
 
+from utils.config import CORE_SUMMARY_TYPES
 from utils.database import _validate_identifier, get_amount_columns
 
 
@@ -260,9 +261,8 @@ def compute_yoy_change(
 #: Exhibit types that represent summary-level aggregations (p1, r1, etc.).
 #: Queries that sum dollar amounts should exclude these to avoid double-counting
 #: with the detail-level exhibits (p5, r2, etc.).
-SUMMARY_EXHIBIT_TYPES: tuple[str, ...] = (
-    "p1", "r1", "o1", "m1", "c1", "rf1", "p1r",
-)
+#: Derived from the canonical CORE_SUMMARY_TYPES in utils/config.py.
+SUMMARY_EXHIBIT_TYPES: tuple[str, ...] = tuple(sorted(CORE_SUMMARY_TYPES))
 
 #: Ready-to-interpolate SQL fragment for excluding summary exhibits.
 EXCLUDE_SUMMARY_SQL = (
