@@ -1397,3 +1397,78 @@ def consolidated_detail(request: Request, pe_number: str) -> HTMLResponse:
         "pe_tags": pe_tags,
         "project_tags": project_tags,
     })
+
+
+# ── GET /hypersonics ──────────────────────────────────────────────────────────
+
+@router.get("/hypersonics", response_class=HTMLResponse)
+async def hypersonics_page(
+    request: Request,
+    service: str | None = None,
+    exhibit: str | None = None,
+    fy_from: int | None = None,
+    fy_to: int | None = None,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> HTMLResponse:
+    """Server-rendered hypersonics PE lines pivot table page."""
+    from api.routes.hypersonics import (
+        _build_pivot_query,
+        _apply_filters,
+        _HYPERSONICS_KEYWORDS,
+        _FY_START,
+        _FY_END,
+    )
+    from utils.database import get_amount_columns
+
+    all_cols = set(get_amount_columns(conn))
+    extra_where, extra_params = _apply_filters(service, exhibit, fy_from, fy_to)
+    sql, params = _build_pivot_query(all_cols, extra_where, extra_params)
+
+    rows = conn.execute(sql, params).fetchall()
+
+    year_range = list(range(_FY_START, _FY_END + 1))
+    # Only surface years that have at least one non-NULL value
+    active_years = [
+        yr for yr in year_range
+        if any(r[f"fy{yr}"] is not None for r in rows)
+    ] if rows else year_range
+
+    # Distinct services and exhibit types for filter dropdowns
+    try:
+        services = [
+            r["organization_name"]
+            for r in conn.execute(
+                "SELECT DISTINCT organization_name FROM budget_lines "
+                "WHERE organization_name IS NOT NULL ORDER BY organization_name"
+            ).fetchall()
+        ]
+    except sqlite3.OperationalError:
+        services = []
+
+    try:
+        exhibits = [
+            r["exhibit_type"]
+            for r in conn.execute(
+                "SELECT DISTINCT exhibit_type FROM budget_lines "
+                "WHERE exhibit_type IS NOT NULL ORDER BY exhibit_type"
+            ).fetchall()
+        ]
+    except sqlite3.OperationalError:
+        exhibits = []
+
+    return _tmpl().TemplateResponse("hypersonics.html", {
+        "request": request,
+        "rows": [dict(r) for r in rows],
+        "active_years": active_years,
+        "year_range": year_range,
+        "keywords": _HYPERSONICS_KEYWORDS,
+        "services": services,
+        "exhibits": exhibits,
+        "filters": {
+            "service": service or "",
+            "exhibit": exhibit or "",
+            "fy_from": fy_from or _FY_START,
+            "fy_to": fy_to or _FY_END,
+        },
+        "row_count": len(rows),
+    })

@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+
+{% block title %}Hypersonics Programs — DoD Budget Explorer{% endblock %}
+
+{% block extra_head %}
+<style>
+  .hypersonics-header {
+    display: flex;
+    align-items: baseline;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+  }
+  .hypersonics-header h2 {
+    margin: 0;
+  }
+  .row-count {
+    color: var(--color-text-muted);
+    font-size: 0.9rem;
+  }
+  .filter-bar {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    margin-bottom: 1rem;
+    padding: 0.75rem 1rem;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+  }
+  .filter-bar label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--color-text-muted);
+    display: block;
+    margin-bottom: 0.2rem;
+  }
+  .filter-bar input,
+  .filter-bar select {
+    padding: 0.3rem 0.5rem;
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-size: 0.85rem;
+    min-width: 120px;
+  }
+  .filter-bar .filter-group {
+    display: flex;
+    flex-direction: column;
+  }
+  .filter-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-end;
+  }
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+  }
+  .hypersonics-table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.8rem;
+    white-space: nowrap;
+  }
+  .hypersonics-table th,
+  .hypersonics-table td {
+    padding: 0.35rem 0.6rem;
+    border-bottom: 1px solid var(--color-border);
+    text-align: left;
+  }
+  .hypersonics-table th {
+    background: var(--color-surface);
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    border-bottom: 2px solid var(--color-border);
+  }
+  .hypersonics-table th.fy-col {
+    text-align: right;
+    min-width: 80px;
+  }
+  .hypersonics-table td.fy-col {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-family: var(--font-mono, monospace);
+  }
+  .hypersonics-table td.fy-col.has-value {
+    color: var(--color-text);
+  }
+  .hypersonics-table td.fy-col.no-value {
+    color: var(--color-text-muted);
+  }
+  .hypersonics-table tr:last-child td {
+    border-bottom: none;
+  }
+  .hypersonics-table tr:hover td {
+    background: var(--color-surface);
+  }
+  .col-pe       { min-width: 110px; font-family: var(--font-mono, monospace); font-size: 0.75rem; }
+  .col-service  { min-width: 90px; }
+  .col-exhibit  { min-width: 70px; }
+  .col-title    { min-width: 260px; white-space: normal; max-width: 380px; }
+  .col-activity { min-width: 140px; white-space: normal; max-width: 220px; }
+  .no-data-msg {
+    padding: 2rem;
+    text-align: center;
+    color: var(--color-text-muted);
+  }
+  .keyword-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-bottom: 0.75rem;
+  }
+  .keyword-pill {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 0.15rem 0.6rem;
+    font-size: 0.75rem;
+    color: var(--color-text-muted);
+  }
+  .download-btn {
+    margin-left: auto;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="hypersonics-page">
+
+  <div class="hypersonics-header">
+    <h2>Hypersonics Programs</h2>
+    <span class="row-count">{{ row_count }} sub-element{{ 's' if row_count != 1 else '' }}</span>
+  </div>
+
+  <p style="color: var(--color-text-muted); font-size: 0.85rem; margin-bottom: 0.5rem;">
+    All PE lines and sub-programs matching hypersonics-related keywords from FY2015 onward.
+    Each row is a unique program element sub-element; each column shows the primary requested/enacted
+    funding ($K) from that year's budget document.
+  </p>
+
+  <div class="keyword-pills">
+    <span style="font-size: 0.75rem; color: var(--color-text-muted); align-self: center;">Keywords:</span>
+    {% for kw in keywords %}
+      <span class="keyword-pill">{{ kw }}</span>
+    {% endfor %}
+  </div>
+
+  <!-- Filter bar -->
+  <form method="get" action="/hypersonics" class="filter-bar">
+    <div class="filter-group">
+      <label for="f-service">Service / Org</label>
+      <select id="f-service" name="service">
+        <option value="">All services</option>
+        {% for svc in services %}
+          <option value="{{ svc }}" {% if filters.service == svc %}selected{% endif %}>{{ svc }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="filter-group">
+      <label for="f-exhibit">Exhibit Type</label>
+      <select id="f-exhibit" name="exhibit">
+        <option value="">All exhibits</option>
+        {% for ex in exhibits %}
+          <option value="{{ ex }}" {% if filters.exhibit == ex %}selected{% endif %}>{{ ex }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="filter-group">
+      <label for="f-fy-from">FY From</label>
+      <input id="f-fy-from" type="number" name="fy_from" min="2015" max="2030"
+             value="{{ filters.fy_from }}" style="width: 80px;">
+    </div>
+
+    <div class="filter-group">
+      <label for="f-fy-to">FY To</label>
+      <input id="f-fy-to" type="number" name="fy_to" min="2015" max="2030"
+             value="{{ filters.fy_to }}" style="width: 80px;">
+    </div>
+
+    <div class="filter-actions">
+      <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+      <a href="/hypersonics" class="btn btn-secondary btn-sm">Reset</a>
+      <a href="/api/v1/hypersonics/download?{% if filters.service %}service={{ filters.service }}&{% endif %}{% if filters.exhibit %}exhibit={{ filters.exhibit }}&{% endif %}{% if filters.fy_from %}fy_from={{ filters.fy_from }}&{% endif %}{% if filters.fy_to %}fy_to={{ filters.fy_to }}{% endif %}"
+         class="btn btn-secondary btn-sm download-btn"
+         download="hypersonics_pe_lines.csv">&#8681; Download CSV</a>
+    </div>
+  </form>
+
+  {% if rows %}
+  <div class="table-wrap">
+    <table class="hypersonics-table" aria-label="Hypersonics PE lines pivot table">
+      <thead>
+        <tr>
+          <th class="col-pe">PE Number</th>
+          <th class="col-service">Service</th>
+          <th class="col-exhibit">Exhibit</th>
+          <th class="col-title">Line Item / Sub-Program</th>
+          <th class="col-activity">Budget Activity</th>
+          {% for yr in active_years %}
+          <th class="fy-col">FY{{ yr }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td class="col-pe">{{ row.pe_number or '—' }}</td>
+          <td class="col-service">{{ row.organization_name or '—' }}</td>
+          <td class="col-exhibit">{{ row.exhibit_type or '—' }}</td>
+          <td class="col-title">{{ row.line_item_title or '—' }}</td>
+          <td class="col-activity">{{ row.budget_activity_title or '—' }}</td>
+          {% for yr in active_years %}
+            {% set val = row['fy' ~ yr] %}
+            {% if val is not none %}
+            <td class="fy-col has-value">{{ '{:,.0f}'.format(val) }}</td>
+            {% else %}
+            <td class="fy-col no-value">—</td>
+            {% endif %}
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="no-data-msg">
+    <p>No hypersonics-related programs found for the selected filters.</p>
+    <p><a href="/hypersonics">Reset filters</a></p>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}
