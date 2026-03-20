@@ -1414,6 +1414,8 @@ async def hypersonics_page(
     from api.routes.hypersonics import (
         _build_pivot_query,
         _apply_filters,
+        _desc_subquery,
+        _enrich_rows,
         _HYPERSONICS_KEYWORDS,
         _FY_START,
         _FY_END,
@@ -1421,16 +1423,19 @@ async def hypersonics_page(
     from utils.database import get_amount_columns
 
     all_cols = set(get_amount_columns(conn))
+    desc_where, desc_params = _desc_subquery(conn)
     extra_where, extra_params = _apply_filters(service, exhibit, fy_from, fy_to)
-    sql, params = _build_pivot_query(all_cols, extra_where, extra_params)
+    sql, params = _build_pivot_query(
+        all_cols, desc_where, desc_params, extra_where, extra_params
+    )
 
-    rows = conn.execute(sql, params).fetchall()
+    raw_rows = conn.execute(sql, params).fetchall()
+    rows = _enrich_rows(raw_rows)
 
     year_range = list(range(_FY_START, _FY_END + 1))
-    # Only surface years that have at least one non-NULL value
     active_years = [
         yr for yr in year_range
-        if any(r[f"fy{yr}"] is not None for r in rows)
+        if any(r.get(f"fy{yr}") is not None for r in rows)
     ] if rows else year_range
 
     # Distinct services and exhibit types for filter dropdowns
@@ -1458,7 +1463,7 @@ async def hypersonics_page(
 
     return _tmpl().TemplateResponse("hypersonics.html", {
         "request": request,
-        "rows": [dict(r) for r in rows],
+        "rows": rows,
         "active_years": active_years,
         "year_range": year_range,
         "keywords": _HYPERSONICS_KEYWORDS,

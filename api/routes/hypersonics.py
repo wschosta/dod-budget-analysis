@@ -2,9 +2,11 @@
 Hypersonics PE lines endpoints.
 
 Returns a pivoted view of all budget lines related to hypersonics programs,
-FY2015 onward. Each row represents a unique PE + sub-element (line item), with
-one column per fiscal year showing the primary requested/enacted amount from
-that year's budget document.
+FY2015 onward. Sources: budget_lines keyword search + pe_descriptions narrative search.
+
+Each row is a unique (pe_number, exhibit_type, line_item_title) combination.
+Columns fy2015–fy2026 show the primary requested/enacted amount ($K) from
+that fiscal year's budget document.
 
 Endpoints:
   GET /api/v1/hypersonics          — JSON, pivoted table data
@@ -31,8 +33,10 @@ router = APIRouter(prefix="/hypersonics", tags=["hypersonics"])
 
 # ── Keywords ──────────────────────────────────────────────────────────────────
 
+# Searched across line_item_title, account_title, budget_activity_title.
+# '%hypersonic%' covers both "hypersonic" and "hypersonics" via LIKE.
 _HYPERSONICS_KEYWORDS = [
-    "hypersonic",
+    "hypersonic",   # catches hypersonics, hypersonic glide, etc.
     "ARRW",
     "LRHW",
     "C-HGB",
@@ -44,42 +48,105 @@ _HYPERSONICS_KEYWORDS = [
     "AGM-183",
 ]
 
-# Columns to search for keyword matches
+# Subset used for pe_descriptions narrative search (broader text, fewer terms needed)
+_DESC_KEYWORDS = [
+    "hypersonic",
+    "ARRW",
+    "LRHW",
+    "C-HGB",
+    "CHGB",
+    "HACM",
+    "HCSW",
+]
+
 _SEARCH_COLS = ["line_item_title", "account_title", "budget_activity_title"]
 
-# Fiscal year range to cover
 _FY_START = 2015
 _FY_END = 2026
 
 
+# ── Color-of-money normalization ──────────────────────────────────────────────
+
+def _color_of_money(approp_title: str | None) -> str:
+    """Map appropriation title to a standard color-of-money category."""
+    if not approp_title:
+        return "Unknown"
+    t = approp_title.upper()
+    if any(k in t for k in ("RDT", "RESEARCH", "DEVELOPMENT", "R&D")):
+        return "RDT&E"
+    if "PROCURE" in t:
+        return "Procurement"
+    if any(k in t for k in ("OPER", "MAINT", "O&M")):
+        return "O&M"
+    if any(k in t for k in ("MILCON", "CONSTRUCTION")):
+        return "MILCON"
+    if any(k in t for k in ("MILPERS", "PERSONNEL")):
+        return "Military Personnel"
+    return approp_title  # show verbatim if unrecognized
+
+
+# ── SQL helpers ───────────────────────────────────────────────────────────────
+
 def _build_keyword_where() -> tuple[str, list[str]]:
-    """Build the WHERE clause for hypersonics keyword matching."""
+    """WHERE fragment matching hypersonics keywords across key text columns."""
     clauses: list[str] = []
     params: list[str] = []
     for col in _SEARCH_COLS:
         for kw in _HYPERSONICS_KEYWORDS:
             clauses.append(f"{col} LIKE ?")
             params.append(f"%{kw}%")
-    where = "(" + " OR ".join(clauses) + ")"
-    return where, params
+    return "(" + " OR ".join(clauses) + ")", params
+
+
+def _desc_subquery(conn: sqlite3.Connection) -> tuple[str, list[str]]:
+    """Return a WHERE fragment that matches PEs found in pe_descriptions.
+
+    Returns ('', []) if the pe_descriptions table does not exist.
+    """
+    try:
+        conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
+    except sqlite3.OperationalError:
+        return "", []
+
+    clauses = [f"description_text LIKE ?" for _ in _DESC_KEYWORDS]
+    params = [f"%{kw}%" for kw in _DESC_KEYWORDS]
+    subq_where = " OR ".join(clauses)
+    fragment = (
+        f"pe_number IN "
+        f"(SELECT DISTINCT pe_number FROM pe_descriptions WHERE {subq_where})"
+    )
+    return fragment, params
 
 
 def _build_pivot_query(
     all_amount_cols: set[str],
+    desc_where: str = "",
+    desc_params: list[Any] | None = None,
     extra_where: str = "",
     extra_params: list[Any] | None = None,
 ) -> tuple[str, list[Any]]:
     """Build the pivoted SELECT query.
 
-    For each fiscal year N in [_FY_START, _FY_END], emits a column:
-      SUM(CASE WHEN fiscal_year = 'FY N' THEN COALESCE(<best available col>) END)
+    For each fiscal year N in [_FY_START, _FY_END], emits:
+      SUM(CASE WHEN fiscal_year = 'FY N' THEN COALESCE(<best col>) END) AS fyN
 
-    The 'best available' priority is: request → total → enacted → actual.
+    Priority: request → total → enacted → actual.
+
+    Rows are matched by keywords on budget_lines columns OR by pe_number
+    appearing in pe_descriptions (when desc_where is provided).
     """
     kw_where, kw_params = _build_keyword_where()
 
-    # Build per-year pivot columns
-    year_select_parts: list[str] = []
+    # Combine keyword match with description match (OR)
+    if desc_where:
+        match_where = f"({kw_where} OR {desc_where})"
+        match_params: list[Any] = list(kw_params) + list(desc_params or [])
+    else:
+        match_where = kw_where
+        match_params = list(kw_params)
+
+    # Per-year pivot columns
+    year_parts: list[str] = []
     for yr in range(_FY_START, _FY_END + 1):
         priority = [
             f"amount_fy{yr}_request",
@@ -88,33 +155,32 @@ def _build_pivot_query(
             f"amount_fy{yr}_actual",
         ]
         available = [c for c in priority if c in all_amount_cols]
-        if available:
-            coalesce_expr = f"COALESCE({', '.join(available)})"
-        else:
-            coalesce_expr = "NULL"
-        year_select_parts.append(
+        coalesce_expr = f"COALESCE({', '.join(available)})" if available else "NULL"
+        year_parts.append(
             f"SUM(CASE WHEN fiscal_year = 'FY {yr}' THEN {coalesce_expr} END) AS fy{yr}"
         )
 
-    year_cols_sql = ",\n    ".join(year_select_parts)
+    year_cols_sql = ",\n    ".join(year_parts)
 
-    where_parts = [kw_where, "fiscal_year >= 'FY 2015'"]
-    all_params: list[Any] = list(kw_params)
+    where_parts = [match_where, "fiscal_year >= 'FY 2015'"]
+    all_params: list[Any] = match_params
 
     if extra_where:
         where_parts.append(extra_where)
     if extra_params:
-        all_params.extend(extra_params)
+        all_params = all_params + list(extra_params)
 
     full_where = " AND ".join(where_parts)
 
     sql = f"""
         SELECT
             pe_number,
-            MAX(organization_name)        AS organization_name,
+            MAX(organization_name)     AS organization_name,
             exhibit_type,
             line_item_title,
-            MAX(budget_activity_title)    AS budget_activity_title,
+            MAX(budget_activity_title) AS budget_activity_title,
+            MAX(appropriation_title)   AS appropriation_title,
+            MAX(account_title)         AS account_title,
             {year_cols_sql}
         FROM budget_lines
         WHERE {full_where}
@@ -134,7 +200,6 @@ def _apply_filters(
     """Build additional WHERE fragments from optional user filters."""
     parts: list[str] = []
     params: list[Any] = []
-
     if service:
         parts.append("organization_name LIKE ?")
         params.append(f"%{service}%")
@@ -147,8 +212,17 @@ def _apply_filters(
     if fy_to:
         parts.append("fiscal_year <= ?")
         params.append(f"FY {fy_to}")
-
     return (" AND ".join(parts), params) if parts else ("", [])
+
+
+def _enrich_rows(rows: list[sqlite3.Row]) -> list[dict]:
+    """Convert rows to dicts and add derived color_of_money field."""
+    result: list[dict] = []
+    for r in rows:
+        d = dict(r)
+        d["color_of_money"] = _color_of_money(d.get("appropriation_title"))
+        result.append(d)
+    return result
 
 
 # ── GET /api/v1/hypersonics ───────────────────────────────────────────────────
@@ -160,43 +234,35 @@ def _apply_filters(
 def get_hypersonics(
     service: str | None = Query(None, description="Filter by service/org name (substring)"),
     exhibit: str | None = Query(None, description="Filter by exhibit type (exact, e.g. 'r2')"),
-    fy_from: int | None = Query(None, ge=2015, le=2030, description="Start fiscal year (e.g. 2020)"),
-    fy_to: int | None = Query(None, ge=2015, le=2030, description="End fiscal year (e.g. 2026)"),
+    fy_from: int | None = Query(None, ge=2015, le=2030, description="Start fiscal year"),
+    fy_to: int | None = Query(None, ge=2015, le=2030, description="End fiscal year"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
     """Return all hypersonics-related budget line sub-elements as a pivoted table.
 
+    Sources: keyword match on budget_lines + pe_descriptions narrative search.
     Each row is a unique (pe_number, exhibit_type, line_item_title) combination.
-    Columns fy2015 … fy2026 show the primary requested/enacted amount ($K) from
-    that fiscal year's budget document (NULL if no data for that year).
+    Columns fy2015–fy2026 show the primary requested/enacted amount ($K).
     """
     all_cols = set(get_amount_columns(conn))
-
+    desc_where, desc_params = _desc_subquery(conn)
     extra_where, extra_params = _apply_filters(service, exhibit, fy_from, fy_to)
-    sql, params = _build_pivot_query(all_cols, extra_where, extra_params)
-
+    sql, params = _build_pivot_query(
+        all_cols, desc_where, desc_params, extra_where, extra_params
+    )
     rows = conn.execute(sql, params).fetchall()
 
-    # Build the list of fiscal year column names that have any non-NULL data
     year_range = list(range(_FY_START, _FY_END + 1))
-    active_years: list[int] = []
-    if rows:
-        for yr in year_range:
-            col = f"fy{yr}"
-            if any(r[col] is not None for r in rows):
-                active_years.append(yr)
-    else:
-        active_years = year_range
-
-    items = [dict(r) for r in rows]
+    active_years = (
+        [yr for yr in year_range if any(r[f"fy{yr}"] is not None for r in rows)]
+        if rows else year_range
+    )
 
     return {
-        "count": len(items),
+        "count": len(rows),
         "fiscal_years": active_years,
-        "fy_start": _FY_START,
-        "fy_end": _FY_END,
         "keywords": _HYPERSONICS_KEYWORDS,
-        "rows": items,
+        "rows": _enrich_rows(rows),
     }
 
 
@@ -214,39 +280,37 @@ def download_hypersonics(
     fy_to: int | None = Query(None, ge=2015, le=2030),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> Response:
-    """Download hypersonics PE lines as a pivoted CSV.
+    """Download pivoted hypersonics PE lines as CSV.
 
-    Same filters as GET /api/v1/hypersonics. Each row is a unique
-    (pe_number, exhibit_type, line_item_title); columns span FY2015–FY2026.
+    Same filters as GET /api/v1/hypersonics.
     """
     all_cols = set(get_amount_columns(conn))
+    desc_where, desc_params = _desc_subquery(conn)
     extra_where, extra_params = _apply_filters(service, exhibit, fy_from, fy_to)
-    sql, params = _build_pivot_query(all_cols, extra_where, extra_params)
-
+    sql, params = _build_pivot_query(
+        all_cols, desc_where, desc_params, extra_where, extra_params
+    )
     rows = conn.execute(sql, params).fetchall()
+    items = _enrich_rows(rows)
 
     year_range = list(range(_FY_START, _FY_END + 1))
 
     buf = io.StringIO()
     writer = csv.writer(buf)
-
-    # Header
     writer.writerow([
-        "PE Number", "Service/Org", "Exhibit Type", "Line Item Title", "Budget Activity",
+        "PE Number", "Service/Org", "Exhibit Type", "Line Item Title",
+        "Budget Activity", "Appropriation", "Color of Money",
         *[f"FY{yr} ($K)" for yr in year_range],
     ])
-
-    for r in rows:
+    for r in items:
         writer.writerow([
-            r["pe_number"],
-            r["organization_name"],
-            r["exhibit_type"],
-            r["line_item_title"],
-            r["budget_activity_title"],
-            *[r[f"fy{yr}"] for yr in year_range],
+            r["pe_number"], r["organization_name"], r["exhibit_type"],
+            r["line_item_title"], r["budget_activity_title"],
+            r["appropriation_title"], r["color_of_money"],
+            *[r.get(f"fy{yr}") for yr in year_range],
         ])
 
-    csv_bytes = buf.getvalue().encode("utf-8-sig")  # BOM for Excel
+    csv_bytes = buf.getvalue().encode("utf-8-sig")
     return Response(
         content=csv_bytes,
         media_type="text/csv",
