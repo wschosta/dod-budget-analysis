@@ -43,6 +43,12 @@ router = APIRouter(prefix="/hypersonics", tags=["hypersonics"])
 
 # Searched across line_item_title, account_title, budget_activity_title.
 # '%hypersonic%' covers both "hypersonic" and "hypersonics" via LIKE.
+#
+# TODO(real-data): audit keyword recall against the live database. Candidates to add:
+#   "boost glide", "HCM", "LRHW Block", "MACH", "LRPF", "HCSW Block",
+#   "OpFires" (Army offensive fires — includes hypersonic component),
+#   "DAAL" (Glide Phase Interceptor predecessor).
+#   Run GET /api/v1/hypersonics/debug?show_misses=1 and eyeball pe_number outliers.
 _HYPERSONICS_KEYWORDS = [
     "hypersonic",   # catches hypersonics, hypersonic glide, etc.
     "ARRW",
@@ -76,7 +82,14 @@ _FY_END = 2026
 # ── Color-of-money normalization ──────────────────────────────────────────────
 
 def _color_of_money(approp_title: str | None) -> str:
-    """Map appropriation title to a standard color-of-money category."""
+    """Map appropriation title to a standard color-of-money category.
+
+    TODO(real-data): check GET /api/v1/hypersonics/debug for any rows landing in
+    "Unknown" or returning verbatim approp_title strings. Real budget documents
+    sometimes use phrasing like "Research, Development, Test & Evaluation, Navy"
+    (already covered) or unusual variants like "Defense-Wide RDT&E" or
+    "Missile Procurement, Army" — add matches here if needed.
+    """
     if not approp_title:
         return "Unknown"
     t = approp_title.upper()
@@ -118,6 +131,10 @@ def _build_pe_match_where(conn: sqlite3.Connection) -> tuple[str, list[Any]]:
     all_params: list[Any] = list(kw_params)
 
     # ── (b) pe_descriptions narrative match ───────────────────────────────────
+    # TODO(real-data): pe_descriptions is populated by the enrichment pipeline
+    # (`python enrich_budget_db.py`). If it is empty, this UNION arm is a no-op
+    # and recall falls back to budget-lines keyword matching only. Run the debug
+    # endpoint to check pe_descriptions row count before assuming full coverage.
     try:
         conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
         desc_clauses = [f"description_text LIKE ?" for _ in _DESC_KEYWORDS]
@@ -161,6 +178,10 @@ def _build_pivot_query(
             f"amount_fy{yr}_actual",
         ]
         available = [c for c in priority if c in all_amount_cols]
+        # TODO(real-data): verify the real schema has amount_fy{N}_request populated
+        # for recent years. GET /api/v1/hypersonics/debug lists which priority column
+        # (request / total / enacted / actual) is actually used for each FY so you
+        # can spot years silently falling back to enacted or actual figures.
         if len(available) == 0:
             coalesce_expr = "NULL"
         elif len(available) == 1:
@@ -350,3 +371,131 @@ def download_hypersonics(
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="hypersonics_pe_lines.csv"'},
     )
+
+
+# ── GET /api/v1/hypersonics/debug ─────────────────────────────────────────────
+
+@router.get(
+    "/debug",
+    summary="Pre-flight data quality checks for the hypersonics view",
+)
+def debug_hypersonics(conn: sqlite3.Connection = Depends(get_db)) -> dict:
+    """Surface data-quality stats to validate the hypersonics view against real data.
+
+    Checks:
+    - Which amount_fy* columns exist and which priority column is used per year
+    - pe_descriptions table status (exists, row count, distinct PE numbers)
+    - source_file null rate in matching budget_lines rows
+    - Color-of-money breakdown (flags any "Unknown" or verbatim approp_title rows)
+    - Per-keyword PE hit counts (helps spot gaps in keyword coverage)
+    - Active fiscal years and total matching sub-elements
+    """
+    result: dict = {}
+
+    # ── 1. Amount column availability ─────────────────────────────────────────
+    all_amount_cols = set(get_amount_columns(conn))
+    year_col_map: dict[str, str] = {}
+    for yr in range(_FY_START, _FY_END + 1):
+        priority = [
+            f"amount_fy{yr}_request",
+            f"amount_fy{yr}_total",
+            f"amount_fy{yr}_enacted",
+            f"amount_fy{yr}_actual",
+        ]
+        available = [c for c in priority if c in all_amount_cols]
+        year_col_map[f"fy{yr}"] = available[0].split(f"fy{yr}_")[1] if available else "missing"
+    result["amount_columns"] = {
+        "present": sorted(all_amount_cols),
+        "per_year_priority_used": year_col_map,
+        "years_with_no_data": [k for k, v in year_col_map.items() if v == "missing"],
+    }
+
+    # ── 2. pe_descriptions status ─────────────────────────────────────────────
+    try:
+        conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
+        row_count = conn.execute("SELECT COUNT(*) FROM pe_descriptions").fetchone()[0]
+        pe_count = conn.execute(
+            "SELECT COUNT(DISTINCT pe_number) FROM pe_descriptions"
+        ).fetchone()[0]
+        kw_hits = conn.execute(
+            "SELECT COUNT(DISTINCT pe_number) FROM pe_descriptions WHERE "
+            + " OR ".join("description_text LIKE ?" for _ in _DESC_KEYWORDS),
+            [f"%{kw}%" for kw in _DESC_KEYWORDS],
+        ).fetchone()[0]
+        result["pe_descriptions"] = {
+            "table_exists": True,
+            "row_count": row_count,
+            "distinct_pe_numbers": pe_count,
+            "pe_numbers_matching_keywords": kw_hits,
+            "populated": row_count > 0,
+        }
+    except sqlite3.OperationalError:
+        result["pe_descriptions"] = {"table_exists": False, "populated": False}
+
+    # ── 3. source_file null rate on matching rows ─────────────────────────────
+    pe_where, pe_params = _build_pe_match_where(conn)
+    base_where = f"{pe_where} AND fiscal_year >= 'FY {_FY_START}'"
+    total_rows = conn.execute(
+        f"SELECT COUNT(*) FROM budget_lines WHERE {base_where}", pe_params
+    ).fetchone()[0]
+    null_source = conn.execute(
+        f"SELECT COUNT(*) FROM budget_lines WHERE {base_where} AND source_file IS NULL",
+        pe_params,
+    ).fetchone()[0]
+    result["source_file"] = {
+        "total_matching_rows": total_rows,
+        "null_count": null_source,
+        "null_pct": round(null_source / total_rows * 100, 1) if total_rows else 0,
+        "ok": null_source == 0,
+    }
+
+    # ── 4. Color-of-money breakdown ───────────────────────────────────────────
+    com_rows = conn.execute(
+        f"SELECT appropriation_title, COUNT(DISTINCT pe_number || exhibit_type || line_item_title) "
+        f"FROM budget_lines WHERE {base_where} "
+        f"GROUP BY appropriation_title ORDER BY 2 DESC",
+        pe_params,
+    ).fetchall()
+    com_breakdown: dict[str, int] = {}
+    unrecognized: list[str] = []
+    for approp_title, cnt in com_rows:
+        label = _color_of_money(approp_title)
+        com_breakdown[label] = com_breakdown.get(label, 0) + cnt
+        if label not in ("RDT&E", "Procurement", "O&M", "MILCON", "Military Personnel", "Unknown"):
+            unrecognized.append(approp_title or "")
+    result["color_of_money"] = {
+        "breakdown": com_breakdown,
+        "unrecognized_approp_titles": sorted(set(unrecognized)),
+        "ok": len(unrecognized) == 0 and com_breakdown.get("Unknown", 0) == 0,
+    }
+
+    # ── 5. Per-keyword PE hit counts ──────────────────────────────────────────
+    keyword_hits: dict[str, int] = {}
+    for kw in _HYPERSONICS_KEYWORDS:
+        clauses = " OR ".join(f"{col} LIKE ?" for col in _SEARCH_COLS)
+        params = [f"%{kw}%"] * len(_SEARCH_COLS)
+        n = conn.execute(
+            f"SELECT COUNT(DISTINCT pe_number) FROM budget_lines WHERE {clauses}", params
+        ).fetchone()[0]
+        keyword_hits[kw] = n
+    result["keyword_pe_hits"] = keyword_hits
+    result["keywords_with_zero_hits"] = [kw for kw, n in keyword_hits.items() if n == 0]
+
+    # ── 6. Summary ────────────────────────────────────────────────────────────
+    pivot_sql, pivot_params = _build_pivot_query(conn, all_amount_cols)
+    pivot_rows = conn.execute(pivot_sql, pivot_params).fetchall()
+    year_range = list(range(_FY_START, _FY_END + 1))
+    active_years = [yr for yr in year_range if any(r[f"fy{yr}"] is not None for r in pivot_rows)]
+    result["summary"] = {
+        "total_sub_elements": len(pivot_rows),
+        "distinct_pe_numbers": len({r["pe_number"] for r in pivot_rows}),
+        "active_fiscal_years": active_years,
+        "overall_ok": (
+            result["source_file"]["ok"]
+            and result["color_of_money"]["ok"]
+            and len(result["keywords_with_zero_hits"]) == 0
+            and result.get("pe_descriptions", {}).get("populated", False)
+        ),
+    }
+
+    return result
