@@ -19,8 +19,8 @@ def _make_downloader_mock(
     download_summary=None,
     discover_raises=None,
 ):
-    """Create a mock dod_budget_downloader module."""
-    mod = types.ModuleType("dod_budget_downloader")
+    """Create a mock downloader module."""
+    mod = types.ModuleType("downloader")
 
     if available_years is None:
         available_years = {"2026": "https://example.com/2026"}
@@ -57,7 +57,7 @@ def _make_downloader_mock(
 class TestRunScheduledDownload:
     def test_success(self, tmp_path):
         mock_mod = _make_downloader_mock()
-        with patch.dict(sys.modules, {"dod_budget_downloader": mock_mod}):
+        with patch.dict(sys.modules, {"downloader": mock_mod}):
             from scripts.scheduled_download import run_scheduled_download
             code = run_scheduled_download(tmp_path / "output")
         assert code == 0
@@ -66,7 +66,7 @@ class TestRunScheduledDownload:
     def test_creates_output_dir(self, tmp_path):
         out = tmp_path / "new" / "sub"
         mock_mod = _make_downloader_mock()
-        with patch.dict(sys.modules, {"dod_budget_downloader": mock_mod}):
+        with patch.dict(sys.modules, {"downloader": mock_mod}):
             from scripts.scheduled_download import run_scheduled_download
             run_scheduled_download(out)
         assert out.is_dir()
@@ -74,7 +74,7 @@ class TestRunScheduledDownload:
     def test_log_file_created(self, tmp_path):
         log = tmp_path / "logs" / "run.log"
         mock_mod = _make_downloader_mock()
-        with patch.dict(sys.modules, {"dod_budget_downloader": mock_mod}):
+        with patch.dict(sys.modules, {"downloader": mock_mod}):
             from scripts.scheduled_download import run_scheduled_download
             run_scheduled_download(tmp_path / "output", log_file=log)
         assert log.exists()
@@ -85,14 +85,14 @@ class TestRunScheduledDownload:
         mock_mod = _make_downloader_mock(
             download_summary={"downloaded": 3, "skipped": 0, "failed": 2}
         )
-        with patch.dict(sys.modules, {"dod_budget_downloader": mock_mod}):
+        with patch.dict(sys.modules, {"downloader": mock_mod}):
             from scripts.scheduled_download import run_scheduled_download
             code = run_scheduled_download(tmp_path / "output")
         assert code == 1
 
     def test_import_error_returns_1(self, tmp_path):
         # Remove the module so import fails
-        with patch.dict(sys.modules, {"dod_budget_downloader": None}):
+        with patch.dict(sys.modules, {"downloader": None}):
             # Need to clear cached import in the script
             mod_key = "scripts.scheduled_download"
             sys.modules.pop(mod_key, None)
@@ -106,7 +106,7 @@ class TestRunScheduledDownload:
         mock_mod = _make_downloader_mock(
             discover_raises=RuntimeError("No years found")
         )
-        with patch.dict(sys.modules, {"dod_budget_downloader": mock_mod}):
+        with patch.dict(sys.modules, {"downloader": mock_mod}):
             from scripts.scheduled_download import run_scheduled_download
             log = tmp_path / "err.log"
             code = run_scheduled_download(tmp_path / "output", log_file=log)
@@ -118,7 +118,7 @@ class TestRunScheduledDownload:
         mock_mod = _make_downloader_mock(
             available_years={"2025": "url25", "2026": "url26"}
         )
-        with patch.dict(sys.modules, {"dod_budget_downloader": mock_mod}):
+        with patch.dict(sys.modules, {"downloader": mock_mod}):
             from scripts.scheduled_download import run_scheduled_download
             code = run_scheduled_download(
                 tmp_path / "output", years=["2026"]
@@ -129,7 +129,7 @@ class TestRunScheduledDownload:
         mock_mod = _make_downloader_mock(
             available_years={"2026": "url26"}
         )
-        with patch.dict(sys.modules, {"dod_budget_downloader": mock_mod}):
+        with patch.dict(sys.modules, {"downloader": mock_mod}):
             from scripts.scheduled_download import run_scheduled_download
             code = run_scheduled_download(
                 tmp_path / "output", years=["2026", "2020"]
@@ -140,7 +140,7 @@ class TestRunScheduledDownload:
         mock_mod = _make_downloader_mock(
             available_years={"2025": "url25", "2026": "url26"}
         )
-        with patch.dict(sys.modules, {"dod_budget_downloader": mock_mod}):
+        with patch.dict(sys.modules, {"downloader": mock_mod}):
             from scripts.scheduled_download import run_scheduled_download
             code = run_scheduled_download(
                 tmp_path / "output", years=["all"]
@@ -151,7 +151,7 @@ class TestRunScheduledDownload:
         mock_mod = _make_downloader_mock(
             available_years={"2026": "url26"}
         )
-        with patch.dict(sys.modules, {"dod_budget_downloader": mock_mod}):
+        with patch.dict(sys.modules, {"downloader": mock_mod}):
             from scripts.scheduled_download import run_scheduled_download
             code = run_scheduled_download(
                 tmp_path / "output", years=["2019"]

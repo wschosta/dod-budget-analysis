@@ -96,8 +96,10 @@ import pytest
 # prevents other test files' setdefault stubs from shadowing the real package.
 try:
     import pdfplumber  # noqa: F401
-except ImportError:
-    # Fall back to stub only if pdfplumber is genuinely unavailable
+except (ImportError, Exception):
+    # Catch ImportError (missing package) and any native-extension crash
+    # (e.g. pyo3 PanicException when cffi/_cffi_backend is absent).
+    # Fall back to a stub so PDF-free tests still run.
     sys.modules.setdefault("pdfplumber", types.ModuleType("pdfplumber"))
 
 import openpyxl  # noqa: E402 — available in requirements-dev.txt
