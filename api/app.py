@@ -45,7 +45,7 @@ from starlette.responses import Response
 
 from api.database import get_db_path, _make_conn
 from utils.database import get_slow_queries, get_query_stats
-from api.routes import aggregations, budget_lines, dashboard, download, facets, feedback, hypersonics, metadata, pe, reference, search
+from api.routes import aggregations, budget_lines, dashboard, download, facets, feedback, files, hypersonics, metadata, pe, reference, search
 from api.routes import frontend as frontend_routes
 from utils.config import AppConfig
 
@@ -589,6 +589,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     app.include_router(metadata.router,    prefix=prefix)
     app.include_router(facets.router,     prefix=prefix)
     app.include_router(hypersonics.router, prefix=prefix)
+    app.include_router(files.router,      prefix=prefix)
 
     # ── Static files + Jinja2 templates (3.A0-a) ──────────────────────────────
     _here = Path(__file__).parent.parent  # project root
