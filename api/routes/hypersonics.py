@@ -137,7 +137,7 @@ def _build_pe_match_where(conn: sqlite3.Connection) -> tuple[str, list[Any]]:
     # endpoint to check pe_descriptions row count before assuming full coverage.
     try:
         conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
-        desc_clauses = [f"description_text LIKE ?" for _ in _DESC_KEYWORDS]
+        desc_clauses = ["description_text LIKE ?" for _ in _DESC_KEYWORDS]
         desc_params = [f"%{kw}%" for kw in _DESC_KEYWORDS]
         union_parts.append(
             "SELECT DISTINCT pe_number FROM pe_descriptions"

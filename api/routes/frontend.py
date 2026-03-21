@@ -1321,7 +1321,7 @@ def consolidated_detail(request: Request, pe_number: str) -> HTMLResponse:
         matrix_fys = sorted(all_fys_set)
 
         # ── "Not accounted for" difference row ──
-        diff_row: dict = {"label": "Not accounted for", "fy_vals": {}}
+        diff_row: dict | None = {"label": "Not accounted for", "fy_vals": {}}
         has_diff = False
         for fy in matrix_fys:
             pe_val = pe_row["fy_vals"].get(fy)
@@ -1330,6 +1330,7 @@ def consolidated_detail(request: Request, pe_number: str) -> HTMLResponse:
             sub_sum = sum(r["fy_vals"].get(fy, 0) or 0 for r in project_rows)
             diff = round(pe_val - sub_sum, 1)
             if abs(diff) > 0.5:  # ignore rounding noise
+                assert diff_row is not None
                 diff_row["fy_vals"][fy] = diff
                 has_diff = True
         if not has_diff:
@@ -1414,7 +1415,6 @@ async def hypersonics_page(
     from api.routes.hypersonics import (
         _build_pivot_query,
         _apply_filters,
-        _desc_subquery,
         _enrich_rows,
         _HYPERSONICS_KEYWORDS,
         _FY_START,
@@ -1423,16 +1423,13 @@ async def hypersonics_page(
     from utils.database import get_amount_columns
 
     all_cols = set(get_amount_columns(conn))
-    desc_where, desc_params = _desc_subquery(conn)
     extra_where, extra_params = _apply_filters(service, exhibit, fy_from, fy_to)
-    sql, params = _build_pivot_query(
-        all_cols, desc_where, desc_params, extra_where, extra_params
-    )
-
-    raw_rows = conn.execute(sql, params).fetchall()
-    rows = _enrich_rows(raw_rows)
+    sql, params = _build_pivot_query(conn, all_cols, extra_where, extra_params)
 
     year_range = list(range(_FY_START, _FY_END + 1))
+    raw_rows = conn.execute(sql, params).fetchall()
+    rows = _enrich_rows(raw_rows, year_range)
+
     active_years = [
         yr for yr in year_range
         if any(r.get(f"fy{yr}") is not None for r in rows)
