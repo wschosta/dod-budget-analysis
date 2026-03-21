@@ -44,33 +44,66 @@ router = APIRouter(prefix="/hypersonics", tags=["hypersonics"])
 # Searched across line_item_title, account_title, budget_activity_title.
 # '%hypersonic%' covers both "hypersonic" and "hypersonics" via LIKE.
 #
-# TODO(real-data): audit keyword recall against the live database. Candidates to add:
-#   "boost glide", "HCM", "LRHW Block", "MACH", "LRPF", "HCSW Block",
-#   "OpFires" (Army offensive fires — includes hypersonic component),
-#   "DAAL" (Glide Phase Interceptor predecessor).
-#   Run GET /api/v1/hypersonics/debug?show_misses=1 and eyeball pe_number outliers.
+# ---------------------------------------------------------------------------
+# Hypersonics keyword lists
+#
+# _HYPERSONICS_KEYWORDS  — matched against short structured columns
+#   (line_item_title, account_title, budget_activity_title).  Terms must be
+#   distinctive enough to avoid false positives in terse budget labels.
+#
+# _DESC_KEYWORDS  — matched against pe_descriptions narrative text.  Can be
+#   broader phrases; prose naturally disambiguates short acronyms.
+# ---------------------------------------------------------------------------
+
 _HYPERSONICS_KEYWORDS = [
-    "hypersonic",   # catches hypersonics, hypersonic glide, etc.
-    "ARRW",
-    "LRHW",
-    "C-HGB",
-    "CHGB",
-    "glide body",
-    "scramjet",
-    "HACM",
-    "HCSW",
-    "AGM-183",
+    # ── Generic / cross-program ───────────────────────────────────────────
+    "hypersonic",           # hypersonics, hypersonic glide, hypersonic weapon…
+    "boost glide",          # boost-glide vehicles (all services)
+    "glide body",           # Common Hypersonic Glide Body (C-HGB)
+    "glide vehicle",        # generic glide vehicle references
+    "scramjet",             # air-breathing hypersonic propulsion
+
+    # ── Offensive — Air Force ──────────────────────────────────────────────
+    "ARRW",                 # Air-Launched Rapid Response Weapon (AGM-183A)
+    "AGM-183",              # ARRW missile designation
+    "HACM",                 # Hypersonic Attack Cruise Missile
+    "HCSW",                 # Hypersonic Conventional Strike Weapon (cancelled FY20)
+
+    # ── Offensive — Army ───────────────────────────────────────────────────
+    "LRHW",                 # Long Range Hypersonic Weapon / Dark Eagle battery
+    "Dark Eagle",           # LRHW battery name
+    "OpFires",              # Operational Fires (hypersonic component)
+
+    # ── Offensive — Navy / Joint ───────────────────────────────────────────
+    "C-HGB",                # Common Hypersonic Glide Body (joint Army/Navy)
+    "CHGB",                 # alternate abbreviation
+    "conventional prompt strike",   # Navy CPS program
+    "prompt strike",        # catches "Intermediate Range Conventional Prompt Strike"
+
+    # ── Defensive / tracking ───────────────────────────────────────────────
+    "Glide Phase Interceptor",  # GPI — MDA program to defeat HGVs in glide
+    "HBTSS",                # Hypersonic and Ballistic Tracking Space Sensor
 ]
 
-# Subset used for pe_descriptions narrative search (broader text, fewer terms needed)
+# Subset used for pe_descriptions narrative search (broader text, fewer terms needed).
+# Short acronyms that are ambiguous in prose are excluded here.
 _DESC_KEYWORDS = [
     "hypersonic",
+    "boost glide",
+    "glide vehicle",
+    "scramjet",
     "ARRW",
-    "LRHW",
-    "C-HGB",
-    "CHGB",
     "HACM",
     "HCSW",
+    "LRHW",
+    "Dark Eagle",
+    "C-HGB",
+    "CHGB",
+    "conventional prompt strike",
+    "prompt strike",
+    "Glide Phase Interceptor",
+    "HBTSS",
+    "OpFires",
 ]
 
 _SEARCH_COLS = ["line_item_title", "account_title", "budget_activity_title"]
