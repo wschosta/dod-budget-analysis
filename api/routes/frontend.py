@@ -1321,7 +1321,7 @@ def consolidated_detail(request: Request, pe_number: str) -> HTMLResponse:
         matrix_fys = sorted(all_fys_set)
 
         # ── "Not accounted for" difference row ──
-        diff_row: dict = {"label": "Not accounted for", "fy_vals": {}}
+        diff_row: dict | None = {"label": "Not accounted for", "fy_vals": {}}
         has_diff = False
         for fy in matrix_fys:
             pe_val = pe_row["fy_vals"].get(fy)
@@ -1330,6 +1330,7 @@ def consolidated_detail(request: Request, pe_number: str) -> HTMLResponse:
             sub_sum = sum(r["fy_vals"].get(fy, 0) or 0 for r in project_rows)
             diff = round(pe_val - sub_sum, 1)
             if abs(diff) > 0.5:  # ignore rounding noise
+                assert diff_row is not None
                 diff_row["fy_vals"][fy] = diff
                 has_diff = True
         if not has_diff:
@@ -1396,4 +1397,80 @@ def consolidated_detail(request: Request, pe_number: str) -> HTMLResponse:
         "pe_descriptions": pe_descriptions,
         "pe_tags": pe_tags,
         "project_tags": project_tags,
+    })
+
+
+# ── GET /hypersonics ──────────────────────────────────────────────────────────
+
+@router.get("/hypersonics", response_class=HTMLResponse)
+async def hypersonics_page(
+    request: Request,
+    service: str | None = None,
+    exhibit: str | None = None,
+    fy_from: int | None = None,
+    fy_to: int | None = None,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> HTMLResponse:
+    """Server-rendered hypersonics PE lines pivot table page."""
+    from api.routes.hypersonics import (
+        _build_pivot_query,
+        _apply_filters,
+        _enrich_rows,
+        _HYPERSONICS_KEYWORDS,
+        _FY_START,
+        _FY_END,
+    )
+    from utils.database import get_amount_columns
+
+    all_cols = set(get_amount_columns(conn))
+    extra_where, extra_params = _apply_filters(service, exhibit, fy_from, fy_to)
+    sql, params = _build_pivot_query(conn, all_cols, extra_where, extra_params)
+
+    year_range = list(range(_FY_START, _FY_END + 1))
+    raw_rows = conn.execute(sql, params).fetchall()
+    rows = _enrich_rows(raw_rows, year_range)
+
+    active_years = [
+        yr for yr in year_range
+        if any(r.get(f"fy{yr}") is not None for r in rows)
+    ] if rows else year_range
+
+    # Distinct services and exhibit types for filter dropdowns
+    try:
+        services = [
+            r["organization_name"]
+            for r in conn.execute(
+                "SELECT DISTINCT organization_name FROM budget_lines "
+                "WHERE organization_name IS NOT NULL ORDER BY organization_name"
+            ).fetchall()
+        ]
+    except sqlite3.OperationalError:
+        services = []
+
+    try:
+        exhibits = [
+            r["exhibit_type"]
+            for r in conn.execute(
+                "SELECT DISTINCT exhibit_type FROM budget_lines "
+                "WHERE exhibit_type IS NOT NULL ORDER BY exhibit_type"
+            ).fetchall()
+        ]
+    except sqlite3.OperationalError:
+        exhibits = []
+
+    return _tmpl().TemplateResponse("hypersonics.html", {
+        "request": request,
+        "rows": rows,
+        "active_years": active_years,
+        "year_range": year_range,
+        "keywords": _HYPERSONICS_KEYWORDS,
+        "services": services,
+        "exhibits": exhibits,
+        "filters": {
+            "service": service or "",
+            "exhibit": exhibit or "",
+            "fy_from": fy_from or _FY_START,
+            "fy_to": fy_to or _FY_END,
+        },
+        "row_count": len(rows),
     })

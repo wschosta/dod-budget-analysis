@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hypersonics Programs — Preview</title>
+<style>
+/* ── Base / reset ────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+:root {
+  --color-bg: #ffffff;
+  --color-surface: #f4f5f7;
+  --color-border: #d1d5db;
+  --color-text: #111827;
+  --color-text-muted: #6b7280;
+  --color-primary: #2563eb;
+  --font-mono: 'Space Mono', 'Courier New', monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #0f1117;
+    --color-surface: #1a1d27;
+    --color-border: #2d3148;
+    --color-text: #e5e7eb;
+    --color-text-muted: #9ca3af;
+    --color-primary: #60a5fa;
+  }
+}
+body { font-family: Inter, system-ui, sans-serif; background: var(--color-bg); color: var(--color-text); margin: 0; padding: 1rem 1.5rem; font-size: 14px; }
+h2 { font-size: 1.4rem; margin: 0; }
+h3 { font-size: 1rem; margin: 0 0 0.75rem; }
+a { color: var(--color-primary); text-decoration: none; cursor: pointer; }
+a:hover { text-decoration: underline; }
+
+/* ── Buttons ─────────────────────────────────────────────── */
+.btn { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.3rem 0.75rem; border-radius: 4px; font-size: 0.82rem; border: 1px solid transparent; cursor: pointer; white-space: nowrap; }
+.btn-primary { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+.btn-secondary { background: var(--color-surface); color: var(--color-text); border-color: var(--color-border); }
+
+/* ── Page header ──────────────────────────────────────────── */
+.hyp-page-header { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+.row-count { color: var(--color-text-muted); font-size: 0.9rem; }
+
+/* ── Filter bar ───────────────────────────────────────────── */
+.hyp-filter-bar { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end; margin-bottom: 1rem; padding: 0.6rem 0.9rem; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 6px; font-size: 0.82rem; }
+.hyp-filter-bar label { font-size: 0.75rem; font-weight: 600; color: var(--color-text-muted); display: block; margin-bottom: 0.15rem; }
+.hyp-filter-bar input, .hyp-filter-bar select { padding: 0.28rem 0.45rem; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg); color: var(--color-text); font-size: 0.82rem; }
+.hyp-filter-group { display: flex; flex-direction: column; }
+.hyp-filter-actions { display: flex; gap: 0.4rem; align-items: flex-end; margin-left: auto; }
+
+/* ── Keyword pills ───────────────────────────────────────── */
+.kw-pills { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.75rem; align-items: center; }
+.kw-pill { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 10px; padding: 0.1rem 0.5rem; font-size: 0.72rem; color: var(--color-text-muted); }
+
+/* ── Selection controls ──────────────────────────────────── */
+.sel-controls { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 0.4rem; font-size: 0.8rem; color: var(--color-text-muted); }
+
+/* ── Main table ───────────────────────────────────────────── */
+.hyp-table-wrap { overflow-x: auto; border: 1px solid var(--color-border); border-radius: 6px; margin-bottom: 2rem; }
+.hyp-table { border-collapse: collapse; width: 100%; font-size: 0.78rem; white-space: nowrap; }
+.hyp-table th, .hyp-table td { padding: 0.3rem 0.55rem; border-bottom: 1px solid var(--color-border); }
+.hyp-table th { background: var(--color-surface); font-weight: 600; position: sticky; top: 0; z-index: 2; border-bottom: 2px solid var(--color-border); text-align: left; }
+.hyp-table th.col-cb-table, .hyp-table td.col-cb-table { left: 0; position: sticky; z-index: 3; background: var(--color-surface); min-width: 46px; text-align: center; }
+.hyp-table th.col-cb-total, .hyp-table td.col-cb-total { left: 46px; position: sticky; z-index: 3; background: var(--color-surface); min-width: 46px; text-align: center; border-right: 2px solid var(--color-border); }
+.hyp-table td.col-cb-table, .hyp-table td.col-cb-total { background: var(--color-bg); }
+.hyp-table tr:hover td.col-cb-table, .hyp-table tr:hover td.col-cb-total { background: var(--color-surface); }
+.hyp-table th.col-fy, .hyp-table td.col-fy { text-align: right; min-width: 82px; font-variant-numeric: tabular-nums; }
+.hyp-table td.col-fy { font-family: var(--font-mono, monospace); }
+.hyp-table td.null-val { color: var(--color-text-muted); text-align: right; }
+.hyp-table tr:last-child td { border-bottom: none; }
+.hyp-table tr:hover td { background: var(--color-surface); }
+.hyp-table tr.row-hidden { display: none; }
+.col-pe { min-width: 108px; font-family: var(--font-mono, monospace); font-size: 0.72rem; }
+.col-svc { min-width: 85px; }
+.col-exh { min-width: 60px; }
+.col-title { min-width: 250px; white-space: normal; max-width: 360px; }
+.col-ba { min-width: 130px; white-space: normal; max-width: 200px; }
+.col-com { min-width: 90px; }
+
+/* ── Totals section ───────────────────────────────────────── */
+.hyp-totals { margin-top: 0.5rem; }
+.totals-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 1.25rem; }
+.totals-card { border: 1px solid var(--color-border); border-radius: 6px; overflow: hidden; }
+.totals-card-header { background: var(--color-surface); padding: 0.4rem 0.75rem; font-weight: 600; font-size: 0.82rem; border-bottom: 1px solid var(--color-border); }
+.totals-table-wrap { overflow-x: auto; }
+.totals-table { border-collapse: collapse; width: 100%; font-size: 0.77rem; white-space: nowrap; }
+.totals-table th, .totals-table td { padding: 0.28rem 0.55rem; border-bottom: 1px solid var(--color-border); }
+.totals-table th { background: var(--color-surface); font-weight: 600; text-align: right; }
+.totals-table th:first-child { text-align: left; }
+.totals-table td { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--font-mono, monospace); }
+.totals-table td:first-child { text-align: left; font-family: inherit; }
+.totals-table tr:last-child td { border-bottom: none; }
+.totals-table .total-row td { font-weight: 700; background: var(--color-surface); }
+.zero-val { color: var(--color-text-muted); }
+</style>
+</head>
+<body>
+<div class="hyp-page">
+
+  <div class="hyp-page-header">
+    <h2>Hypersonics Programs</h2>
+    <span class="row-count" id="visible-count">11 sub-elements</span>
+  </div>
+
+  <p style="color:var(--color-text-muted);font-size:0.82rem;margin-bottom:0.5rem;">
+    All PE lines and sub-programs matching hypersonics keywords in budget lines
+    and program descriptions, FY2015 onward. One row per unique sub-element;
+    one column per fiscal year. Amounts in $K.
+  </p>
+
+  <div class="kw-pills">
+    <span style="font-size:0.72rem;color:var(--color-text-muted);align-self:center;">Keywords:</span>
+    <span class="kw-pill">hypersonic</span>
+    <span class="kw-pill">ARRW</span>
+    <span class="kw-pill">LRHW</span>
+    <span class="kw-pill">C-HGB</span>
+    <span class="kw-pill">CHGB</span>
+    <span class="kw-pill">glide body</span>
+    <span class="kw-pill">scramjet</span>
+    <span class="kw-pill">HACM</span>
+    <span class="kw-pill">HCSW</span>
+    <span class="kw-pill">AGM-183</span>
+  </div>
+
+  <!-- Filter bar -->
+  <div class="hyp-filter-bar">
+    <div class="hyp-filter-group">
+      <label>Service / Org</label>
+      <select>
+        <option>All services</option>
+        <option>Air Force</option>
+        <option>Army</option>
+        <option>Navy</option>
+        <option>DARPA</option>
+        <option>MDA</option>
+      </select>
+    </div>
+    <div class="hyp-filter-group">
+      <label>Exhibit Type</label>
+      <select>
+        <option>All exhibits</option>
+        <option>r1</option><option>r2</option><option>p1</option><option>p5</option>
+      </select>
+    </div>
+    <div class="hyp-filter-group">
+      <label>FY From</label>
+      <input type="number" value="2015" style="width:72px;">
+    </div>
+    <div class="hyp-filter-group">
+      <label>FY To</label>
+      <input type="number" value="2026" style="width:72px;">
+    </div>
+    <div class="hyp-filter-actions">
+      <button class="btn btn-primary">Apply</button>
+      <button class="btn btn-secondary">Reset</button>
+      <button class="btn btn-secondary">&#8681; CSV</button>
+    </div>
+  </div>
+
+  <!-- Selection controls -->
+  <div class="sel-controls">
+    <span>Table:</span>
+    <a onclick="setAll('table',true)">All</a>
+    <a onclick="setAll('table',false)">None</a>
+    &nbsp;|&nbsp;
+    <span>Total:</span>
+    <a onclick="setAll('total',true)">All</a>
+    <a onclick="setAll('total',false)">None</a>
+  </div>
+
+  <!-- Main pivot table -->
+  <div class="hyp-table-wrap">
+    <table class="hyp-table" id="hyp-table">
+      <thead>
+        <tr>
+          <th class="col-cb-table" title="Include row in table view">Show</th>
+          <th class="col-cb-total" title="Include row in totals">Total</th>
+          <th class="col-pe">PE Number</th>
+          <th class="col-svc">Service</th>
+          <th class="col-exh">Exhibit</th>
+          <th class="col-title">Line Item / Sub-Program</th>
+          <th class="col-ba">Budget Activity</th>
+          <th class="col-com">Color of Money</th>
+          <th class="col-fy">FY2019</th>
+          <th class="col-fy">FY2020</th>
+          <th class="col-fy">FY2021</th>
+          <th class="col-fy">FY2022</th>
+          <th class="col-fy">FY2023</th>
+          <th class="col-fy">FY2024</th>
+          <th class="col-fy">FY2025</th>
+          <th class="col-fy">FY2026</th>
+        </tr>
+      </thead>
+      <tbody id="main-tbody">
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Totals section -->
+  <div class="hyp-totals">
+    <h3>Totals (selected rows)</h3>
+    <div class="totals-grid">
+
+      <div class="totals-card">
+        <div class="totals-card-header">Grand Total ($K)</div>
+        <div class="totals-table-wrap">
+          <table class="totals-table">
+            <thead><tr>
+              <th>Category</th>
+              <th>FY2019</th><th>FY2020</th><th>FY2021</th><th>FY2022</th>
+              <th>FY2023</th><th>FY2024</th><th>FY2025</th><th>FY2026</th>
+            </tr></thead>
+            <tbody><tr class="total-row" id="tr-grand">
+              <td>Grand Total</td>
+              <td id="gt-2019">—</td><td id="gt-2020">—</td>
+              <td id="gt-2021">—</td><td id="gt-2022">—</td>
+              <td id="gt-2023">—</td><td id="gt-2024">—</td>
+              <td id="gt-2025">—</td><td id="gt-2026">—</td>
+            </tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="totals-card">
+        <div class="totals-card-header">By Major Organization ($K)</div>
+        <div class="totals-table-wrap">
+          <table class="totals-table">
+            <thead><tr>
+              <th>Organization</th>
+              <th>FY2019</th><th>FY2020</th><th>FY2021</th><th>FY2022</th>
+              <th>FY2023</th><th>FY2024</th><th>FY2025</th><th>FY2026</th>
+            </tr></thead>
+            <tbody id="tbody-org"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="totals-card">
+        <div class="totals-card-header">By Color of Money ($K)</div>
+        <div class="totals-table-wrap">
+          <table class="totals-table">
+            <thead><tr>
+              <th>Appropriation</th>
+              <th>FY2019</th><th>FY2020</th><th>FY2021</th><th>FY2022</th>
+              <th>FY2023</th><th>FY2024</th><th>FY2025</th><th>FY2026</th>
+            </tr></thead>
+            <tbody id="tbody-com"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="totals-card">
+        <div class="totals-card-header">By Budget Activity ($K)</div>
+        <div class="totals-table-wrap">
+          <table class="totals-table">
+            <thead><tr>
+              <th>Budget Activity</th>
+              <th>FY2019</th><th>FY2020</th><th>FY2021</th><th>FY2022</th>
+              <th>FY2023</th><th>FY2024</th><th>FY2025</th><th>FY2026</th>
+            </tr></thead>
+            <tbody id="tbody-ba"></tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+</div><!-- /hyp-page -->
+
+<script>
+// ── Dummy data ────────────────────────────────────────────────────────────────
+const HYPER_ROWS = [
+  { pe_number: "0603225E", organization_name: "DARPA",       exhibit_type: "r2", line_item_title: "Hypersonic Air-breathing Weapon Concept (HAWC)",               budget_activity_title: "6.3 Advanced Technology Development", color_of_money: "RDT&E",       fy2019:  42100, fy2020:  58300, fy2021:  74200, fy2022:  89400, fy2023:  95100, fy2024: 101300, fy2025: 110200, fy2026: 118500 },
+  { pe_number: "0603225E", organization_name: "DARPA",       exhibit_type: "r2", line_item_title: "Tactical Boost Glide (TBG)",                                    budget_activity_title: "6.3 Advanced Technology Development", color_of_money: "RDT&E",       fy2019:  31400, fy2020:  37900, fy2021:  29800, fy2022:  18200, fy2023:   null, fy2024:   null, fy2025:   null, fy2026:   null },
+  { pe_number: "0603941A", organization_name: "Army",        exhibit_type: "r2", line_item_title: "Long Range Hypersonic Weapon (LRHW) — Development",             budget_activity_title: "6.3 Advanced Technology Development", color_of_money: "RDT&E",       fy2019:  55000, fy2020: 120000, fy2021: 180400, fy2022: 263700, fy2023: 292100, fy2024: 330200, fy2025: 347800, fy2026: 388400 },
+  { pe_number: "0604873A", organization_name: "Army",        exhibit_type: "p5", line_item_title: "Long Range Hypersonic Weapon (LRHW) — Procurement",             budget_activity_title: "Missile & Rocket Programs",           color_of_money: "Procurement", fy2019:   null, fy2020:   null, fy2021:   null, fy2022:   null, fy2023:  87300, fy2024: 212400, fy2025: 298700, fy2026: 415200 },
+  { pe_number: "0204781N", organization_name: "Navy",        exhibit_type: "r2", line_item_title: "Conventional Prompt Strike (CPS) — Common Hypersonic Glide Body",budget_activity_title: "6.4 Advanced Component Development",   color_of_money: "RDT&E",       fy2019: 161400, fy2020: 182600, fy2021: 225800, fy2022: 290100, fy2023: 314800, fy2024: 328500, fy2025: 412700, fy2026: 498300 },
+  { pe_number: "0204781N", organization_name: "Navy",        exhibit_type: "p5", line_item_title: "Conventional Prompt Strike (CPS) — Procurement",                budget_activity_title: "Weapons Procurement",                 color_of_money: "Procurement", fy2019:   null, fy2020:   null, fy2021:   null, fy2022:   null, fy2023:   null, fy2024: 189600, fy2025: 387200, fy2026: 502100 },
+  { pe_number: "0602702E", organization_name: "DARPA",       exhibit_type: "r2", line_item_title: "Hypersonic Technology (HyTech) — Scramjet Research",            budget_activity_title: "6.2 Applied Research",               color_of_money: "RDT&E",       fy2019:  28700, fy2020:  31200, fy2021:  35600, fy2022:  39400, fy2023:  44100, fy2024:  47200, fy2025:  51300, fy2026:  55900 },
+  { pe_number: "0604800A", organization_name: "Air Force",   exhibit_type: "r2", line_item_title: "AGM-183A Air-Launched Rapid Response Weapon (ARRW)",             budget_activity_title: "6.5 System Development & Demonstration", color_of_money: "RDT&E",    fy2019: 253900, fy2020: 382400, fy2021: 382100, fy2022: 259800, fy2023: 149700, fy2024:  42100, fy2025:   null, fy2026:   null },
+  { pe_number: "0604875F", organization_name: "Air Force",   exhibit_type: "r2", line_item_title: "Hypersonic Attack Cruise Missile (HACM)",                        budget_activity_title: "6.5 System Development & Demonstration", color_of_money: "RDT&E",    fy2019:   null, fy2020:   null, fy2021:  80400, fy2022: 161200, fy2023: 238700, fy2024: 289100, fy2025: 332400, fy2026: 378800 },
+  { pe_number: "0603890A", organization_name: "Army",        exhibit_type: "r2", line_item_title: "Hypersonic Missile Technology — Glide Body Integration",         budget_activity_title: "6.3 Advanced Technology Development", color_of_money: "RDT&E",       fy2019:  18200, fy2020:  24700, fy2021:  38900, fy2022:  52100, fy2023:  67800, fy2024:  88400, fy2025:  97600, fy2026: 104200 },
+  { pe_number: "0603941N", organization_name: "Navy",        exhibit_type: "r2", line_item_title: "Hypersonic Strike Weapons — Component Development",              budget_activity_title: "6.3 Advanced Technology Development", color_of_money: "RDT&E",       fy2019:  14900, fy2020:  19300, fy2021:  31400, fy2022:  48700, fy2023:  72300, fy2024:  89100, fy2025: 108400, fy2026: 131700 },
+];
+
+const ACTIVE_YEARS = [2019,2020,2021,2022,2023,2024,2025,2026];
+
+// ── Render main table rows ────────────────────────────────────────────────────
+function renderTableRows() {
+  const tbody = document.getElementById('main-tbody');
+  tbody.innerHTML = HYPER_ROWS.map((r, i) => {
+    const fyCells = ACTIVE_YEARS.map(yr => {
+      const v = r['fy'+yr];
+      return v !== null && v !== undefined
+        ? `<td class="col-fy">${v.toLocaleString()}</td>`
+        : `<td class="col-fy null-val">—</td>`;
+    }).join('');
+    return `<tr data-idx="${i}">
+      <td class="col-cb-table"><input type="checkbox" class="cb-table" data-idx="${i}" checked></td>
+      <td class="col-cb-total"><input type="checkbox" class="cb-total" data-idx="${i}" checked></td>
+      <td class="col-pe">${r.pe_number}</td>
+      <td class="col-svc">${r.organization_name}</td>
+      <td class="col-exh">${r.exhibit_type}</td>
+      <td class="col-title">${r.line_item_title}</td>
+      <td class="col-ba">${r.budget_activity_title}</td>
+      <td class="col-com">${r.color_of_money}</td>
+      ${fyCells}
+    </tr>`;
+  }).join('');
+}
+
+// ── Org normalization ─────────────────────────────────────────────────────────
+function normalizeOrg(org) {
+  if (!org) return 'Unknown';
+  const o = org.toLowerCase();
+  if (o.includes('navy') || o.includes('marine')) return 'Navy / USMC';
+  if (o.includes('army')) return 'Army';
+  if (o.includes('air force')) return 'Air Force';
+  if (o.includes('space force')) return 'Space Force';
+  if (o.includes('osd') || o.includes('darpa') || o.includes('mda') || o.includes('defense-wide')) return 'OSD / Defense-Wide';
+  return org;
+}
+
+// ── Number formatting ─────────────────────────────────────────────────────────
+function fmt(v) {
+  if (!v) return '<span class="zero-val">—</span>';
+  return Math.round(v).toLocaleString();
+}
+
+// ── Compute group totals ──────────────────────────────────────────────────────
+function groupTotals(rows, keyFn) {
+  const t = {};
+  for (const r of rows) {
+    const k = keyFn(r) || 'Unknown';
+    if (!t[k]) t[k] = {};
+    for (const yr of ACTIVE_YEARS) t[k][yr] = (t[k][yr]||0) + (r['fy'+yr]||0);
+  }
+  return t;
+}
+
+function renderGroupTbody(tbodyId, groupMap) {
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  const keys = Object.keys(groupMap).sort();
+  tbody.innerHTML = keys.map(k => {
+    const cells = ACTIVE_YEARS.map(yr => `<td>${fmt(groupMap[k][yr])}</td>`).join('');
+    return `<tr><td>${k}</td>${cells}</tr>`;
+  }).join('');
+}
+
+// ── Main totals recompute ─────────────────────────────────────────────────────
+function recomputeTotals() {
+  const totalIdxs = new Set(
+    [...document.querySelectorAll('.cb-total:checked')].map(cb => +cb.dataset.idx)
+  );
+  const selected = HYPER_ROWS.filter((_, i) => totalIdxs.has(i));
+
+  for (const yr of ACTIVE_YEARS) {
+    const sum = selected.reduce((s, r) => s + (r['fy'+yr]||0), 0);
+    const cell = document.getElementById('gt-'+yr);
+    if (cell) cell.innerHTML = fmt(sum||null);
+  }
+
+  renderGroupTbody('tbody-org', groupTotals(selected, r => normalizeOrg(r.organization_name)));
+  renderGroupTbody('tbody-com', groupTotals(selected, r => r.color_of_money||'Unknown'));
+  renderGroupTbody('tbody-ba',  groupTotals(selected, r => r.budget_activity_title||'Unknown'));
+
+  const vis = document.querySelectorAll('#hyp-table tbody tr:not(.row-hidden)').length;
+  const vc = document.getElementById('visible-count');
+  if (vc) vc.textContent = vis + ' sub-element' + (vis!==1?'s':'');
+}
+
+// ── Checkbox event handling ───────────────────────────────────────────────────
+document.addEventListener('change', e => {
+  const cb = e.target;
+  if (!cb.classList.contains('cb-table') && !cb.classList.contains('cb-total')) return;
+  const idx = +cb.dataset.idx;
+  const row = document.querySelector(`tr[data-idx="${idx}"]`);
+  if (cb.classList.contains('cb-table')) {
+    const cbTotal = row.querySelector('.cb-total');
+    if (!cb.checked) {
+      row.classList.add('row-hidden');
+      cbTotal.checked = false; cbTotal.disabled = true;
+    } else {
+      row.classList.remove('row-hidden');
+      cbTotal.disabled = false;
+    }
+  }
+  recomputeTotals();
+});
+
+// ── Select-all helpers ────────────────────────────────────────────────────────
+function setAll(type, checked) {
+  document.querySelectorAll(type==='table'?'.cb-table':'.cb-total').forEach(cb => {
+    if (type==='total' && checked) {
+      const cbTable = document.querySelector(`.cb-table[data-idx="${cb.dataset.idx}"]`);
+      if (cbTable && !cbTable.checked) return;
+    }
+    cb.checked = checked;
+    if (type==='table') {
+      const row = document.querySelector(`tr[data-idx="${cb.dataset.idx}"]`);
+      const cbTotal = row && row.querySelector('.cb-total');
+      if (!checked) {
+        row && row.classList.add('row-hidden');
+        if (cbTotal) { cbTotal.checked=false; cbTotal.disabled=true; }
+      } else {
+        row && row.classList.remove('row-hidden');
+        if (cbTotal) cbTotal.disabled=false;
+      }
+    }
+  });
+  recomputeTotals();
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+renderTableRows();
+recomputeTotals();
+</script>
+</body>
+</html>

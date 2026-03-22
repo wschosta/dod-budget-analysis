@@ -107,6 +107,8 @@ FastAPI application serving the database through versioned endpoints (`/api/v1`)
 | `/api/v1/dashboard/summary` | GET | Dashboard summary statistics |
 | `/api/v1/dashboard/top-programs` | GET | Top programs by funding amount |
 | `/api/v1/facets` | GET | Faceted filter counts with cross-filtering per dimension |
+| `/api/v1/hypersonics` | GET | Pivoted hypersonics PE lines: one row per sub-element, columns for FY2015–FY2026. Filters: service, exhibit, fy_from, fy_to. |
+| `/api/v1/hypersonics/download` | GET | CSV download of the pivoted hypersonics table (same filters). |
 | `/api/v1/feedback` | POST | User feedback submission |
 | `/health` | GET | Health check (DB connectivity) |
 | `/health/detailed` | GET | Uptime, request/error counts, query stats, DB metrics |
@@ -138,6 +140,7 @@ Server-side rendered HTML using Jinja2 templates with HTMX for dynamic updates.
 | **Programs** | `/programs` | Program element browsing with tag filters, search, and funding history table. |
 | **Program Detail** | `/programs/{pe}` | Individual PE detail: funding breakdown by FY, narrative descriptions, related exhibits, source documents. |
 | **About** | `/about` | Project description, data coverage summary, methodology overview. |
+| **Hypersonics** | `/hypersonics` | Pivoted table of all hypersonics-related PE lines and sub-programs, FY2015+. One row per unique PE + sub-element; one column per fiscal year showing primary requested/enacted funding ($K). Filter by service, exhibit type, and FY range. CSV download. |
 
 ### 4.2 HTMX Partials
 

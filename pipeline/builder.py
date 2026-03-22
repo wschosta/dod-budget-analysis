@@ -56,7 +56,10 @@ _SCHEMA_DESCRIPTION = (
 )
 
 import openpyxl  # noqa: E402
-import pdfplumber  # noqa: E402
+
+# pdfplumber is imported lazily inside functions that need it (see _process_pdf_file
+# and _extract_pe_descriptions_from_pdf) to avoid a startup crash caused by the
+# pdfminer → cryptography Rust extension on some environments.
 
 # Optional: python-calamine (Rust-based xlsx reader, ~8x faster than openpyxl)
 try:
@@ -1816,6 +1819,7 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
     total_pages = 0
 
     try:
+        import pdfplumber  # lazy import — kept out of module level to avoid startup crash
         with pdfplumber.open(str(file_path)) as pdf:
             num_pages = len(pdf.pages)
             batch = []
@@ -1975,6 +1979,7 @@ def _extract_pdf_data(args):
     num_pages = 0
 
     try:
+        import pdfplumber  # lazy import — kept out of module level to avoid startup crash
         with pdfplumber.open(file_path_str) as pdf:
             num_pages = len(pdf.pages)
             executor = ThreadPoolExecutor(max_workers=1)
