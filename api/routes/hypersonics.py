@@ -796,24 +796,27 @@ def rebuild_hypersonics_cache(conn: sqlite3.Connection) -> int:
 
     year_parts: list[str] = []
     for yr in range(_FY_START, _FY_END + 1):
+        # Priority: actual spend > enacted > total > request (best accuracy first).
+        # Use MAX across ALL submissions (not just fiscal_year=yr) so that actuals
+        # reported in later submissions are picked up instead of zero-valued requests.
         priority = [
-            f"amount_fy{yr}_request",
-            f"amount_fy{yr}_total",
-            f"amount_fy{yr}_enacted",
             f"amount_fy{yr}_actual",
+            f"amount_fy{yr}_enacted",
+            f"amount_fy{yr}_total",
+            f"amount_fy{yr}_request",
         ]
         available = [c for c in priority if c in all_amount_cols]
         if not available:
             coalesce_expr = "NULL"
-        elif len(available) == 1:
-            coalesce_expr = available[0]
         else:
-            coalesce_expr = f"COALESCE({', '.join(available)})"
+            # COALESCE + NULLIF: skip 0 values to prefer non-zero from higher-priority cols
+            parts = [f"NULLIF(MAX({c}), 0)" for c in available]
+            # Fall back to MAX of highest-priority col (may be 0) if all are zero
+            coalesce_expr = f"COALESCE({', '.join(parts)}, MAX({available[0]}))"
+        year_parts.append(f"{coalesce_expr} AS fy{yr}")
         year_parts.append(
-            f"SUM(CASE WHEN fiscal_year = '{yr}' THEN {coalesce_expr} END) AS fy{yr}"
-        )
-        year_parts.append(
-            f"MAX(CASE WHEN fiscal_year = '{yr}' THEN source_file END) AS fy{yr}_ref"
+            f"MAX(CASE WHEN {available[0]} IS NOT NULL THEN source_file END) AS fy{yr}_ref"
+            if available else f"NULL AS fy{yr}_ref"
         )
 
     year_cols_sql = ",\n        ".join(year_parts)
