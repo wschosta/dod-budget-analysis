@@ -307,7 +307,7 @@
     <div class="hyp-filter-actions">
       <button type="submit" class="btn btn-primary btn-sm">Apply</button>
       <a href="/hypersonics" class="btn btn-secondary btn-sm">Reset</a>
-      <a href="#" class="btn btn-secondary btn-sm" onclick="downloadFilteredCSV(); return false;">&#8681; CSV</a>
+      <a href="#" class="btn btn-secondary btn-sm" onclick="downloadFilteredCSV(); return false;">&#8681; Excel</a>
     </div>
   </form>
 
@@ -919,61 +919,48 @@ document.querySelectorAll('.hyp-table thead th[data-sort]').forEach(th => {
 
 /* ── Client-side CSV export of currently filtered rows ────── */
 function downloadFilteredCSV() {
-  const table = document.getElementById('hyp-table');
-  if (!table) return;
+  // Collect data-child-idx values for SHOW-checked and TOTAL-checked rows
+  const showIds = [];
+  const totalIds = [];
 
-  // Build header row from <thead>
-  const ths = table.querySelectorAll('thead th');
-  const headers = [];
-  const colIndices = [];  // indices of columns to include (skip checkboxes)
-  ths.forEach((th, i) => {
-    // Skip the two checkbox columns
-    if (th.classList.contains('col-cb-table') || th.classList.contains('col-cb-total')) return;
-    headers.push(th.textContent.replace(/[▲▼]/g, '').trim());
-    colIndices.push(i);
+  document.querySelectorAll('.cb-child-table:checked').forEach(cb => {
+    const idx = cb.getAttribute('data-child-idx');
+    if (idx) showIds.push(idx);
+  });
+  document.querySelectorAll('.cb-total:checked').forEach(cb => {
+    const idx = cb.getAttribute('data-child-idx');
+    if (idx) totalIds.push(idx);
   });
 
-  const csvRows = [headers];
+  if (showIds.length === 0) {
+    alert('No rows selected. Check the "Show" boxes for rows to include in the download.');
+    return;
+  }
 
-  // Collect visible child rows (same selector as the visible-count logic)
-  const visibleRows = table.querySelectorAll(
-    '#hyp-tbody .pe-child-row:not(.child-hidden):not(.row-hidden):not(.kw-filtered)'
-  );
-
-  visibleRows.forEach(tr => {
-    const tds = tr.querySelectorAll('td');
-    const row = [];
-    colIndices.forEach(i => {
-      const td = tds[i];
-      if (!td) { row.push(''); return; }
-      // For FY columns, extract the raw number (strip commas, ignore mdash)
-      let text = td.textContent.trim();
-      if (text === '\u2014' || text === '\u2013' || text === '-') text = '';
-      // Strip commas from numbers for CSV
-      if (/^[\d,]+$/.test(text)) text = text.replace(/,/g, '');
-      // Escape for CSV: quote fields containing commas, quotes, or newlines
-      if (text.includes(',') || text.includes('"') || text.includes('\n')) {
-        text = '"' + text.replace(/"/g, '""') + '"';
-      }
-      row.push(text);
-    });
-    csvRows.push(row);
+  // POST to server for XLSX generation
+  fetch('/api/v1/hypersonics/download/xlsx', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ show_ids: showIds, total_ids: totalIds }),
+  })
+  .then(resp => {
+    if (!resp.ok) return resp.text().then(t => { throw new Error(t); });
+    return resp.blob();
+  })
+  .then(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'hypersonics_selected.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  })
+  .catch(err => {
+    console.error('Download failed:', err);
+    alert('Download failed: ' + err.message);
   });
-
-  // Build CSV string with BOM for Excel
-  const bom = '\uFEFF';
-  const csvContent = bom + csvRows.map(r => r.join(',')).join('\r\n');
-
-  // Trigger download
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'hypersonics_filtered.csv';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 }
 
 /* ── Initial render ───────────────────────────────────────── */

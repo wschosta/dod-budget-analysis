@@ -29,7 +29,7 @@ import logging
 import sqlite3
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
 from fastapi.responses import Response
 
 from api.database import get_db
@@ -1158,6 +1158,170 @@ def download_hypersonics(
         content=csv_bytes,
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="hypersonics_pe_lines.csv"'},
+    )
+
+
+# ── POST /api/v1/hypersonics/download/xlsx ────────────────────────────────────
+
+@router.post(
+    "/download/xlsx",
+    summary="Download selected hypersonics rows as XLSX with formatting",
+    response_class=Response,
+)
+def download_hypersonics_xlsx(
+    show_ids: list[str] = Body(..., description="data-idx values of SHOW-checked rows"),
+    total_ids: list[str] = Body(..., description="data-idx values of TOTAL-checked rows"),
+    conn: sqlite3.Connection = Depends(get_db),
+) -> Response:
+    """Download an XLSX with all SHOW-checked rows.
+
+    Rows that are SHOW-only (not TOTAL-checked) are rendered in italics.
+    Rows that are TOTAL-checked get normal formatting.
+    A "Totals" row is appended at the bottom summing the TOTAL-checked FY columns.
+    """
+    import openpyxl
+    from openpyxl.styles import Alignment, Font, PatternFill, numbers
+
+    _ensure_cache(conn)
+
+    year_range = list(range(_FY_START, _FY_END + 1))
+
+    # Fetch all cache rows, grouped by PE as the template does
+    sql = f"SELECT * FROM {_CACHE_TABLE} ORDER BY pe_number, exhibit_type, line_item_title"
+    all_rows = conn.execute(sql).fetchall()
+    items = _cache_rows_to_dicts(all_rows)
+
+    # Group by PE (preserving order) and assign data-idx values matching the template
+    from collections import OrderedDict
+    pe_groups: OrderedDict[str, list[dict]] = OrderedDict()
+    for item in items:
+        pe = item["pe_number"]
+        pe_groups.setdefault(pe, []).append(item)
+
+    # Build lookup: data-idx → (row_dict, child_index_in_pe)
+    idx_to_row: dict[str, dict] = {}
+    for pe, children in pe_groups.items():
+        for i, child in enumerate(children):
+            idx = f"{pe}-{i}"
+            idx_to_row[idx] = child
+
+    show_set = set(show_ids)
+    total_set = set(total_ids)
+
+    # Filter to only SHOW-checked rows, preserving order
+    selected_rows: list[tuple[str, dict]] = []  # (data_idx, row_dict)
+    for pe, children in pe_groups.items():
+        for i, child in enumerate(children):
+            idx = f"{pe}-{i}"
+            if idx in show_set:
+                selected_rows.append((idx, child))
+
+    if not selected_rows:
+        return Response(
+            content=b"No rows selected",
+            media_type="text/plain",
+            status_code=400,
+        )
+
+    # Detect which FY columns have any data in selected rows
+    active_years = [
+        yr for yr in year_range
+        if any(row.get(f"fy{yr}") is not None for _, row in selected_rows)
+    ]
+
+    # Build workbook
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Hypersonics"
+
+    # Styles
+    header_font = Font(bold=True, size=11)
+    header_fill = PatternFill(start_color="2C3E50", end_color="2C3E50", fill_type="solid")
+    header_font_white = Font(bold=True, size=11, color="FFFFFF")
+    italic_font = Font(italic=True, color="888888", size=10)
+    normal_font = Font(size=10)
+    total_font = Font(bold=True, size=11)
+    money_fmt = '#,##0'
+
+    # Headers
+    headers = [
+        "PE Number", "Service/Org", "Exhibit", "Line Item / Sub-Program",
+        "Budget Activity", "Color of Money", "In Totals",
+    ]
+    for yr in active_years:
+        headers.append(f"FY{yr} ($K)")
+
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font_white
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", wrap_text=True)
+
+    # Data rows
+    total_sums: dict[int, float] = {}  # FY year → sum
+    row_num = 2
+    for data_idx, row in selected_rows:
+        is_total = data_idx in total_set
+        font = normal_font if is_total else italic_font
+
+        vals = [
+            row.get("pe_number", ""),
+            row.get("organization_name", ""),
+            row.get("exhibit_type", ""),
+            row.get("line_item_title", ""),
+            row.get("budget_activity_norm", ""),
+            row.get("color_of_money", ""),
+            "Yes" if is_total else "",
+        ]
+        for i, v in enumerate(vals, 1):
+            cell = ws.cell(row=row_num, column=i, value=v)
+            cell.font = font
+
+        # FY columns
+        for fy_col_idx, yr in enumerate(active_years):
+            col = len(vals) + fy_col_idx + 1
+            amount = row.get(f"fy{yr}")
+            cell = ws.cell(row=row_num, column=col, value=amount)
+            cell.font = font
+            if amount is not None:
+                cell.number_format = money_fmt
+                if is_total:
+                    total_sums[yr] = total_sums.get(yr, 0) + amount
+
+        row_num += 1
+
+    # Totals row
+    if total_sums:
+        ws.cell(row=row_num, column=1, value="TOTALS").font = total_font
+        ws.cell(row=row_num, column=7, value="Sum").font = total_font
+        for fy_col_idx, yr in enumerate(active_years):
+            col = 7 + fy_col_idx + 1
+            val = total_sums.get(yr)
+            if val is not None:
+                cell = ws.cell(row=row_num, column=col, value=val)
+                cell.font = total_font
+                cell.number_format = money_fmt
+
+    # Column widths
+    col_widths = [14, 14, 8, 50, 20, 12, 10] + [14] * len(active_years)
+    for i, w in enumerate(col_widths, 1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+
+    # Freeze panes: freeze header row + first 4 columns
+    ws.freeze_panes = "E2"
+
+    # Auto-filter
+    ws.auto_filter.ref = ws.dimensions
+
+    # Write to bytes
+    buf = io.BytesIO()
+    wb.save(buf)
+    xlsx_bytes = buf.getvalue()
+
+    return Response(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="hypersonics_selected.xlsx"'},
     )
 
 
