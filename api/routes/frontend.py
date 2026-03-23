@@ -1462,6 +1462,15 @@ async def hypersonics_page(
         pe = row["pe_number"]
         pe_groups.setdefault(pe, []).append(row)
 
+    # Compute per-keyword match counts across all rows
+    keyword_counts: dict[str, int] = {kw: 0 for kw in _HYPERSONICS_KEYWORDS}
+    for row in rows:
+        row_kws = set(row.get("matched_keywords_row", []))
+        desc_kws = set(row.get("matched_keywords_desc", []))
+        for kw in row_kws | desc_kws:
+            if kw in keyword_counts:
+                keyword_counts[kw] += 1
+
     return _tmpl().TemplateResponse("hypersonics.html", {
         "request": request,
         "rows": rows,
@@ -1469,6 +1478,7 @@ async def hypersonics_page(
         "active_years": active_years,
         "year_range": year_range,
         "keywords": _HYPERSONICS_KEYWORDS,
+        "keyword_counts": keyword_counts,
         "services": services,
         "exhibits": exhibits,
         "filters": {

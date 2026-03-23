@@ -64,6 +64,7 @@
   transition: opacity 0.15s, background 0.15s;
 }
 .kw-pill:hover { opacity: 0.85; }
+.kw-count { font-weight: 400; opacity: 0.8; font-size: 0.65rem; }
 .kw-pill.kw-off {
   background: transparent;
   color: var(--color-text-muted);
@@ -280,7 +281,7 @@
 
   <div class="kw-pills">
     <span style="font-size:0.72rem;color:var(--color-text-muted);align-self:center;">Keywords:</span>
-    {% for kw in keywords %}<span class="kw-pill" data-kw="{{ kw }}" onclick="toggleKeyword(this)">{{ kw }}</span>{% endfor %}
+    {% for kw in keywords %}<span class="kw-pill" data-kw="{{ kw }}" onclick="toggleKeyword(this)">{{ kw }}{% if keyword_counts and keyword_counts.get(kw, 0) > 0 %} <span class="kw-count">({{ keyword_counts[kw] }})</span>{% endif %}</span>{% endfor %}
   </div>
 
   <!-- Filter bar -->
