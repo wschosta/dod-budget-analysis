@@ -47,18 +47,28 @@
 .hyp-filter-group { display: flex; flex-direction: column; }
 .hyp-filter-actions { display: flex; gap: 0.4rem; align-items: flex-end; margin-left: auto; }
 
-/* ── Keyword pills ───────────────────────────────────────── */
+/* ── Keyword pills (toggleable) ─────────────────────────── */
 .kw-pills {
   display: flex; flex-wrap: wrap; gap: 0.3rem;
   margin-bottom: 0.75rem; align-items: center;
 }
 .kw-pill {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-primary, #0070f3);
+  border: 1px solid var(--color-primary, #0070f3);
   border-radius: 10px;
-  padding: 0.1rem 0.5rem;
+  padding: 0.15rem 0.55rem;
   font-size: 0.72rem;
+  color: #fff;
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 0.15s, background 0.15s;
+}
+.kw-pill:hover { opacity: 0.85; }
+.kw-pill.kw-off {
+  background: transparent;
   color: var(--color-text-muted);
+  border-color: var(--color-border);
+  opacity: 0.5;
 }
 
 /* ── Selection controls ──────────────────────────────────── */
@@ -129,6 +139,7 @@
 .hyp-table tr:last-child td { border-bottom: none; }
 .hyp-table tr:hover td { background: var(--color-surface); }
 .hyp-table tr.row-hidden { display: none; }
+.hyp-table tr.kw-filtered { display: none; }
 
 .col-pe    { min-width: 108px; font-family: var(--font-mono, monospace); font-size: 0.72rem; }
 .col-svc   { min-width: 85px; }
@@ -153,16 +164,27 @@
 /* ── Keyword tags (#4) ───────────────────────────────────── */
 .kw-tags { display: inline-flex; flex-wrap: wrap; gap: 2px; margin-top: 2px; }
 .kw-tag {
-  background: var(--color-primary, #0070f3);
-  color: #fff;
   border-radius: 3px;
   padding: 0px 4px;
   font-size: 0.6rem;
   font-weight: 500;
   line-height: 1.4;
-  opacity: 0.8;
 }
-.kw-tag:hover { opacity: 1; }
+/* Row-level match: solid fill */
+.kw-tag.kw-row {
+  background: var(--color-primary, #0070f3);
+  color: #fff;
+  opacity: 0.85;
+}
+.kw-tag.kw-row:hover { opacity: 1; }
+/* Desc-level match: outline style */
+.kw-tag.kw-desc {
+  background: transparent;
+  border: 1px solid var(--color-text-muted);
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+.kw-tag.kw-desc:hover { opacity: 1; }
 
 /* ── Description drawer (#3) ─────────────────────────────── */
 .desc-toggle {
@@ -250,7 +272,7 @@
 
   <div class="kw-pills">
     <span style="font-size:0.72rem;color:var(--color-text-muted);align-self:center;">Keywords:</span>
-    {% for kw in keywords %}<span class="kw-pill">{{ kw }}</span>{% endfor %}
+    {% for kw in keywords %}<span class="kw-pill" data-kw="{{ kw }}" onclick="toggleKeyword(this)">{{ kw }}</span>{% endfor %}
   </div>
 
   <!-- Filter bar -->
@@ -373,10 +395,15 @@
           <td class="col-exh">{{ row.exhibit_type or '' }}</td>
           <td class="col-title">
             {{ row.line_item_title or '' }}
-            {% if row.matched_keywords %}
+            {% if row.matched_keywords_row or row.matched_keywords_desc %}
             <div class="kw-tags">
-              {% for kw in row.matched_keywords %}
-              <span class="kw-tag" title="Matched keyword: {{ kw }}">{{ kw }}</span>
+              {% for kw in row.matched_keywords_row %}
+              <span class="kw-tag kw-row" data-kw="{{ kw }}" title="Direct match in line item: {{ kw }}">{{ kw }}</span>
+              {% endfor %}
+              {% for kw in row.matched_keywords_desc %}
+              {% if kw not in row.matched_keywords_row %}
+              <span class="kw-tag kw-desc" data-kw="{{ kw }}" title="Matched in PE description: {{ kw }}">{{ kw }}</span>
+              {% endif %}
               {% endfor %}
             </div>
             {% endif %}
@@ -487,6 +514,64 @@
 <script>
 const HYPER_ROWS = {{ rows | tojson }};
 const ACTIVE_YEARS = {{ active_years | tojson }};
+
+/* ── Keyword toggle state ─────────────────────────────────── */
+const activeKeywords = new Set();
+document.querySelectorAll('.kw-pill').forEach(p => activeKeywords.add(p.dataset.kw));
+
+function toggleKeyword(pill) {
+  const kw = pill.dataset.kw;
+  if (activeKeywords.has(kw)) {
+    activeKeywords.delete(kw);
+    pill.classList.add('kw-off');
+  } else {
+    activeKeywords.add(kw);
+    pill.classList.remove('kw-off');
+  }
+  applyKeywordFilter();
+}
+
+function applyKeywordFilter() {
+  // For each PE group: show if any of its rows match an active keyword
+  const peGroups = {};
+  document.querySelectorAll('tr.pe-child-row').forEach(tr => {
+    const pe = tr.dataset.pe;
+    if (!peGroups[pe]) peGroups[pe] = [];
+    peGroups[pe].push(tr);
+  });
+
+  for (const [pe, childRows] of Object.entries(peGroups)) {
+    const parentRow = document.querySelector(`tr.pe-parent-row[data-pe="${pe}"]`);
+    const descRow = document.getElementById('desc-pe-' + pe);
+
+    // Check if any child row has an active keyword
+    let peHasActiveKw = false;
+    for (const tr of childRows) {
+      const tags = tr.querySelectorAll('.kw-tag');
+      let rowHasActiveKw = false;
+      tags.forEach(tag => {
+        if (activeKeywords.has(tag.dataset.kw)) rowHasActiveKw = true;
+      });
+      // Show/hide individual keyword tags based on active state
+      tags.forEach(tag => {
+        tag.style.display = activeKeywords.has(tag.dataset.kw) ? '' : 'none';
+      });
+      if (rowHasActiveKw) peHasActiveKw = true;
+    }
+
+    // Show/hide entire PE group based on keyword filter
+    if (peHasActiveKw) {
+      if (parentRow) parentRow.classList.remove('kw-filtered');
+      childRows.forEach(tr => tr.classList.remove('kw-filtered'));
+      if (descRow) descRow.classList.remove('kw-filtered');
+    } else {
+      if (parentRow) parentRow.classList.add('kw-filtered');
+      childRows.forEach(tr => tr.classList.add('kw-filtered'));
+      if (descRow) descRow.classList.add('kw-filtered');
+    }
+  }
+  recomputeTotals();
+}
 
 /* ── Org normalization ──────────────────────────────────── */
 function normalizeOrg(org) {
@@ -640,7 +725,7 @@ function recomputeTotals() {
   renderGroupTbody('tbody-ba',  groupTotals(selected, r => r.budget_activity_norm || 'Unknown'));
 
   // Update visible count
-  const visCount = document.querySelectorAll('#hyp-table .pe-child-row:not(.child-hidden):not(.row-hidden)').length;
+  const visCount = document.querySelectorAll('#hyp-table .pe-child-row:not(.child-hidden):not(.row-hidden):not(.kw-filtered)').length;
   const vc = document.getElementById('visible-count');
   if (vc) vc.textContent = visCount + ' sub-element' + (visCount !== 1 ? 's' : '');
 }

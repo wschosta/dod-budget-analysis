@@ -170,7 +170,8 @@ CREATE TABLE IF NOT EXISTS {_CACHE_TABLE} (
     appropriation_title     TEXT,
     account_title           TEXT,
     color_of_money          TEXT,
-    matched_keywords        TEXT,
+    matched_keywords_row    TEXT,
+    matched_keywords_desc   TEXT,
     description_text        TEXT,
     fy2015 REAL, fy2015_ref TEXT,
     fy2016 REAL, fy2016_ref TEXT,
@@ -223,7 +224,35 @@ def _collect_matching_pe_numbers(conn: sqlite3.Connection) -> set[str]:
 
 
 def _get_description_map(conn: sqlite3.Connection, pe_numbers: set[str]) -> dict[str, str]:
-    """Build PE → concatenated description text map for the given PEs."""
+    """Build PE → truncated description text map for UI display."""
+    if not pe_numbers:
+        return {}
+    try:
+        conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
+    except sqlite3.OperationalError:
+        return {}
+
+    result: dict[str, str] = {}
+    # Query in batches to avoid huge GROUP_CONCAT — take first 2000 chars only
+    for pe in pe_numbers:
+        rows = conn.execute(
+            "SELECT description_text FROM pe_descriptions "
+            "WHERE pe_number = ? LIMIT 5",
+            [pe],
+        ).fetchall()
+        text = " ".join(r[0] for r in rows if r[0])
+        if len(text) > 2000:
+            text = text[:2000] + "…"
+        if text.strip():
+            result[pe] = text
+    return result
+
+
+def _get_desc_keyword_map(conn: sqlite3.Connection, pe_numbers: set[str]) -> dict[str, list[str]]:
+    """Build PE → list of DESC_KEYWORDS that match in pe_descriptions (via SQL LIKE).
+
+    Uses SQL-level matching to avoid truncation bugs from GROUP_CONCAT.
+    """
     if not pe_numbers:
         return {}
     try:
@@ -232,19 +261,20 @@ def _get_description_map(conn: sqlite3.Connection, pe_numbers: set[str]) -> dict
         return {}
 
     placeholders = ", ".join("?" for _ in pe_numbers)
-    rows = conn.execute(
-        f"SELECT pe_number, GROUP_CONCAT(description_text, ' ') AS text "
-        f"FROM pe_descriptions WHERE pe_number IN ({placeholders}) "
-        f"GROUP BY pe_number",
-        list(pe_numbers),
-    ).fetchall()
-    result: dict[str, str] = {}
-    for r in rows:
-        text = r["text"] or ""
-        # Truncate to 2000 chars for UI display
-        if len(text) > 2000:
-            text = text[:2000] + "…"
-        result[r["pe_number"]] = text
+    pe_list = list(pe_numbers)
+    result: dict[str, list[str]] = {}
+
+    for kw in _DESC_KEYWORDS:
+        rows = conn.execute(
+            f"SELECT DISTINCT pe_number FROM pe_descriptions "
+            f"WHERE pe_number IN ({placeholders}) AND description_text LIKE ?",
+            pe_list + [f"%{kw}%"],
+        ).fetchall()
+        for r in rows:
+            result.setdefault(r[0], [])
+            if kw not in result[r[0]]:
+                result[r[0]].append(kw)
+
     return result
 
 
@@ -264,8 +294,11 @@ def rebuild_hypersonics_cache(conn: sqlite3.Connection) -> int:
         logger.info("No matching PEs found — cache table is empty.")
         return 0
 
-    # 2. Get description text per PE
+    # 2. Get description text per PE (truncated for UI display)
     desc_map = _get_description_map(conn, matched_pes)
+
+    # 2b. Get desc-level keyword matches per PE (via SQL LIKE, no truncation)
+    desc_kw_map = _get_desc_keyword_map(conn, matched_pes)
 
     # 3. Get amount columns
     all_amount_cols = set(get_amount_columns(conn))
@@ -328,7 +361,7 @@ def rebuild_hypersonics_cache(conn: sqlite3.Connection) -> int:
         "pe_number", "organization_name", "exhibit_type", "line_item_title",
         "budget_activity", "budget_activity_title", "budget_activity_norm",
         "appropriation_title", "account_title", "color_of_money",
-        "matched_keywords", "description_text",
+        "matched_keywords_row", "matched_keywords_desc", "description_text",
     ]
     for yr in year_range:
         insert_cols.extend([f"fy{yr}", f"fy{yr}_ref"])
@@ -338,15 +371,11 @@ def rebuild_hypersonics_cache(conn: sqlite3.Connection) -> int:
     count = 0
     for r in rows:
         d = dict(r)
-        # Keyword matching
+        # Row-level keyword matching (from structured fields)
         text_fields = [d.get("line_item_title"), d.get("account_title"), d.get("budget_activity_title")]
-        matched_kws = _find_matched_keywords(text_fields)
-        # Also check description text
-        pe_desc = desc_map.get(d["pe_number"], "")
-        desc_lower = pe_desc.lower()
-        for kw in _DESC_KEYWORDS:
-            if kw.lower() in desc_lower and kw not in matched_kws:
-                matched_kws.append(kw)
+        row_kws = _find_matched_keywords(text_fields)
+        # Desc-level keyword matching (from pe_descriptions via SQL)
+        desc_kws = desc_kw_map.get(d["pe_number"], [])
 
         vals = [
             d["pe_number"],
@@ -359,8 +388,9 @@ def rebuild_hypersonics_cache(conn: sqlite3.Connection) -> int:
             d.get("appropriation_title"),
             d.get("account_title"),
             _color_of_money(d.get("appropriation_title")),
-            json.dumps(matched_kws) if matched_kws else "[]",
-            pe_desc or None,
+            json.dumps(row_kws) if row_kws else "[]",
+            json.dumps(desc_kws) if desc_kws else "[]",
+            desc_map.get(d["pe_number"]) or None,
         ]
         for yr in year_range:
             vals.append(d.get(f"fy{yr}"))
@@ -420,12 +450,13 @@ def _cache_rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict]:
     result: list[dict] = []
     for r in rows:
         d = dict(r)
-        # Parse matched_keywords from JSON
-        kw_json = d.pop("matched_keywords", "[]")
-        try:
-            d["matched_keywords"] = json.loads(kw_json) if kw_json else []
-        except (json.JSONDecodeError, TypeError):
-            d["matched_keywords"] = []
+        # Parse keyword fields from JSON
+        for field in ("matched_keywords_row", "matched_keywords_desc"):
+            kw_json = d.get(field, "[]")
+            try:
+                d[field] = json.loads(kw_json) if kw_json else []
+            except (json.JSONDecodeError, TypeError):
+                d[field] = []
         # Build refs dict
         refs: dict[str, str] = {}
         for yr in year_range:
@@ -504,7 +535,7 @@ def download_hypersonics(
     writer.writerow([
         "PE Number", "Service/Org", "Exhibit Type", "Line Item Title",
         "Budget Activity", "Budget Activity (Normalized)", "Appropriation",
-        "Color of Money", "Matched Keywords",
+        "Color of Money", "Keywords (Row)", "Keywords (Desc)",
         *fy_headers,
     ])
     for r in items:
@@ -516,7 +547,9 @@ def download_hypersonics(
             r["pe_number"], r["organization_name"], r["exhibit_type"],
             r["line_item_title"], r["budget_activity_title"],
             r["budget_activity_norm"], r["appropriation_title"],
-            r["color_of_money"], ", ".join(r.get("matched_keywords", [])),
+            r["color_of_money"],
+            ", ".join(r.get("matched_keywords_row", [])),
+            ", ".join(r.get("matched_keywords_desc", [])),
             *fy_cells,
         ])
 
@@ -584,15 +617,19 @@ def debug_hypersonics(conn: sqlite3.Connection = Depends(get_db)) -> dict:
     if result.get("cache", {}).get("table_exists"):
         try:
             kw_rows = conn.execute(
-                f"SELECT matched_keywords FROM {_CACHE_TABLE} WHERE matched_keywords != '[]'"
+                f"SELECT matched_keywords_row, matched_keywords_desc FROM {_CACHE_TABLE}"
             ).fetchall()
-            kw_counts: dict[str, int] = {}
+            row_counts: dict[str, int] = {}
+            desc_counts: dict[str, int] = {}
             for r in kw_rows:
-                for kw in json.loads(r[0]):
-                    kw_counts[kw] = kw_counts.get(kw, 0) + 1
-            result["keyword_hit_counts"] = kw_counts
+                for kw in json.loads(r[0] or "[]"):
+                    row_counts[kw] = row_counts.get(kw, 0) + 1
+                for kw in json.loads(r[1] or "[]"):
+                    desc_counts[kw] = desc_counts.get(kw, 0) + 1
+            all_kw_counts = {kw: row_counts.get(kw, 0) + desc_counts.get(kw, 0) for kw in set(list(row_counts) + list(desc_counts))}
+            result["keyword_hit_counts"] = {"row": row_counts, "desc": desc_counts, "combined": all_kw_counts}
             result["keywords_with_zero_hits"] = [
-                kw for kw in _HYPERSONICS_KEYWORDS if kw not in kw_counts
+                kw for kw in _HYPERSONICS_KEYWORDS if kw not in all_kw_counts
             ]
         except Exception:
             pass
