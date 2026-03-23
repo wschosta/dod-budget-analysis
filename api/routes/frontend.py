@@ -1469,16 +1469,24 @@ async def hypersonics_page(
     pe_meta: dict[str, dict] = {}
     for pe, children in pe_groups.items():
         r1_titles = []
+        r1_row = None
         for c in children:
             if c.get("exhibit_type") == "r1" and c.get("line_item_title"):
                 r1_titles.append(c["line_item_title"])
+                r1_row = c  # last R-1 row = most recent
         # Use last R-1 title (most recent) or first child title as fallback
         title = r1_titles[-1] if r1_titles else (children[0].get("line_item_title") or pe)
         distinct_titles = len(set(r1_titles))
+        # Extract R-1 FY values for parent row display
+        r1_fy: dict[str, int | None] = {}
+        if r1_row:
+            for yr in active_years:
+                r1_fy[f"fy{yr}"] = r1_row.get(f"fy{yr}")
         pe_meta[pe] = {
             "pe_title": title,
             "pe_title_count": distinct_titles,
             "child_count": len(children),
+            "r1_fy": r1_fy,
         }
 
     # Compute per-keyword match counts across all rows

@@ -383,8 +383,12 @@
           <td class="col-cnt">{{ children|length }}</td>
           <td class="col-ba">&nbsp;</td>
           <td class="col-com">&nbsp;</td>
+          {% set r1fy = pe_meta.get(pe, {}).get('r1_fy', {}) %}
           {% for yr in active_years %}
-          <td class="col-fy null-val">&nbsp;</td>
+          {% set val = r1fy.get('fy' ~ yr) %}
+          <td class="col-fy{% if val is none %} null-val{% endif %}" style="font-weight:600;">
+            {{ '{:,.0f}'.format(val) if val is not none else '' }}
+          </td>
           {% endfor %}
         </tr>
 
