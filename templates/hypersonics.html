@@ -406,6 +406,9 @@
             {% if row.lineage_note %}
             <span class="lineage-note" title="{{ row.lineage_note }}">↔ {{ row.lineage_note }}</span>
             {% endif %}
+            {% if row.description_text and row.exhibit_type == 'r2' %}
+            <span class="desc-toggle" onclick="toggleDesc(event, 'desc-{{ pe }}-{{ loop.index0 }}')" title="Show R-2 description">[desc]</span>
+            {% endif %}
             {% if row.matched_keywords_row or row.matched_keywords_desc %}
             <div class="kw-tags">
               {% for kw in row.matched_keywords_row %}
@@ -438,6 +441,14 @@
             {% endif %}
           {% endfor %}
         </tr>
+        {% if row.description_text and row.exhibit_type == 'r2' %}
+        <tr class="desc-row" id="desc-{{ pe }}-{{ loop.index0 }}">
+          <td colspan="{{ 8 + active_years|length }}">
+            <strong>{{ row.line_item_title or 'R-2' }} Description:</strong><br>
+            {{ row.description_text[:2000] }}{% if row.description_text|length > 2000 %}...{% endif %}
+          </td>
+        </tr>
+        {% endif %}
         {% endfor %}
 
         {% endfor %}{# /pe_groups #}

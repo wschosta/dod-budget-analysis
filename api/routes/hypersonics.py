@@ -503,7 +503,7 @@ def _mine_pdf_subelements(
     conn: sqlite3.Connection,
     pe_numbers: set[str],
     core_pes: set[str] | None = None,
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], set[str]]:
     """Mine R-2/R-2A sub-element data from pdf_pages for the given PE numbers.
 
     Scans pdf_pages for R-2/R-2A exhibit first-pages that contain COST tables,
@@ -518,12 +518,12 @@ def _mine_pdf_subelements(
     Only processes FY >= _FY_START to match the cache's fiscal year range.
     """
     if not pe_numbers:
-        return []
+        return [], set()
 
     try:
         conn.execute("SELECT 1 FROM pdf_pages LIMIT 0")
     except sqlite3.OperationalError:
-        return []
+        return [], set()
 
     if core_pes is None:
         core_pes = pe_numbers
@@ -549,41 +549,27 @@ def _mine_pdf_subelements(
                 len(rows), len(pe_numbers))
 
     # Parse all pages and collect raw sub-element rows.
-    # Only keep rows where the parsed PE from the exhibit header is in our set.
-    # Deduplicate within each budget submission: (pe, project_code, doc_fy).
+    # Keep rows from known PEs unconditionally, AND discover new PEs whose
+    # R-2 title or description matches a hypersonics keyword.
     seen: set[tuple[str, str | None, str]] = set()
     raw_items: list[dict[str, Any]] = []
+    discovered_pes: set[str] = set()  # PEs found via R-2 keyword match
 
     for r in rows:
         source_file, page_number, page_text, fiscal_year = r
         parsed = _parse_r2_cost_block(page_text, source_file, fiscal_year)
         for item in parsed:
-            if item["pe_number"] not in pe_numbers:
-                continue
-            key = (item["pe_number"], item.get("project_code"), fiscal_year)
+            pe = item["pe_number"]
+            key = (pe, item.get("project_code"), fiscal_year)
             if key in seen:
                 continue
-            seen.add(key)
-            raw_items.append(item)
 
-    logger.info("PDF sub-element mining: %d raw rows before consolidation", len(raw_items))
-
-    # Consolidate into one golden-timeseries row per (pe_number, project_code).
-    consolidated = _consolidate_r2_timeseries(raw_items)
-    logger.info("PDF sub-element mining: %d consolidated rows before keyword filter",
-                len(consolidated))
-
-    # For desc-only PEs, filter: keep only sub-elements whose project title or
-    # description text matches at least one hypersonics keyword.
-    desc_only_pes = pe_numbers - core_pes
-    if desc_only_pes:
-        filtered: list[dict[str, Any]] = []
-        for item in consolidated:
-            if item["pe_number"] in core_pes:
-                # Core PE — keep all sub-elements
-                filtered.append(item)
+            if pe in pe_numbers:
+                # Known PE — keep unconditionally
+                seen.add(key)
+                raw_items.append(item)
             else:
-                # Desc-only PE — check if project title or description has keywords
+                # Unknown PE — check if R-2 title or description has keywords
                 text_fields = [
                     item.get("project_title", ""),
                     item.get("description_text", ""),
@@ -592,16 +578,36 @@ def _mine_pdf_subelements(
                 matched = _find_matched_keywords(text_fields)
                 if matched:
                     item["_matched_r2_keywords"] = matched
-                    filtered.append(item)
-        logger.info(
-            "PDF sub-element mining: %d→%d after keyword filter "
-            "(%d desc-only PEs checked)",
-            len(consolidated), len(filtered), len(desc_only_pes),
-        )
-        consolidated = filtered
+                    seen.add(key)
+                    raw_items.append(item)
+                    discovered_pes.add(pe)
 
-    logger.info("PDF sub-element mining: %d final project rows", len(consolidated))
-    return consolidated
+    if discovered_pes:
+        logger.info("PDF sub-element mining: discovered %d new PEs via R-2 keyword matches: %s",
+                    len(discovered_pes), ", ".join(sorted(discovered_pes)))
+
+    logger.info("PDF sub-element mining: %d raw rows before consolidation", len(raw_items))
+
+    # Consolidate into one golden-timeseries row per (pe_number, project_code).
+    consolidated = _consolidate_r2_timeseries(raw_items)
+
+    # Tag rows with keyword matches (for display as keyword pills) but keep
+    # ALL sub-elements — if a PE is in the cache at R-1 level, we show all its
+    # R-2 sub-elements so the user can see the full funding picture.
+    for item in consolidated:
+        if not item.get("_matched_r2_keywords"):
+            text_fields = [
+                item.get("project_title", ""),
+                item.get("description_text", ""),
+                item.get("pe_title", ""),
+            ]
+            matched = _find_matched_keywords(text_fields)
+            if matched:
+                item["_matched_r2_keywords"] = matched
+
+    logger.info("PDF sub-element mining: %d final project rows (%d discovered PEs)",
+                len(consolidated), len(discovered_pes))
+    return consolidated, discovered_pes
 
 
 def _consolidate_r2_timeseries(
@@ -880,8 +886,56 @@ def rebuild_hypersonics_cache(conn: sqlite3.Connection) -> int:
         conn.execute(insert_sql, vals)
         count += 1
 
-    # 6b. Insert PDF-mined R-2/R-2A sub-elements (only for core budget_lines PEs)
-    pdf_subelements = _mine_pdf_subelements(conn, matched_pes, core_pes=bl_pes)
+    # 6b. Insert PDF-mined R-2/R-2A sub-elements
+    pdf_result = _mine_pdf_subelements(conn, matched_pes, core_pes=bl_pes)
+    pdf_subelements: list[dict[str, Any]] = pdf_result[0]
+    discovered_pes: set[str] = pdf_result[1]
+
+    # For PEs discovered via R-2 keyword matches, also insert R-1 budget_lines rows
+    if discovered_pes:
+        disc_placeholders = ", ".join("?" for _ in discovered_pes)
+        disc_sql = f"""
+            SELECT
+                pe_number,
+                MAX(organization_name) AS organization_name,
+                exhibit_type,
+                line_item_title,
+                MAX(budget_activity) AS budget_activity,
+                MAX(budget_activity_title) AS budget_activity_title,
+                MAX(appropriation_title) AS appropriation_title,
+                MAX(account_title) AS account_title,
+                {year_cols_sql}
+            FROM budget_lines
+            WHERE pe_number IN ({disc_placeholders})
+              AND CAST(fiscal_year AS INTEGER) >= {_FY_START}
+            GROUP BY pe_number, exhibit_type, line_item_title
+            ORDER BY pe_number, exhibit_type, line_item_title
+        """
+        disc_rows = conn.execute(disc_sql, list(discovered_pes)).fetchall()
+        disc_desc_map = _get_description_map(conn, discovered_pes)
+        disc_desc_kw_map = _get_desc_keyword_map(conn, discovered_pes)
+        for r in disc_rows:
+            d = dict(r)
+            text_fields = [d.get("line_item_title"), d.get("account_title"), d.get("budget_activity_title")]
+            row_kws = _find_matched_keywords(text_fields)
+            dkws = disc_desc_kw_map.get(d["pe_number"], [])
+            vals = [
+                d["pe_number"], d.get("organization_name"), d.get("exhibit_type"),
+                d.get("line_item_title"), d.get("budget_activity"), d.get("budget_activity_title"),
+                _normalize_budget_activity(d.get("budget_activity"), d.get("budget_activity_title")),
+                d.get("appropriation_title"), d.get("account_title"),
+                _color_of_money(d.get("appropriation_title")),
+                json.dumps(row_kws) if row_kws else "[]",
+                json.dumps(dkws) if dkws else "[]",
+                disc_desc_map.get(d["pe_number"]) or None,
+            ]
+            for yr in year_range:
+                vals.append(d.get(f"fy{yr}"))
+                vals.append(d.get(f"fy{yr}_ref"))
+            conn.execute(insert_sql, vals)
+            count += 1
+        logger.info("Hypersonics cache: added %d R-1 rows for %d discovered PEs",
+                    len(disc_rows), len(discovered_pes))
     pdf_count = 0
     for item in pdf_subelements:
         pe = item["pe_number"]
