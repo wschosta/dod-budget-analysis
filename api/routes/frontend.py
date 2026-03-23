@@ -1407,40 +1407,39 @@ async def hypersonics_page(
     request: Request,
     service: str | None = None,
     exhibit: str | None = None,
-    fy_from: int | None = None,
-    fy_to: int | None = None,
     conn: sqlite3.Connection = Depends(get_db),
 ) -> HTMLResponse:
     """Server-rendered hypersonics PE lines pivot table page."""
     from api.routes.hypersonics import (
-        _build_pivot_query,
         _apply_filters,
-        _enrich_rows,
+        _cache_rows_to_dicts,
+        _ensure_cache,
         _HYPERSONICS_KEYWORDS,
+        _CACHE_TABLE,
         _FY_START,
         _FY_END,
     )
-    from utils.database import get_amount_columns
 
-    all_cols = set(get_amount_columns(conn))
-    extra_where, extra_params = _apply_filters(service, exhibit, fy_from, fy_to)
-    sql, params = _build_pivot_query(conn, all_cols, extra_where, extra_params)
+    _ensure_cache(conn)
+
+    extra_where, extra_params = _apply_filters(service, exhibit, None, None)
+    where = f"WHERE {extra_where}" if extra_where else ""
+    sql = f"SELECT * FROM {_CACHE_TABLE} {where} ORDER BY pe_number, exhibit_type, line_item_title"
+    raw_rows = conn.execute(sql, extra_params).fetchall()
 
     year_range = list(range(_FY_START, _FY_END + 1))
-    raw_rows = conn.execute(sql, params).fetchall()
-    rows = _enrich_rows(raw_rows, year_range)
+    rows = _cache_rows_to_dicts(raw_rows)
 
     active_years = [
         yr for yr in year_range
         if any(r.get(f"fy{yr}") is not None for r in rows)
     ] if rows else year_range
 
-    # Distinct services and exhibit types for filter dropdowns
+    # Distinct services and exhibit types from cache for filter dropdowns
     try:
         services = [
-            r["organization_name"]
-            for r in conn.execute(
-                "SELECT DISTINCT organization_name FROM budget_lines "
+            r[0] for r in conn.execute(
+                f"SELECT DISTINCT organization_name FROM {_CACHE_TABLE} "
                 "WHERE organization_name IS NOT NULL ORDER BY organization_name"
             ).fetchall()
         ]
@@ -1449,18 +1448,24 @@ async def hypersonics_page(
 
     try:
         exhibits = [
-            r["exhibit_type"]
-            for r in conn.execute(
-                "SELECT DISTINCT exhibit_type FROM budget_lines "
+            r[0] for r in conn.execute(
+                f"SELECT DISTINCT exhibit_type FROM {_CACHE_TABLE} "
                 "WHERE exhibit_type IS NOT NULL ORDER BY exhibit_type"
             ).fetchall()
         ]
     except sqlite3.OperationalError:
         exhibits = []
 
+    # Group rows by PE for hierarchy (#1)
+    pe_groups: dict[str, list[dict]] = {}
+    for row in rows:
+        pe = row["pe_number"]
+        pe_groups.setdefault(pe, []).append(row)
+
     return _tmpl().TemplateResponse("hypersonics.html", {
         "request": request,
         "rows": rows,
+        "pe_groups": pe_groups,
         "active_years": active_years,
         "year_range": year_range,
         "keywords": _HYPERSONICS_KEYWORDS,
@@ -1469,8 +1474,6 @@ async def hypersonics_page(
         "filters": {
             "service": service or "",
             "exhibit": exhibit or "",
-            "fy_from": fy_from or _FY_START,
-            "fy_to": fy_to or _FY_END,
         },
         "row_count": len(rows),
     })

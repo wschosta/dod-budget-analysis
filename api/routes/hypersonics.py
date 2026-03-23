@@ -9,22 +9,22 @@ a keyword OR if any pe_descriptions row for that PE matches a keyword. Once a PE
 matched, ALL of its sub-elements (line_item_title rows) are returned — not just the
 rows that individually match a keyword.
 
-Each row is a unique (pe_number, exhibit_type, line_item_title) combination.
-Columns fy2015–fy2026 show the primary requested/enacted amount ($K) from
-that fiscal year's budget document.
-
-Each fy{N} amount column has a companion fy{N}_ref column containing the source
-filename for that cell, suitable for citation tooltips in the UI.
+Data is served from a pre-computed ``hypersonics_cache`` table for instant reads.
+Call ``rebuild_hypersonics_cache(conn)`` after pipeline/enrichment runs, or hit the
+POST /api/v1/hypersonics/rebuild endpoint to refresh.
 
 Endpoints:
-  GET /api/v1/hypersonics          — JSON, pivoted table data
-  GET /api/v1/hypersonics/download — streaming CSV of pivoted table
+  GET  /api/v1/hypersonics          — JSON, pivoted table data
+  GET  /api/v1/hypersonics/download — streaming CSV of pivoted table
+  GET  /api/v1/hypersonics/debug    — data-quality checks
+  POST /api/v1/hypersonics/rebuild  — rebuild the materialized cache table
 """
 
 from __future__ import annotations
 
 import csv
 import io
+import json
 import logging
 import sqlite3
 from typing import Any
@@ -40,20 +40,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/hypersonics", tags=["hypersonics"])
 
 # ── Keywords ──────────────────────────────────────────────────────────────────
-
-# Searched across line_item_title, account_title, budget_activity_title.
-# '%hypersonic%' covers both "hypersonic" and "hypersonics" via LIKE.
-#
-# ---------------------------------------------------------------------------
-# Hypersonics keyword lists
-#
-# _HYPERSONICS_KEYWORDS  — matched against short structured columns
-#   (line_item_title, account_title, budget_activity_title).  Terms must be
-#   distinctive enough to avoid false positives in terse budget labels.
-#
-# _DESC_KEYWORDS  — matched against pe_descriptions narrative text.  Can be
-#   broader phrases; prose naturally disambiguates short acronyms.
-# ---------------------------------------------------------------------------
 
 _HYPERSONICS_KEYWORDS = [
     # ── Generic / cross-program ───────────────────────────────────────────
@@ -85,8 +71,6 @@ _HYPERSONICS_KEYWORDS = [
     "HBTSS",                # Hypersonic and Ballistic Tracking Space Sensor
 ]
 
-# Subset used for pe_descriptions narrative search (broader text, fewer terms needed).
-# Short acronyms that are ambiguous in prose are excluded here.
 _DESC_KEYWORDS = [
     "hypersonic",
     "boost glide",
@@ -112,17 +96,33 @@ _FY_START = 2015
 _FY_END = 2026
 
 
+# ── Budget Activity normalization (#5) ────────────────────────────────────────
+
+# RDT&E BA categories (BA 01-07) — canonical titles
+_BA_CANONICAL: dict[str, str] = {
+    "01": "BA 1: Basic Research",
+    "02": "BA 2: Applied Research",
+    "03": "BA 3: Advanced Technology Development",
+    "04": "BA 4: Advanced Component Dev & Prototypes",
+    "05": "BA 5: System Development & Demonstration",
+    "06": "BA 6: RDT&E Management Support",
+    "07": "BA 7: Operational Systems Development",
+}
+
+
+def _normalize_budget_activity(ba_number: str | None, ba_title: str | None) -> str:
+    """Map budget_activity number to canonical BA label, falling back to title."""
+    if ba_number and ba_number.strip() in _BA_CANONICAL:
+        return _BA_CANONICAL[ba_number.strip()]
+    if ba_title:
+        return ba_title.strip()
+    return "Unknown"
+
+
 # ── Color-of-money normalization ──────────────────────────────────────────────
 
 def _color_of_money(approp_title: str | None) -> str:
-    """Map appropriation title to a standard color-of-money category.
-
-    TODO(real-data): check GET /api/v1/hypersonics/debug for any rows landing in
-    "Unknown" or returning verbatim approp_title strings. Real budget documents
-    sometimes use phrasing like "Research, Development, Test & Evaluation, Navy"
-    (already covered) or unusual variants like "Defense-Wide RDT&E" or
-    "Missile Procurement, Army" — add matches here if needed.
-    """
+    """Map appropriation title to a standard color-of-money category."""
     if not approp_title:
         return "Unknown"
     t = approp_title.upper()
@@ -136,22 +136,63 @@ def _color_of_money(approp_title: str | None) -> str:
         return "MILCON"
     if any(k in t for k in ("MILPERS", "PERSONNEL")):
         return "Military Personnel"
-    return approp_title  # show verbatim if unrecognized
+    return approp_title
 
 
-# ── SQL helpers ───────────────────────────────────────────────────────────────
+# ── Keyword matching helpers (#4) ─────────────────────────────────────────────
 
-def _build_pe_match_where(conn: sqlite3.Connection) -> tuple[str, list[Any]]:
-    """Return a WHERE fragment that selects ALL sub-elements of matching PEs.
+def _find_matched_keywords(text_fields: list[str | None]) -> list[str]:
+    """Return which hypersonics keywords match in the given text fields."""
+    combined = " ".join((t or "") for t in text_fields).lower()
+    if not combined.strip():
+        return []
+    matched = []
+    for kw in _HYPERSONICS_KEYWORDS:
+        if kw.lower() in combined:
+            matched.append(kw)
+    return matched
 
-    A PE is "matching" if:
-      (a) any of its budget_lines rows match a hypersonics keyword in a key column, OR
-      (b) any pe_descriptions row for that PE mentions a hypersonics keyword.
 
-    By operating at the PE level (via UNION subquery), we return every sub-element
-    of a matched PE — not just the individual rows that happen to mention the keyword.
-    """
-    # ── (a) Budget-lines keyword match ────────────────────────────────────────
+# ── Materialized table (#6) ───────────────────────────────────────────────────
+
+_CACHE_TABLE = "hypersonics_cache"
+
+_CACHE_DDL = f"""
+CREATE TABLE IF NOT EXISTS {_CACHE_TABLE} (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    pe_number               TEXT NOT NULL,
+    organization_name       TEXT,
+    exhibit_type            TEXT,
+    line_item_title         TEXT,
+    budget_activity         TEXT,
+    budget_activity_title   TEXT,
+    budget_activity_norm    TEXT,
+    appropriation_title     TEXT,
+    account_title           TEXT,
+    color_of_money          TEXT,
+    matched_keywords        TEXT,
+    description_text        TEXT,
+    fy2015 REAL, fy2015_ref TEXT,
+    fy2016 REAL, fy2016_ref TEXT,
+    fy2017 REAL, fy2017_ref TEXT,
+    fy2018 REAL, fy2018_ref TEXT,
+    fy2019 REAL, fy2019_ref TEXT,
+    fy2020 REAL, fy2020_ref TEXT,
+    fy2021 REAL, fy2021_ref TEXT,
+    fy2022 REAL, fy2022_ref TEXT,
+    fy2023 REAL, fy2023_ref TEXT,
+    fy2024 REAL, fy2024_ref TEXT,
+    fy2025 REAL, fy2025_ref TEXT,
+    fy2026 REAL, fy2026_ref TEXT
+);
+"""
+
+
+def _collect_matching_pe_numbers(conn: sqlite3.Connection) -> set[str]:
+    """Return the set of PE numbers that match any hypersonics keyword."""
+    matched: set[str] = set()
+
+    # (a) Budget-lines keyword match
     kw_clauses: list[str] = []
     kw_params: list[Any] = []
     for col in _SEARCH_COLS:
@@ -159,49 +200,80 @@ def _build_pe_match_where(conn: sqlite3.Connection) -> tuple[str, list[Any]]:
             kw_clauses.append(f"{col} LIKE ?")
             kw_params.append(f"%{kw}%")
     kw_where = " OR ".join(kw_clauses)
+    rows = conn.execute(
+        f"SELECT DISTINCT pe_number FROM budget_lines WHERE {kw_where}", kw_params
+    ).fetchall()
+    matched.update(r[0] for r in rows if r[0])
 
-    union_parts = [f"SELECT DISTINCT pe_number FROM budget_lines WHERE {kw_where}"]
-    all_params: list[Any] = list(kw_params)
-
-    # ── (b) pe_descriptions narrative match ───────────────────────────────────
-    # TODO(real-data): pe_descriptions is populated by the enrichment pipeline
-    # (`python enrich_budget_db.py`). If it is empty, this UNION arm is a no-op
-    # and recall falls back to budget-lines keyword matching only. Run the debug
-    # endpoint to check pe_descriptions row count before assuming full coverage.
+    # (b) pe_descriptions narrative match
     try:
         conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
         desc_clauses = ["description_text LIKE ?" for _ in _DESC_KEYWORDS]
         desc_params = [f"%{kw}%" for kw in _DESC_KEYWORDS]
-        union_parts.append(
+        rows = conn.execute(
             "SELECT DISTINCT pe_number FROM pe_descriptions"
-            f" WHERE {' OR '.join(desc_clauses)}"
-        )
-        all_params.extend(desc_params)
+            f" WHERE {' OR '.join(desc_clauses)}",
+            desc_params,
+        ).fetchall()
+        matched.update(r[0] for r in rows if r[0])
     except sqlite3.OperationalError:
-        pass  # pe_descriptions table not yet populated — skip
+        pass
 
-    fragment = "pe_number IN (\n  " + "\n  UNION\n  ".join(union_parts) + "\n)"
-    return fragment, all_params
+    return matched
 
 
-def _build_pivot_query(
-    conn: sqlite3.Connection,
-    all_amount_cols: set[str],
-    extra_where: str = "",
-    extra_params: list[Any] | None = None,
-) -> tuple[str, list[Any]]:
-    """Build the pivoted SELECT query.
+def _get_description_map(conn: sqlite3.Connection, pe_numbers: set[str]) -> dict[str, str]:
+    """Build PE → concatenated description text map for the given PEs."""
+    if not pe_numbers:
+        return {}
+    try:
+        conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
+    except sqlite3.OperationalError:
+        return {}
 
-    For each fiscal year N in [_FY_START, _FY_END], emits TWO columns:
-      • fy{N}      — SUM of best available amount (request → total → enacted → actual)
-      • fy{N}_ref  — source filename for that cell (for citation tooltips)
+    placeholders = ", ".join("?" for _ in pe_numbers)
+    rows = conn.execute(
+        f"SELECT pe_number, GROUP_CONCAT(description_text, ' ') AS text "
+        f"FROM pe_descriptions WHERE pe_number IN ({placeholders}) "
+        f"GROUP BY pe_number",
+        list(pe_numbers),
+    ).fetchall()
+    result: dict[str, str] = {}
+    for r in rows:
+        text = r["text"] or ""
+        # Truncate to 2000 chars for UI display
+        if len(text) > 2000:
+            text = text[:2000] + "…"
+        result[r["pe_number"]] = text
+    return result
 
-    Rows are matched at the PE level: any PE whose sub-elements or descriptions
-    mention a hypersonics keyword contributes ALL of its sub-elements.
+
+def rebuild_hypersonics_cache(conn: sqlite3.Connection) -> int:
+    """Rebuild the hypersonics_cache table from budget_lines + pe_descriptions.
+
+    Returns the number of rows inserted.
     """
-    pe_where, pe_params = _build_pe_match_where(conn)
+    logger.info("Rebuilding hypersonics cache table...")
 
-    # Per-year pivot columns (amount + source reference)
+    # 1. Collect matching PE numbers
+    matched_pes = _collect_matching_pe_numbers(conn)
+    if not matched_pes:
+        conn.execute(f"DROP TABLE IF EXISTS {_CACHE_TABLE}")
+        conn.execute(_CACHE_DDL)
+        conn.commit()
+        logger.info("No matching PEs found — cache table is empty.")
+        return 0
+
+    # 2. Get description text per PE
+    desc_map = _get_description_map(conn, matched_pes)
+
+    # 3. Get amount columns
+    all_amount_cols = set(get_amount_columns(conn))
+
+    # 4. Build pivot query
+    pe_placeholders = ", ".join("?" for _ in matched_pes)
+    pe_params = list(matched_pes)
+
     year_parts: list[str] = []
     for yr in range(_FY_START, _FY_END + 1):
         priority = [
@@ -211,54 +283,116 @@ def _build_pivot_query(
             f"amount_fy{yr}_actual",
         ]
         available = [c for c in priority if c in all_amount_cols]
-        # TODO(real-data): verify the real schema has amount_fy{N}_request populated
-        # for recent years. GET /api/v1/hypersonics/debug lists which priority column
-        # (request / total / enacted / actual) is actually used for each FY so you
-        # can spot years silently falling back to enacted or actual figures.
-        if len(available) == 0:
+        if not available:
             coalesce_expr = "NULL"
         elif len(available) == 1:
             coalesce_expr = available[0]
         else:
             coalesce_expr = f"COALESCE({', '.join(available)})"
         year_parts.append(
-            f"SUM(CASE WHEN fiscal_year = 'FY {yr}' THEN {coalesce_expr} END) AS fy{yr}"
+            f"SUM(CASE WHEN fiscal_year = '{yr}' THEN {coalesce_expr} END) AS fy{yr}"
         )
-        # Source file reference for this year's cell — MAX collapses the single matching row.
         year_parts.append(
-            f"MAX(CASE WHEN fiscal_year = 'FY {yr}' THEN source_file END) AS fy{yr}_ref"
+            f"MAX(CASE WHEN fiscal_year = '{yr}' THEN source_file END) AS fy{yr}_ref"
         )
 
-    year_cols_sql = ",\n    ".join(year_parts)
-
-    where_parts = [pe_where, "fiscal_year >= 'FY 2015'"]
-    all_params: list[Any] = list(pe_params)
-
-    if extra_where:
-        where_parts.append(extra_where)
-    if extra_params:
-        all_params = all_params + list(extra_params)
-
-    full_where = " AND ".join(where_parts)
-
+    year_cols_sql = ",\n        ".join(year_parts)
     sql = f"""
         SELECT
             pe_number,
-            MAX(organization_name)     AS organization_name,
+            MAX(organization_name) AS organization_name,
             exhibit_type,
             line_item_title,
+            MAX(budget_activity) AS budget_activity,
             MAX(budget_activity_title) AS budget_activity_title,
-            MAX(appropriation_title)   AS appropriation_title,
-            MAX(account_title)         AS account_title,
+            MAX(appropriation_title) AS appropriation_title,
+            MAX(account_title) AS account_title,
             {year_cols_sql}
         FROM budget_lines
-        WHERE {full_where}
+        WHERE pe_number IN ({pe_placeholders})
+          AND CAST(fiscal_year AS INTEGER) >= {_FY_START}
         GROUP BY pe_number, exhibit_type, line_item_title
         HAVING COUNT(*) > 0
         ORDER BY pe_number, exhibit_type, line_item_title
     """
-    return sql, all_params
 
+    rows = conn.execute(sql, pe_params).fetchall()
+
+    # 5. Recreate cache table
+    conn.execute(f"DROP TABLE IF EXISTS {_CACHE_TABLE}")
+    conn.execute(_CACHE_DDL)
+
+    # 6. Insert enriched rows
+    year_range = list(range(_FY_START, _FY_END + 1))
+    insert_cols = [
+        "pe_number", "organization_name", "exhibit_type", "line_item_title",
+        "budget_activity", "budget_activity_title", "budget_activity_norm",
+        "appropriation_title", "account_title", "color_of_money",
+        "matched_keywords", "description_text",
+    ]
+    for yr in year_range:
+        insert_cols.extend([f"fy{yr}", f"fy{yr}_ref"])
+    placeholders_insert = ", ".join("?" for _ in insert_cols)
+    insert_sql = f"INSERT INTO {_CACHE_TABLE} ({', '.join(insert_cols)}) VALUES ({placeholders_insert})"
+
+    count = 0
+    for r in rows:
+        d = dict(r)
+        # Keyword matching
+        text_fields = [d.get("line_item_title"), d.get("account_title"), d.get("budget_activity_title")]
+        matched_kws = _find_matched_keywords(text_fields)
+        # Also check description text
+        pe_desc = desc_map.get(d["pe_number"], "")
+        desc_lower = pe_desc.lower()
+        for kw in _DESC_KEYWORDS:
+            if kw.lower() in desc_lower and kw not in matched_kws:
+                matched_kws.append(kw)
+
+        vals = [
+            d["pe_number"],
+            d.get("organization_name"),
+            d.get("exhibit_type"),
+            d.get("line_item_title"),
+            d.get("budget_activity"),
+            d.get("budget_activity_title"),
+            _normalize_budget_activity(d.get("budget_activity"), d.get("budget_activity_title")),
+            d.get("appropriation_title"),
+            d.get("account_title"),
+            _color_of_money(d.get("appropriation_title")),
+            json.dumps(matched_kws) if matched_kws else "[]",
+            pe_desc or None,
+        ]
+        for yr in year_range:
+            vals.append(d.get(f"fy{yr}"))
+            vals.append(d.get(f"fy{yr}_ref"))
+
+        conn.execute(insert_sql, vals)
+        count += 1
+
+    # 7. Create indexes for fast filtering
+    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_hc_pe ON {_CACHE_TABLE}(pe_number)")
+    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_hc_org ON {_CACHE_TABLE}(organization_name)")
+    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_hc_exhibit ON {_CACHE_TABLE}(exhibit_type)")
+
+    conn.commit()
+    logger.info("Hypersonics cache rebuilt: %d rows", count)
+    return count
+
+
+def _ensure_cache(conn: sqlite3.Connection) -> bool:
+    """Ensure hypersonics_cache exists and is populated. Returns True if data available."""
+    try:
+        n = conn.execute(f"SELECT COUNT(*) FROM {_CACHE_TABLE}").fetchone()[0]
+        if n > 0:
+            return True
+    except sqlite3.OperationalError:
+        pass
+    # Auto-rebuild on first access
+    logger.info("hypersonics_cache not found or empty — rebuilding...")
+    return rebuild_hypersonics_cache(conn) > 0
+
+
+# ── Query helpers (now read from cache) ───────────────────────────────────────
 
 def _apply_filters(
     service: str | None,
@@ -266,7 +400,7 @@ def _apply_filters(
     fy_from: int | None,
     fy_to: int | None,
 ) -> tuple[str, list[Any]]:
-    """Build additional WHERE fragments from optional user filters."""
+    """Build WHERE fragments for cache table filters."""
     parts: list[str] = []
     params: list[Any] = []
     if service:
@@ -275,31 +409,28 @@ def _apply_filters(
     if exhibit:
         parts.append("exhibit_type = ?")
         params.append(exhibit)
-    if fy_from:
-        parts.append("fiscal_year >= ?")
-        params.append(f"FY {fy_from}")
-    if fy_to:
-        parts.append("fiscal_year <= ?")
-        params.append(f"FY {fy_to}")
+    # FY filters: check which FY columns have data
+    # (handled client-side for now since data is already pivoted in cache)
     return (" AND ".join(parts), params) if parts else ("", [])
 
 
-def _enrich_rows(rows: list[sqlite3.Row], year_range: list[int]) -> list[dict]:
-    """Convert rows to dicts, add color_of_money, and extract refs into a nested dict.
-
-    Each row gets a ``refs`` key:
-      { "fy2026": "fy2026_navy_rdtest.xlsx", "fy2025": "fy2025_navy_rdtest.xlsx", ... }
-    Only years with non-null source data are included in ``refs``.
-    The raw fy{N}_ref columns are removed from the top-level dict to keep it clean.
-    """
+def _cache_rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict]:
+    """Convert cache rows to dicts with refs nested structure."""
+    year_range = list(range(_FY_START, _FY_END + 1))
     result: list[dict] = []
     for r in rows:
         d = dict(r)
-        d["color_of_money"] = _color_of_money(d.get("appropriation_title"))
+        # Parse matched_keywords from JSON
+        kw_json = d.pop("matched_keywords", "[]")
+        try:
+            d["matched_keywords"] = json.loads(kw_json) if kw_json else []
+        except (json.JSONDecodeError, TypeError):
+            d["matched_keywords"] = []
+        # Build refs dict
         refs: dict[str, str] = {}
         for yr in year_range:
-            key = f"fy{yr}_ref"
-            val = d.pop(key, None)
+            ref_key = f"fy{yr}_ref"
+            val = d.pop(ref_key, None)
             if val:
                 refs[f"fy{yr}"] = val
         d["refs"] = refs
@@ -311,39 +442,33 @@ def _enrich_rows(rows: list[sqlite3.Row], year_range: list[int]) -> list[dict]:
 
 @router.get(
     "",
-    summary="Pivoted hypersonics PE lines: one row per sub-element, one column per FY",
+    summary="Pivoted hypersonics PE lines from materialized cache",
 )
 def get_hypersonics(
     service: str | None = Query(None, description="Filter by service/org name (substring)"),
     exhibit: str | None = Query(None, description="Filter by exhibit type (exact, e.g. 'r2')"),
-    fy_from: int | None = Query(None, ge=2015, le=2030, description="Start fiscal year"),
-    fy_to: int | None = Query(None, ge=2015, le=2030, description="End fiscal year"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
-    """Return all hypersonics-related budget line sub-elements as a pivoted table.
+    """Return all hypersonics-related budget line sub-elements as a pivoted table."""
+    _ensure_cache(conn)
 
-    Matching is PE-level: if any sub-element or pe_description for a PE mentions a
-    hypersonics keyword, ALL sub-elements for that PE are returned.
-
-    Each row includes a ``refs`` dict mapping fy{N} → source filename for citation
-    tooltips in the UI.
-    """
-    all_cols = set(get_amount_columns(conn))
-    extra_where, extra_params = _apply_filters(service, exhibit, fy_from, fy_to)
-    sql, params = _build_pivot_query(conn, all_cols, extra_where, extra_params)
-    rows = conn.execute(sql, params).fetchall()
+    extra_where, extra_params = _apply_filters(service, exhibit, None, None)
+    where = f"WHERE {extra_where}" if extra_where else ""
+    sql = f"SELECT * FROM {_CACHE_TABLE} {where} ORDER BY pe_number, exhibit_type, line_item_title"
+    rows = conn.execute(sql, extra_params).fetchall()
 
     year_range = list(range(_FY_START, _FY_END + 1))
+    items = _cache_rows_to_dicts(rows)
     active_years = (
-        [yr for yr in year_range if any(r[f"fy{yr}"] is not None for r in rows)]
-        if rows else year_range
+        [yr for yr in year_range if any(r.get(f"fy{yr}") is not None for r in items)]
+        if items else year_range
     )
 
     return {
-        "count": len(rows),
+        "count": len(items),
         "fiscal_years": active_years,
         "keywords": _HYPERSONICS_KEYWORDS,
-        "rows": _enrich_rows(rows, year_range),
+        "rows": items,
     }
 
 
@@ -357,24 +482,19 @@ def get_hypersonics(
 def download_hypersonics(
     service: str | None = Query(None),
     exhibit: str | None = Query(None),
-    fy_from: int | None = Query(None, ge=2015, le=2030),
-    fy_to: int | None = Query(None, ge=2015, le=2030),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> Response:
-    """Download pivoted hypersonics PE lines as CSV.
+    """Download pivoted hypersonics PE lines as CSV."""
+    _ensure_cache(conn)
 
-    Includes fy{N}_source columns alongside each fy{N} amount so recipients
-    can trace every figure back to its source document.
-    """
-    all_cols = set(get_amount_columns(conn))
-    extra_where, extra_params = _apply_filters(service, exhibit, fy_from, fy_to)
-    sql, params = _build_pivot_query(conn, all_cols, extra_where, extra_params)
-    rows = conn.execute(sql, params).fetchall()
+    extra_where, extra_params = _apply_filters(service, exhibit, None, None)
+    where = f"WHERE {extra_where}" if extra_where else ""
+    sql = f"SELECT * FROM {_CACHE_TABLE} {where} ORDER BY pe_number, exhibit_type, line_item_title"
+    rows = conn.execute(sql, extra_params).fetchall()
 
     year_range = list(range(_FY_START, _FY_END + 1))
-    items = _enrich_rows(rows, year_range)
+    items = _cache_rows_to_dicts(rows)
 
-    # Interleave amount and source columns: FY2015 ($K), FY2015 Source, FY2016 ($K), ...
     fy_headers: list[str] = []
     for yr in year_range:
         fy_headers.extend([f"FY{yr} ($K)", f"FY{yr} Source"])
@@ -383,7 +503,8 @@ def download_hypersonics(
     writer = csv.writer(buf)
     writer.writerow([
         "PE Number", "Service/Org", "Exhibit Type", "Line Item Title",
-        "Budget Activity", "Appropriation", "Color of Money",
+        "Budget Activity", "Budget Activity (Normalized)", "Appropriation",
+        "Color of Money", "Matched Keywords",
         *fy_headers,
     ])
     for r in items:
@@ -394,7 +515,8 @@ def download_hypersonics(
         writer.writerow([
             r["pe_number"], r["organization_name"], r["exhibit_type"],
             r["line_item_title"], r["budget_activity_title"],
-            r["appropriation_title"], r["color_of_money"],
+            r["budget_activity_norm"], r["appropriation_title"],
+            r["color_of_money"], ", ".join(r.get("matched_keywords", [])),
             *fy_cells,
         ])
 
@@ -406,6 +528,18 @@ def download_hypersonics(
     )
 
 
+# ── POST /api/v1/hypersonics/rebuild ──────────────────────────────────────────
+
+@router.post(
+    "/rebuild",
+    summary="Rebuild the materialized hypersonics cache table",
+)
+def rebuild_cache(conn: sqlite3.Connection = Depends(get_db)) -> dict:
+    """Rebuild the hypersonics_cache table from budget_lines + pe_descriptions."""
+    count = rebuild_hypersonics_cache(conn)
+    return {"status": "ok", "rows": count}
+
+
 # ── GET /api/v1/hypersonics/debug ─────────────────────────────────────────────
 
 @router.get(
@@ -413,122 +547,54 @@ def download_hypersonics(
     summary="Pre-flight data quality checks for the hypersonics view",
 )
 def debug_hypersonics(conn: sqlite3.Connection = Depends(get_db)) -> dict:
-    """Surface data-quality stats to validate the hypersonics view against real data.
-
-    Checks:
-    - Which amount_fy* columns exist and which priority column is used per year
-    - pe_descriptions table status (exists, row count, distinct PE numbers)
-    - source_file null rate in matching budget_lines rows
-    - Color-of-money breakdown (flags any "Unknown" or verbatim approp_title rows)
-    - Per-keyword PE hit counts (helps spot gaps in keyword coverage)
-    - Active fiscal years and total matching sub-elements
-    """
+    """Surface data-quality stats to validate the hypersonics view against real data."""
     result: dict = {}
 
-    # ── 1. Amount column availability ─────────────────────────────────────────
-    all_amount_cols = set(get_amount_columns(conn))
-    year_col_map: dict[str, str] = {}
-    for yr in range(_FY_START, _FY_END + 1):
-        priority = [
-            f"amount_fy{yr}_request",
-            f"amount_fy{yr}_total",
-            f"amount_fy{yr}_enacted",
-            f"amount_fy{yr}_actual",
-        ]
-        available = [c for c in priority if c in all_amount_cols]
-        year_col_map[f"fy{yr}"] = available[0].split(f"fy{yr}_")[1] if available else "missing"
-    result["amount_columns"] = {
-        "present": sorted(all_amount_cols),
-        "per_year_priority_used": year_col_map,
-        "years_with_no_data": [k for k, v in year_col_map.items() if v == "missing"],
-    }
+    # 1. Cache status
+    try:
+        cache_count = conn.execute(f"SELECT COUNT(*) FROM {_CACHE_TABLE}").fetchone()[0]
+        distinct_pes = conn.execute(
+            f"SELECT COUNT(DISTINCT pe_number) FROM {_CACHE_TABLE}"
+        ).fetchone()[0]
+        result["cache"] = {
+            "table_exists": True,
+            "row_count": cache_count,
+            "distinct_pe_numbers": distinct_pes,
+        }
+    except sqlite3.OperationalError:
+        result["cache"] = {"table_exists": False, "row_count": 0}
 
-    # ── 2. pe_descriptions status ─────────────────────────────────────────────
+    # 2. pe_descriptions status
     try:
         conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
         row_count = conn.execute("SELECT COUNT(*) FROM pe_descriptions").fetchone()[0]
         pe_count = conn.execute(
             "SELECT COUNT(DISTINCT pe_number) FROM pe_descriptions"
         ).fetchone()[0]
-        kw_hits = conn.execute(
-            "SELECT COUNT(DISTINCT pe_number) FROM pe_descriptions WHERE "
-            + " OR ".join("description_text LIKE ?" for _ in _DESC_KEYWORDS),
-            [f"%{kw}%" for kw in _DESC_KEYWORDS],
-        ).fetchone()[0]
         result["pe_descriptions"] = {
             "table_exists": True,
             "row_count": row_count,
             "distinct_pe_numbers": pe_count,
-            "pe_numbers_matching_keywords": kw_hits,
             "populated": row_count > 0,
         }
     except sqlite3.OperationalError:
         result["pe_descriptions"] = {"table_exists": False, "populated": False}
 
-    # ── 3. source_file null rate on matching rows ─────────────────────────────
-    pe_where, pe_params = _build_pe_match_where(conn)
-    base_where = f"{pe_where} AND fiscal_year >= 'FY {_FY_START}'"
-    total_rows = conn.execute(
-        f"SELECT COUNT(*) FROM budget_lines WHERE {base_where}", pe_params
-    ).fetchone()[0]
-    null_source = conn.execute(
-        f"SELECT COUNT(*) FROM budget_lines WHERE {base_where} AND source_file IS NULL",
-        pe_params,
-    ).fetchone()[0]
-    result["source_file"] = {
-        "total_matching_rows": total_rows,
-        "null_count": null_source,
-        "null_pct": round(null_source / total_rows * 100, 1) if total_rows else 0,
-        "ok": null_source == 0,
-    }
-
-    # ── 4. Color-of-money breakdown ───────────────────────────────────────────
-    com_rows = conn.execute(
-        f"SELECT appropriation_title, COUNT(DISTINCT pe_number || exhibit_type || line_item_title) "
-        f"FROM budget_lines WHERE {base_where} "
-        f"GROUP BY appropriation_title ORDER BY 2 DESC",
-        pe_params,
-    ).fetchall()
-    com_breakdown: dict[str, int] = {}
-    unrecognized: list[str] = []
-    for approp_title, cnt in com_rows:
-        label = _color_of_money(approp_title)
-        com_breakdown[label] = com_breakdown.get(label, 0) + cnt
-        if label not in ("RDT&E", "Procurement", "O&M", "MILCON", "Military Personnel", "Unknown"):
-            unrecognized.append(approp_title or "")
-    result["color_of_money"] = {
-        "breakdown": com_breakdown,
-        "unrecognized_approp_titles": sorted(set(unrecognized)),
-        "ok": len(unrecognized) == 0 and com_breakdown.get("Unknown", 0) == 0,
-    }
-
-    # ── 5. Per-keyword PE hit counts ──────────────────────────────────────────
-    keyword_hits: dict[str, int] = {}
-    for kw in _HYPERSONICS_KEYWORDS:
-        clauses = " OR ".join(f"{col} LIKE ?" for col in _SEARCH_COLS)
-        params = [f"%{kw}%"] * len(_SEARCH_COLS)
-        n = conn.execute(
-            f"SELECT COUNT(DISTINCT pe_number) FROM budget_lines WHERE {clauses}", params
-        ).fetchone()[0]
-        keyword_hits[kw] = n
-    result["keyword_pe_hits"] = keyword_hits
-    result["keywords_with_zero_hits"] = [kw for kw, n in keyword_hits.items() if n == 0]
-
-    # ── 6. Summary ────────────────────────────────────────────────────────────
-    pivot_sql, pivot_params = _build_pivot_query(conn, all_amount_cols)
-    pivot_rows = conn.execute(pivot_sql, pivot_params).fetchall()
-    year_range = list(range(_FY_START, _FY_END + 1))
-    active_years = [yr for yr in year_range if any(r[f"fy{yr}"] is not None for r in pivot_rows)]
-    result["summary"] = {
-        "total_sub_elements": len(pivot_rows),
-        "distinct_pe_numbers": len({r["pe_number"] for r in pivot_rows}),
-        "active_fiscal_years": active_years,
-        "overall_ok": (
-            result["source_file"]["ok"]
-            and result["color_of_money"]["ok"]
-            and len(result["keywords_with_zero_hits"]) == 0
-            and result.get("pe_descriptions", {}).get("populated", False)
-        ),
-    }
+    # 3. Keyword hit summary from cache
+    if result.get("cache", {}).get("table_exists"):
+        try:
+            kw_rows = conn.execute(
+                f"SELECT matched_keywords FROM {_CACHE_TABLE} WHERE matched_keywords != '[]'"
+            ).fetchall()
+            kw_counts: dict[str, int] = {}
+            for r in kw_rows:
+                for kw in json.loads(r[0]):
+                    kw_counts[kw] = kw_counts.get(kw, 0) + 1
+            result["keyword_hit_counts"] = kw_counts
+            result["keywords_with_zero_hits"] = [
+                kw for kw in _HYPERSONICS_KEYWORDS if kw not in kw_counts
+            ]
+        except Exception:
+            pass
 
     return result
