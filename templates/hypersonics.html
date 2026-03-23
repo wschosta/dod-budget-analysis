@@ -162,6 +162,14 @@
 .pe-child-row.child-hidden { display: none; }
 
 /* ── Keyword tags (#4) ───────────────────────────────────── */
+.lineage-note {
+  display: inline-block;
+  font-size: 0.75rem;
+  color: var(--text-muted, #888);
+  font-style: italic;
+  margin-left: 0.5em;
+  opacity: 0.85;
+}
 .kw-tags { display: inline-flex; flex-wrap: wrap; gap: 2px; margin-top: 2px; }
 .kw-tag {
   border-radius: 3px;
@@ -395,6 +403,9 @@
           <td class="col-exh">{{ row.exhibit_type or '' }}</td>
           <td class="col-title">
             {{ row.line_item_title or '' }}
+            {% if row.lineage_note %}
+            <span class="lineage-note" title="{{ row.lineage_note }}">↔ {{ row.lineage_note }}</span>
+            {% endif %}
             {% if row.matched_keywords_row or row.matched_keywords_desc %}
             <div class="kw-tags">
               {% for kw in row.matched_keywords_row %}

@@ -173,6 +173,7 @@ CREATE TABLE IF NOT EXISTS {_CACHE_TABLE} (
     matched_keywords_row    TEXT,
     matched_keywords_desc   TEXT,
     description_text        TEXT,
+    lineage_note            TEXT,
     fy2015 REAL, fy2015_ref TEXT,
     fy2016 REAL, fy2016_ref TEXT,
     fy2017 REAL, fy2017_ref TEXT,
@@ -191,7 +192,23 @@ CREATE TABLE IF NOT EXISTS {_CACHE_TABLE} (
 
 def _collect_matching_pe_numbers(conn: sqlite3.Connection) -> set[str]:
     """Return the set of PE numbers that match any hypersonics keyword."""
-    matched: set[str] = set()
+    core, _ = _collect_matching_pe_numbers_split(conn)
+    return core[0] | core[1] if len(core) == 2 else core[0]
+
+
+def _collect_matching_pe_numbers_split(
+    conn: sqlite3.Connection,
+) -> tuple[tuple[set[str], set[str]], set[str]]:
+    """Return (budget_lines_matched, desc_matched) PE number sets.
+
+    budget_lines_matched: PEs found via keyword search in budget_lines columns.
+    desc_matched: additional PEs found via narrative keyword search in pe_descriptions.
+
+    The union of both is the full matched set for the cache, but only
+    budget_lines_matched PEs should be mined for PDF sub-elements (the
+    desc-matched set is too broad and would pull in thousands of unrelated PEs).
+    """
+    bl_matched: set[str] = set()
 
     # (a) Budget-lines keyword match
     kw_clauses: list[str] = []
@@ -204,9 +221,10 @@ def _collect_matching_pe_numbers(conn: sqlite3.Connection) -> set[str]:
     rows = conn.execute(
         f"SELECT DISTINCT pe_number FROM budget_lines WHERE {kw_where}", kw_params
     ).fetchall()
-    matched.update(r[0] for r in rows if r[0])
+    bl_matched.update(r[0] for r in rows if r[0])
 
     # (b) pe_descriptions narrative match
+    desc_matched: set[str] = set()
     try:
         conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
         desc_clauses = ["description_text LIKE ?" for _ in _DESC_KEYWORDS]
@@ -216,11 +234,14 @@ def _collect_matching_pe_numbers(conn: sqlite3.Connection) -> set[str]:
             f" WHERE {' OR '.join(desc_clauses)}",
             desc_params,
         ).fetchall()
-        matched.update(r[0] for r in rows if r[0])
+        desc_matched.update(r[0] for r in rows if r[0])
     except sqlite3.OperationalError:
         pass
 
-    return matched
+    # Remove overlap so desc_matched only contains extras
+    desc_matched -= bl_matched
+
+    return (bl_matched, desc_matched), bl_matched | desc_matched
 
 
 def _get_description_map(conn: sqlite3.Connection, pe_numbers: set[str]) -> dict[str, str]:
@@ -246,6 +267,466 @@ def _get_description_map(conn: sqlite3.Connection, pe_numbers: set[str]) -> dict
         if text.strip():
             result[pe] = text
     return result
+
+
+def _parse_r2_cost_block(page_text: str, source_file: str, fiscal_year: str
+                         ) -> list[dict[str, Any]]:
+    """Parse R-2/R-2A COST block from a PDF page to extract project-level funding.
+
+    Returns a list of dicts with keys:
+        pe_number, project_code, project_title, source_file, fiscal_year,
+        fy_amounts: {fyXXXX: amount_in_thousands}
+    """
+    import re
+
+    lines = page_text.split("\n")
+    results: list[dict[str, Any]] = []
+
+    # 1. Extract PE number from header line: "PE 0604182A / Hypersonics"
+    pe_number = None
+    pe_title = None
+    for line in lines[:10]:
+        m = re.search(r"PE\s+(\d{7}[A-Z])\s*/\s*(.+?)(?:\s+\d|$)", line)
+        if m:
+            pe_number = m.group(1)
+            pe_title = m.group(2).strip()
+            break
+    if not pe_number:
+        return []
+
+    # 2. Find the COST block and parse FY column headers
+    cost_idx = None
+    for i, line in enumerate(lines):
+        if "COST" in line and "Millions" in line:
+            cost_idx = i
+            break
+    if cost_idx is None:
+        return []
+
+    # The FY header line is typically right after COST line
+    # Format: "Years  FY 2024  FY 2025  Base  OOC  Total  FY 2027  ..."
+    fy_header_line = lines[cost_idx + 1] if cost_idx + 1 < len(lines) else ""
+
+    # Detect the budget-year split columns: "Base", "OOC/OCO", "Total"
+    # These represent the budget-year (typically fiscal_year) broken into components
+    # We want the "Total" for the budget year
+    # fiscal_year may be "FY 2026" or "2026"
+    _fy_m = re.search(r"(\d{4})", fiscal_year or "")
+    budget_year = int(_fy_m.group(1)) if _fy_m else None
+
+    # Build ordered list of what each numeric column represents.
+    # Header format (single-spaced from PDF extraction):
+    #   "Years FY 2024 FY 2025 Base OOC Total FY 2027 FY 2028 ... Complete Cost"
+    # The column order corresponds to numbers in the data rows:
+    #   prior_years, fy_n-2, fy_n-1, base, ooc, total, fy_n+1, ...
+    # We parse keyword positions left-to-right to build the column map.
+    col_fy_map: list[int | None] = []
+
+    # Use regex to find all column keywords in order
+    col_tokens = re.finditer(
+        r"(?:FY\s+\d{4}|Years|Base|OOC|OCO|Total|Complete|Cost)\b",
+        fy_header_line, re.IGNORECASE,
+    )
+    for m in col_tokens:
+        tok = m.group().strip()
+        fy_m = re.match(r"FY\s+(\d{4})", tok, re.IGNORECASE)
+        tok_upper = tok.upper()
+        if tok_upper == "YEARS":
+            continue  # "Prior Years" — skip, prior_years is the first number
+        elif fy_m:
+            col_fy_map.append(int(fy_m.group(1)))
+        elif tok_upper == "BASE":
+            col_fy_map.append(None)
+        elif tok_upper in ("OOC", "OCO"):
+            col_fy_map.append(None)
+        elif tok_upper == "TOTAL":
+            if budget_year:
+                col_fy_map.append(budget_year)
+            else:
+                col_fy_map.append(None)
+        elif tok_upper in ("COMPLETE", "COST"):
+            col_fy_map.append(None)
+
+    if not col_fy_map:
+        return []
+
+    # 3. Parse project rows after the header
+    # Project rows contain: "<code>: <title> <numbers...>" or "Total Program Element <numbers...>"
+    # Numbers are like: 228.962, 1,076.050, -, 0.000
+    num_pattern = re.compile(r"[\d,]+\.\d{3}|(?<!\w)-(?!\w)|0\.000")
+
+    for i in range(cost_idx + 2, min(cost_idx + 15, len(lines))):
+        line = lines[i].strip()
+        if not line:
+            continue
+        # Stop at section boundaries
+        if any(line.startswith(s) for s in (
+            "Quantity of RDT&E",
+            "A. Mission",
+            "B. Accomplishments",
+            "Note",
+            "Program MDAP",
+        )):
+            break
+
+        # Skip "Total Program Element" row — we want sub-project rows
+        if "Total Program Element" in line:
+            continue
+
+        # Detect continuation lines (title wraps to next line, no numbers)
+        nums_in_line = num_pattern.findall(line)
+        if not nums_in_line:
+            # Continuation of previous project title
+            if results:
+                results[-1]["project_title"] += " " + line.strip()
+            continue
+
+        # Extract project code and title before the numbers start
+        first_num_pos = re.search(r"\s[\d,]+\.\d{3}|\s-\s|\s-$", line)
+        if first_num_pos:
+            prefix = line[:first_num_pos.start()].strip()
+        else:
+            prefix = line.strip()
+
+        # Parse project code: "HX2: Hypersonic Weapon" or "644183: HACM"
+        code_m = re.match(r"^([A-Z0-9]+):\s*(.+)", prefix)
+        if code_m:
+            project_code = code_m.group(1)
+            project_title = code_m.group(2).strip()
+        else:
+            project_code = None
+            project_title = prefix
+
+        # Parse the numeric values — prior_years first, then FY columns
+        all_nums = num_pattern.findall(line)
+        # First number is "Prior Years" — skip it
+        fy_nums = all_nums[1:] if len(all_nums) > len(col_fy_map) else all_nums
+
+        fy_amounts: dict[str, float] = {}
+        for j, val_str in enumerate(fy_nums):
+            if j >= len(col_fy_map):
+                break
+            fy_year = col_fy_map[j]
+            if fy_year is None:
+                continue
+            if val_str == "-":
+                continue
+            try:
+                amount_millions = float(val_str.replace(",", ""))
+                # Convert millions to thousands (budget_lines uses thousands)
+                fy_amounts[f"fy{fy_year}"] = amount_millions * 1000.0
+            except ValueError:
+                continue
+
+        if fy_amounts:
+            results.append({
+                "pe_number": pe_number,
+                "pe_title": pe_title,
+                "project_code": project_code,
+                "project_title": project_title,
+                "source_file": source_file,
+                "fiscal_year": fiscal_year,
+                "fy_amounts": fy_amounts,
+                "description_text": "",  # filled below
+            })
+
+    # 4. Extract description text from Section A (Mission Description) and
+    #    Section B project-level Title/Description blocks.
+    desc_parts: list[str] = []
+    in_section_a = False
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("A. Mission Description"):
+            in_section_a = True
+            continue
+        if in_section_a:
+            # Stop at section B or C header
+            if re.match(r"^[B-Z]\.\s", stripped):
+                break
+            if stripped:
+                desc_parts.append(stripped)
+    section_a_text = " ".join(desc_parts).strip()
+
+    # Also extract Section B project Title/Description pairs
+    project_descs: dict[str, str] = {}  # project_title_prefix -> description
+    current_title = None
+    current_desc_parts: list[str] = []
+    in_section_b = False
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("B. Accomplishments") or stripped.startswith("C. Accomplishments"):
+            in_section_b = True
+            continue
+        if not in_section_b:
+            continue
+        # Stop at next major section
+        if re.match(r"^[C-Z]\.\s(?!Accomplishments)", stripped):
+            break
+        if stripped.startswith("Title:"):
+            # Save previous
+            if current_title and current_desc_parts:
+                project_descs[current_title] = " ".join(current_desc_parts).strip()
+            title_text = stripped[len("Title:"):].strip()
+            # Strip trailing FY amounts from title line
+            title_text = re.sub(r"\s+[\d,.]+\s*$", "", title_text).strip()
+            current_title = title_text
+            current_desc_parts = []
+        elif stripped.startswith("Description:") and current_title:
+            current_desc_parts.append(stripped[len("Description:"):].strip())
+        elif current_title and current_desc_parts and not stripped.startswith("FY "):
+            # Continuation of description text
+            if not re.match(r"^(Accomplishments|Congressional|Title:)", stripped):
+                current_desc_parts.append(stripped)
+    # Save last
+    if current_title and current_desc_parts:
+        project_descs[current_title] = " ".join(current_desc_parts).strip()
+
+    # Attach description text to results
+    for item in results:
+        parts = []
+        if section_a_text:
+            parts.append(section_a_text)
+        # Try to match project-level description by title prefix
+        proj_title = item["project_title"]
+        for desc_title, desc_text in project_descs.items():
+            # Fuzzy match: check if the project title starts with or contains the desc title
+            if (proj_title.lower().startswith(desc_title[:20].lower())
+                    or desc_title.lower().startswith(proj_title[:20].lower())):
+                parts.append(f"[{desc_title}] {desc_text}")
+                break
+        item["description_text"] = "\n\n".join(parts) if parts else ""
+
+    return results
+
+
+def _mine_pdf_subelements(
+    conn: sqlite3.Connection,
+    pe_numbers: set[str],
+    core_pes: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Mine R-2/R-2A sub-element data from pdf_pages for the given PE numbers.
+
+    Scans pdf_pages for R-2/R-2A exhibit first-pages that contain COST tables,
+    extracts project-level funding breakdowns, and returns rows suitable for
+    insertion into the hypersonics cache.
+
+    For *core* PEs (direct keyword matches in line item title), all sub-elements
+    are kept. For *desc-only* PEs (keyword only in PE description), sub-elements
+    are filtered: only those whose project title or description text matches a
+    hypersonics keyword are retained.
+
+    Only processes FY >= _FY_START to match the cache's fiscal year range.
+    """
+    if not pe_numbers:
+        return []
+
+    try:
+        conn.execute("SELECT 1 FROM pdf_pages LIMIT 0")
+    except sqlite3.OperationalError:
+        return []
+
+    if core_pes is None:
+        core_pes = pe_numbers
+
+    # For large PE sets, scan all R-2/R-2A exhibit pages and filter by PE in
+    # Python rather than building hundreds of LIKE clauses.
+    fy_min_str = f"FY {_FY_START}"
+
+    rows = conn.execute(
+        """
+        SELECT source_file, page_number, page_text, fiscal_year
+        FROM pdf_pages
+        WHERE (page_text LIKE '%Exhibit R-2,%' OR page_text LIKE '%Exhibit R-2A%')
+          AND page_text LIKE '%COST%Millions%'
+          AND source_file LIKE '%detail%'
+          AND fiscal_year >= ?
+        ORDER BY fiscal_year DESC, source_file, page_number
+        """,
+        [fy_min_str],
+    ).fetchall()
+
+    logger.info("PDF sub-element mining: scanning %d R-2/R-2A pages for %d PEs",
+                len(rows), len(pe_numbers))
+
+    # Parse all pages and collect raw sub-element rows.
+    # Only keep rows where the parsed PE from the exhibit header is in our set.
+    # Deduplicate within each budget submission: (pe, project_code, doc_fy).
+    seen: set[tuple[str, str | None, str]] = set()
+    raw_items: list[dict[str, Any]] = []
+
+    for r in rows:
+        source_file, page_number, page_text, fiscal_year = r
+        parsed = _parse_r2_cost_block(page_text, source_file, fiscal_year)
+        for item in parsed:
+            if item["pe_number"] not in pe_numbers:
+                continue
+            key = (item["pe_number"], item.get("project_code"), fiscal_year)
+            if key in seen:
+                continue
+            seen.add(key)
+            raw_items.append(item)
+
+    logger.info("PDF sub-element mining: %d raw rows before consolidation", len(raw_items))
+
+    # Consolidate into one golden-timeseries row per (pe_number, project_code).
+    consolidated = _consolidate_r2_timeseries(raw_items)
+    logger.info("PDF sub-element mining: %d consolidated rows before keyword filter",
+                len(consolidated))
+
+    # For desc-only PEs, filter: keep only sub-elements whose project title or
+    # description text matches at least one hypersonics keyword.
+    desc_only_pes = pe_numbers - core_pes
+    if desc_only_pes:
+        filtered: list[dict[str, Any]] = []
+        for item in consolidated:
+            if item["pe_number"] in core_pes:
+                # Core PE — keep all sub-elements
+                filtered.append(item)
+            else:
+                # Desc-only PE — check if project title or description has keywords
+                text_fields = [
+                    item.get("project_title", ""),
+                    item.get("description_text", ""),
+                    item.get("pe_title", ""),
+                ]
+                matched = _find_matched_keywords(text_fields)
+                if matched:
+                    item["_matched_r2_keywords"] = matched
+                    filtered.append(item)
+        logger.info(
+            "PDF sub-element mining: %d→%d after keyword filter "
+            "(%d desc-only PEs checked)",
+            len(consolidated), len(filtered), len(desc_only_pes),
+        )
+        consolidated = filtered
+
+    logger.info("PDF sub-element mining: %d final project rows", len(consolidated))
+    return consolidated
+
+
+def _consolidate_r2_timeseries(
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Collapse multiple budget-submission rows into one golden row per project.
+
+    For each (pe_number, project_code), build a single timeseries by picking
+    each FY cell from the most recent budget submission that reports it.
+    Also tracks the source_file per FY cell for citation links.
+    """
+    import re
+
+    # Group by (pe_number, project_code)
+    groups: dict[tuple[str, str | None], list[dict[str, Any]]] = {}
+    for item in items:
+        key = (item["pe_number"], item.get("project_code"))
+        groups.setdefault(key, []).append(item)
+
+    results: list[dict[str, Any]] = []
+    for (pe, proj_code), group in groups.items():
+        # Sort by budget submission year descending (most recent first)
+        def _doc_fy(item: dict[str, Any]) -> int:
+            m = re.search(r"(\d{4})", item.get("fiscal_year", ""))
+            return int(m.group(1)) if m else 0
+
+        group.sort(key=_doc_fy, reverse=True)
+
+        # Build golden timeseries: for each FY, take the first non-null value
+        golden_amounts: dict[str, float] = {}
+        golden_refs: dict[str, str] = {}  # fy key -> source_file
+        for item in group:
+            for fy_key, amount in item["fy_amounts"].items():
+                if fy_key not in golden_amounts:
+                    golden_amounts[fy_key] = amount
+                    golden_refs[fy_key] = item["source_file"]
+
+        # Use metadata from the most recent submission
+        latest = group[0]
+        # Use the longest/most recent description available
+        best_desc = ""
+        for item in group:
+            desc = item.get("description_text", "")
+            if len(desc) > len(best_desc):
+                best_desc = desc
+        results.append({
+            "pe_number": pe,
+            "pe_title": latest.get("pe_title"),
+            "project_code": proj_code,
+            "project_title": latest["project_title"],
+            "source_file": latest["source_file"],
+            "fiscal_year": latest["fiscal_year"],
+            "fy_amounts": golden_amounts,
+            "fy_refs": golden_refs,
+            "description_text": best_desc,
+        })
+
+    return results
+
+
+def _normalize_program_name(title: str) -> str:
+    """Extract a canonical short name for cross-PE matching.
+
+    Strips project codes, parenthetical abbreviations, and common suffixes
+    to produce a fuzzy-matchable program identity.
+    E.g. "643883: Hypersonic Attack Cruise Missile" → "hypersonic attack cruise missile"
+         "644183: Hypersonic Attack Cruise Missile (HACM)" → "hypersonic attack cruise missile"
+    """
+    import re
+    # Strip leading project code
+    s = re.sub(r"^[A-Z0-9]+:\s*", "", title)
+    # Strip parenthetical abbreviations
+    s = re.sub(r"\s*\([^)]*\)\s*", " ", s)
+    # Normalize whitespace and lowercase
+    return " ".join(s.lower().split())
+
+
+def _annotate_cross_pe_lineages(conn: sqlite3.Connection) -> None:
+    """Detect R-2 projects that migrated across PEs and annotate with lineage_note.
+
+    Finds projects with matching normalized names under different PE numbers,
+    then writes a human-readable note like:
+        "→ Moved to PE 0604183F" or "← From PE 0604033F"
+    """
+    rows = conn.execute(f"""
+        SELECT id, pe_number, line_item_title
+        FROM {_CACHE_TABLE}
+        WHERE exhibit_type = 'r2'
+    """).fetchall()
+
+    if not rows:
+        return
+
+    # Build normalized name → list of (id, pe_number, title)
+    from collections import defaultdict
+    name_groups: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
+    for row_id, pe, title in rows:
+        norm = _normalize_program_name(title)
+        if norm:
+            name_groups[norm].append((row_id, pe, title))
+
+    updates: list[tuple[str, int]] = []
+    for norm_name, members in name_groups.items():
+        # Only interesting if same name appears under multiple PEs
+        pe_set = {pe for _, pe, _ in members}
+        if len(pe_set) < 2:
+            continue
+
+        # Sort by PE number to get a consistent ordering
+        sorted_members = sorted(members, key=lambda x: x[1])
+
+        # For each member, annotate with links to the other PEs
+        for row_id, pe, title in sorted_members:
+            other_pes = sorted(p for p in pe_set if p != pe)
+            if not other_pes:
+                continue
+            note = "Also in PE " + ", ".join(other_pes)
+            updates.append((note, row_id))
+
+    if updates:
+        conn.executemany(
+            f"UPDATE {_CACHE_TABLE} SET lineage_note = ? WHERE id = ?",
+            updates,
+        )
+        logger.info("Cross-PE lineage: annotated %d R-2 rows", len(updates))
 
 
 def _get_desc_keyword_map(conn: sqlite3.Connection, pe_numbers: set[str]) -> dict[str, list[str]]:
@@ -286,7 +767,7 @@ def rebuild_hypersonics_cache(conn: sqlite3.Connection) -> int:
     logger.info("Rebuilding hypersonics cache table...")
 
     # 1. Collect matching PE numbers
-    matched_pes = _collect_matching_pe_numbers(conn)
+    (bl_pes, _desc_pes), matched_pes = _collect_matching_pe_numbers_split(conn)
     if not matched_pes:
         conn.execute(f"DROP TABLE IF EXISTS {_CACHE_TABLE}")
         conn.execute(_CACHE_DDL)
@@ -399,13 +880,78 @@ def rebuild_hypersonics_cache(conn: sqlite3.Connection) -> int:
         conn.execute(insert_sql, vals)
         count += 1
 
+    # 6b. Insert PDF-mined R-2/R-2A sub-elements (only for core budget_lines PEs)
+    pdf_subelements = _mine_pdf_subelements(conn, matched_pes, core_pes=bl_pes)
+    pdf_count = 0
+    for item in pdf_subelements:
+        pe = item["pe_number"]
+        title = item["project_title"]
+        if item.get("project_code"):
+            title = f"{item['project_code']}: {title}"
+
+        # Row-level keyword matching on project title + R-2 description
+        row_kws = item.get("_matched_r2_keywords") or _find_matched_keywords([title])
+        desc_kws = desc_kw_map.get(pe, [])
+
+        # Use R-2 description if available, fall back to PE-level description
+        r2_desc = item.get("description_text", "")
+        description = r2_desc if r2_desc else (desc_map.get(pe) or None)
+
+        vals = [
+            pe,
+            None,  # organization_name — not in PDF text, filled below
+            "r2",  # exhibit_type
+            title,
+            None,  # budget_activity
+            None,  # budget_activity_title
+            None,  # budget_activity_norm
+            None,  # appropriation_title
+            item.get("pe_title"),  # account_title — use PE title
+            "RDT&E",  # color_of_money — R-2 is always RDT&E
+            json.dumps(row_kws) if row_kws else "[]",
+            json.dumps(desc_kws) if desc_kws else "[]",
+            description,
+        ]
+        fy_refs = item.get("fy_refs", {})
+        for yr in year_range:
+            fy_key = f"fy{yr}"
+            vals.append(item["fy_amounts"].get(fy_key))
+            vals.append(fy_refs.get(fy_key) if item["fy_amounts"].get(fy_key) is not None else None)
+
+        conn.execute(insert_sql, vals)
+        pdf_count += 1
+
+    if pdf_count:
+        # Back-fill organization_name from R-1 rows where available
+        conn.execute(f"""
+            UPDATE {_CACHE_TABLE} AS c
+            SET organization_name = (
+                SELECT r1.organization_name
+                FROM {_CACHE_TABLE} r1
+                WHERE r1.pe_number = c.pe_number
+                  AND r1.exhibit_type = 'r1'
+                  AND r1.organization_name IS NOT NULL
+                LIMIT 1
+            )
+            WHERE c.exhibit_type = 'r2' AND c.organization_name IS NULL
+        """)
+
+    count += pdf_count
+    logger.info("Hypersonics cache: %d R-2 sub-element rows from PDFs", pdf_count)
+
+    # 6c. Detect and annotate cross-PE program lineages among R-2 rows.
+    # Match projects that share the same short program name across different PEs.
+    if pdf_count:
+        _annotate_cross_pe_lineages(conn)
+
     # 7. Create indexes for fast filtering
     conn.execute(f"CREATE INDEX IF NOT EXISTS idx_hc_pe ON {_CACHE_TABLE}(pe_number)")
     conn.execute(f"CREATE INDEX IF NOT EXISTS idx_hc_org ON {_CACHE_TABLE}(organization_name)")
     conn.execute(f"CREATE INDEX IF NOT EXISTS idx_hc_exhibit ON {_CACHE_TABLE}(exhibit_type)")
 
     conn.commit()
-    logger.info("Hypersonics cache rebuilt: %d rows", count)
+    logger.info("Hypersonics cache rebuilt: %d rows (%d from budget_lines, %d from PDFs)",
+                count, count - pdf_count, pdf_count)
     return count
 
 
