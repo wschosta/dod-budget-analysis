@@ -1462,6 +1462,25 @@ async def hypersonics_page(
         pe = row["pe_number"]
         pe_groups.setdefault(pe, []).append(row)
 
+    # Compute PE-level metadata for parent rows:
+    # - pe_title: most recent R-1 line_item_title (or first R-2 title as fallback)
+    # - pe_title_count: number of distinct R-1 titles (for "also known as" display)
+    # - child_count: number of child rows in the PE group
+    pe_meta: dict[str, dict] = {}
+    for pe, children in pe_groups.items():
+        r1_titles = []
+        for c in children:
+            if c.get("exhibit_type") == "r1" and c.get("line_item_title"):
+                r1_titles.append(c["line_item_title"])
+        # Use last R-1 title (most recent) or first child title as fallback
+        title = r1_titles[-1] if r1_titles else (children[0].get("line_item_title") or pe)
+        distinct_titles = len(set(r1_titles))
+        pe_meta[pe] = {
+            "pe_title": title,
+            "pe_title_count": distinct_titles,
+            "child_count": len(children),
+        }
+
     # Compute per-keyword match counts across all rows
     keyword_counts: dict[str, int] = {kw: 0 for kw in _HYPERSONICS_KEYWORDS}
     for row in rows:
@@ -1483,6 +1502,8 @@ async def hypersonics_page(
         row.pop("description_text", None)
         slim = {k: v for k, v in row.items()
                 if k in js_fields or (k.startswith(fy_prefix) and not k.endswith("_ref"))}
+        # Add child count for sorting by sub-element count
+        slim["_childCount"] = pe_meta.get(row["pe_number"], {}).get("child_count", 0)
         slim_rows.append(slim)
 
     return _tmpl().TemplateResponse("hypersonics.html", {
@@ -1490,6 +1511,7 @@ async def hypersonics_page(
         "rows": rows,
         "slim_rows": slim_rows,
         "pe_groups": pe_groups,
+        "pe_meta": pe_meta,
         "active_years": active_years,
         "year_range": year_range,
         "keywords": _HYPERSONICS_KEYWORDS,

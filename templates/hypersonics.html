@@ -151,6 +151,7 @@
 .col-svc   { min-width: 85px; }
 .col-exh   { min-width: 60px; }
 .col-title { min-width: 250px; white-space: normal; max-width: 360px; }
+.col-cnt   { min-width: 30px; text-align: center; font-size: 0.8em; color: var(--color-text-muted); }
 .col-ba    { min-width: 130px; white-space: normal; max-width: 200px; }
 .col-com   { min-width: 90px; }
 
@@ -344,6 +345,7 @@
           <th class="col-svc" data-sort="organization_name">Service <span class="sort-arrow">&#9650;</span></th>
           <th class="col-exh" data-sort="exhibit_type">Exhibit <span class="sort-arrow">&#9650;</span></th>
           <th class="col-title" data-sort="line_item_title">Line Item / Sub-Program <span class="sort-arrow">&#9650;</span></th>
+          <th class="col-cnt" data-sort="_childCount"># <span class="sort-arrow">&#9650;</span></th>
           <th class="col-ba" data-sort="budget_activity_norm">Budget Activity <span class="sort-arrow">&#9650;</span></th>
           <th class="col-com" data-sort="color_of_money">Color of Money <span class="sort-arrow">&#9650;</span></th>
           {% for yr in active_years %}
@@ -367,12 +369,18 @@
           </td>
           <td class="col-svc">{{ children[0].organization_name or '' }}</td>
           <td class="col-exh">{{ children[0].exhibit_type or '' }}</td>
-          <td class="col-title" style="font-style:italic;color:var(--color-text-muted);">
-            {{ children|length }} sub-element{{ 's' if children|length != 1 else '' }}
+          <td class="col-title">
+            {% set meta = pe_meta.get(pe, {}) %}
+            {{ meta.get('pe_title', pe) }}
+            {% if meta.get('pe_title_count', 0) > 1 %}
+            <span style="font-size:0.75em;color:var(--color-text-muted);">(+{{ meta.pe_title_count - 1 }} title{{ 's' if meta.pe_title_count > 2 else '' }})</span>
+            {% endif %}
+            <span style="font-size:0.75em;color:var(--color-text-muted);margin-left:0.5em;">{{ children|length }} sub-elem.</span>
             {% if children[0].has_description %}
             <span class="desc-toggle" onclick="toggleDesc(event, 'desc-pe-{{ pe }}')" title="Show PE description">[desc]</span>
             {% endif %}
           </td>
+          <td class="col-cnt">{{ children|length }}</td>
           <td class="col-ba">&nbsp;</td>
           <td class="col-com">&nbsp;</td>
           {% for yr in active_years %}
@@ -383,7 +391,7 @@
         {# Description row (lazy-loaded via AJAX) #}
         {% if children[0].has_description %}
         <tr class="desc-row" id="desc-pe-{{ pe }}" data-desc-pe="{{ pe }}">
-          <td colspan="{{ 8 + active_years|length }}">
+          <td colspan="{{ 9 + active_years|length }}">
             <em>Loading description...</em>
           </td>
         </tr>
@@ -426,6 +434,7 @@
             </div>
             {% endif %}
           </td>
+          <td class="col-cnt">&nbsp;</td>
           <td class="col-ba">{{ row.budget_activity_norm or '' }}</td>
           <td class="col-com">{{ row.color_of_money or '' }}</td>
           {% for yr in active_years %}
@@ -447,7 +456,7 @@
         </tr>
         {% if row.has_description and row.exhibit_type == 'r2' %}
         <tr class="desc-row" id="desc-{{ pe }}-{{ loop.index0 }}" data-desc-pe="{{ pe }}" data-desc-project="{{ row.line_item_title or '' }}">
-          <td colspan="{{ 8 + active_years|length }}">
+          <td colspan="{{ 9 + active_years|length }}">
             <em>Loading description...</em>
           </td>
         </tr>
@@ -685,9 +694,13 @@ function togglePE(pe) {
     }
   });
 
-  // Also hide description if collapsing
-  if (isCollapsed && descRow) {
-    descRow.classList.remove('desc-visible');
+  if (isCollapsed) {
+    // Hide PE-level description
+    if (descRow) descRow.classList.remove('desc-visible');
+    // Hide all R-2 per-row description rows for this PE
+    document.querySelectorAll(`tr.desc-row[id^="desc-${pe}-"]`).forEach(r => {
+      r.classList.remove('desc-visible');
+    });
   }
 }
 
@@ -706,6 +719,10 @@ function toggleAllGroups(expand) {
       });
       const descRow = document.getElementById('desc-pe-' + pe);
       if (descRow) descRow.classList.remove('desc-visible');
+      // Hide R-2 per-row descriptions
+      document.querySelectorAll(`tr.desc-row[id^="desc-${pe}-"]`).forEach(r => {
+        r.classList.remove('desc-visible');
+      });
     }
   });
 }
@@ -1103,17 +1120,30 @@ function downloadFilteredCSV() {
     }
   });
 
-  // 2. Sync parent checkboxes: checked if any child is shown
+  // 2. Sync parent checkboxes: checked if any child has TOTAL checked.
+  //    If no child has TOTAL, default SHOW off for entire PE (dimmed at bottom).
   document.querySelectorAll('tr.pe-parent-row').forEach(row => {
     const pe = row.dataset.pe;
     const children = document.querySelectorAll(`tr.pe-child-row[data-pe="${pe}"]`);
-    const anyShown = [...children].some(r => {
-      const cb = r.querySelector('.cb-child-table');
+    const anyTotal = [...children].some(r => {
+      const cb = r.querySelector('.cb-total');
       return cb && cb.checked;
     });
     const parentCb = row.querySelector('.cb-parent-table');
-    if (parentCb) parentCb.checked = anyShown;
-    if (!anyShown) row.classList.add('show-unchecked');
+    if (anyTotal) {
+      if (parentCb) parentCb.checked = true;
+    } else {
+      // No totals in this PE — default SHOW off
+      if (parentCb) parentCb.checked = false;
+      row.classList.add('show-unchecked');
+      children.forEach(r => {
+        r.classList.add('show-unchecked');
+        const cs = r.querySelector('.cb-child-table');
+        if (cs) cs.checked = false;
+        const ct = r.querySelector('.cb-total');
+        if (ct) ct.disabled = true;
+      });
+    }
   });
 
   // 3. Batch reorder: collect all rows, sort checked-first within each PE, re-append once
@@ -1168,5 +1198,11 @@ function downloadFilteredCSV() {
   }
 })();
 recomputeTotals();
+
+// Default sort by service (ascending)
+(function defaultSort() {
+  const svcHeader = document.querySelector('th[data-sort="organization_name"]');
+  if (svcHeader) svcHeader.click();
+})();
 </script>
 {% endblock %}

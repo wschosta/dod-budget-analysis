@@ -990,6 +990,29 @@ def rebuild_hypersonics_cache(conn: sqlite3.Connection) -> int:
             WHERE c.exhibit_type = 'r2' AND c.organization_name IS NULL
         """)
 
+        # Fallback: infer organization from source_file path for remaining blanks.
+        # Check the most recent FY ref column for a service path fragment.
+        _ORG_FROM_PATH = [
+            ("US_Army", "Army"),
+            ("US_Air_Force", "Air Force"),
+            ("US_Navy", "Navy"),
+            ("Defense_Wide", "Defense-Wide"),
+            ("DARPA", "DARPA"),
+            ("SOCOM", "SOCOM"),
+        ]
+        latest_ref_col = f"fy{year_range[-1]}_ref"
+        fallback_ref_col = f"fy{year_range[-2]}_ref" if len(year_range) > 1 else latest_ref_col
+        for path_fragment, org_name in _ORG_FROM_PATH:
+            conn.execute(
+                f"""
+                UPDATE {_CACHE_TABLE}
+                SET organization_name = ?
+                WHERE (organization_name IS NULL OR organization_name = '')
+                  AND ({latest_ref_col} LIKE ? OR {fallback_ref_col} LIKE ?)
+                """,
+                [org_name, f"%{path_fragment}%", f"%{path_fragment}%"],
+            )
+
     count += pdf_count
     logger.info("Hypersonics cache: %d R-2 sub-element rows from PDFs", pdf_count)
 
@@ -1357,12 +1380,19 @@ def get_description(
                 [pe_number, project],
             ).fetchone()
         else:
+            # Prefer R-2 description (contains actual Mission Description from R-2A
+            # exhibit), fall back to R-1 only if no R-2 desc exists.
             row = conn.execute(
                 f"SELECT description_text FROM {_CACHE_TABLE} "
-                "WHERE pe_number = ? AND description_text IS NOT NULL "
-                "ORDER BY exhibit_type LIMIT 1",
+                "WHERE pe_number = ? AND exhibit_type = 'r2' AND description_text IS NOT NULL LIMIT 1",
                 [pe_number],
             ).fetchone()
+            if not row:
+                row = conn.execute(
+                    f"SELECT description_text FROM {_CACHE_TABLE} "
+                    "WHERE pe_number = ? AND description_text IS NOT NULL LIMIT 1",
+                    [pe_number],
+                ).fetchone()
         return {"description": row[0] if row else None}
     except sqlite3.OperationalError:
         return {"description": None}
