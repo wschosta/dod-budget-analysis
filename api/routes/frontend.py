@@ -1471,9 +1471,24 @@ async def hypersonics_page(
             if kw in keyword_counts:
                 keyword_counts[kw] += 1
 
+    # Strip heavy fields from template context.
+    # description_text: loaded via AJAX. Keep a boolean flag for [desc] toggle.
+    # Build a slim rows list for JS (only fields needed for totals/sorting).
+    js_fields = {"pe_number", "organization_name", "exhibit_type", "line_item_title",
+                 "budget_activity_norm", "color_of_money", "_childIdx"}
+    fy_prefix = "fy"
+    slim_rows: list[dict] = []
+    for row in rows:
+        row["has_description"] = bool(row.get("description_text"))
+        row.pop("description_text", None)
+        slim = {k: v for k, v in row.items()
+                if k in js_fields or (k.startswith(fy_prefix) and not k.endswith("_ref"))}
+        slim_rows.append(slim)
+
     return _tmpl().TemplateResponse("hypersonics.html", {
         "request": request,
         "rows": rows,
+        "slim_rows": slim_rows,
         "pe_groups": pe_groups,
         "active_years": active_years,
         "year_range": year_range,

@@ -1337,6 +1337,37 @@ def rebuild_cache(conn: sqlite3.Connection = Depends(get_db)) -> dict:
     return {"status": "ok", "rows": count}
 
 
+# ── GET /api/v1/hypersonics/desc ──────────────────────────────────────────────
+
+@router.get(
+    "/desc/{pe_number}",
+    summary="Get description text for a PE or R-2 project",
+)
+def get_description(
+    pe_number: str,
+    project: str | None = None,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> dict:
+    """Return description_text for a PE (R-1 level) or specific R-2 project row."""
+    try:
+        if project:
+            row = conn.execute(
+                f"SELECT description_text FROM {_CACHE_TABLE} "
+                "WHERE pe_number = ? AND line_item_title = ? AND description_text IS NOT NULL LIMIT 1",
+                [pe_number, project],
+            ).fetchone()
+        else:
+            row = conn.execute(
+                f"SELECT description_text FROM {_CACHE_TABLE} "
+                "WHERE pe_number = ? AND description_text IS NOT NULL "
+                "ORDER BY exhibit_type LIMIT 1",
+                [pe_number],
+            ).fetchone()
+        return {"description": row[0] if row else None}
+    except sqlite3.OperationalError:
+        return {"description": None}
+
+
 # ── GET /api/v1/hypersonics/debug ─────────────────────────────────────────────
 
 @router.get(

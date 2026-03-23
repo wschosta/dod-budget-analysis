@@ -141,6 +141,11 @@
 .hyp-table tr:hover td { background: var(--color-surface); }
 .hyp-table tr.row-hidden { display: none; }
 .hyp-table tr.kw-filtered { display: none; }
+.hyp-table tr.show-unchecked td { opacity: 0.35; }
+.hyp-table tr.show-unchecked td.col-cb-table,
+.hyp-table tr.show-unchecked td.col-cb-total { opacity: 1; }
+.hyp-table tr.pe-parent-row.show-unchecked td { opacity: 0.35; }
+.hyp-table tr.pe-parent-row.show-unchecked td.col-cb-table { opacity: 1; }
 
 .col-pe    { min-width: 108px; font-family: var(--font-mono, monospace); font-size: 0.72rem; }
 .col-svc   { min-width: 85px; }
@@ -351,7 +356,7 @@
         {% for pe, children in pe_groups.items() %}
 
         {# ── PE Parent row ─────────────────────────────────────── #}
-        <tr class="pe-parent-row" data-pe="{{ pe }}" data-idx="pe-{{ pe }}">
+        <tr class="pe-parent-row collapsed" data-pe="{{ pe }}" data-idx="pe-{{ pe }}">
           <td class="col-cb-table">
             <input type="checkbox" class="cb-table cb-parent-table" data-pe="{{ pe }}"
                    checked aria-label="Show PE group">
@@ -364,7 +369,7 @@
           <td class="col-exh">{{ children[0].exhibit_type or '' }}</td>
           <td class="col-title" style="font-style:italic;color:var(--color-text-muted);">
             {{ children|length }} sub-element{{ 's' if children|length != 1 else '' }}
-            {% if children[0].description_text %}
+            {% if children[0].has_description %}
             <span class="desc-toggle" onclick="toggleDesc(event, 'desc-pe-{{ pe }}')" title="Show PE description">[desc]</span>
             {% endif %}
           </td>
@@ -375,19 +380,18 @@
           {% endfor %}
         </tr>
 
-        {# Description row (hidden by default) #}
-        {% if children[0].description_text %}
-        <tr class="desc-row" id="desc-pe-{{ pe }}">
+        {# Description row (lazy-loaded via AJAX) #}
+        {% if children[0].has_description %}
+        <tr class="desc-row" id="desc-pe-{{ pe }}" data-desc-pe="{{ pe }}">
           <td colspan="{{ 8 + active_years|length }}">
-            <strong>PE {{ pe }} Description:</strong><br>
-            {{ children[0].description_text[:1500] }}{% if children[0].description_text|length > 1500 %}...{% endif %}
+            <em>Loading description...</em>
           </td>
         </tr>
         {% endif %}
 
         {# ── Child rows (sub-elements) ─────────────────────────── #}
         {% for row in children %}
-        <tr class="pe-child-row" data-pe="{{ pe }}" data-idx="{{ pe }}-{{ loop.index0 }}">
+        <tr class="pe-child-row child-hidden" data-pe="{{ pe }}" data-idx="{{ pe }}-{{ loop.index0 }}">
           <td class="col-cb-table">
             <input type="checkbox" class="cb-table cb-child-table" data-pe="{{ pe }}"
                    data-child-idx="{{ pe }}-{{ loop.index0 }}"
@@ -406,7 +410,7 @@
             {% if row.lineage_note %}
             <span class="lineage-note" title="{{ row.lineage_note }}">↔ {{ row.lineage_note }}</span>
             {% endif %}
-            {% if row.description_text and row.exhibit_type == 'r2' %}
+            {% if row.has_description and row.exhibit_type == 'r2' %}
             <span class="desc-toggle" onclick="toggleDesc(event, 'desc-{{ pe }}-{{ loop.index0 }}')" title="Show R-2 description">[desc]</span>
             {% endif %}
             {% if row.matched_keywords_row or row.matched_keywords_desc %}
@@ -441,11 +445,10 @@
             {% endif %}
           {% endfor %}
         </tr>
-        {% if row.description_text and row.exhibit_type == 'r2' %}
-        <tr class="desc-row" id="desc-{{ pe }}-{{ loop.index0 }}">
+        {% if row.has_description and row.exhibit_type == 'r2' %}
+        <tr class="desc-row" id="desc-{{ pe }}-{{ loop.index0 }}" data-desc-pe="{{ pe }}" data-desc-project="{{ row.line_item_title or '' }}">
           <td colspan="{{ 8 + active_years|length }}">
-            <strong>{{ row.line_item_title or 'R-2' }} Description:</strong><br>
-            {{ row.description_text[:2000] }}{% if row.description_text|length > 2000 %}...{% endif %}
+            <em>Loading description...</em>
           </td>
         </tr>
         {% endif %}
@@ -534,7 +537,7 @@
 
 <!-- ── Embedded row data for JS totals + sorting ───────────── -->
 <script>
-const HYPER_ROWS = {{ rows | tojson }};
+const HYPER_ROWS = {{ slim_rows | tojson }};
 const ACTIVE_YEARS = {{ active_years | tojson }};
 
 /* ── Keyword toggle state ─────────────────────────────────── */
@@ -554,7 +557,7 @@ function toggleKeyword(pill) {
 }
 
 function applyKeywordFilter() {
-  // For each PE group: show if any of its rows match an active keyword
+  // For each PE group: sync visibility and checkboxes based on active keywords
   const peGroups = {};
   document.querySelectorAll('tr.pe-child-row').forEach(tr => {
     const pe = tr.dataset.pe;
@@ -565,32 +568,61 @@ function applyKeywordFilter() {
   for (const [pe, childRows] of Object.entries(peGroups)) {
     const parentRow = document.querySelector(`tr.pe-parent-row[data-pe="${pe}"]`);
     const descRow = document.getElementById('desc-pe-' + pe);
+    const parentCb = parentRow ? parentRow.querySelector('.cb-parent-table') : null;
 
-    // Check if any child row has an active keyword
     let peHasActiveKw = false;
     for (const tr of childRows) {
       const tags = tr.querySelectorAll('.kw-tag');
+      const cbShow = tr.querySelector('.cb-child-table');
+      const cbTotal = tr.querySelector('.cb-total');
+
+      // Check if this row has ANY active keyword
       let rowHasActiveKw = false;
+      // Check if this row has an active DIRECT (kw-row) keyword
+      let rowHasActiveDirectKw = false;
       tags.forEach(tag => {
-        if (activeKeywords.has(tag.dataset.kw)) rowHasActiveKw = true;
+        const isActive = activeKeywords.has(tag.dataset.kw);
+        tag.style.display = isActive ? '' : 'none';
+        if (isActive) {
+          rowHasActiveKw = true;
+          if (tag.classList.contains('kw-row')) rowHasActiveDirectKw = true;
+        }
       });
-      // Show/hide individual keyword tags based on active state
-      tags.forEach(tag => {
-        tag.style.display = activeKeywords.has(tag.dataset.kw) ? '' : 'none';
-      });
+
       if (rowHasActiveKw) peHasActiveKw = true;
+
+      // Sync SHOW checkbox: on if row has any active keyword
+      if (cbShow) {
+        cbShow.checked = rowHasActiveKw;
+        if (rowHasActiveKw) {
+          tr.classList.remove('show-unchecked');
+        } else {
+          tr.classList.add('show-unchecked');
+        }
+      }
+
+      // Sync TOTAL checkbox: on if row has active direct keyword match
+      if (cbTotal) {
+        cbTotal.checked = rowHasActiveDirectKw;
+        cbTotal.disabled = !rowHasActiveKw;
+      }
     }
 
     // Show/hide entire PE group based on keyword filter
     if (peHasActiveKw) {
       if (parentRow) parentRow.classList.remove('kw-filtered');
+      if (parentCb) parentCb.checked = true;
       childRows.forEach(tr => tr.classList.remove('kw-filtered'));
       if (descRow) descRow.classList.remove('kw-filtered');
     } else {
       if (parentRow) parentRow.classList.add('kw-filtered');
+      if (parentCb) parentCb.checked = false;
       childRows.forEach(tr => tr.classList.add('kw-filtered'));
       if (descRow) descRow.classList.add('kw-filtered');
     }
+
+    // Reorder: checked children first, unchecked at bottom
+    reorderPEChildren(pe);
   }
   recomputeTotals();
 }
@@ -649,9 +681,7 @@ function togglePE(pe) {
     if (isCollapsed) {
       r.classList.add('child-hidden');
     } else {
-      // Only show if the child's cb-table is checked
-      const cb = r.querySelector('.cb-child-table');
-      if (cb && cb.checked) r.classList.remove('child-hidden');
+      r.classList.remove('child-hidden');
     }
   });
 
@@ -667,8 +697,7 @@ function toggleAllGroups(expand) {
     if (expand) {
       row.classList.remove('collapsed');
       document.querySelectorAll(`tr.pe-child-row[data-pe="${pe}"]`).forEach(r => {
-        const cb = r.querySelector('.cb-child-table');
-        if (cb && cb.checked) r.classList.remove('child-hidden');
+        r.classList.remove('child-hidden');
       });
     } else {
       row.classList.add('collapsed');
@@ -681,11 +710,36 @@ function toggleAllGroups(expand) {
   });
 }
 
-/* ── Description drawer toggle (#3) ───────────────────────── */
+/* ── Description drawer toggle (#3) — lazy-loads via AJAX ── */
 function toggleDesc(event, id) {
   event.stopPropagation();
   const row = document.getElementById(id);
-  if (row) row.classList.toggle('desc-visible');
+  if (!row) return;
+  row.classList.toggle('desc-visible');
+
+  // Lazy-load description text on first open
+  if (row.classList.contains('desc-visible') && !row.dataset.loaded) {
+    const pe = row.dataset.descPe;
+    const project = row.dataset.descProject || '';
+    const url = project
+      ? `/api/v1/hypersonics/desc/${pe}?project=${encodeURIComponent(project)}`
+      : `/api/v1/hypersonics/desc/${pe}`;
+    fetch(url)
+      .then(r => r.json())
+      .then(data => {
+        const td = row.querySelector('td');
+        if (data.description) {
+          const label = project || ('PE ' + pe);
+          td.innerHTML = `<strong>${label} Description:</strong><br>${data.description.substring(0, 2000)}${data.description.length > 2000 ? '...' : ''}`;
+        } else {
+          td.innerHTML = '<em>No description available.</em>';
+        }
+        row.dataset.loaded = '1';
+      })
+      .catch(() => {
+        row.querySelector('td').innerHTML = '<em>Failed to load description.</em>';
+      });
+  }
 }
 
 /* ── Main totals recompute ────────────────────────────────── */
@@ -747,9 +801,66 @@ function recomputeTotals() {
   renderGroupTbody('tbody-ba',  groupTotals(selected, r => r.budget_activity_norm || 'Unknown'));
 
   // Update visible count
-  const visCount = document.querySelectorAll('#hyp-table .pe-child-row:not(.child-hidden):not(.row-hidden):not(.kw-filtered)').length;
+  const visCount = document.querySelectorAll('#hyp-table .pe-child-row:not(.child-hidden):not(.row-hidden):not(.kw-filtered):not(.show-unchecked)').length;
   const vc = document.getElementById('visible-count');
   if (vc) vc.textContent = visCount + ' sub-element' + (visCount !== 1 ? 's' : '');
+}
+
+/* ── Reorder: move unchecked SHOW rows to bottom of their PE group ── */
+function reorderPEChildren(pe) {
+  const tbody = document.getElementById('hyp-tbody');
+  const parentRow = document.querySelector(`tr.pe-parent-row[data-pe="${pe}"]`);
+  if (!parentRow) return;
+
+  // Collect all child rows and desc rows for this PE
+  const children = [...document.querySelectorAll(`tr.pe-child-row[data-pe="${pe}"]`)];
+  const descRows = children.map(tr => {
+    const idx = tr.dataset.idx;
+    return document.getElementById('desc-' + idx);
+  });
+
+  // Partition: checked first, unchecked last
+  const checked = [];
+  const unchecked = [];
+  children.forEach((tr, i) => {
+    const cb = tr.querySelector('.cb-child-table');
+    const desc = descRows[i];
+    if (cb && cb.checked) {
+      checked.push({ tr, desc });
+    } else {
+      unchecked.push({ tr, desc });
+    }
+  });
+
+  // Find the insertion point (right after the parent row and its PE desc row)
+  let insertBefore = parentRow.nextElementSibling;
+  const peDescRow = document.getElementById('desc-pe-' + pe);
+  if (peDescRow && insertBefore === peDescRow) {
+    insertBefore = peDescRow.nextElementSibling;
+  }
+
+  // Skip past any existing children of this PE to find the next PE's start
+  let nextPEStart = null;
+  let node = parentRow.nextElementSibling;
+  while (node) {
+    if (node.classList && node.classList.contains('pe-parent-row') && node.dataset.pe !== pe) {
+      nextPEStart = node;
+      break;
+    }
+    node = node.nextElementSibling;
+  }
+
+  // Re-insert in order: checked children first, then unchecked
+  const ordered = [...checked, ...unchecked];
+  for (const { tr, desc } of ordered) {
+    if (nextPEStart) {
+      tbody.insertBefore(tr, nextPEStart);
+      if (desc) tbody.insertBefore(desc, nextPEStart);
+    } else {
+      tbody.appendChild(tr);
+      if (desc) tbody.appendChild(desc);
+    }
+  }
 }
 
 /* ── Checkbox event handling ──────────────────────────────── */
@@ -764,27 +875,27 @@ document.addEventListener('change', function(e) {
     const descRow = document.getElementById('desc-pe-' + pe);
 
     if (!cb.checked) {
-      parentRow.classList.add('row-hidden');
+      parentRow.classList.add('show-unchecked');
       children.forEach(r => {
-        r.classList.add('row-hidden');
+        r.classList.add('show-unchecked');
         const ct = r.querySelector('.cb-total');
         if (ct) { ct.checked = false; ct.disabled = true; }
         const cs = r.querySelector('.cb-child-table');
-        if (cs) { cs.checked = false; cs.disabled = true; }
+        if (cs) { cs.checked = false; }
       });
-      if (descRow) descRow.classList.add('row-hidden');
+      if (descRow) descRow.classList.add('show-unchecked');
     } else {
-      parentRow.classList.remove('row-hidden');
+      parentRow.classList.remove('show-unchecked');
       parentRow.classList.remove('collapsed');
       children.forEach(r => {
-        r.classList.remove('row-hidden');
+        r.classList.remove('show-unchecked');
         r.classList.remove('child-hidden');
         const ct = r.querySelector('.cb-total');
         if (ct) ct.disabled = false;
         const cs = r.querySelector('.cb-child-table');
-        if (cs) { cs.checked = true; cs.disabled = false; }
+        if (cs) cs.checked = true;
       });
-      if (descRow) descRow.classList.remove('row-hidden');
+      if (descRow) descRow.classList.remove('show-unchecked');
     }
     recomputeTotals();
     return;
@@ -793,14 +904,16 @@ document.addEventListener('change', function(e) {
   // Child "Show" checkbox
   if (cb.classList.contains('cb-child-table')) {
     const row = cb.closest('tr');
+    const pe = row.dataset.pe;
     const cbTotal = row.querySelector('.cb-total');
     if (!cb.checked) {
-      row.classList.add('child-hidden');
+      row.classList.add('show-unchecked');
       if (cbTotal) { cbTotal.checked = false; cbTotal.disabled = true; }
     } else {
-      row.classList.remove('child-hidden');
+      row.classList.remove('show-unchecked');
       if (cbTotal) cbTotal.disabled = false;
     }
+    reorderPEChildren(pe);
     recomputeTotals();
     return;
   }
@@ -821,11 +934,11 @@ function setAll(type, checked) {
       cb.dispatchEvent(new Event('change', { bubbles: true }));
     });
   } else {
-    // Total: only check if the row is visible
+    // Total: only check if the row's SHOW is checked
     document.querySelectorAll('.cb-total').forEach(cb => {
-      const row = cb.closest('tr');
-      if (checked && (row.classList.contains('child-hidden') || row.classList.contains('row-hidden'))) return;
       if (cb.disabled) return;
+      const row = cb.closest('tr');
+      if (checked && row.classList.contains('show-unchecked')) return;
       cb.checked = checked;
     });
     recomputeTotals();
@@ -963,7 +1076,97 @@ function downloadFilteredCSV() {
   });
 }
 
-/* ── Initial render ───────────────────────────────────────── */
+/* ── Initial render: pre-populate checkboxes from keywords ── */
+(function initCheckboxes() {
+  // 1. Set checkbox state based on keywords (no DOM reordering yet)
+  document.querySelectorAll('tr.pe-child-row').forEach(tr => {
+    const tags = tr.querySelectorAll('.kw-tag');
+    const cbShow = tr.querySelector('.cb-child-table');
+    const cbTotal = tr.querySelector('.cb-total');
+
+    let hasAnyKw = false;
+    let hasDirectKw = false;
+    tags.forEach(tag => {
+      if (activeKeywords.has(tag.dataset.kw)) {
+        hasAnyKw = true;
+        if (tag.classList.contains('kw-row')) hasDirectKw = true;
+      }
+    });
+
+    if (cbShow) {
+      cbShow.checked = hasAnyKw;
+      if (!hasAnyKw) tr.classList.add('show-unchecked');
+    }
+    if (cbTotal) {
+      cbTotal.checked = hasDirectKw;
+      cbTotal.disabled = !hasAnyKw;
+    }
+  });
+
+  // 2. Sync parent checkboxes: checked if any child is shown
+  document.querySelectorAll('tr.pe-parent-row').forEach(row => {
+    const pe = row.dataset.pe;
+    const children = document.querySelectorAll(`tr.pe-child-row[data-pe="${pe}"]`);
+    const anyShown = [...children].some(r => {
+      const cb = r.querySelector('.cb-child-table');
+      return cb && cb.checked;
+    });
+    const parentCb = row.querySelector('.cb-parent-table');
+    if (parentCb) parentCb.checked = anyShown;
+    if (!anyShown) row.classList.add('show-unchecked');
+  });
+
+  // 3. Batch reorder: collect all rows, sort checked-first within each PE, re-append once
+  const tbody = document.getElementById('hyp-tbody');
+  if (tbody) {
+    const allRows = [...tbody.children];
+    const peBlocks = [];  // [{pe, rows: [dom nodes]}]
+    let current = null;
+
+    for (const row of allRows) {
+      if (row.classList && row.classList.contains('pe-parent-row')) {
+        if (current) peBlocks.push(current);
+        current = { pe: row.dataset.pe, parent: row, checked: [], unchecked: [], other: [] };
+      } else if (current) {
+        if (row.classList && row.classList.contains('pe-child-row')) {
+          const cb = row.querySelector('.cb-child-table');
+          if (cb && cb.checked) {
+            current.checked.push(row);
+          } else {
+            current.unchecked.push(row);
+          }
+        } else {
+          // desc rows, etc
+          current.other.push(row);
+        }
+      }
+    }
+    if (current) peBlocks.push(current);
+
+    // Rebuild tbody in one pass
+    const frag = document.createDocumentFragment();
+    for (const block of peBlocks) {
+      frag.appendChild(block.parent);
+      // Append desc row for PE if it exists
+      const peDesc = document.getElementById('desc-pe-' + block.pe);
+      if (peDesc) frag.appendChild(peDesc);
+      // Checked children first, then unchecked
+      for (const row of block.checked) {
+        frag.appendChild(row);
+        const descId = 'desc-' + (row.dataset.idx || '');
+        const desc = descId ? document.getElementById(descId) : null;
+        if (desc) frag.appendChild(desc);
+      }
+      for (const row of block.unchecked) {
+        frag.appendChild(row);
+        const descId = 'desc-' + (row.dataset.idx || '');
+        const desc = descId ? document.getElementById(descId) : null;
+        if (desc) frag.appendChild(desc);
+      }
+    }
+    tbody.appendChild(frag);
+  }
+})();
 recomputeTotals();
 </script>
 {% endblock %}
