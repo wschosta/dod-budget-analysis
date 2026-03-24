@@ -332,7 +332,8 @@ def _parse_r2_cost_block(page_text: str, source_file: str, fiscal_year: str
         fy_m = re.match(r"FY\s+(\d{4})", tok, re.IGNORECASE)
         tok_upper = tok.upper()
         if tok_upper == "YEARS":
-            continue  # "Prior Years" — skip, prior_years is the first number
+            col_fy_map.append(None)  # "Prior Years" column — skip value but keep alignment
+            continue
         elif fy_m:
             col_fy_map.append(int(fy_m.group(1)))
         elif tok_upper == "BASE":
@@ -397,10 +398,9 @@ def _parse_r2_cost_block(page_text: str, source_file: str, fiscal_year: str
             project_code = None
             project_title = prefix
 
-        # Parse the numeric values — prior_years first, then FY columns
+        # Parse the numeric values — aligned 1:1 with col_fy_map
         all_nums = num_pattern.findall(line)
-        # First number is "Prior Years" — skip it
-        fy_nums = all_nums[1:] if len(all_nums) > len(col_fy_map) else all_nums
+        fy_nums = all_nums
 
         fy_amounts: dict[str, float] = {}
         for j, val_str in enumerate(fy_nums):
@@ -809,10 +809,11 @@ def rebuild_hypersonics_cache(conn: sqlite3.Connection) -> int:
         if not available:
             coalesce_expr = "NULL"
         else:
-            # COALESCE + NULLIF: skip 0 values to prefer non-zero from higher-priority cols
-            parts = [f"NULLIF(MAX({c}), 0)" for c in available]
-            # Fall back to MAX of highest-priority col (may be 0) if all are zero
-            coalesce_expr = f"COALESCE({', '.join(parts)}, MAX({available[0]}))"
+            # COALESCE + MAX(NULLIF): skip zero and negative values (reconciliation deltas)
+            # to prefer real funding amounts from higher-priority columns.
+            parts = [f"MAX(CASE WHEN {c} > 0 THEN {c} END)" for c in available]
+            # Fall back to 0 only if every column is NULL/zero/negative
+            coalesce_expr = f"COALESCE({', '.join(parts)}, 0)"
         year_parts.append(f"{coalesce_expr} AS fy{yr}")
         year_parts.append(
             f"MAX(CASE WHEN {available[0]} IS NOT NULL THEN source_file END) AS fy{yr}_ref"

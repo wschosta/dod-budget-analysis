@@ -809,17 +809,22 @@ function recomputeTotals() {
     });
   }
 
+  // Deduplicate: when a PE has both R-1 (parent total) and R-2 (project breakdown)
+  // rows selected, exclude the R-1 to avoid double-counting.
+  const pesWithR2 = new Set(selected.filter(r => r.exhibit_type === 'r2').map(r => r.pe_number));
+  const deduped = selected.filter(r => !(r.exhibit_type === 'r1' && pesWithR2.has(r.pe_number)));
+
   // Grand total
   for (const yr of ACTIVE_YEARS) {
-    const sum = selected.reduce((s, r) => s + (r['fy' + yr] || 0), 0);
+    const sum = deduped.reduce((s, r) => s + (r['fy' + yr] || 0), 0);
     const cell = document.getElementById('gt-' + yr);
     if (cell) cell.innerHTML = fmt(sum || null);
   }
 
   // Group totals — use normalized BA for budget activity
-  renderGroupTbody('tbody-org', groupTotals(selected, r => normalizeOrg(r.organization_name)));
-  renderGroupTbody('tbody-com', groupTotals(selected, r => r.color_of_money || 'Unknown'));
-  renderGroupTbody('tbody-ba',  groupTotals(selected, r => r.budget_activity_norm || 'Unknown'));
+  renderGroupTbody('tbody-org', groupTotals(deduped, r => normalizeOrg(r.organization_name)));
+  renderGroupTbody('tbody-com', groupTotals(deduped, r => r.color_of_money || 'Unknown'));
+  renderGroupTbody('tbody-ba',  groupTotals(deduped, r => r.budget_activity_norm || 'Unknown'));
 
   // Update visible count
   const visCount = document.querySelectorAll('#hyp-table .pe-child-row:not(.child-hidden):not(.row-hidden):not(.kw-filtered):not(.show-unchecked)').length;
