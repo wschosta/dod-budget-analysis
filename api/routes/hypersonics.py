@@ -1162,7 +1162,7 @@ def download_hypersonics(
     writer.writerow([
         "PE Number", "Service/Org", "Exhibit Type", "Line Item Title",
         "Budget Activity", "Budget Activity (Normalized)", "Appropriation",
-        "Color of Money", "Keywords (Row)", "Keywords (Desc)",
+        "Color of Money", "Keywords (Row)", "Keywords (Desc)", "Description",
         *fy_headers,
     ])
     for r in items:
@@ -1177,6 +1177,7 @@ def download_hypersonics(
             r["color_of_money"],
             ", ".join(r.get("matched_keywords_row", [])),
             ", ".join(r.get("matched_keywords_desc", [])),
+            r.get("description_text", ""),
             *fy_cells,
         ])
 
@@ -1273,7 +1274,7 @@ def download_hypersonics_xlsx(
     # Headers
     headers = [
         "PE Number", "Service/Org", "Exhibit", "Line Item / Sub-Program",
-        "Budget Activity", "Color of Money", "In Totals",
+        "Budget Activity", "Color of Money", "Description", "In Totals",
     ]
     for yr in active_years:
         headers.append(f"FY{yr} ($K)")
@@ -1298,6 +1299,7 @@ def download_hypersonics_xlsx(
             row.get("line_item_title", ""),
             row.get("budget_activity_norm", ""),
             row.get("color_of_money", ""),
+            row.get("description_text", ""),
             "Yes" if is_total else "",
         ]
         for i, v in enumerate(vals, 1):
@@ -1320,9 +1322,9 @@ def download_hypersonics_xlsx(
     # Totals row
     if total_sums:
         ws.cell(row=row_num, column=1, value="TOTALS").font = total_font
-        ws.cell(row=row_num, column=7, value="Sum").font = total_font
+        ws.cell(row=row_num, column=8, value="Sum").font = total_font
         for fy_col_idx, yr in enumerate(active_years):
-            col = 7 + fy_col_idx + 1
+            col = 8 + fy_col_idx + 1
             val = total_sums.get(yr)
             if val is not None:
                 cell = ws.cell(row=row_num, column=col, value=val)
@@ -1330,7 +1332,7 @@ def download_hypersonics_xlsx(
                 cell.number_format = money_fmt
 
     # Column widths
-    col_widths = [14, 14, 8, 50, 20, 12, 10] + [14] * len(active_years)
+    col_widths = [14, 14, 8, 50, 20, 12, 60, 10] + [14] * len(active_years)
     for i, w in enumerate(col_widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
 
