@@ -1,0 +1,625 @@
+{% extends "base.html" %}
+
+{% block title %}Keyword Explorer — DoD Budget Explorer{% endblock %}
+
+{% block extra_head %}
+<style>
+/* ── Page layout ─────────────────────────────────────────── */
+.exp-page { max-width: 1400px; margin: 0 auto; padding: 1rem; }
+.exp-page h2 { margin: 0 0 0.5rem; }
+.exp-subtitle { color: var(--color-text-muted); font-size: 0.9rem; margin-bottom: 1rem; }
+
+/* ── Keyword input ───────────────────────────────────────── */
+.kw-input-area {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+.kw-input-area label { font-weight: 600; display: block; margin-bottom: 0.4rem; }
+.kw-input-row { display: flex; gap: 0.5rem; align-items: center; }
+.kw-input-row input[type="text"] {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: 0.95rem;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+.kw-input-row .btn { white-space: nowrap; }
+.kw-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.5rem; }
+.kw-tag-pill {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  background: var(--color-primary, #3498db); color: #fff;
+  padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.82rem;
+}
+.kw-tag-pill .kw-remove {
+  cursor: pointer; font-weight: bold; opacity: 0.7;
+  background: none; border: none; color: inherit; font-size: 1rem; line-height: 1;
+}
+.kw-tag-pill .kw-remove:hover { opacity: 1; }
+.kw-expanded {
+  font-size: 0.8rem; color: var(--color-text-muted); margin-top: 0.3rem;
+}
+.kw-validation-error {
+  color: var(--color-danger, #e74c3c); font-size: 0.85rem; margin-top: 0.3rem;
+  display: none;
+}
+
+/* ── Progress area ───────────────────────────────────────── */
+.build-progress {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+  text-align: center;
+  display: none;
+}
+.build-progress .spinner {
+  display: inline-block; width: 24px; height: 24px;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-primary, #3498db);
+  border-radius: 50%; animation: spin 0.8s linear infinite;
+  margin-right: 0.5rem; vertical-align: middle;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.build-progress .status-text { font-size: 0.95rem; }
+
+/* ── Preview table ───────────────────────────────────────── */
+.preview-section { margin-bottom: 1rem; }
+.preview-section h3 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+.summary-stats {
+  display: flex; gap: 1.5rem; margin-bottom: 0.75rem;
+  font-size: 0.9rem; color: var(--color-text-muted);
+}
+.summary-stats strong { color: var(--color-text); }
+.preview-table {
+  width: 100%; border-collapse: collapse; font-size: 0.85rem;
+}
+.preview-table th {
+  background: var(--color-surface); border-bottom: 2px solid var(--color-border);
+  padding: 0.5rem; text-align: left; font-weight: 600;
+}
+.preview-table td {
+  padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--color-border);
+}
+
+/* ── Column picker ───────────────────────────────────────── */
+.column-picker { margin-bottom: 1rem; }
+.column-picker h3 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+.picker-layout { display: flex; gap: 1rem; flex-wrap: wrap; }
+.picker-list {
+  flex: 1; min-width: 260px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 0.5rem;
+  min-height: 200px; max-height: 400px; overflow-y: auto;
+}
+.picker-list h4 {
+  margin: 0 0 0.5rem; font-size: 0.9rem;
+  color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.05em;
+}
+.picker-item {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.35rem 0.5rem; margin-bottom: 2px;
+  border-radius: 4px; cursor: grab; font-size: 0.85rem;
+  background: var(--color-bg);
+  border: 1px solid transparent;
+  transition: background 0.15s;
+}
+.picker-item:hover { background: var(--color-surface-hover, #ecf0f1); }
+.picker-item.dragging { opacity: 0.5; }
+.picker-item .drag-handle { color: var(--color-text-muted); cursor: grab; user-select: none; }
+.picker-item .item-label { flex: 1; }
+.picker-item .item-actions { display: flex; gap: 0.2rem; }
+.picker-item .item-actions button {
+  background: none; border: none; cursor: pointer; padding: 0.1rem 0.3rem;
+  color: var(--color-text-muted); font-size: 0.9rem; border-radius: 3px;
+}
+.picker-item .item-actions button:hover { background: var(--color-border); color: var(--color-text); }
+.picker-item .item-actions button:focus { outline: 2px solid var(--color-primary, #3498db); }
+.drop-zone-highlight { border: 2px dashed var(--color-primary, #3498db) !important; }
+
+/* ── Download area ───────────────────────────────────────── */
+.download-area {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 1rem;
+  display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;
+}
+.download-area .filter-toggle { font-size: 0.9rem; }
+.download-area .btn-download {
+  padding: 0.6rem 1.5rem; font-size: 1rem; font-weight: 600;
+}
+
+/* ── Empty results ───────────────────────────────────────── */
+.no-results {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 2rem; text-align: center;
+}
+.no-results h3 { margin: 0 0 0.5rem; }
+.no-results .suggestions { color: var(--color-text-muted); font-size: 0.9rem; }
+.no-results .suggestions ul { list-style: none; padding: 0; margin: 0.5rem 0; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="exp-page">
+  <h2>Keyword Explorer</h2>
+  <p class="exp-subtitle">Search DoD budget programs by any keywords. Results include budget line items and PDF-mined R-2 sub-elements.</p>
+
+  <!-- 1. Keyword Input -->
+  <div class="kw-input-area">
+    <label for="kw-input">Keywords <span style="font-weight:normal; color:var(--color-text-muted)">(comma-separated, max 20)</span></label>
+    <div class="kw-input-row">
+      <input type="text" id="kw-input" placeholder="e.g. hypersonic, scramjet, directed energy"
+             value="{{ keyword_input or '' }}"
+             aria-describedby="kw-validation">
+      <button class="btn btn-primary" id="kw-search-btn" onclick="startSearch()">Search</button>
+    </div>
+    <div class="kw-tags" id="kw-tags"></div>
+    <div class="kw-expanded" id="kw-expanded" style="display:none"></div>
+    <div class="kw-validation-error" id="kw-validation"></div>
+  </div>
+
+  <!-- 2. Build Progress -->
+  <div class="build-progress" id="build-progress">
+    <span class="spinner"></span>
+    <span class="status-text" id="progress-text">Building cache...</span>
+  </div>
+
+  <!-- 3. Results area (hidden until data loaded) -->
+  <div id="results-area" style="display:none">
+
+    <!-- 3a. Preview table -->
+    <div class="preview-section">
+      <h3>Matching Program Elements</h3>
+      <div class="summary-stats" id="summary-stats"></div>
+      <div style="overflow-x:auto">
+        <table class="preview-table" id="preview-table">
+          <thead>
+            <tr>
+              <th>PE Number</th>
+              <th>Service</th>
+              <th>PE Title</th>
+              <th>Total Sub-Elements</th>
+              <th>Matching Sub-Elements</th>
+            </tr>
+          </thead>
+          <tbody id="preview-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 3b. Column picker -->
+    <div class="column-picker">
+      <h3>Download Columns</h3>
+      <div class="picker-layout">
+        <div class="picker-list" id="available-cols">
+          <h4>Available Columns</h4>
+          <div id="available-list" role="listbox" aria-label="Available columns"></div>
+        </div>
+        <div class="picker-list" id="selected-cols">
+          <h4>Selected Columns (drag to reorder)</h4>
+          <div id="selected-list" role="listbox" aria-label="Selected columns for download"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3c. Download -->
+    <div class="download-area">
+      <label class="filter-toggle">
+        <input type="checkbox" id="matching-only"> Only include directly matching sub-elements
+      </label>
+      <button class="btn btn-primary btn-download" onclick="downloadXlsx()">&#8681; Download XLSX</button>
+    </div>
+  </div>
+
+  <!-- 4. No results -->
+  <div class="no-results" id="no-results" style="display:none">
+    <h3>No matching programs found</h3>
+    <div class="suggestions">
+      <p>Your keywords didn't match any budget programs. Try:</p>
+      <ul>
+        <li>Using broader or shorter terms</li>
+        <li>Checking spelling</li>
+        <li>Using fewer keywords</li>
+        <li>Trying the full name instead of an abbreviation (or vice versa)</li>
+      </ul>
+      <p id="searched-keywords"></p>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ── State ──────────────────────────────────────────────── */
+let currentKeywords = [];
+let currentExpanded = [];
+let kwSetId = null;
+let pollTimer = null;
+let explorerData = null;  // Cached response from GET /api/v1/explorer
+
+/* ── Keyword input ──────────────────────────────────────── */
+const kwInput = document.getElementById('kw-input');
+const kwTags = document.getElementById('kw-tags');
+const kwValidation = document.getElementById('kw-validation');
+
+kwInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); startSearch(); }
+});
+
+function showValidationError(msg) {
+  kwValidation.textContent = msg;
+  kwValidation.style.display = 'block';
+}
+function clearValidation() {
+  kwValidation.style.display = 'none';
+}
+
+function renderKeywordTags(keywords) {
+  kwTags.innerHTML = '';
+  keywords.forEach((kw, i) => {
+    const pill = document.createElement('span');
+    pill.className = 'kw-tag-pill';
+    pill.innerHTML = `${kw} <button class="kw-remove" aria-label="Remove keyword ${kw}" onclick="removeKeyword(${i})">&times;</button>`;
+    kwTags.appendChild(pill);
+  });
+}
+
+function removeKeyword(idx) {
+  currentKeywords.splice(idx, 1);
+  renderKeywordTags(currentKeywords);
+  kwInput.value = currentKeywords.join(', ');
+}
+
+function validateKeywords(keywords) {
+  if (keywords.length === 0) return 'Enter at least one keyword';
+  if (keywords.length > 20) return 'Maximum 20 keywords allowed';
+  for (const kw of keywords) {
+    if (kw.length < 2) return `Keyword "${kw}" is too short (min 2 characters)`;
+    if (kw.length > 100) return `Keyword "${kw}" is too long (max 100 characters)`;
+    if (!/^[a-zA-Z0-9\s\-\/&.]+$/.test(kw)) return `Keyword "${kw}" contains invalid characters`;
+  }
+  return null;
+}
+
+/* ── Search flow ────────────────────────────────────────── */
+function startSearch() {
+  clearValidation();
+  const raw = kwInput.value.trim();
+  const keywords = raw.split(',').map(k => k.trim()).filter(k => k);
+  const error = validateKeywords(keywords);
+  if (error) { showValidationError(error); return; }
+
+  currentKeywords = keywords;
+  renderKeywordTags(keywords);
+
+  // Update URL without reload
+  const url = new URL(window.location);
+  url.searchParams.set('keywords', keywords.join(','));
+  history.pushState({}, '', url);
+
+  // Hide previous results
+  document.getElementById('results-area').style.display = 'none';
+  document.getElementById('no-results').style.display = 'none';
+
+  // Show progress
+  const prog = document.getElementById('build-progress');
+  prog.style.display = 'block';
+  document.getElementById('progress-text').textContent = 'Starting cache build...';
+
+  // Start build
+  fetch('/api/v1/explorer/build?keywords=' + encodeURIComponent(keywords.join(',')), {
+    method: 'POST',
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.error) { showValidationError(data.error); prog.style.display = 'none'; return; }
+    kwSetId = data.keyword_set_id;
+    currentExpanded = data.expanded_keywords || keywords;
+
+    // Show expanded keywords if different from input
+    const expDiv = document.getElementById('kw-expanded');
+    if (currentExpanded.length > keywords.length) {
+      const extra = currentExpanded.filter(e => !keywords.map(k => k.toLowerCase()).includes(e.toLowerCase()));
+      if (extra.length) {
+        expDiv.textContent = 'Also searching (acronym expansions): ' + extra.join(', ');
+        expDiv.style.display = 'block';
+      }
+    } else {
+      expDiv.style.display = 'none';
+    }
+
+    if (data.state === 'ready') {
+      onBuildReady();
+    } else {
+      startPolling();
+    }
+  })
+  .catch(err => {
+    prog.style.display = 'none';
+    showValidationError('Request failed: ' + err.message);
+  });
+}
+
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(pollStatus, 2000);
+}
+
+function pollStatus() {
+  fetch('/api/v1/explorer/status?keywords=' + encodeURIComponent(currentKeywords.join(',')))
+  .then(r => r.json())
+  .then(data => {
+    const textEl = document.getElementById('progress-text');
+    if (data.state === 'ready') {
+      clearInterval(pollTimer); pollTimer = null;
+      onBuildReady();
+    } else if (data.state === 'error') {
+      clearInterval(pollTimer); pollTimer = null;
+      document.getElementById('build-progress').style.display = 'none';
+      showValidationError('Build failed: ' + (data.progress || 'Unknown error'));
+    } else {
+      // Building — show progress
+      let msg = 'Building cache...';
+      if (data.progress === 'collecting_pes') msg = 'Searching budget lines for matching PEs...';
+      else if (data.progress === 'building_pivot') msg = `Found ${data.pe_count || '?'} PEs. Pivoting budget data...`;
+      else if (data.progress === 'mining_pdfs') msg = `Mining PDF sub-elements (${data.budget_line_rows || 0} budget rows so far)...`;
+      textEl.textContent = msg;
+    }
+  });
+}
+
+function onBuildReady() {
+  document.getElementById('build-progress').style.display = 'none';
+
+  // Fetch full data
+  fetch('/api/v1/explorer?keywords=' + encodeURIComponent(currentKeywords.join(',')))
+  .then(r => r.json())
+  .then(data => {
+    if (data.error) { showValidationError(data.error); return; }
+    explorerData = data;
+
+    if (data.total_rows === 0) {
+      showNoResults();
+      return;
+    }
+
+    renderPreview(data);
+    renderColumnPicker(data);
+    document.getElementById('results-area').style.display = 'block';
+  });
+}
+
+/* ── No results ─────────────────────────────────────────── */
+function showNoResults() {
+  const el = document.getElementById('no-results');
+  el.style.display = 'block';
+  const searched = currentExpanded.length > currentKeywords.length
+    ? `Searched for: ${currentKeywords.join(', ')} (plus acronym expansions: ${currentExpanded.filter(e => !currentKeywords.map(k=>k.toLowerCase()).includes(e.toLowerCase())).join(', ')})`
+    : `Searched for: ${currentKeywords.join(', ')}`;
+  document.getElementById('searched-keywords').textContent = searched;
+}
+
+/* ── Preview table ──────────────────────────────────────── */
+function renderPreview(data) {
+  const stats = document.getElementById('summary-stats');
+  const totalMatching = data.pe_summary.reduce((s, p) => s + p.matching_sub_elements, 0);
+  stats.innerHTML = `
+    <span><strong>${data.total_pes}</strong> Program Elements</span>
+    <span><strong>${data.total_rows}</strong> total sub-elements</span>
+    <span><strong>${totalMatching}</strong> directly matching sub-elements</span>
+  `;
+
+  const tbody = document.getElementById('preview-tbody');
+  tbody.innerHTML = '';
+  data.pe_summary.forEach(pe => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><code>${pe.pe_number}</code></td>
+      <td>${pe.service || ''}</td>
+      <td>${pe.pe_title || ''}</td>
+      <td>${pe.total_sub_elements}</td>
+      <td>${pe.matching_sub_elements}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+/* ── Column picker ──────────────────────────────────────── */
+let selectedColumns = [];
+
+function renderColumnPicker(data) {
+  selectedColumns = [...data.default_columns];
+  renderAvailableList(data.available_columns);
+  renderSelectedList();
+}
+
+function renderAvailableList(columns) {
+  const list = document.getElementById('available-list');
+  list.innerHTML = '';
+  columns.forEach(col => {
+    const item = document.createElement('div');
+    item.className = 'picker-item';
+    item.setAttribute('role', 'option');
+    item.setAttribute('draggable', 'true');
+    item.dataset.col = col;
+    item.innerHTML = `
+      <span class="drag-handle" aria-hidden="true">&#9776;</span>
+      <span class="item-label">${col}</span>
+      <span class="item-actions">
+        <button onclick="addColumn('${col.replace(/'/g, "\\'")}')" aria-label="Add ${col} to selected columns" title="Add">+</button>
+      </span>
+    `;
+    item.addEventListener('dragstart', onAvailDragStart);
+    list.appendChild(item);
+  });
+}
+
+function renderSelectedList() {
+  const list = document.getElementById('selected-list');
+  list.innerHTML = '';
+  selectedColumns.forEach((col, i) => {
+    const item = document.createElement('div');
+    item.className = 'picker-item';
+    item.setAttribute('role', 'option');
+    item.setAttribute('draggable', 'true');
+    item.dataset.col = col;
+    item.dataset.idx = i;
+    item.innerHTML = `
+      <span class="drag-handle" aria-hidden="true">&#9776;</span>
+      <span class="item-label">${col}</span>
+      <span class="item-actions">
+        <button onclick="moveColumnUp(${i})" aria-label="Move ${col} up" title="Move up" ${i === 0 ? 'disabled' : ''}>&#9650;</button>
+        <button onclick="moveColumnDown(${i})" aria-label="Move ${col} down" title="Move down" ${i === selectedColumns.length - 1 ? 'disabled' : ''}>&#9660;</button>
+        <button onclick="removeColumn(${i})" aria-label="Remove ${col}" title="Remove">&times;</button>
+      </span>
+    `;
+    item.addEventListener('dragstart', onSelDragStart);
+    item.addEventListener('dragover', onSelDragOver);
+    item.addEventListener('drop', onSelDrop);
+    item.addEventListener('dragleave', onSelDragLeave);
+    list.appendChild(item);
+  });
+}
+
+function addColumn(col) {
+  selectedColumns.push(col);
+  renderSelectedList();
+}
+
+function removeColumn(idx) {
+  selectedColumns.splice(idx, 1);
+  renderSelectedList();
+}
+
+function moveColumnUp(idx) {
+  if (idx <= 0) return;
+  [selectedColumns[idx - 1], selectedColumns[idx]] = [selectedColumns[idx], selectedColumns[idx - 1]];
+  renderSelectedList();
+}
+
+function moveColumnDown(idx) {
+  if (idx >= selectedColumns.length - 1) return;
+  [selectedColumns[idx], selectedColumns[idx + 1]] = [selectedColumns[idx + 1], selectedColumns[idx]];
+  renderSelectedList();
+}
+
+/* ── Drag and drop ──────────────────────────────────────── */
+let dragData = null;
+
+function onAvailDragStart(e) {
+  dragData = { type: 'available', col: e.currentTarget.dataset.col };
+  e.currentTarget.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'copy';
+}
+
+function onSelDragStart(e) {
+  dragData = { type: 'selected', idx: parseInt(e.currentTarget.dataset.idx) };
+  e.currentTarget.classList.add('dragging');
+  e.dataTransfer.effectAllowed = 'move';
+}
+
+function onSelDragOver(e) {
+  e.preventDefault();
+  e.currentTarget.classList.add('drop-zone-highlight');
+}
+
+function onSelDragLeave(e) {
+  e.currentTarget.classList.remove('drop-zone-highlight');
+}
+
+function onSelDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drop-zone-highlight');
+  const targetIdx = parseInt(e.currentTarget.dataset.idx);
+
+  if (dragData.type === 'available') {
+    // Insert from available at target position
+    selectedColumns.splice(targetIdx, 0, dragData.col);
+  } else if (dragData.type === 'selected') {
+    // Reorder within selected
+    const fromIdx = dragData.idx;
+    if (fromIdx === targetIdx) return;
+    const [item] = selectedColumns.splice(fromIdx, 1);
+    const adjustedTarget = fromIdx < targetIdx ? targetIdx - 1 : targetIdx;
+    selectedColumns.splice(adjustedTarget, 0, item);
+  }
+  dragData = null;
+  renderSelectedList();
+}
+
+// Allow dropping on the selected list container (for appending)
+document.getElementById('selected-list').addEventListener('dragover', e => {
+  e.preventDefault();
+});
+document.getElementById('selected-list').addEventListener('drop', e => {
+  if (e.target === document.getElementById('selected-list') && dragData) {
+    if (dragData.type === 'available') {
+      selectedColumns.push(dragData.col);
+    }
+    dragData = null;
+    renderSelectedList();
+  }
+});
+
+document.addEventListener('dragend', () => {
+  document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging'));
+  dragData = null;
+});
+
+/* ── Download ───────────────────────────────────────────── */
+function downloadXlsx() {
+  if (!currentKeywords.length || !selectedColumns.length) {
+    alert('No keywords or columns selected.');
+    return;
+  }
+
+  const matchingOnly = document.getElementById('matching-only').checked;
+
+  fetch('/api/v1/explorer/download/xlsx', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      keywords: currentKeywords.join(','),
+      columns: selectedColumns,
+      matching_only: matchingOnly,
+    }),
+  })
+  .then(resp => {
+    if (!resp.ok) return resp.text().then(t => { throw new Error(t); });
+    return resp.blob();
+  })
+  .then(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'explorer_results.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  })
+  .catch(err => {
+    alert('Download failed: ' + err.message);
+  });
+}
+
+/* ── Auto-search from URL on page load ──────────────────── */
+(function() {
+  const params = new URLSearchParams(window.location.search);
+  const kw = params.get('keywords');
+  if (kw) {
+    kwInput.value = kw;
+    startSearch();
+  }
+})();
+</script>
+{% endblock %}

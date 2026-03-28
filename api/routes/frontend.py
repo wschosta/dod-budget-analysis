@@ -1411,24 +1411,26 @@ async def hypersonics_page(
 ) -> HTMLResponse:
     """Server-rendered hypersonics PE lines pivot table page."""
     from api.routes.hypersonics import (
-        _apply_filters,
-        _cache_rows_to_dicts,
         _ensure_cache,
         _HYPERSONICS_KEYWORDS,
         _CACHE_TABLE,
-        _FY_START,
-        _FY_END,
+    )
+    from api.routes.keyword_search import (
+        apply_filters,
+        cache_rows_to_dicts,
+        FY_START,
+        FY_END,
     )
 
     _ensure_cache(conn)
 
-    extra_where, extra_params = _apply_filters(service, exhibit, None, None)
+    extra_where, extra_params = apply_filters(service, exhibit, None, None)
     where = f"WHERE {extra_where}" if extra_where else ""
     sql = f"SELECT * FROM {_CACHE_TABLE} {where} ORDER BY pe_number, exhibit_type, line_item_title"
     raw_rows = conn.execute(sql, extra_params).fetchall()
 
-    year_range = list(range(_FY_START, _FY_END + 1))
-    rows = _cache_rows_to_dicts(raw_rows)
+    year_range = list(range(FY_START, FY_END + 1))
+    rows = cache_rows_to_dicts(raw_rows)
 
     active_years = [
         yr for yr in year_range
@@ -1531,4 +1533,18 @@ async def hypersonics_page(
             "exhibit": exhibit or "",
         },
         "row_count": len(rows),
+    })
+
+
+# ── GET /explorer ────────────────────────────────────────────────────────────
+
+@router.get("/explorer", response_class=HTMLResponse)
+async def explorer_page(
+    request: Request,
+    keywords: str | None = None,
+) -> HTMLResponse:
+    """Server-rendered keyword explorer page."""
+    return _tmpl().TemplateResponse("explorer.html", {
+        "request": request,
+        "keyword_input": keywords or "",
     })

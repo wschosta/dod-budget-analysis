@@ -109,6 +109,10 @@ FastAPI application serving the database through versioned endpoints (`/api/v1`)
 | `/api/v1/facets` | GET | Faceted filter counts with cross-filtering per dimension |
 | `/api/v1/hypersonics` | GET | Pivoted hypersonics PE lines: one row per sub-element, columns for FY2015–FY2026. Filters: service, exhibit, fy_from, fy_to. |
 | `/api/v1/hypersonics/download` | GET | CSV download of the pivoted hypersonics table (same filters). |
+| `/api/v1/explorer/build` | POST | Start async cache build for user-supplied keywords. Returns keyword_set_id. |
+| `/api/v1/explorer/status` | GET | Poll cache build progress (state, progress text, PE count). |
+| `/api/v1/explorer` | GET | PE-level summary + available download columns for a built keyword set. |
+| `/api/v1/explorer/download/xlsx` | POST | XLSX export with user-selected columns in chosen order. Supports matching-only filter. |
 | `/api/v1/feedback` | POST | User feedback submission |
 | `/health` | GET | Health check (DB connectivity) |
 | `/health/detailed` | GET | Uptime, request/error counts, query stats, DB metrics |
@@ -141,6 +145,7 @@ Server-side rendered HTML using Jinja2 templates with HTMX for dynamic updates.
 | **Program Detail** | `/programs/{pe}` | Individual PE detail: funding breakdown by FY, narrative descriptions, related exhibits, source documents. |
 | **About** | `/about` | Project description, data coverage summary, methodology overview. |
 | **Hypersonics** | `/hypersonics` | Pivoted table of all hypersonics-related PE lines and sub-programs, FY2015+. One row per unique PE + sub-element; one column per fiscal year showing primary requested/enacted funding ($K). Filter by service, exhibit type, and FY range. CSV download. |
+| **Explorer** | `/explorer` | Generalized keyword search tool. Enter any keywords (comma-separated, max 20) to search budget lines and PE descriptions with fuzzy matching (prefix, acronym expansion, edit-distance). Async cache build with progress polling. PE-level preview table showing match counts. Two-list drag-and-drop column picker for XLSX download with customizable column order. Toggle to filter to directly matching sub-elements only. |
 
 ### 4.2 HTMX Partials
 

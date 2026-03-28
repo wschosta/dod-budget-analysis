@@ -53,6 +53,7 @@
         <a href="/programs"  {% if request.url.path.startswith("/programs") %}class="active"{% endif %}>Programs</a>
         <a href="/consolidated" {% if request.url.path.startswith("/consolidated") %}class="active"{% endif %}>Consolidated</a>
         <a href="/hypersonics" {% if request.url.path == "/hypersonics" %}class="active"{% endif %}>Hypersonics</a>
+        <a href="/explorer" {% if request.url.path == "/explorer" %}class="active"{% endif %}>Explorer</a>
         <a href="/about"     {% if request.url.path == "/about" %}class="active"{% endif %}>About</a>
         <a href="/docs"      target="_blank" rel="noopener">API Docs</a>
       </div>

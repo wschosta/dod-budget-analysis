@@ -1,0 +1,965 @@
+"""
+Shared keyword-search cache-building logic.
+
+Extracted from hypersonics.py so that both the Hypersonics page and the
+generic Keyword Explorer can reuse the same pivot/cache/PDF-mining pipeline.
+
+All public functions accept ``keywords`` and ``cache_table`` (or similar)
+as parameters — no module-level keyword lists are hard-coded here.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+import sqlite3
+from typing import Any
+
+from utils.database import get_amount_columns
+
+logger = logging.getLogger(__name__)
+
+# ── Constants ─────────────────────────────────────────────────────────────────
+
+SEARCH_COLS = ["line_item_title", "account_title", "budget_activity_title"]
+
+FY_START = 2015
+FY_END = 2026
+
+# RDT&E BA categories (BA 01-07) — canonical titles
+BA_CANONICAL: dict[str, str] = {
+    "01": "BA 1: Basic Research",
+    "02": "BA 2: Applied Research",
+    "03": "BA 3: Advanced Technology Development",
+    "04": "BA 4: Advanced Component Dev & Prototypes",
+    "05": "BA 5: System Development & Demonstration",
+    "06": "BA 6: RDT&E Management Support",
+    "07": "BA 7: Operational Systems Development",
+}
+
+_ORG_FROM_PATH = [
+    ("US_Army", "Army"),
+    ("US_Air_Force", "Air Force"),
+    ("US_Navy", "Navy"),
+    ("Defense_Wide", "Defense-Wide"),
+    ("DARPA", "DARPA"),
+    ("SOCOM", "SOCOM"),
+]
+
+
+# ── Cache DDL ─────────────────────────────────────────────────────────────────
+
+def cache_ddl(table_name: str, fy_start: int = FY_START, fy_end: int = FY_END) -> str:
+    """Return the CREATE TABLE DDL for a keyword-search cache table."""
+    fy_cols = "\n".join(
+        f"    fy{yr} REAL, fy{yr}_ref TEXT,"
+        for yr in range(fy_start, fy_end + 1)
+    )
+    # Remove trailing comma from last FY line
+    fy_cols = fy_cols.rstrip(",")
+    return f"""
+CREATE TABLE IF NOT EXISTS {table_name} (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    pe_number               TEXT NOT NULL,
+    organization_name       TEXT,
+    exhibit_type            TEXT,
+    line_item_title         TEXT,
+    budget_activity         TEXT,
+    budget_activity_title   TEXT,
+    budget_activity_norm    TEXT,
+    appropriation_title     TEXT,
+    account_title           TEXT,
+    color_of_money          TEXT,
+    matched_keywords_row    TEXT,
+    matched_keywords_desc   TEXT,
+    description_text        TEXT,
+    lineage_note            TEXT,
+{fy_cols}
+);
+"""
+
+
+# ── Normalization helpers ─────────────────────────────────────────────────────
+
+def normalize_budget_activity(ba_number: str | None, ba_title: str | None) -> str:
+    """Map budget_activity number to canonical BA label, falling back to title."""
+    if ba_number and ba_number.strip() in BA_CANONICAL:
+        return BA_CANONICAL[ba_number.strip()]
+    if ba_title:
+        return ba_title.strip()
+    return "Unknown"
+
+
+def color_of_money(approp_title: str | None) -> str:
+    """Map appropriation title to a standard color-of-money category."""
+    if not approp_title:
+        return "Unknown"
+    t = approp_title.upper()
+    if any(k in t for k in ("RDT", "RESEARCH", "DEVELOPMENT", "R&D")):
+        return "RDT&E"
+    if "PROCURE" in t:
+        return "Procurement"
+    if any(k in t for k in ("OPER", "MAINT", "O&M")):
+        return "O&M"
+    if any(k in t for k in ("MILCON", "CONSTRUCTION")):
+        return "MILCON"
+    if any(k in t for k in ("MILPERS", "PERSONNEL")):
+        return "Military Personnel"
+    return approp_title
+
+
+# ── Keyword matching ─────────────────────────────────────────────────────────
+
+def find_matched_keywords(
+    text_fields: list[str | None],
+    keywords: list[str],
+) -> list[str]:
+    """Return which of *keywords* match (case-insensitive substring) in *text_fields*."""
+    combined = " ".join((t or "") for t in text_fields).lower()
+    if not combined.strip():
+        return []
+    return [kw for kw in keywords if kw.lower() in combined]
+
+
+# ── PE discovery ──────────────────────────────────────────────────────────────
+
+def collect_matching_pe_numbers_split(
+    conn: sqlite3.Connection,
+    keywords: list[str],
+    desc_keywords: list[str],
+    search_cols: list[str] | None = None,
+) -> tuple[tuple[set[str], set[str]], set[str]]:
+    """Return (budget_lines_matched, desc_matched) PE number sets.
+
+    budget_lines_matched: PEs found via keyword search in budget_lines columns.
+    desc_matched: additional PEs found via narrative keyword search in pe_descriptions.
+    The union is the full matched set for the cache.
+    """
+    if search_cols is None:
+        search_cols = SEARCH_COLS
+
+    bl_matched: set[str] = set()
+
+    # (a) Budget-lines keyword match
+    kw_clauses: list[str] = []
+    kw_params: list[Any] = []
+    for col in search_cols:
+        for kw in keywords:
+            kw_clauses.append(f"{col} LIKE ?")
+            kw_params.append(f"%{kw}%")
+    kw_where = " OR ".join(kw_clauses)
+    rows = conn.execute(
+        f"SELECT DISTINCT pe_number FROM budget_lines WHERE {kw_where}", kw_params
+    ).fetchall()
+    bl_matched.update(r[0] for r in rows if r[0])
+
+    # (b) pe_descriptions narrative match
+    desc_matched: set[str] = set()
+    try:
+        conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
+        desc_clauses = ["description_text LIKE ?" for _ in desc_keywords]
+        desc_params = [f"%{kw}%" for kw in desc_keywords]
+        rows = conn.execute(
+            "SELECT DISTINCT pe_number FROM pe_descriptions"
+            f" WHERE {' OR '.join(desc_clauses)}",
+            desc_params,
+        ).fetchall()
+        desc_matched.update(r[0] for r in rows if r[0])
+    except sqlite3.OperationalError:
+        pass
+
+    # Remove overlap so desc_matched only contains extras
+    desc_matched -= bl_matched
+    return (bl_matched, desc_matched), bl_matched | desc_matched
+
+
+# ── Description helpers ───────────────────────────────────────────────────────
+
+def get_description_map(
+    conn: sqlite3.Connection, pe_numbers: set[str],
+) -> dict[str, str]:
+    """Build PE → truncated description text map for UI display."""
+    if not pe_numbers:
+        return {}
+    try:
+        conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
+    except sqlite3.OperationalError:
+        return {}
+
+    result: dict[str, str] = {}
+    for pe in pe_numbers:
+        rows = conn.execute(
+            "SELECT description_text FROM pe_descriptions "
+            "WHERE pe_number = ? LIMIT 5",
+            [pe],
+        ).fetchall()
+        text = " ".join(r[0] for r in rows if r[0])
+        if len(text) > 2000:
+            text = text[:2000] + "…"
+        if text.strip():
+            result[pe] = text
+    return result
+
+
+def get_desc_keyword_map(
+    conn: sqlite3.Connection,
+    pe_numbers: set[str],
+    desc_keywords: list[str],
+) -> dict[str, list[str]]:
+    """Build PE → list of desc_keywords that match in pe_descriptions (via SQL LIKE)."""
+    if not pe_numbers:
+        return {}
+    try:
+        conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
+    except sqlite3.OperationalError:
+        return {}
+
+    placeholders = ", ".join("?" for _ in pe_numbers)
+    pe_list = list(pe_numbers)
+    result: dict[str, list[str]] = {}
+
+    for kw in desc_keywords:
+        rows = conn.execute(
+            f"SELECT DISTINCT pe_number FROM pe_descriptions "
+            f"WHERE pe_number IN ({placeholders}) AND description_text LIKE ?",
+            pe_list + [f"%{kw}%"],
+        ).fetchall()
+        for r in rows:
+            result.setdefault(r[0], [])
+            if kw not in result[r[0]]:
+                result[r[0]].append(kw)
+
+    return result
+
+
+# ── R-2 PDF parsing ──────────────────────────────────────────────────────────
+
+def parse_r2_cost_block(
+    page_text: str, source_file: str, fiscal_year: str,
+) -> list[dict[str, Any]]:
+    """Parse R-2/R-2A COST block from a PDF page to extract project-level funding.
+
+    Returns a list of dicts with keys:
+        pe_number, project_code, project_title, source_file, fiscal_year,
+        fy_amounts: {fyXXXX: amount_in_thousands}
+    """
+    lines = page_text.split("\n")
+    results: list[dict[str, Any]] = []
+
+    # 1. Extract PE number from header line
+    pe_number = None
+    pe_title = None
+    for line in lines[:10]:
+        m = re.search(r"PE\s+(\d{7}[A-Z])\s*/\s*(.+?)(?:\s+\d|$)", line)
+        if m:
+            pe_number = m.group(1)
+            pe_title = m.group(2).strip()
+            break
+    if not pe_number:
+        return []
+
+    # 2. Find the COST block and parse FY column headers
+    cost_idx = None
+    for i, line in enumerate(lines):
+        if "COST" in line and "Millions" in line:
+            cost_idx = i
+            break
+    if cost_idx is None:
+        return []
+
+    fy_header_line = lines[cost_idx + 1] if cost_idx + 1 < len(lines) else ""
+
+    _fy_m = re.search(r"(\d{4})", fiscal_year or "")
+    budget_year = int(_fy_m.group(1)) if _fy_m else None
+
+    col_fy_map: list[int | None] = []
+    col_tokens = re.finditer(
+        r"(?:FY\s+\d{4}|Years|Base|OOC|OCO|Total|Complete|Cost)\b",
+        fy_header_line, re.IGNORECASE,
+    )
+    for m in col_tokens:
+        tok = m.group().strip()
+        fy_m = re.match(r"FY\s+(\d{4})", tok, re.IGNORECASE)
+        tok_upper = tok.upper()
+        if tok_upper == "YEARS":
+            col_fy_map.append(None)
+            continue
+        elif fy_m:
+            col_fy_map.append(int(fy_m.group(1)))
+        elif tok_upper == "BASE":
+            col_fy_map.append(None)
+        elif tok_upper in ("OOC", "OCO"):
+            col_fy_map.append(None)
+        elif tok_upper == "TOTAL":
+            if budget_year:
+                col_fy_map.append(budget_year)
+            else:
+                col_fy_map.append(None)
+        elif tok_upper in ("COMPLETE", "COST"):
+            col_fy_map.append(None)
+
+    if not col_fy_map:
+        return []
+
+    # 3. Parse project rows after the header
+    num_pattern = re.compile(r"[\d,]+\.\d{3}|(?<!\w)-(?!\w)|0\.000")
+
+    for i in range(cost_idx + 2, min(cost_idx + 15, len(lines))):
+        line = lines[i].strip()
+        if not line:
+            continue
+        if any(line.startswith(s) for s in (
+            "Quantity of RDT&E",
+            "A. Mission",
+            "B. Accomplishments",
+            "Note",
+            "Program MDAP",
+        )):
+            break
+
+        if "Total Program Element" in line:
+            continue
+
+        nums_in_line = num_pattern.findall(line)
+        if not nums_in_line:
+            if results:
+                results[-1]["project_title"] += " " + line.strip()
+            continue
+
+        first_num_pos = re.search(r"\s[\d,]+\.\d{3}|\s-\s|\s-$", line)
+        if first_num_pos:
+            prefix = line[:first_num_pos.start()].strip()
+        else:
+            prefix = line.strip()
+
+        code_m = re.match(r"^([A-Z0-9]+):\s*(.+)", prefix)
+        if code_m:
+            project_code = code_m.group(1)
+            project_title = code_m.group(2).strip()
+        else:
+            project_code = None
+            project_title = prefix
+
+        all_nums = num_pattern.findall(line)
+
+        fy_amounts: dict[str, float] = {}
+        for j, val_str in enumerate(all_nums):
+            if j >= len(col_fy_map):
+                break
+            fy_year = col_fy_map[j]
+            if fy_year is None:
+                continue
+            if val_str == "-":
+                continue
+            try:
+                amount_millions = float(val_str.replace(",", ""))
+                fy_amounts[f"fy{fy_year}"] = amount_millions * 1000.0
+            except ValueError:
+                continue
+
+        if fy_amounts:
+            results.append({
+                "pe_number": pe_number,
+                "pe_title": pe_title,
+                "project_code": project_code,
+                "project_title": project_title,
+                "source_file": source_file,
+                "fiscal_year": fiscal_year,
+                "fy_amounts": fy_amounts,
+                "description_text": "",
+            })
+
+    # 4. Extract description text from Section A and Section B
+    desc_parts: list[str] = []
+    in_section_a = False
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("A. Mission Description"):
+            in_section_a = True
+            continue
+        if in_section_a:
+            if re.match(r"^[B-Z]\.\s", stripped):
+                break
+            if stripped:
+                desc_parts.append(stripped)
+    section_a_text = " ".join(desc_parts).strip()
+
+    project_descs: dict[str, str] = {}
+    current_title = None
+    current_desc_parts: list[str] = []
+    in_section_b = False
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("B. Accomplishments") or stripped.startswith("C. Accomplishments"):
+            in_section_b = True
+            continue
+        if not in_section_b:
+            continue
+        if re.match(r"^[C-Z]\.\s(?!Accomplishments)", stripped):
+            break
+        if stripped.startswith("Title:"):
+            if current_title and current_desc_parts:
+                project_descs[current_title] = " ".join(current_desc_parts).strip()
+            title_text = stripped[len("Title:"):].strip()
+            title_text = re.sub(r"\s+[\d,.]+\s*$", "", title_text).strip()
+            current_title = title_text
+            current_desc_parts = []
+        elif stripped.startswith("Description:") and current_title:
+            current_desc_parts.append(stripped[len("Description:"):].strip())
+        elif current_title and current_desc_parts and not stripped.startswith("FY "):
+            if not re.match(r"^(Accomplishments|Congressional|Title:)", stripped):
+                current_desc_parts.append(stripped)
+    if current_title and current_desc_parts:
+        project_descs[current_title] = " ".join(current_desc_parts).strip()
+
+    for item in results:
+        parts = []
+        if section_a_text:
+            parts.append(section_a_text)
+        proj_title = item["project_title"]
+        for desc_title, desc_text in project_descs.items():
+            if (proj_title.lower().startswith(desc_title[:20].lower())
+                    or desc_title.lower().startswith(proj_title[:20].lower())):
+                parts.append(f"[{desc_title}] {desc_text}")
+                break
+        item["description_text"] = "\n\n".join(parts) if parts else ""
+
+    return results
+
+
+def consolidate_r2_timeseries(
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Collapse multiple budget-submission rows into one golden row per project."""
+    groups: dict[tuple[str, str | None], list[dict[str, Any]]] = {}
+    for item in items:
+        key = (item["pe_number"], item.get("project_code"))
+        groups.setdefault(key, []).append(item)
+
+    results: list[dict[str, Any]] = []
+    for (pe, proj_code), group in groups.items():
+        def _doc_fy(item: dict[str, Any]) -> int:
+            m = re.search(r"(\d{4})", item.get("fiscal_year", ""))
+            return int(m.group(1)) if m else 0
+
+        group.sort(key=_doc_fy, reverse=True)
+
+        golden_amounts: dict[str, float] = {}
+        golden_refs: dict[str, str] = {}
+        for item in group:
+            for fy_key, amount in item["fy_amounts"].items():
+                if fy_key not in golden_amounts:
+                    golden_amounts[fy_key] = amount
+                    golden_refs[fy_key] = item["source_file"]
+
+        latest = group[0]
+        best_desc = ""
+        for item in group:
+            desc = item.get("description_text", "")
+            if len(desc) > len(best_desc):
+                best_desc = desc
+        results.append({
+            "pe_number": pe,
+            "pe_title": latest.get("pe_title"),
+            "project_code": proj_code,
+            "project_title": latest["project_title"],
+            "source_file": latest["source_file"],
+            "fiscal_year": latest["fiscal_year"],
+            "fy_amounts": golden_amounts,
+            "fy_refs": golden_refs,
+            "description_text": best_desc,
+        })
+
+    return results
+
+
+def mine_pdf_subelements(
+    conn: sqlite3.Connection,
+    pe_numbers: set[str],
+    keywords: list[str],
+    core_pes: set[str] | None = None,
+    fy_start: int = FY_START,
+) -> tuple[list[dict[str, Any]], set[str]]:
+    """Mine R-2/R-2A sub-element data from pdf_pages for the given PE numbers.
+
+    Returns (consolidated_rows, discovered_pes).
+    """
+    if not pe_numbers:
+        return [], set()
+
+    try:
+        conn.execute("SELECT 1 FROM pdf_pages LIMIT 0")
+    except sqlite3.OperationalError:
+        return [], set()
+
+    if core_pes is None:
+        core_pes = pe_numbers
+
+    fy_min_str = f"FY {fy_start}"
+
+    rows = conn.execute(
+        """
+        SELECT source_file, page_number, page_text, fiscal_year
+        FROM pdf_pages
+        WHERE (page_text LIKE '%Exhibit R-2,%' OR page_text LIKE '%Exhibit R-2A%')
+          AND page_text LIKE '%COST%Millions%'
+          AND source_file LIKE '%detail%'
+          AND fiscal_year >= ?
+        ORDER BY fiscal_year DESC, source_file, page_number
+        """,
+        [fy_min_str],
+    ).fetchall()
+
+    logger.info("PDF sub-element mining: scanning %d R-2/R-2A pages for %d PEs",
+                len(rows), len(pe_numbers))
+
+    seen: set[tuple[str, str | None, str]] = set()
+    raw_items: list[dict[str, Any]] = []
+    discovered_pes: set[str] = set()
+
+    for r in rows:
+        source_file, page_number, page_text, fiscal_year = r
+        parsed = parse_r2_cost_block(page_text, source_file, fiscal_year)
+        for item in parsed:
+            pe = item["pe_number"]
+            key = (pe, item.get("project_code"), fiscal_year)
+            if key in seen:
+                continue
+
+            if pe in pe_numbers:
+                seen.add(key)
+                raw_items.append(item)
+            else:
+                text_fields = [
+                    item.get("project_title", ""),
+                    item.get("description_text", ""),
+                    item.get("pe_title", ""),
+                ]
+                matched = find_matched_keywords(text_fields, keywords)
+                if matched:
+                    item["_matched_r2_keywords"] = matched
+                    seen.add(key)
+                    raw_items.append(item)
+                    discovered_pes.add(pe)
+
+    if discovered_pes:
+        logger.info("PDF sub-element mining: discovered %d new PEs via R-2 keyword matches: %s",
+                    len(discovered_pes), ", ".join(sorted(discovered_pes)))
+
+    logger.info("PDF sub-element mining: %d raw rows before consolidation", len(raw_items))
+
+    consolidated = consolidate_r2_timeseries(raw_items)
+
+    for item in consolidated:
+        if not item.get("_matched_r2_keywords"):
+            text_fields = [
+                item.get("project_title", ""),
+                item.get("description_text", ""),
+                item.get("pe_title", ""),
+            ]
+            matched = find_matched_keywords(text_fields, keywords)
+            if matched:
+                item["_matched_r2_keywords"] = matched
+
+    logger.info("PDF sub-element mining: %d final project rows (%d discovered PEs)",
+                len(consolidated), len(discovered_pes))
+    return consolidated, discovered_pes
+
+
+def normalize_program_name(title: str) -> str:
+    """Extract a canonical short name for cross-PE matching."""
+    s = re.sub(r"^[A-Z0-9]+:\s*", "", title)
+    s = re.sub(r"\s*\([^)]*\)\s*", " ", s)
+    return " ".join(s.lower().split())
+
+
+def annotate_cross_pe_lineages(
+    conn: sqlite3.Connection,
+    cache_table: str,
+) -> None:
+    """Detect R-2 projects that migrated across PEs and annotate with lineage_note."""
+    rows = conn.execute(f"""
+        SELECT id, pe_number, line_item_title
+        FROM {cache_table}
+        WHERE exhibit_type = 'r2'
+    """).fetchall()
+
+    if not rows:
+        return
+
+    from collections import defaultdict
+    name_groups: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
+    for row_id, pe, title in rows:
+        norm = normalize_program_name(title)
+        if norm:
+            name_groups[norm].append((row_id, pe, title))
+
+    updates: list[tuple[str, int]] = []
+    for norm_name, members in name_groups.items():
+        pe_set = {pe for _, pe, _ in members}
+        if len(pe_set) < 2:
+            continue
+        sorted_members = sorted(members, key=lambda x: x[1])
+        for row_id, pe, title in sorted_members:
+            other_pes = sorted(p for p in pe_set if p != pe)
+            if not other_pes:
+                continue
+            note = "Also in PE " + ", ".join(other_pes)
+            updates.append((note, row_id))
+
+    if updates:
+        conn.executemany(
+            f"UPDATE {cache_table} SET lineage_note = ? WHERE id = ?",
+            updates,
+        )
+        logger.info("Cross-PE lineage: annotated %d R-2 rows", len(updates))
+
+
+# ── Query helpers ─────────────────────────────────────────────────────────────
+
+def apply_filters(
+    service: str | None,
+    exhibit: str | None,
+    fy_from: int | None,
+    fy_to: int | None,
+) -> tuple[str, list[Any]]:
+    """Build WHERE fragments for cache table filters."""
+    parts: list[str] = []
+    params: list[Any] = []
+    if service:
+        parts.append("organization_name LIKE ?")
+        params.append(f"%{service}%")
+    if exhibit:
+        parts.append("exhibit_type = ?")
+        params.append(exhibit)
+    return (" AND ".join(parts), params) if parts else ("", [])
+
+
+def cache_rows_to_dicts(
+    rows: list[sqlite3.Row],
+    fy_start: int = FY_START,
+    fy_end: int = FY_END,
+) -> list[dict]:
+    """Convert cache rows to dicts with refs nested structure."""
+    year_range = list(range(fy_start, fy_end + 1))
+    result: list[dict] = []
+    for r in rows:
+        d = dict(r)
+        for field in ("matched_keywords_row", "matched_keywords_desc"):
+            kw_json = d.get(field, "[]")
+            try:
+                d[field] = json.loads(kw_json) if kw_json else []
+            except (json.JSONDecodeError, TypeError):
+                d[field] = []
+        refs: dict[str, str] = {}
+        for yr in year_range:
+            ref_key = f"fy{yr}_ref"
+            val = d.pop(ref_key, None)
+            if val:
+                refs[f"fy{yr}"] = val
+        d["refs"] = refs
+        result.append(d)
+    return result
+
+
+# ── Cache builder ─────────────────────────────────────────────────────────────
+
+def build_cache_table(
+    conn: sqlite3.Connection,
+    cache_table: str,
+    keywords: list[str],
+    desc_keywords: list[str],
+    fy_start: int = FY_START,
+    fy_end: int = FY_END,
+    search_cols: list[str] | None = None,
+    progress_callback: Any | None = None,
+) -> int:
+    """Full cache rebuild: keyword match → pivot → PDF mine → insert.
+
+    Returns the number of rows inserted.
+
+    *progress_callback*, if provided, is called with ``(step_name, detail_dict)``
+    at key milestones so callers can surface build progress.
+    """
+    def _progress(step: str, **kw: Any) -> None:
+        if progress_callback:
+            progress_callback(step, kw)
+
+    _progress("collecting_pes")
+
+    # 1. Collect matching PE numbers
+    (bl_pes, _desc_pes), matched_pes = collect_matching_pe_numbers_split(
+        conn, keywords, desc_keywords, search_cols,
+    )
+    if not matched_pes:
+        conn.execute(f"DROP TABLE IF EXISTS {cache_table}")
+        conn.execute(cache_ddl(cache_table, fy_start, fy_end))
+        conn.commit()
+        logger.info("No matching PEs found — cache table is empty.")
+        _progress("done", row_count=0, pe_count=0)
+        return 0
+
+    _progress("building_pivot", pe_count=len(matched_pes))
+
+    # 2. Get description text per PE
+    desc_map = get_description_map(conn, matched_pes)
+    desc_kw_map = get_desc_keyword_map(conn, matched_pes, desc_keywords)
+
+    # 3. Get amount columns
+    all_amount_cols = set(get_amount_columns(conn))
+
+    # 4. Build pivot query
+    pe_placeholders = ", ".join("?" for _ in matched_pes)
+    pe_params = list(matched_pes)
+
+    year_range = list(range(fy_start, fy_end + 1))
+    year_parts: list[str] = []
+    for yr in year_range:
+        priority = [
+            f"amount_fy{yr}_actual",
+            f"amount_fy{yr}_enacted",
+            f"amount_fy{yr}_total",
+            f"amount_fy{yr}_request",
+        ]
+        available = [c for c in priority if c in all_amount_cols]
+        if not available:
+            coalesce_expr = "NULL"
+        else:
+            parts = [f"MAX(CASE WHEN {c} > 0 THEN {c} END)" for c in available]
+            coalesce_expr = f"COALESCE({', '.join(parts)}, 0)"
+        year_parts.append(f"{coalesce_expr} AS fy{yr}")
+        year_parts.append(
+            f"MAX(CASE WHEN {available[0]} IS NOT NULL THEN source_file END) AS fy{yr}_ref"
+            if available else f"NULL AS fy{yr}_ref"
+        )
+
+    year_cols_sql = ",\n        ".join(year_parts)
+    sql = f"""
+        SELECT
+            pe_number,
+            MAX(organization_name) AS organization_name,
+            exhibit_type,
+            line_item_title,
+            MAX(budget_activity) AS budget_activity,
+            MAX(budget_activity_title) AS budget_activity_title,
+            MAX(appropriation_title) AS appropriation_title,
+            MAX(account_title) AS account_title,
+            {year_cols_sql}
+        FROM budget_lines
+        WHERE pe_number IN ({pe_placeholders})
+          AND CAST(fiscal_year AS INTEGER) >= {fy_start}
+        GROUP BY pe_number, exhibit_type, line_item_title
+        HAVING COUNT(*) > 0
+        ORDER BY pe_number, exhibit_type, line_item_title
+    """
+
+    rows = conn.execute(sql, pe_params).fetchall()
+
+    # 5. Recreate cache table
+    conn.execute(f"DROP TABLE IF EXISTS {cache_table}")
+    conn.execute(cache_ddl(cache_table, fy_start, fy_end))
+
+    # 6. Insert enriched rows
+    insert_cols = [
+        "pe_number", "organization_name", "exhibit_type", "line_item_title",
+        "budget_activity", "budget_activity_title", "budget_activity_norm",
+        "appropriation_title", "account_title", "color_of_money",
+        "matched_keywords_row", "matched_keywords_desc", "description_text",
+    ]
+    for yr in year_range:
+        insert_cols.extend([f"fy{yr}", f"fy{yr}_ref"])
+    placeholders_insert = ", ".join("?" for _ in insert_cols)
+    insert_sql = f"INSERT INTO {cache_table} ({', '.join(insert_cols)}) VALUES ({placeholders_insert})"
+
+    count = 0
+    for r in rows:
+        d = dict(r)
+        text_fields = [d.get("line_item_title"), d.get("account_title"), d.get("budget_activity_title")]
+        row_kws = find_matched_keywords(text_fields, keywords)
+        desc_kws = desc_kw_map.get(d["pe_number"], [])
+
+        vals = [
+            d["pe_number"],
+            d.get("organization_name"),
+            d.get("exhibit_type"),
+            d.get("line_item_title"),
+            d.get("budget_activity"),
+            d.get("budget_activity_title"),
+            normalize_budget_activity(d.get("budget_activity"), d.get("budget_activity_title")),
+            d.get("appropriation_title"),
+            d.get("account_title"),
+            color_of_money(d.get("appropriation_title")),
+            json.dumps(row_kws) if row_kws else "[]",
+            json.dumps(desc_kws) if desc_kws else "[]",
+            desc_map.get(d["pe_number"]) or None,
+        ]
+        for yr in year_range:
+            vals.append(d.get(f"fy{yr}"))
+            vals.append(d.get(f"fy{yr}_ref"))
+
+        conn.execute(insert_sql, vals)
+        count += 1
+
+    _progress("mining_pdfs", budget_line_rows=count)
+
+    # 6b. Insert PDF-mined R-2/R-2A sub-elements
+    pdf_subelements, discovered_pes = mine_pdf_subelements(
+        conn, matched_pes, keywords, core_pes=bl_pes, fy_start=fy_start,
+    )
+
+    # For PEs discovered via R-2 keyword matches, also insert R-1 budget_lines rows
+    if discovered_pes:
+        disc_placeholders = ", ".join("?" for _ in discovered_pes)
+        disc_sql = f"""
+            SELECT
+                pe_number,
+                MAX(organization_name) AS organization_name,
+                exhibit_type,
+                line_item_title,
+                MAX(budget_activity) AS budget_activity,
+                MAX(budget_activity_title) AS budget_activity_title,
+                MAX(appropriation_title) AS appropriation_title,
+                MAX(account_title) AS account_title,
+                {year_cols_sql}
+            FROM budget_lines
+            WHERE pe_number IN ({disc_placeholders})
+              AND CAST(fiscal_year AS INTEGER) >= {fy_start}
+            GROUP BY pe_number, exhibit_type, line_item_title
+            ORDER BY pe_number, exhibit_type, line_item_title
+        """
+        disc_rows = conn.execute(disc_sql, list(discovered_pes)).fetchall()
+        disc_desc_map = get_description_map(conn, discovered_pes)
+        disc_desc_kw_map = get_desc_keyword_map(conn, discovered_pes, desc_keywords)
+        for r in disc_rows:
+            d = dict(r)
+            text_fields = [d.get("line_item_title"), d.get("account_title"), d.get("budget_activity_title")]
+            row_kws = find_matched_keywords(text_fields, keywords)
+            dkws = disc_desc_kw_map.get(d["pe_number"], [])
+            vals = [
+                d["pe_number"], d.get("organization_name"), d.get("exhibit_type"),
+                d.get("line_item_title"), d.get("budget_activity"), d.get("budget_activity_title"),
+                normalize_budget_activity(d.get("budget_activity"), d.get("budget_activity_title")),
+                d.get("appropriation_title"), d.get("account_title"),
+                color_of_money(d.get("appropriation_title")),
+                json.dumps(row_kws) if row_kws else "[]",
+                json.dumps(dkws) if dkws else "[]",
+                disc_desc_map.get(d["pe_number"]) or None,
+            ]
+            for yr in year_range:
+                vals.append(d.get(f"fy{yr}"))
+                vals.append(d.get(f"fy{yr}_ref"))
+            conn.execute(insert_sql, vals)
+            count += 1
+        logger.info("Cache: added %d R-1 rows for %d discovered PEs",
+                    len(disc_rows), len(discovered_pes))
+
+    pdf_count = 0
+    for item in pdf_subelements:
+        pe = item["pe_number"]
+        title = item["project_title"]
+        if item.get("project_code"):
+            title = f"{item['project_code']}: {title}"
+
+        row_kws = item.get("_matched_r2_keywords") or find_matched_keywords([title], keywords)
+        desc_kws = desc_kw_map.get(pe, [])
+
+        r2_desc = item.get("description_text", "")
+        description = r2_desc if r2_desc else (desc_map.get(pe) or None)
+
+        vals = [
+            pe,
+            None,  # organization_name — not in PDF text, filled below
+            "r2",
+            title,
+            None,  # budget_activity
+            None,  # budget_activity_title
+            None,  # budget_activity_norm
+            None,  # appropriation_title
+            item.get("pe_title"),
+            "RDT&E",
+            json.dumps(row_kws) if row_kws else "[]",
+            json.dumps(desc_kws) if desc_kws else "[]",
+            description,
+        ]
+        fy_refs = item.get("fy_refs", {})
+        for yr in year_range:
+            fy_key = f"fy{yr}"
+            vals.append(item["fy_amounts"].get(fy_key))
+            vals.append(fy_refs.get(fy_key) if item["fy_amounts"].get(fy_key) is not None else None)
+
+        conn.execute(insert_sql, vals)
+        pdf_count += 1
+
+    if pdf_count:
+        # Back-fill organization_name from R-1 rows
+        conn.execute(f"""
+            UPDATE {cache_table} AS c
+            SET organization_name = (
+                SELECT r1.organization_name
+                FROM {cache_table} r1
+                WHERE r1.pe_number = c.pe_number
+                  AND r1.exhibit_type = 'r1'
+                  AND r1.organization_name IS NOT NULL
+                LIMIT 1
+            )
+            WHERE c.exhibit_type = 'r2' AND c.organization_name IS NULL
+        """)
+
+        # Fallback: infer organization from source_file path
+        latest_ref_col = f"fy{year_range[-1]}_ref"
+        fallback_ref_col = f"fy{year_range[-2]}_ref" if len(year_range) > 1 else latest_ref_col
+        for path_fragment, org_name in _ORG_FROM_PATH:
+            conn.execute(
+                f"""
+                UPDATE {cache_table}
+                SET organization_name = ?
+                WHERE (organization_name IS NULL OR organization_name = '')
+                  AND ({latest_ref_col} LIKE ? OR {fallback_ref_col} LIKE ?)
+                """,
+                [org_name, f"%{path_fragment}%", f"%{path_fragment}%"],
+            )
+
+    count += pdf_count
+    logger.info("Cache: %d R-2 sub-element rows from PDFs", pdf_count)
+
+    # 6c. Detect and annotate cross-PE program lineages
+    if pdf_count:
+        annotate_cross_pe_lineages(conn, cache_table)
+
+    # 7. Create indexes for fast filtering
+    # Use short hash suffix to avoid name collisions across cache tables
+    idx_suffix = cache_table.replace(".", "_")
+    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{idx_suffix}_pe ON {cache_table}(pe_number)")
+    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{idx_suffix}_org ON {cache_table}(organization_name)")
+    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{idx_suffix}_ex ON {cache_table}(exhibit_type)")
+
+    conn.commit()
+    logger.info("Cache rebuilt: %d rows (%d from budget_lines, %d from PDFs)",
+                count, count - pdf_count, pdf_count)
+    _progress("done", row_count=count, pe_count=len(matched_pes))
+    return count
+
+
+def ensure_cache(
+    conn: sqlite3.Connection,
+    cache_table: str,
+    keywords: list[str],
+    desc_keywords: list[str],
+    fy_start: int = FY_START,
+    fy_end: int = FY_END,
+    progress_callback: Any | None = None,
+) -> bool:
+    """Ensure cache table exists and is populated. Returns True if data available."""
+    try:
+        n = conn.execute(f"SELECT COUNT(*) FROM {cache_table}").fetchone()[0]
+        if n > 0:
+            return True
+    except sqlite3.OperationalError:
+        pass
+    logger.info("%s not found or empty — rebuilding...", cache_table)
+    return build_cache_table(
+        conn, cache_table, keywords, desc_keywords,
+        fy_start=fy_start, fy_end=fy_end,
+        progress_callback=progress_callback,
+    ) > 0
