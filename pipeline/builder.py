@@ -2448,16 +2448,36 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     _all_xlsx = sorted(docs_dir.rglob("*.xlsx"))
     pdf_files = sorted(docs_dir.rglob("*.pdf"))
 
-    # Exclude *_display* files — the Comptroller publishes both e.g.
-    # r1.xlsx and r1_display.xlsx which contain identical data in a
-    # different formatting.  Ingesting both creates ~49% duplicate rows.
-    _display_count = sum(1 for f in _all_xlsx if "_display" in f.stem.lower())
-    xlsx_files = [f for f in _all_xlsx if "_display" not in f.stem.lower()]
-    if _display_count:
-        logger.info("Excluded %d *_display* Excel files (duplicate data)",
-                    _display_count)
-        print(f"  Excluded {_display_count} *_display* Excel files "
+    # Exclude *_display* files when a corresponding base file exists —
+    # the Comptroller publishes both e.g. r1.xlsx and r1_display.xlsx
+    # which contain identical data in a different formatting.  Ingesting
+    # both creates ~49% duplicate rows.  However, some fiscal years
+    # (e.g. FY2026) only publish _display variants, so we keep those.
+    _base_stems = {
+        (f.stem.lower(), f.parent): f
+        for f in _all_xlsx if "_display" not in f.stem.lower()
+    }
+    _display_files = [f for f in _all_xlsx if "_display" in f.stem.lower()]
+    _excluded_display = []
+    _kept_display = []
+    for f in _display_files:
+        base_stem = f.stem.lower().replace("_display", "")
+        if (base_stem, f.parent) in _base_stems:
+            _excluded_display.append(f)
+        else:
+            _kept_display.append(f)
+    xlsx_files = [f for f in _all_xlsx if "_display" not in f.stem.lower()] + _kept_display
+    xlsx_files.sort()
+    if _excluded_display:
+        logger.info("Excluded %d *_display* Excel files (base file exists)",
+                    len(_excluded_display))
+        print(f"  Excluded {len(_excluded_display)} *_display* Excel files "
               f"(duplicate formatting variants)", flush=True)
+    if _kept_display:
+        logger.info("Kept %d *_display* Excel files (no base file available)",
+                    len(_kept_display))
+        print(f"  Kept {len(_kept_display)} *_display* Excel files "
+              f"(no base file for these FYs)", flush=True)
 
     # Exclude *a.xlsx alternate Comptroller files (e.g. r1a.xlsx, p1a.xlsx).
     # These contain identical data to the base files and create duplicate rows.

@@ -61,10 +61,10 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
     _Fix: `api/routes/frontend.py:540` reverses FY list. Tests: `test_frontend_helpers.py::TestGetFiscalYears`._
 19. **[STRUCTURAL — documented in PRD §9]** **Selecting FY 2012 shows blank** (no data for that year)
     _Note: FY2000-2009 documents not publicly available._
-20. **[CODE COMPLETE — run repair_database.py on production]** **Service dropdown has same duplicates** (ARMY/Army, AF/Air Force, NAVY/Navy)
-    _Fix: Same as #3. Action: run `repair_database.py` step_3 on production DB, then verify /charts dropdown._
-21. **[CODE COMPLETE — run repair_database.py on production]** **Appropriation Breakdown donut is 100% "Unknown"**
-    _Fix: Same as #5. Action: run `repair_database.py` step_4 on production DB, then verify /charts donut._
+20. **[RESOLVED — verified 2026-04-02]** **Service dropdown has same duplicates** (ARMY/Army, AF/Air Force, NAVY/Navy)
+    _Fix: Same as #3. Verified: `repair_database.py` run on production DB; org normalization confirmed 0 rows needing fix (already normalized)._
+21. **[RESOLVED — verified 2026-04-02]** **Appropriation Breakdown donut is 100% "Unknown"**
+    _Fix: Same as #5. Verified: `repair_database.py` run on production DB; reference tables populated (225 appropriation titles, 54 services, 17 exhibit types)._
 
 ### Programs (/programs)
 
@@ -209,12 +209,12 @@ Removed the hero version (`name="hero_source"`) radio buttons. The sidebar versi
 
 ---
 
-### 38. Service/Agency Dropdown — Potentially Dozens of Entries **[CODE COMPLETE — run repair_database.py on production]**
+### ~~38. Service/Agency Dropdown — Potentially Dozens of Entries~~ **[RESOLVED — verified 2026-04-02]**
 
 **Root cause:** Database-level issue. Organization names need normalization.
 
 **Fix applied:** Same fix as #3 — org normalization in `utils/normalization.py`.
-**Action:** Run `repair_database.py` step_3 on production DB, then verify /programs dropdown.
+**Verified:** `repair_database.py` run on production DB 2026-04-02; all org names canonical (54 distinct services, no duplicates).
 
 ---
 
@@ -410,17 +410,20 @@ and `source_file='budget_lines'` to distinguish from PDF-sourced descriptions.
 
 ---
 
-#### 56. Fiscal Year Gaps in PE Funding Matrices **[OPEN — DB]**
+#### ~~56. Fiscal Year Gaps in PE Funding Matrices~~ **[RESOLVED — 2026-04-02]**
 
-Some PEs show funding for FY2025-2026 but nothing earlier, even when historical
-data should exist. Requires cross-referencing `line_item_amounts` coverage per PE.
+**Root cause:** The builder excluded all `*_display.xlsx` files, but FY2026 (and FY2012)
+only published display variants on the Comptroller site — no base Excel files exist.
+Only `c1.xlsx` was ingested for FY2026, yielding 581 rows vs ~3,000+ for other years.
 
-```sql
-SELECT li.pe_number, MIN(a.target_fy) as fy_min, MAX(a.target_fy) as fy_max,
-       COUNT(DISTINCT a.target_fy) as fy_count
-FROM line_items li JOIN line_item_amounts a ON a.line_item_id = li.id
-GROUP BY li.pe_number HAVING fy_count < 3 ORDER BY fy_count;
-```
+**Fix:** Modified display-file exclusion logic in `pipeline/builder.py` to only exclude
+`_display` files when a corresponding base file exists in the same directory. Display
+files without a base file are now kept and ingested.
+
+**Result:** FY2026 rows: 581 → 3,094. `amount_fy2026_request` non-zero: 98 → 2,097.
+FY2012 also gained D8Z PE data from its display files. Total DB: 47,531 → 51,053 rows.
+
+**Files changed:** `pipeline/builder.py` (display-file exclusion logic, ~line 2451)
 
 ---
 
@@ -659,11 +662,9 @@ are rows without enough context to infer an appropriation code.
 
 | Status | Count | Issues |
 |--------|-------|--------|
-| **RESOLVED** | 49 | #1-4, #5, #6/14, #7/17/22, #9, #11-13, #15, #18, #26, #27, #29-37, #39-48, #50-52, #54, #55, #57-61, #63 |
-| **CODE COMPLETE — run repair_database.py** | 3 | #20, #21, #38 (need org normalization + appropriation backfill on production DB) |
+| **RESOLVED** | 53 | #1-4, #5, #6/14, #7/17/22, #9, #11-13, #15, #18, #20, #21, #26, #27, #29-48, #50-52, #54-61, #63 |
 | **STRUCTURAL — documented in PRD §9** | 7 | #8, #16, #19, #23, #24, #28, #53 (data coverage limitations) |
 | **OPEN — partial** | 2 | #10, #25 (FY mismatch — remaining sub-items are Group D, deferred) |
-| **OPEN** | 1 | #56 (FY gaps in PE funding — needs DB investigation) |
 | **DOCUMENTED** | 1 | #62 (tag coverage assessment) |
 | **RESOLVED (partial)** | 1 | #49 (inline styles — 301→161, 47% reduction; remainder has no utility match) |
 
