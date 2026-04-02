@@ -154,6 +154,18 @@ def collect_matching_pe_numbers_split(
             pe_upper,
         ).fetchall()
         bl_matched.update(r[0] for r in rows if r[0])
+        # Fallback: check pe_index for PDF-only PEs not in budget_lines
+        remaining_pes = set(pe_upper) - bl_matched
+        if remaining_pes:
+            try:
+                rp = ", ".join("?" for _ in remaining_pes)
+                pi_rows = conn.execute(
+                    f"SELECT DISTINCT pe_number FROM pe_index WHERE pe_number IN ({rp})",
+                    list(remaining_pes),
+                ).fetchall()
+                bl_matched.update(r[0] for r in pi_rows if r[0])
+            except sqlite3.OperationalError:
+                pass  # pe_index table may not exist
 
     # (a) Budget-lines keyword match
     kw_clauses: list[str] = []
