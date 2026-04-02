@@ -37,9 +37,6 @@ _DOWNLOAD_COLUMNS = [
     "amount_fy2026_total", "amount_type", "amount_unit", "currency_year",
 ]
 
-# Backward-compatible alias — canonical definition lives in utils/query.py
-_ALLOWED_SORT = ALLOWED_SORT_COLUMNS
-
 
 def _iter_rows(conn: sqlite3.Connection, sql: str, params: list[Any]):
     """Yield rows one at a time to enable streaming."""
@@ -103,7 +100,7 @@ def _build_download_sql(
     total = conn.execute(count_sql, params).fetchone()[0]
 
     col_list = ", ".join(export_cols)
-    sort_col = sort_by if sort_by in _ALLOWED_SORT else "id"
+    sort_col = sort_by if sort_by in ALLOWED_SORT_COLUMNS else "id"
     direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
     sql = (f"SELECT {col_list} FROM budget_lines {where} "
            f"ORDER BY {sort_col} {direction} LIMIT ?")

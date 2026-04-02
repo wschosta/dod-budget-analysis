@@ -18,7 +18,7 @@ from typing import Any
 
 from scripts.clean_pe_narratives import clean_narrative
 from utils.database import get_amount_columns
-from utils.patterns import PE_SUFFIX_PATTERN
+from utils.patterns import PE_NUMBER_STRICT_CI, PE_SUFFIX_PATTERN
 
 logger = logging.getLogger(__name__)
 
@@ -152,8 +152,7 @@ def collect_matching_pe_numbers_split(
     bl_matched: set[str] = set()
 
     # (a0) Direct PE number match — detect keywords that look like PE numbers
-    pe_pattern = re.compile(rf"^\d{{7}}{PE_SUFFIX_PATTERN}$", re.IGNORECASE)
-    pe_keywords = [kw for kw in keywords if pe_pattern.match(kw.strip())]
+    pe_keywords = [kw for kw in keywords if PE_NUMBER_STRICT_CI.match(kw.strip())]
     if pe_keywords:
         pe_placeholders = ", ".join("?" for _ in pe_keywords)
         pe_upper = [pk.strip().upper() for pk in pe_keywords]
@@ -223,20 +222,28 @@ def get_description_map(
     except sqlite3.OperationalError:
         return {}
 
+    placeholders = ", ".join("?" for _ in pe_numbers)
+    pe_list = list(pe_numbers)
+    rows = conn.execute(
+        f"SELECT pe_number, description_text, "
+        f"CASE "
+        f"  WHEN section_header LIKE '%Mission Description%' THEN 1 "
+        f"  WHEN section_header LIKE '%Accomplishments%' THEN 2 "
+        f"  WHEN section_header LIKE '%Acquisition Strategy%' THEN 3 "
+        f"  ELSE 4 END AS priority "
+        f"FROM pe_descriptions "
+        f"WHERE pe_number IN ({placeholders}) AND section_header IS NOT NULL "
+        f"ORDER BY pe_number, priority",
+        pe_list,
+    ).fetchall()
+
+    # Group by PE, take top 3 per PE
+    from itertools import groupby
+
     result: dict[str, str] = {}
-    for pe in pe_numbers:
-        rows = conn.execute(
-            "SELECT description_text FROM pe_descriptions "
-            "WHERE pe_number = ? AND section_header IS NOT NULL "
-            "ORDER BY CASE "
-            "  WHEN section_header LIKE '%Mission Description%' THEN 1 "
-            "  WHEN section_header LIKE '%Accomplishments%' THEN 2 "
-            "  WHEN section_header LIKE '%Acquisition Strategy%' THEN 3 "
-            "  ELSE 4 END "
-            "LIMIT 3",
-            [pe],
-        ).fetchall()
-        text = " ".join(r[0] for r in rows if r[0])
+    for pe, group in groupby(rows, key=lambda r: r[0]):
+        texts = [r[1] for r in group if r[1]][:3]
+        text = " ".join(texts)
         if len(text) > 2000:
             text = text[:2000] + "…"
         if text.strip():
@@ -250,7 +257,7 @@ def get_desc_keyword_map(
     desc_keywords: list[str],
 ) -> dict[str, list[str]]:
     """Build PE → list of desc_keywords that match in pe_descriptions (via SQL LIKE)."""
-    if not pe_numbers:
+    if not pe_numbers or not desc_keywords:
         return {}
     try:
         conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
@@ -259,18 +266,25 @@ def get_desc_keyword_map(
 
     placeholders = ", ".join("?" for _ in pe_numbers)
     pe_list = list(pe_numbers)
-    result: dict[str, list[str]] = {}
 
-    for kw in desc_keywords:
-        rows = conn.execute(
-            f"SELECT DISTINCT pe_number FROM pe_descriptions "
-            f"WHERE pe_number IN ({placeholders}) AND description_text LIKE ?",
-            pe_list + [f"%{kw}%"],
-        ).fetchall()
-        for r in rows:
-            result.setdefault(r[0], [])
-            if kw not in result[r[0]]:
-                result[r[0]].append(kw)
+    # Single query: fetch all (pe_number, description_text) pairs
+    rows = conn.execute(
+        f"SELECT DISTINCT pe_number, description_text FROM pe_descriptions "
+        f"WHERE pe_number IN ({placeholders})",
+        pe_list,
+    ).fetchall()
+
+    # Application-side keyword matching
+    result: dict[str, list[str]] = {}
+    for pe, desc_text in rows:
+        if not desc_text:
+            continue
+        desc_lower = desc_text.lower()
+        for kw in desc_keywords:
+            if kw.lower() in desc_lower:
+                result.setdefault(pe, [])
+                if kw not in result[pe]:
+                    result[pe].append(kw)
 
     return result
 

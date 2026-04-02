@@ -9,8 +9,6 @@ Tests the schema migration framework handles version upgrades correctly:
 5. All expected indexes exist after migration.
 6. FTS5 content-sync triggers exist after migration.
 """
-# DONE [Group: BEAR] BEAR-008: Add database migration framework tests (~2,500 tokens)
-
 import sqlite3
 
 import pytest

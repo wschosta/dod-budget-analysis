@@ -8,8 +8,6 @@ Tests that the system can handle pre-FY2024 data:
 4. Verify search across mixed historical + current FY data.
 5. Verify aggregations work correctly with historical data.
 """
-# DONE [Group: BEAR] BEAR-002: Add historical data compatibility tests (FY2017-2023 fixtures) (~2,500 tokens)
-
 import sqlite3
 
 import pytest

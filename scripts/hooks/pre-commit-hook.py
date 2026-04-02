@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# DONE [Group: BEAR] BEAR-012: Pre-commit hook updated for scripts/hooks/ location
 """
 Pre-commit hook for optimization tests
 

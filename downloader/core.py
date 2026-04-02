@@ -62,11 +62,6 @@ DEFAULT_OUTPUT_DIR = Path("DoD_Budget_Documents")
 
 # ---- Progress Tracker ----
 
-# format_bytes and elapsed are now imported from utils.common
-# This consolidates utilities across the codebase for easier maintenance
-# and ensures consistent behavior across all tools.
-
-
 class ProgressTracker:
     """Tracks overall download session progress and renders status bars.
 

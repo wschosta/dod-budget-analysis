@@ -43,9 +43,6 @@ _SELECT_ALL_COLUMNS = """
     quantity_fy2026_request, quantity_fy2026_total
 """
 
-# Backward-compatible alias — canonical definition lives in utils/query.py
-_ALLOWED_SORT = ALLOWED_SORT_COLUMNS
-
 
 @router.get("", response_model=PaginatedResponse, summary="List budget lines")
 def list_budget_lines(
@@ -66,10 +63,10 @@ def list_budget_lines(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> PaginatedResponse:
     """Return a paginated, filtered list of budget line items."""
-    if sort_by not in _ALLOWED_SORT:
+    if sort_by not in ALLOWED_SORT_COLUMNS:
         raise HTTPException(
             status_code=400,
-            detail=f"sort_by must be one of: {sorted(_ALLOWED_SORT)}",
+            detail=f"sort_by must be one of: {sorted(ALLOWED_SORT_COLUMNS)}",
         )
 
     # FTS5 free-text search: resolve matching row IDs first

@@ -39,8 +39,6 @@ LION-107 [DONE]: Add rebuild orchestration with timing and integrity checks.
 
 """
 
-# DONE [Group: BEAR] BEAR-010: Data refresh e2e test — tests/test_bear_refresh_e2e.py (14 tests)
-
 import argparse
 import json
 import shutil

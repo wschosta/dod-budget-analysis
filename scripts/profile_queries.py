@@ -10,8 +10,6 @@ Usage:
     python scripts/profile_queries.py --json    # JSON output + write profile_report.json
     python scripts/profile_queries.py --rows 50000  # Custom row count
 """
-# DONE [Group: BEAR] BEAR-011: Add performance profiling to CI (~2,500 tokens)
-
 import argparse
 import json
 import sqlite3

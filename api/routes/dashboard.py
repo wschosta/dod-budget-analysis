@@ -23,14 +23,6 @@ def clear_dashboard_cache() -> dict:
 
 
 
-def _detect_fy_columns(conn: sqlite3.Connection) -> tuple[str, str]:
-    """Detect the best FY request and enacted column names dynamically.
-
-    Delegates to :func:`utils.query.detect_fy_columns`.
-    """
-    return detect_fy_columns(conn)
-
-
 @router.get("/summary", summary="Dashboard summary statistics")
 def dashboard_summary(
     fiscal_year: str | None = Query(None, description="Filter by fiscal year (e.g. '2026')"),
@@ -59,7 +51,7 @@ def dashboard_summary(
     if cached is not None:
         return cached
 
-    fy26_col, fy25_col = _detect_fy_columns(conn)
+    fy26_col, fy25_col = detect_fy_columns(conn)
 
     # FIX-006: Exclude summary exhibits (p1, r1, o1, m1, c1, rf1, p1r) to avoid
     # double-counting with detail exhibits. Also exclude rows with invalid

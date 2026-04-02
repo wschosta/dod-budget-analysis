@@ -77,19 +77,6 @@ def get_facets(
     result: dict[str, list[dict]] = {}
 
     # Fiscal year facet (excludes fiscal_year from its own filter)
-    where, params = _build_conditions(
-        fiscal_year, service, exhibit_type, budget_type,
-        exclude_dim="fiscal_year",
-    )
-    fy_rows = conn.execute(
-        f"SELECT fiscal_year AS value, COUNT(*) AS count "
-        f"FROM budget_lines {where} "
-        f"WHERE fiscal_year IS NOT NULL "
-        f"{'AND ' + where.replace('WHERE ', '') if where else ''}"
-        f"GROUP BY fiscal_year ORDER BY fiscal_year DESC",
-        params,
-    ).fetchall()
-    # Simplify: run a single clean query per dimension
     where_fy, params_fy = _build_conditions(
         fiscal_year, service, exhibit_type, budget_type,
         exclude_dim="fiscal_year",

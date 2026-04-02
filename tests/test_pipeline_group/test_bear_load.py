@@ -10,8 +10,6 @@ Verify the system handles large datasets without degradation:
 
 Uses time.monotonic() for timing assertions.
 """
-# DONE [Group: BEAR] BEAR-004: Add load testing for 100K-row datasets (~2,500 tokens)
-
 import sqlite3
 import time
 

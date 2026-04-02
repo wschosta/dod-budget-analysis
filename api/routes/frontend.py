@@ -11,8 +11,6 @@ Routes:
     GET /partials/detail/{id}   → partials/detail.html (HTMX swap target)
 """
 
-# DONE [Group: LION] LION-001: Add error page templates (404, 500) with branded styling (~1,500 tokens)
-
 import logging
 import sqlite3
 from typing import Any
@@ -26,7 +24,7 @@ import json as _json
 from pathlib import Path as _Path
 
 from api.database import get_db
-from utils.database import get_amount_columns
+from utils.database import get_amount_columns, table_exists
 from pipeline.builder import EXHIBIT_TYPES as _EXHIBIT_TYPE_NAMES
 from utils.cache import TTLCache
 from utils.query import (
@@ -437,7 +435,7 @@ def _query_results(
     # Batch-query total value + FY range for PE numbers in current results.
     pe_numbers = list({r["pe_number"] for r in items if r.get("pe_number")})
     pe_totals: dict[str, dict] = {}
-    if pe_numbers and _table_exists(conn, "line_item_amounts"):
+    if pe_numbers and table_exists(conn, "line_item_amounts"):
         try:
             placeholders = ",".join("?" * len(pe_numbers))
             total_rows = conn.execute(
@@ -606,7 +604,7 @@ def detail_partial(
     related_items: list[dict] = []
     pe_number = item.get("pe_number")
 
-    if pe_number and _table_exists(conn, "pe_tags"):
+    if pe_number and table_exists(conn, "pe_tags"):
         try:
             # Get tags for this item's PE
             item_tags = conn.execute(
@@ -679,13 +677,6 @@ def detail_partial(
 
 # ── Program Explorer routes ──────────────────────────────────────────────────
 
-def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
-    """Check if a table exists in the database."""
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
-    ).fetchone()
-    return row is not None
-
 
 @router.get("/programs", response_class=HTMLResponse, include_in_schema=False)
 def programs(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
@@ -695,7 +686,7 @@ def programs(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HT
     items: list[dict] = []
     total = 0
 
-    has_pe_data = _table_exists(conn, "pe_index")
+    has_pe_data = table_exists(conn, "pe_index")
 
     params = request.query_params
     try:
@@ -745,7 +736,7 @@ def program_detail(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> HTMLResponse:
     """Program Element detail page."""
-    if not _table_exists(conn, "pe_index"):
+    if not table_exists(conn, "pe_index"):
         raise HTTPException(status_code=404, detail="Program enrichment data not available. "
                             "Run enrich_budget_db.py to populate PE data.")
     try:
@@ -805,7 +796,7 @@ def spruill_table_partial(
     fiscal_years: list[str] = []
     pe_count = 0
 
-    if len(pe_list) >= 2 and _table_exists(conn, "budget_lines"):
+    if len(pe_list) >= 2 and table_exists(conn, "budget_lines"):
         try:
             from api.routes.pe import get_spruill_table
             result = get_spruill_table(pe=pe_list, detail=detail, conn=conn)
@@ -844,7 +835,7 @@ def program_list_partial(
     except (ValueError, TypeError):
         offset = 0
 
-    if _table_exists(conn, "pe_index"):
+    if table_exists(conn, "pe_index"):
         try:
             from api.routes.pe import list_pes
             tag_values = params.getlist("tag") or None
@@ -882,7 +873,7 @@ def program_descriptions_partial(
     descriptions: list[dict] = []
     total = 0
 
-    if _table_exists(conn, "pe_descriptions"):
+    if table_exists(conn, "pe_descriptions"):
         try:
             from api.routes.pe import get_pe_descriptions
             result = get_pe_descriptions(pe_number, fy=None, section=None, limit=10, offset=0, conn=conn)
@@ -920,7 +911,7 @@ def program_related_partial(
     except (ValueError, TypeError):
         pass
 
-    if _table_exists(conn, "pe_lineage"):
+    if table_exists(conn, "pe_lineage"):
         try:
             from api.routes.pe import get_pe_related
             result = get_pe_related(
@@ -954,7 +945,7 @@ def program_projects_partial(
     """HTMX partial: Project-level descriptions for a PE."""
     projects: list[dict] = []
 
-    if _table_exists(conn, "project_descriptions"):
+    if table_exists(conn, "project_descriptions"):
         try:
             from api.routes.pe import get_pe
             pe_data = get_pe(pe_number, conn=conn)
@@ -984,7 +975,7 @@ def program_changes_partial(
         "pct_change": None,
     }
 
-    if _table_exists(conn, "budget_lines"):
+    if table_exists(conn, "budget_lines"):
         try:
             from api.routes.pe import get_pe_changes
             result = get_pe_changes(pe_number, conn=conn)
@@ -1032,7 +1023,7 @@ def program_pdf_pages_partial(
     except (ValueError, TypeError):
         offset = 0
 
-    if _table_exists(conn, "pdf_pe_numbers") or _table_exists(conn, "pdf_pages"):
+    if table_exists(conn, "pdf_pe_numbers") or table_exists(conn, "pdf_pages"):
         try:
             from api.routes.pe import get_pe_pdf_pages
             result = get_pe_pdf_pages(pe_number, fy=fy, limit=limit, offset=offset, conn=conn)
@@ -1058,7 +1049,7 @@ def top_changes_partial(
     increases: list[dict] = []
     decreases: list[dict] = []
 
-    if _table_exists(conn, "budget_lines"):
+    if table_exists(conn, "budget_lines"):
         try:
             from api.routes.pe import get_top_changes
             inc_result = get_top_changes(

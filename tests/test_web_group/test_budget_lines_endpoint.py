@@ -11,7 +11,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from api.routes.budget_lines import list_budget_lines, get_budget_line, _ALLOWED_SORT
+from api.routes.budget_lines import list_budget_lines, get_budget_line
+from utils.query import ALLOWED_SORT_COLUMNS as _ALLOWED_SORT
 
 
 @pytest.fixture()

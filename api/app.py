@@ -32,7 +32,7 @@ import logging
 import logging.handlers
 import time
 import uuid
-from collections import defaultdict
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -151,7 +151,7 @@ _metrics: dict = {
     "request_count": 0,
     "error_count": 0,
     "blocked_count": 0,
-    "response_times_ms": [],  # capped at last 100 entries
+    "response_times_ms": deque(maxlen=100),
 }
 _RESPONSE_TIME_WINDOW = 100  # number of recent response times to average
 
@@ -288,8 +288,6 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    # DONE [Group: TIGER] TIGER-009: Add Cache-Control, ETag, and 304 response headers
-
     # ── TIGER-009: ETag + Cache-Control middleware ────────────────────────────
 
     _etag_value: str | None = None
@@ -396,12 +394,8 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         response = await call_next(request)
         duration_ms = (time.monotonic() - start) * 1000
 
-        # Track response time (cap at last _RESPONSE_TIME_WINDOW entries)
+        # Track response time (deque auto-caps at _RESPONSE_TIME_WINDOW entries)
         _metrics["response_times_ms"].append(duration_ms)
-        if len(_metrics["response_times_ms"]) > _RESPONSE_TIME_WINDOW:
-            _metrics["response_times_ms"] = (
-                _metrics["response_times_ms"][-_RESPONSE_TIME_WINDOW:]
-            )
 
         # Track server errors
         if response.status_code >= 500:
@@ -584,8 +578,6 @@ def create_app(db_path: Path | None = None) -> FastAPI:
             "stats": get_query_stats(),
             "slow_queries": get_slow_queries(),
         }
-
-    # DONE [Group: TIGER] TIGER-008: Add feedback API endpoint stub (logs to feedback.json)
 
     # ── Register routers ──────────────────────────────────────────────────────
 

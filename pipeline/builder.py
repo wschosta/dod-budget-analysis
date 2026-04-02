@@ -132,6 +132,12 @@ DOCS_DIR = Path("DoD_Budget_Documents")
 # ORG_MAP is imported from utils.normalization (centralized)
 # and re-exported here for backward compatibility.
 
+
+def _resolve_org_name(org_code: str) -> str:
+    """Resolve org code to name via exact, upper, then title-case lookup."""
+    return ORG_MAP.get(org_code) or ORG_MAP.get(org_code.upper()) or ORG_MAP.get(org_code.title(), org_code)
+
+
 # Map exhibit type prefixes to readable names (Step 1.B1-g)
 EXHIBIT_TYPES = {
     # Summary exhibits
@@ -1278,7 +1284,7 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
         def get_org_name(row):
             """Get organization name, defaulting to code if not in map."""
             org_code = get_str(row, "organization") or ""
-            return ORG_MAP.get(org_code) or ORG_MAP.get(org_code.upper()) or ORG_MAP.get(org_code.title(), org_code)
+            return _resolve_org_name(org_code)
 
         # Process rows after header
         for row in rows_iter:
@@ -1297,7 +1303,7 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
                 else ""
             )
             # Lookup by exact code first, then uppercase, then title-case (Step 1.B4-b)
-            org_name = ORG_MAP.get(org_code) or ORG_MAP.get(org_code.upper()) or ORG_MAP.get(org_code.title(), org_code)
+            org_name = _resolve_org_name(org_code)
 
             # Single-pass PE extraction from all relevant fields (4 regex → 1)
             line_item_val = get_str(row, "line_item")
@@ -1527,7 +1533,7 @@ def _extract_excel_rows(args: tuple) -> dict:
                 if _org_idx is not None and _org_idx < len(row) and row[_org_idx]
                 else ""
             )
-            org_name = ORG_MAP.get(org_code) or ORG_MAP.get(org_code.upper()) or ORG_MAP.get(org_code.title(), org_code)
+            org_name = _resolve_org_name(org_code)
             line_item_val = _get_str(row, "line_item")
             account_val = str(acct).strip()
             acct_title_val = _get_str(row, "account_title")

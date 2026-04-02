@@ -9,8 +9,6 @@ Validate Docker configuration without building:
 5. All Python files referenced in Dockerfile COPY exist.
 6. requirements.txt is pinned (every line has ==).
 """
-# DONE [Group: BEAR] BEAR-009: Add Dockerfile/docker-compose lint-level validation tests (~1,500 tokens)
-
 import sys
 from pathlib import Path
 
