@@ -220,7 +220,7 @@
       <h2>DoD Budget Explorer</h2>
       <div class="print-meta">
         {% if filters.q %}Keyword: "{{ filters.q }}" | {% endif %}
-        {% if filters.fiscal_year %}FY: {{ filters.fiscal_year | join(', ') }} | {% endif %}
+        {% if filters.fiscal_year %}Fiscal Year: {{ filters.fiscal_year | map('format_fy') | join(', ') }} | {% endif %}
         {% if filters.service %}Service: {{ filters.service | join(', ') }} | {% endif %}
         {% if filters.exhibit_type %}Exhibit: {{ filters.exhibit_type | join(', ') }} | {% endif %}
         Printed <script>document.write(new Date().toLocaleDateString())</script>

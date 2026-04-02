@@ -83,7 +83,7 @@
                    border-bottom:2px solid {% if loop.last %}var(--clr-blue){% else %}transparent{% endif %};
                    color:{% if loop.last %}var(--clr-blue){% else %}var(--text-secondary){% endif %};
                    font-weight:{% if loop.last %}600{% else %}400{% endif %}">
-      FY{{ desc.fiscal_year }}
+      {{ desc.fiscal_year|format_fy }}
     </button>
     {% endfor %}
   </div>
