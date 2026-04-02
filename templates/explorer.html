@@ -179,7 +179,7 @@ details[open] .pe-toggle .toggle-icon { transform: rotate(90deg); }
       <button class="btn btn-primary" id="kw-search-btn" onclick="startSearch()">Search</button>
     </div>
     <div class="kw-tags" id="kw-tags"></div>
-    <div class="kw-expanded" id="kw-expanded" style="display:none"></div>
+    <div class="kw-expanded d-none" id="kw-expanded"></div>
     <div class="kw-validation-error" id="kw-validation"></div>
   </div>
 
@@ -187,13 +187,13 @@ details[open] .pe-toggle .toggle-icon { transform: rotate(90deg); }
   <div class="build-progress" id="build-progress">
     <span class="spinner"></span>
     <span class="status-text" id="progress-text">Building cache...</span>
-    <div class="elapsed-time" id="elapsed-time" style="margin-top:0.5rem; font-size:0.85rem; color:var(--color-text-muted);">
+    <div class="elapsed-time mt-sm text-lg" id="elapsed-time" style="color:var(--color-text-muted);">
       Elapsed: <span id="elapsed-clock">0:00</span>
     </div>
   </div>
 
   <!-- 3. Results area (hidden until data loaded) -->
-  <div id="results-area" style="display:none">
+  <div id="results-area" class="d-none">
 
     <!-- 3a. Preview table (collapsible, starts collapsed) -->
     <div class="preview-section">
@@ -202,7 +202,7 @@ details[open] .pe-toggle .toggle-icon { transform: rotate(90deg); }
         <summary class="pe-toggle">
           <span class="toggle-icon">&#9654;</span> Show Program Element Details
         </summary>
-        <div style="overflow-x:auto; margin-top:0.5rem;">
+        <div class="mt-sm" style="overflow-x:auto;">
           <table class="preview-table" id="preview-table">
             <thead>
               <tr>
@@ -244,7 +244,7 @@ details[open] .pe-toggle .toggle-icon { transform: rotate(90deg); }
   </div>
 
   <!-- 4. No results -->
-  <div class="no-results" id="no-results" style="display:none">
+  <div class="no-results d-none" id="no-results">
     <h3>No matching programs found</h3>
     <div class="suggestions">
       <p>Your keywords didn't match any budget programs. Try:</p>

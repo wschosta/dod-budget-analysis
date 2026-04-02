@@ -9,53 +9,53 @@
 
 {# ── Header ──────────────────────────────────────────────────────────────── #}
 <h2>{{ item.line_item_title or item.pe_number }}</h2>
-<div class="pe-meta" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.75rem 0 1.25rem">
-  <span class="badge" style="font-size:.85rem">{{ item.pe_number }}</span>
+<div class="pe-meta d-flex flex-wrap items-center" style="gap:.5rem;margin:.75rem 0 1.25rem">
+  <span class="badge text-lg">{{ item.pe_number }}</span>
   {% if item.organization_name %}
   <span>{{ item.organization_name }}</span>
   {% endif %}
   {% if item.budget_type %}
-  <span style="color:var(--text-secondary)">{{ item.budget_type }}</span>
+  <span class="text-secondary">{{ item.budget_type }}</span>
   {% endif %}
 </div>
 
 {# ── Metadata grid ───────────────────────────────────────────────────────── #}
-<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.75rem;margin-bottom:1.5rem">
+<div class="d-grid gap-md mb-xl" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr))">
   {% if item.appropriation_name %}
-  <div style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:.75rem">
-    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin-bottom:.25rem">Appropriation</div>
-    <div style="font-size:.85rem">{{ item.appropriation_name }}</div>
+  <div class="card-surface p-md">
+    <div class="section-label">Appropriation</div>
+    <div class="text-lg">{{ item.appropriation_name }}</div>
   </div>
   {% endif %}
   {% if item.account %}
-  <div style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:.75rem">
-    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin-bottom:.25rem">Account</div>
-    <div style="font-size:.85rem">{{ item.account }}</div>
+  <div class="card-surface p-md">
+    <div class="section-label">Account</div>
+    <div class="text-lg">{{ item.account }}</div>
   </div>
   {% endif %}
   {% if item.exhibit_type %}
-  <div style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:.75rem">
-    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin-bottom:.25rem">Exhibit Type</div>
-    <div style="font-size:.85rem">{{ item.exhibit_type | upper }}</div>
+  <div class="card-surface p-md">
+    <div class="section-label">Exhibit Type</div>
+    <div class="text-lg">{{ item.exhibit_type | upper }}</div>
   </div>
   {% endif %}
   {% if item.fy_min and item.fy_max %}
-  <div style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:.75rem">
-    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin-bottom:.25rem">FY Coverage</div>
-    <div style="font-size:.85rem">FY{{ item.fy_min }} – FY{{ item.fy_max }}</div>
+  <div class="card-surface p-md">
+    <div class="section-label">FY Coverage</div>
+    <div class="text-lg">FY{{ item.fy_min }} – FY{{ item.fy_max }}</div>
   </div>
   {% endif %}
   {% if item.submission_count %}
-  <div style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:.75rem">
-    <div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin-bottom:.25rem">Submissions</div>
-    <div style="font-size:.85rem">{{ item.submission_count }} budget document{{ "s" if item.submission_count != 1 }}</div>
+  <div class="card-surface p-md">
+    <div class="section-label">Submissions</div>
+    <div class="text-lg">{{ item.submission_count }} budget document{{ "s" if item.submission_count != 1 }}</div>
   </div>
   {% endif %}
 </div>
 
 {# ── PE-level Tags ────────────────────────────────────────────────────────── #}
 {% if pe_tags %}
-<div style="display:flex;flex-wrap:wrap;gap:.35rem;margin-bottom:1.25rem">
+<div class="d-flex flex-wrap gap-sm" style="margin-bottom:1.25rem">
   {% for t in pe_tags %}
   <a href="/programs?tag={{ t.tag }}" class="filter-chip tag-chip"
      title="Source: {{ t.tag_source }} | Confidence: {{ '%.0f' | format((t.confidence or 0) * 100) }}%"
@@ -71,14 +71,14 @@
 
 {# ── PE Mission Description (tabbed by FY, expandable) ───────────────────── #}
 {% if pe_descriptions %}
-<section id="pe-desc-section" style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:1rem;margin-bottom:1.5rem">
-  <h3 style="font-size:.9rem;margin-bottom:.75rem;color:var(--text-secondary)">Mission Description</h3>
+<section id="pe-desc-section" class="card-surface mb-xl" style="padding:1rem">
+  <h3 class="text-secondary mb-md" style="font-size:.9rem">Mission Description</h3>
   {# Tab bar — oldest FY on left, newest on right (active) #}
-  <div id="pe-desc-tabs" style="display:flex;gap:0;border-bottom:2px solid var(--border-color);margin-bottom:.75rem">
+  <div id="pe-desc-tabs" class="d-flex mb-md" style="gap:0;border-bottom:2px solid var(--border-color)">
     {% for desc in pe_descriptions %}
-    <button class="pe-desc-tab" data-idx="{{ loop.index0 }}"
+    <button class="pe-desc-tab text-base-sm" data-idx="{{ loop.index0 }}"
             onclick="switchPeDescTab({{ loop.index0 }})"
-            style="padding:.35rem .75rem;font-size:.75rem;border:none;cursor:pointer;margin-bottom:-2px;
+            style="padding:.35rem .75rem;border:none;cursor:pointer;margin-bottom:-2px;
                    background:{% if loop.last %}var(--bg-surface){% else %}transparent{% endif %};
                    border-bottom:2px solid {% if loop.last %}var(--clr-blue){% else %}transparent{% endif %};
                    color:{% if loop.last %}var(--clr-blue){% else %}var(--text-secondary){% endif %};
@@ -92,7 +92,7 @@
   <div class="pe-desc-pane" data-idx="{{ loop.index0 }}" style="display:{% if loop.last %}block{% else %}none{% endif %}">
     <div id="pe-desc-text-{{ loop.index0 }}" style="font-size:.82rem;line-height:1.6;white-space:pre-line;max-height:6em;overflow:hidden;position:relative;transition:max-height .3s ease">{{ desc.text }}</div>
     <button id="pe-desc-toggle-{{ loop.index0 }}" onclick="togglePeDescExpand({{ loop.index0 }})"
-            style="display:none;background:none;border:none;color:var(--clr-blue);cursor:pointer;font-size:.78rem;padding:.25rem 0;margin-top:.25rem">
+            class="d-none text-md mt-xs" style="background:none;border:none;color:var(--clr-blue);cursor:pointer;padding:.25rem 0">
       Show more &darr;
     </button>
   </div>
@@ -152,19 +152,19 @@ function togglePeDescExpand(idx) {
 
 {# ── Funding Matrix (transposed: FYs as columns, PE + projects as rows) ── #}
 {% if matrix_fys %}
-<section style="margin-bottom:1.5rem">
-  <h3 style="font-size:1rem;margin-bottom:.75rem">Funding Matrix</h3>
-  <p style="font-size:.8rem;color:var(--text-secondary);margin-bottom:.5rem">
+<section class="mb-xl">
+  <h3 class="mb-md" style="font-size:1rem">Funding Matrix</h3>
+  <p class="meta-std mb-sm">
     Best available amount per fiscal year ($K). PE total from golden time series; sub-project amounts from R-2A exhibits.
     Click a sub-project row to view narrative text.
   </p>
   <div class="table-wrapper">
-    <table id="matrix-table" style="font-size:.75rem;border-collapse:collapse;width:100%;white-space:nowrap">
+    <table id="matrix-table" class="text-base-sm text-nowrap" style="border-collapse:collapse;width:100%">
       <thead>
         <tr>
-          <th style="text-align:left;padding:.4rem .5rem;border-bottom:2px solid var(--border-color);position:sticky;left:0;background:var(--bg-surface);z-index:1;min-width:180px;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary)">Program</th>
+          <th class="text-sm text-upper text-secondary" style="text-align:left;padding:.4rem .5rem;border-bottom:2px solid var(--border-color);position:sticky;left:0;background:var(--bg-surface);z-index:1;min-width:180px">Program</th>
           {% for fy in matrix_fys %}
-          <th style="text-align:right;padding:.4rem .5rem;border-bottom:2px solid var(--border-color);font-family:var(--font-mono);font-size:.72rem;color:var(--text-secondary);min-width:70px">FY{{ fy }}</th>
+          <th class="text-right text-mono meta-sm" style="padding:.4rem .5rem;border-bottom:2px solid var(--border-color);min-width:70px">FY{{ fy }}</th>
           {% endfor %}
         </tr>
       </thead>
@@ -175,7 +175,7 @@ function togglePeDescExpand(idx) {
             {{ pe_row.label }}
           </td>
           {% for fy in matrix_fys %}
-          <td style="text-align:right;padding:.4rem .5rem;border-bottom:1px solid var(--border-color);font-family:var(--font-mono)">
+          <td class="text-right text-mono" style="padding:.4rem .5rem;border-bottom:1px solid var(--border-color)">
             {% if pe_row.fy_vals.get(fy) is not none %}${{ "{:,.0f}".format(pe_row.fy_vals[fy]) }}{% else %}—{% endif %}
           </td>
           {% endfor %}
@@ -187,12 +187,12 @@ function togglePeDescExpand(idx) {
             onmouseover="this.style.background='color-mix(in srgb, var(--clr-blue) 6%, transparent)'"
             onmouseout="if(!this.classList.contains('proj-selected'))this.style.background=''">
           <td style="padding:.4rem .5rem;border-bottom:1px solid var(--border-color);position:sticky;left:0;background:inherit;z-index:1;max-width:280px" title="{{ row.project_number }} — {{ row.label }}">
-            <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-              <span style="font-family:var(--font-mono);font-size:.7rem;color:var(--clr-blue);margin-right:.35rem">{{ row.project_number }}</span>{{ row.label }}
+            <div class="text-ellipsis">
+              <span class="text-mono" style="font-size:.7rem;color:var(--clr-blue);margin-right:.35rem">{{ row.project_number }}</span>{{ row.label }}
             </div>
             {# 4.2: Show project-level tags as small badge chips #}
             {% if project_tags and project_tags.get(row.project_number) %}
-            <div style="display:flex;flex-wrap:wrap;gap:.15rem;margin-top:.2rem">
+            <div class="d-flex flex-wrap" style="gap:.15rem;margin-top:.2rem">
               {% for t in project_tags[row.project_number][:5] %}
               <span style="display:inline-block;padding:0 .35rem;border-radius:.6rem;font-size:.6rem;
                            border:1px solid {% if t.confidence >= 0.9 %}var(--clr-blue){% else %}var(--border-color){% endif %};
@@ -203,7 +203,7 @@ function togglePeDescExpand(idx) {
             {% endif %}
           </td>
           {% for fy in matrix_fys %}
-          <td style="text-align:right;padding:.4rem .5rem;border-bottom:1px solid var(--border-color);font-family:var(--font-mono);color:var(--text-secondary)">
+          <td class="text-right text-mono text-secondary" style="padding:.4rem .5rem;border-bottom:1px solid var(--border-color)">
             {% if row.fy_vals.get(fy) is not none %}{% if row.fy_vals[fy] == 0.0 %}—{% else %}${{ "{:,.0f}".format(row.fy_vals[fy]) }}{% endif %}{% else %}{% endif %}
           </td>
           {% endfor %}
@@ -211,12 +211,12 @@ function togglePeDescExpand(idx) {
         {% endfor %}
         {# "Not accounted for" difference row #}
         {% if diff_row %}
-        <tr style="border-top:2px solid var(--border-color);font-style:italic;color:var(--text-secondary);font-size:.72rem">
+        <tr class="text-italic text-secondary text-sm" style="border-top:2px solid var(--border-color)">
           <td style="padding:.4rem .5rem;border-bottom:1px solid var(--border-color);position:sticky;left:0;background:var(--bg-surface);z-index:1">
             {{ diff_row.label }}
           </td>
           {% for fy in matrix_fys %}
-          <td style="text-align:right;padding:.4rem .5rem;border-bottom:1px solid var(--border-color);font-family:var(--font-mono)">
+          <td class="text-right text-mono" style="padding:.4rem .5rem;border-bottom:1px solid var(--border-color)">
             {% if diff_row.fy_vals.get(fy) is not none %}{% set v = diff_row.fy_vals[fy] %}{% if v > 0 %}+${{ "{:,.0f}".format(v) }}{% elif v < 0 %}-${{ "{:,.0f}".format(v | abs) }}{% else %}—{% endif %}{% else %}{% endif %}
           </td>
           {% endfor %}
@@ -281,19 +281,19 @@ function togglePeDescExpand(idx) {
 
     var html = '<div style="background:var(--bg-surface);border-left:3px solid var(--clr-blue);padding:.75rem 1rem;margin:0">';
     /* Header */
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem">';
-    html += '<span style="font-size:.82rem;font-weight:600"><span class="badge" style="font-size:.72rem;font-family:var(--font-mono);margin-right:.4rem">' + _escHtml(projNum) + '</span>' + _escHtml(title) + '</span>';
-    html += '<button onclick="closeInlinePanel(\'' + projNum + '\')" style="background:none;border:none;font-size:1.1rem;cursor:pointer;color:var(--text-secondary);padding:.15rem .4rem;line-height:1" aria-label="Close">&times;</button>';
+    html += '<div class="d-flex items-center mb-sm" style="justify-content:space-between">';
+    html += '<span style="font-size:.82rem;font-weight:600"><span class="badge text-sm text-mono" style="margin-right:.4rem">' + _escHtml(projNum) + '</span>' + _escHtml(title) + '</span>';
+    html += '<button onclick="closeInlinePanel(\'' + projNum + '\')" class="text-secondary" style="background:none;border:none;font-size:1.1rem;cursor:pointer;padding:.15rem .4rem;line-height:1" aria-label="Close">&times;</button>';
     html += '</div>';
 
     /* Project-level tags */
     var tags = (typeof _projectTags !== 'undefined') ? _projectTags[projNum] : null;
     if (tags && tags.length) {
-      html += '<div style="display:flex;flex-wrap:wrap;gap:.25rem;margin-bottom:.5rem">';
+      html += '<div class="d-flex flex-wrap gap-xs mb-sm">';
       tags.forEach(function(t) {
         var borderColor = (t.confidence >= 0.9) ? 'var(--clr-blue)' : 'var(--text-secondary)';
         var textColor = (t.confidence >= 0.9) ? 'var(--clr-blue)' : 'var(--text-secondary)';
-        html += '<span style="display:inline-block;padding:.1rem .5rem;border-radius:1rem;font-size:.68rem;'
+        html += '<span class="text-xs" style="display:inline-block;padding:.1rem .5rem;border-radius:1rem;'
           + 'border:1px solid ' + borderColor + ';color:' + textColor + '">'
           + _escHtml(t.tag) + '</span>';
       });
@@ -301,22 +301,22 @@ function togglePeDescExpand(idx) {
     }
 
     if (!data || !data.submissions.length) {
-      html += '<p style="font-size:.8rem;color:var(--text-secondary);font-style:italic;margin:0">No narrative text available for this project.</p>';
+      html += '<p class="meta-std text-italic" style="margin:0">No narrative text available for this project.</p>';
     } else {
       /* Filter to submissions that have text, reverse so oldest FY is on the left */
       var subs = data.submissions.filter(function(s) { return !!s.text; }).reverse();
       var defaultIdx = subs.length - 1; /* newest FY = last tab = active by default */
       if (subs.length === 0) {
-        html += '<p style="font-size:.8rem;color:var(--text-secondary);font-style:italic;margin:0">No narrative text available for this project.</p>';
+        html += '<p class="meta-std text-italic" style="margin:0">No narrative text available for this project.</p>';
       } else {
         /* Tab bar — oldest left, newest right (active) */
         var tabId = 'tabs-' + projNum.replace(/[^a-zA-Z0-9]/g, '_');
-        html += '<div style="display:flex;gap:0;border-bottom:2px solid var(--border-color);margin-bottom:.5rem">';
+        html += '<div class="d-flex mb-sm" style="gap:0;border-bottom:2px solid var(--border-color)">';
         subs.forEach(function(sub, i) {
           var active = (i === defaultIdx);
-          html += '<button class="proj-tab" data-tabgroup="' + tabId + '" data-idx="' + i + '"'
+          html += '<button class="proj-tab text-base-sm" data-tabgroup="' + tabId + '" data-idx="' + i + '"'
             + ' onclick="switchTab(\'' + tabId + '\',' + i + ')"'
-            + ' style="padding:.35rem .75rem;font-size:.75rem;border:none;background:' + (active ? 'var(--bg-surface)' : 'transparent')
+            + ' style="padding:.35rem .75rem;border:none;background:' + (active ? 'var(--bg-surface)' : 'transparent')
             + ';border-bottom:2px solid ' + (active ? 'var(--clr-blue)' : 'transparent')
             + ';margin-bottom:-2px;cursor:pointer;color:' + (active ? 'var(--clr-blue)' : 'var(--text-secondary)')
             + ';font-weight:' + (active ? '600' : '400') + '">'
@@ -328,7 +328,7 @@ function togglePeDescExpand(idx) {
         subs.forEach(function(sub, i) {
           html += '<div class="proj-tab-pane" data-tabgroup="' + tabId + '" data-idx="' + i + '"'
             + ' style="display:' + (i === defaultIdx ? 'block' : 'none') + '">'
-            + '<pre style="font-size:.75rem;line-height:1.5;white-space:pre-wrap;word-break:break-word;background:var(--bg-body);border:1px solid var(--border-color);border-radius:var(--radius);padding:.75rem;max-height:350px;overflow-y:auto;margin:0">'
+            + '<pre class="text-base-sm p-md" style="line-height:1.5;white-space:pre-wrap;word-break:break-word;background:var(--bg-body);border:1px solid var(--border-color);border-radius:var(--radius);max-height:350px;overflow-y:auto;margin:0">'
             + _escHtml(sub.text) + '</pre></div>';
         });
       }
@@ -377,43 +377,43 @@ function togglePeDescExpand(idx) {
 
 {# ── Submission Archive (collapsed by default) ────────────────────────── #}
 {% if sub_groups %}
-<section style="margin-bottom:1.5rem">
+<section class="mb-xl">
   <details>
     <summary style="font-size:1rem;font-weight:700;cursor:pointer;padding:.5rem 0">
       Submission Archive
-      <span style="font-size:.8rem;color:var(--text-secondary);font-weight:400">({{ sub_count }} document{{ "s" if sub_count != 1 }})</span>
+      <span class="meta-std" style="font-weight:400">({{ sub_count }} document{{ "s" if sub_count != 1 }})</span>
     </summary>
-    <p style="font-size:.8rem;color:var(--text-secondary);margin:.5rem 0">
+    <p class="meta-std" style="margin:.5rem 0">
       Raw data from each budget submission document, grouped by fiscal year.
     </p>
 
     {% for fy, subs in sub_groups.items() | sort(attribute='0', reverse=True) %}
-    <details style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);margin-bottom:.5rem">
-      <summary style="padding:.75rem 1rem;cursor:pointer;font-size:.85rem;font-weight:600">
+    <details class="card-surface mb-sm">
+      <summary class="text-lg" style="padding:.75rem 1rem;cursor:pointer;font-weight:600">
         FY{{ fy }} Submissions
-        <span style="font-size:.78rem;font-weight:400;color:var(--text-secondary)">({{ subs | length }})</span>
+        <span class="text-md text-secondary" style="font-weight:400">({{ subs | length }})</span>
       </summary>
       <div style="padding:0 1rem .75rem">
         {% for sub in subs %}
         <div style="border-top:1px solid var(--border-color);padding:.75rem 0{% if loop.first %};border-top:none{% endif %}">
-          <div style="font-size:.78rem;color:var(--text-secondary);margin-bottom:.35rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+          <div class="text-md text-secondary text-ellipsis" style="margin-bottom:.35rem"
                title="{{ sub.source_file or '' }}">
             {{ sub.source_file or "unknown source" }}
           </div>
           {% if sub.amounts %}
-          <div class="table-wrapper" style="margin-top:.25rem">
-            <table style="font-size:.78rem;width:100%;border-collapse:collapse">
+          <div class="table-wrapper mt-xs">
+            <table class="text-md" style="width:100%;border-collapse:collapse">
               <thead>
                 <tr>
-                  <th style="text-align:left;padding:.25rem .5rem;border-bottom:1px solid var(--border-color);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary)">Column</th>
-                  <th style="text-align:right;padding:.25rem .5rem;border-bottom:1px solid var(--border-color);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary)">Value ($K)</th>
+                  <th class="text-sm text-upper text-secondary" style="text-align:left;padding:.25rem .5rem;border-bottom:1px solid var(--border-color)">Column</th>
+                  <th class="text-sm text-upper text-secondary text-right" style="padding:.25rem .5rem;border-bottom:1px solid var(--border-color)">Value ($K)</th>
                 </tr>
               </thead>
               <tbody>
                 {% for col, val in sub.amounts.items() | sort %}
                 <tr>
-                  <td style="padding:.2rem .5rem;font-size:.78rem">{{ col.replace("amount_", "").replace("_", " ").title() }}</td>
-                  <td style="padding:.2rem .5rem;text-align:right;font-family:var(--font-mono);font-size:.78rem">
+                  <td class="text-md" style="padding:.2rem .5rem">{{ col.replace("amount_", "").replace("_", " ").title() }}</td>
+                  <td class="text-md text-right text-mono" style="padding:.2rem .5rem">
                     {% if val is not none %}${{ "{:,.0f}".format(val) }}{% else %}—{% endif %}
                   </td>
                 </tr>
@@ -422,7 +422,7 @@ function togglePeDescExpand(idx) {
             </table>
           </div>
           {% else %}
-          <div style="font-size:.78rem;color:var(--text-secondary);font-style:italic">No amount data in this submission</div>
+          <div class="text-md text-secondary text-italic">No amount data in this submission</div>
           {% endif %}
         </div>
         {% endfor %}
@@ -434,17 +434,17 @@ function togglePeDescExpand(idx) {
 {% endif %}
 
 {# ── Related Programs (HTMX lazy-loaded) ────────────────────────────────── #}
-<section style="margin-bottom:1.5rem">
-  <h3 style="font-size:1rem;margin-bottom:.75rem">Related Programs</h3>
+<section class="mb-xl">
+  <h3 class="mb-md" style="font-size:1rem">Related Programs</h3>
   <div id="pe-related"
        hx-get="/partials/program-related/{{ item.pe_number }}?min_confidence=0.8&limit=20"
        hx-trigger="load"
        hx-swap="innerHTML">
-    <p style="color:var(--text-secondary);font-size:.8rem"><span class="spinner" style="display:inline-block;width:14px;height:14px;vertical-align:middle;margin-right:.3rem"></span> Loading related programs&hellip;</p>
+    <p class="meta-std"><span class="spinner" style="display:inline-block;width:14px;height:14px;vertical-align:middle;margin-right:.3rem"></span> Loading related programs&hellip;</p>
   </div>
 </section>
 
-<div style="margin-top:1rem">
+<div class="mt-lg">
   <a href="/consolidated" class="btn btn-secondary btn-sm">&larr; Back to list</a>
   {% if item.pe_number %}
   <a href="/programs/{{ item.pe_number }}" class="btn btn-secondary btn-sm" style="margin-left:.5rem">View in Program Explorer</a>

@@ -80,7 +80,7 @@
                hx-target="#results-container"
                hx-push-url="true"
                hx-include="#filter-form">
-        <div class="search-source-toggle" style="margin-top:.5rem;font-size:.8rem;display:flex;gap:.75rem">
+        <div class="search-source-toggle d-flex mt-sm text-std gap-md">
           <label><input type="radio" name="source" value="budget_lines" {% if not filters.source or filters.source == 'budget_lines' %}checked{% endif %}> Budget Lines</label>
           <label><input type="radio" name="source" value="descriptions" {% if filters.source == 'descriptions' %}checked{% endif %}> Program Descriptions</label>
           <label><input type="radio" name="source" value="both" {% if filters.source == 'both' %}checked{% endif %}> Both</label>
@@ -147,7 +147,7 @@
         {# FE-001: Amount range filters + FALCON-3: dynamic FY column selector #}
         <div class="filter-group">
           <span id="amount-range-label" data-tooltip="Amount in thousands of dollars ($K). Filter lines where the selected FY column falls within this range.">Amount Range ($K)</span>
-          <div style="margin-bottom:.3rem">
+          <div class="mb-xs">
             <select name="amount_column" id="amount_column"
                     style="width:100%;padding:.25rem .4rem;font-size:.82rem;border:1px solid var(--border-color);border-radius:var(--radius);background:var(--bg-surface);color:var(--text-primary)">
               {% for fc in fiscal_year_columns %}
@@ -155,21 +155,21 @@
               {% endfor %}
             </select>
           </div>
-          <div style="display:flex;gap:.4rem;align-items:center" role="group" aria-labelledby="amount-range-label">
+          <div class="d-flex items-center gap-xs" role="group" aria-labelledby="amount-range-label">
             <label for="min_amount" class="sr-only">Minimum amount ($K)</label>
             <input type="number" id="min_amount" name="min_amount"
                    value="{{ filters.min_amount }}"
                    placeholder="Min"
                    aria-label="Minimum amount in thousands"
-                   style="width:50%"
+                   class="w-half"
                    min="0">
-            <span style="font-size:.8rem;color:var(--clr-gray-700)" aria-hidden="true">–</span>
+            <span class="text-std text-secondary" aria-hidden="true">–</span>
             <label for="max_amount" class="sr-only">Maximum amount ($K)</label>
             <input type="number" id="max_amount" name="max_amount"
                    value="{{ filters.max_amount }}"
                    placeholder="Max"
                    aria-label="Maximum amount in thousands"
-                   style="width:50%"
+                   class="w-half"
                    min="0">
           </div>
         </div>
@@ -184,9 +184,9 @@
         <button type="button" id="save-search-btn" class="btn btn-secondary btn-sm"
                 onclick="showSaveSearchInput()" aria-label="Save current search">&#9733; Save</button>
       </div>
-      <div id="save-search-inline" style="display:none;margin-top:.5rem">
-        <label for="save-search-name" style="font-size:.78rem;font-weight:600;color:var(--text-secondary)">Search name</label>
-        <div style="display:flex;gap:.3rem;margin-top:.15rem">
+      <div id="save-search-inline" class="d-none mt-sm">
+        <label for="save-search-name" class="text-md text-secondary" style="font-weight:600">Search name</label>
+        <div class="d-flex gap-xs" style="margin-top:.15rem">
           <input type="text" id="save-search-name" placeholder="e.g. Army cyber programs"
                  style="flex:1;padding:.3rem .5rem;font-size:.82rem;border:1px solid var(--border-color);border-radius:var(--radius);background:var(--bg-surface);color:var(--text-primary)">
           <button type="button" class="btn btn-primary btn-sm" style="padding:.3rem .6rem"
@@ -205,8 +205,8 @@
     </button>
 
     {# Saved searches #}
-    <div style="margin-top:.75rem">
-      <h3 style="font-size:.8rem;text-transform:uppercase;letter-spacing:.04em;color:var(--clr-gray-700);margin-bottom:.25rem">
+    <div class="mt-md">
+      <h3 class="section-label">
         Saved Searches
       </h3>
       <div id="saved-searches-list"></div>
@@ -228,12 +228,12 @@
     </div>
 
     {# LION-008: Print button #}
-    <div style="display:flex;justify-content:flex-end;margin-bottom:.5rem">
+    <div class="d-flex mb-sm" style="justify-content:flex-end">
       <button class="btn btn-secondary btn-sm print-btn" onclick="window.print()">Print Results</button>
     </div>
 
     {# FE-005: ARIA live region for loading status #}
-    <div id="loading-indicator" class="htmx-indicator" style="margin-bottom:.5rem"
+    <div id="loading-indicator" class="htmx-indicator mb-sm"
          role="status" aria-live="polite" aria-label="Loading results">
       <span class="spinner"></span> Loading…
     </div>
@@ -259,11 +259,11 @@
      aria-labelledby="dl-modal-title">
   <div class="modal">
     <h3 id="dl-modal-title">Download Budget Lines</h3>
-    <p id="dl-modal-count" style="font-size:.85rem;color:var(--text-secondary);margin-bottom:.75rem">
+    <p id="dl-modal-count" class="meta-lg mb-md">
       Your filters match <strong>{{ "{:,}".format(total) if total is defined else "—" }}</strong> rows.
       Downloads include all matching rows (up to 50,000).
     </p>
-    <div style="display:flex;gap:.5rem;flex-direction:column">
+    <div class="d-flex gap-sm" style="flex-direction:column">
       <a id="dl-csv" href="#" class="btn btn-primary" download>
         ↓ Download CSV
       </a>

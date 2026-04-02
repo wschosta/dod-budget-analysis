@@ -8,14 +8,14 @@
       <li>
         <div>
           <a href="/programs/{{ item.pe_number }}">{{ item.pe_number }}</a>
-          <span style="margin-left:.35rem;font-size:.8rem;color:var(--text-secondary)">{{ item.display_title or "" }}</span>
+          <span class="meta-std" style="margin-left:.35rem">{{ item.display_title or "" }}</span>
         </div>
-        <div style="text-align:right;white-space:nowrap">
+        <div class="text-right text-nowrap">
           <span class="delta positive" style="font-size:.82rem">
             {{ "{:+,.0f}".format(item.delta) if item.delta is not none else "—" }}
           </span>
           {% if item.pct_change is not none %}
-          <span style="font-size:.72rem;color:var(--text-secondary);margin-left:.25rem">
+          <span class="meta-sm" style="margin-left:.25rem">
             ({{ "{:+.1f}".format(item.pct_change) }}%)
           </span>
           {% endif %}
@@ -34,14 +34,14 @@
       <li>
         <div>
           <a href="/programs/{{ item.pe_number }}">{{ item.pe_number }}</a>
-          <span style="margin-left:.35rem;font-size:.8rem;color:var(--text-secondary)">{{ item.display_title or "" }}</span>
+          <span class="meta-std" style="margin-left:.35rem">{{ item.display_title or "" }}</span>
         </div>
-        <div style="text-align:right;white-space:nowrap">
+        <div class="text-right text-nowrap">
           <span class="delta negative" style="font-size:.82rem">
             {{ "{:+,.0f}".format(item.delta) if item.delta is not none else "—" }}
           </span>
           {% if item.pct_change is not none %}
-          <span style="font-size:.72rem;color:var(--text-secondary);margin-left:.25rem">
+          <span class="meta-sm" style="margin-left:.25rem">
             ({{ "{:+.1f}".format(item.pct_change) }}%)
           </span>
           {% endif %}

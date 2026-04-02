@@ -826,7 +826,47 @@ def run_phase2(conn: sqlite3.Connection, stop_event: threading.Event | None = No
         pass  # pe_descriptions_fts table doesn't exist yet
 
     logger.info("Done. %d description rows inserted.", total_desc)
-    return total_desc
+
+    # Issue #55: Fallback — populate descriptions from budget_lines for PEs
+    # that have no PDF-derived descriptions (e.g., PEs only in Excel data).
+    # Single JOIN query replaces per-PE loop to avoid N+1.
+    fallback_rows = conn.execute("""
+        SELECT pi.pe_number, bl.line_item_title, bl.budget_activity_title,
+               bl.appropriation_title, bl.fiscal_year
+        FROM pe_index pi
+        LEFT JOIN pe_descriptions pd ON pi.pe_number = pd.pe_number
+        LEFT JOIN (
+            SELECT pe_number, line_item_title, budget_activity_title,
+                   appropriation_title, fiscal_year,
+                   ROW_NUMBER() OVER (PARTITION BY pe_number ORDER BY fiscal_year DESC) AS rn
+            FROM budget_lines
+            WHERE line_item_title IS NOT NULL
+        ) bl ON pi.pe_number = bl.pe_number AND bl.rn = 1
+        WHERE pd.pe_number IS NULL AND bl.pe_number IS NOT NULL
+    """).fetchall()
+
+    fallback_count = 0
+    if fallback_rows:
+        logger.info("  Backfilling descriptions for %d PEs from budget_lines...", len(fallback_rows))
+        inserts = []
+        for row in fallback_rows:
+            parts = [p for p in [row[1], row[2], row[3]] if p]
+            desc_text = " — ".join(parts) if parts else None
+            if desc_text:
+                inserts.append((row[0], row[4], desc_text))
+        if inserts:
+            conn.executemany("""
+                INSERT OR IGNORE INTO pe_descriptions
+                    (pe_number, fiscal_year, source_file, page_start,
+                     page_end, description_text, section_header)
+                VALUES (?, ?, 'budget_lines', NULL, NULL, ?, 'Budget Line Title')
+            """, inserts)
+            fallback_count = len(inserts)
+        conn.commit()
+        if fallback_count:
+            logger.info("  Inserted %d fallback descriptions from budget_lines.", fallback_count)
+
+    return total_desc + fallback_count
 
 
 # ── Phase 3: Generate Tags ────────────────────────────────────────────────────

@@ -49,12 +49,12 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 
 | ID | Task | Details | Status |
 |----|------|---------|--------|
-| **1.B1** | Catalog all exhibit types | Enumerate every exhibit type encountered (P-1, R-1, O-1, M-1, C-1, P-5, R-2, R-3, R-4, etc.) and document the column layout and semantics for each. | ✅ **Complete** — `exhibit_catalog.py` (429 lines) defines column layouts for P-1, P-5, R-1, R-2, O-1, M-1, C-1, P-1R, RF-1 with `ExhibitCatalog` class; `scripts/exhibit_audit.py` scans corpus; cross-validated against corpus (OH-MY-006 done 2026-02-19) |
-| **1.B2** | Standardize column mappings | Extend `build_budget_db.py` column-mapping logic to handle all known exhibit formats consistently; add unit tests for each exhibit type with sample data. | ✅ Mostly Complete — Data-driven catalog approach implemented in `exhibit_catalog.py`; `_map_columns()`, `_merge_header_rows()`, catalog-driven detection all tested; multi-row header handling implemented |
+| **1.B1** | Catalog all exhibit types | Enumerate every exhibit type encountered (P-1, R-1, O-1, M-1, C-1, P-5, R-2, R-3, R-4, etc.) and document the column layout and semantics for each. | ✅ **Complete** — `pipeline/exhibit_catalog.py` (576 lines) defines column layouts for P-1, P-5, R-1, R-2, O-1, M-1, C-1, P-1R, RF-1 with `ExhibitCatalog` class; `scripts/exhibit_audit.py` scans corpus; cross-validated against corpus (OH-MY-006 done 2026-02-19) |
+| **1.B2** | Standardize column mappings | Extend `pipeline/builder.py` column-mapping logic to handle all known exhibit formats consistently; add unit tests for each exhibit type with sample data. | ✅ Mostly Complete — Data-driven catalog approach implemented in `pipeline/exhibit_catalog.py`; `_map_columns()`, `_merge_header_rows()`, catalog-driven detection all tested; multi-row header handling implemented |
 | **1.B3** | Normalize monetary values | Ensure all dollar amounts use a consistent unit (thousands of dollars), currency-year label, and handle the distinction between Budget Authority (BA), Appropriations, and Outlays. | ✅ Mostly Complete — FY2024-2026 columns with `_safe_float()` normalization; `amount_type` field tracks BA vs appropriation; currency-year detection implemented (`_detect_currency_year`, DONE 1.B3-b); exhibit→budget_type mapping implemented (`_EXHIBIT_BUDGET_TYPE`, DONE 1.B3-d); amount-unit detection and normalization (DONE 1.B3-a/c) |
 | **1.B4** | Extract and normalize program element (PE) and line-item metadata | Parse PE numbers, line-item numbers, budget activity codes, appropriation titles, and sub-activity groups into dedicated, queryable fields. | ✅ Mostly Complete — `pe_number`, `line_item`, `budget_activity_title`, `sub_activity_title`, `appropriation_code`, `appropriation_title` all extracted; regex patterns validated in `utils/patterns.py` |
 | **1.B5** | PDF text extraction quality audit | Review `pdfplumber` output for the most common PDF layouts; identify tables that extract poorly and implement targeted extraction improvements or fallback strategies. | ✅ Mostly Complete — `scripts/pdf_quality_audit.py` (312 lines) implements automated audit; `utils/pdf_sections.py` handles R-2/R-3 narrative sections; remaining: targeted improvements for identified poor extractions |
-| **1.B6** | Build validation suite | Create automated checks that flag anomalies: missing fiscal years for a service, duplicate rows, zero-sum line items, column misalignment, and unexpected exhibit formats. | ✅ **Complete** — `validate_budget_db.py` (522 lines) + `utils/validation.py` (255 lines) with `ValidationRegistry`, 10+ checks, and cross-service/cross-exhibit reconciliation in `scripts/reconcile_budget_data.py` |
+| **1.B6** | Build validation suite | Create automated checks that flag anomalies: missing fiscal years for a service, duplicate rows, zero-sum line items, column misalignment, and unexpected exhibit formats. | ✅ **Complete** — `pipeline/db_validator.py` (1,758 lines) + `utils/validation.py` (424 lines) with `ValidationRegistry`, 10+ checks, and cross-service/cross-exhibit reconciliation in `scripts/reconcile_budget_data.py` |
 
 ### 1.C — Data Pipeline Testing
 
@@ -74,20 +74,20 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 
 | ID | Task | Details | Status |
 |----|------|---------|--------|
-| **2.A1** | Define the canonical data model | Design normalized tables that capture: fiscal year, service/agency, appropriation, budget activity, program element, line item, exhibit type, dollar amounts (by budget cycle: PB, enacted, request), and document source metadata. | ✅ **Complete** — `schema_design.py` (482 lines) defines `budget_line_items` with 29+ columns; `budget_lines` and `pdf_pages` tables in production schema |
+| **2.A1** | Define the canonical data model | Design normalized tables that capture: fiscal year, service/agency, appropriation, budget activity, program element, line item, exhibit type, dollar amounts (by budget cycle: PB, enacted, request), and document source metadata. | ✅ **Complete** — `pipeline/schema.py` (718 lines) defines `budget_line_items` with 29+ columns; `budget_lines` and `pdf_pages` tables in production schema |
 | **2.A2** | Design lookup/reference tables | Create reference tables for: services & agencies, appropriation titles, exhibit types, budget cycles, and fiscal years — with human-readable labels and codes. | ✅ **Complete** — `services_agencies`, `appropriation_titles`, `exhibit_types`, `budget_cycles` tables created and seeded via migration; `backfill_reference_tables.py` populates from live data |
 | **2.A3** | Design full-text search strategy | Decide whether to continue with SQLite FTS5 for the web deployment or migrate to PostgreSQL with `tsvector`/`tsquery`, or use an external search engine (e.g., Meilisearch). Document trade-offs. | ✅ **Complete** — SQLite FTS5 chosen; `budget_lines_fts` and `pdf_pages_fts` content-sync tables with INSERT/UPDATE/DELETE triggers; `sanitize_fts5_query()` for safe user input |
 | **2.A4** | Design PDF/document metadata tables | Schema for storing page-level PDF text, table extractions, and links back to the original source document URL for provenance. | ✅ **Complete** — `pdf_pages` table with `source_file`, `source_category`, `page_number`, `page_text`, `has_tables` columns; FTS5 full-text index on page text |
-| **2.A5** | Write and version database migrations | Use a migration tool (e.g., Alembic) or versioned SQL scripts so the schema can evolve without data loss. | ✅ **Complete** — `schema_design.py` implements versioned migration framework with `schema_version` table, `_current_version()`, `migrate()` (idempotent), and `create_normalized_db()` |
+| **2.A5** | Write and version database migrations | Use a migration tool (e.g., Alembic) or versioned SQL scripts so the schema can evolve without data loss. | ✅ **Complete** — `pipeline/schema.py` implements versioned migration framework with `schema_version` table, `_current_version()`, `migrate()` (idempotent), and `create_normalized_db()` |
 
 ### 2.B — Data Loading & Quality
 
 | ID | Task | Details | Status |
 |----|------|---------|--------|
-| **2.B1** | Build the production data-load pipeline | Refactor `build_budget_db.py` to target the new canonical schema. Support incremental and full-rebuild modes. | ✅ **Complete** — `build_budget_db.py` (1957 lines) supports full-rebuild and incremental modes; `build_budget_gui.py` provides tkinter interface with progress tracking |
+| **2.B1** | Build the production data-load pipeline | Refactor `pipeline/builder.py` to target the new canonical schema. Support incremental and full-rebuild modes. | ✅ **Complete** — `pipeline/builder.py` (3,676 lines) supports full-rebuild and incremental modes; `pipeline/gui.py` provides tkinter interface with progress tracking |
 | **2.B2** | Cross-service data reconciliation | Verify that totals from service-level exhibits roll up to Comptroller summary exhibits; flag discrepancies. | ✅ **Complete** — `scripts/reconcile_budget_data.py` (481 lines) implements `reconcile_cross_service()` and `reconcile_cross_exhibit()` (P-1 vs P-5, R-1 vs R-2) |
-| **2.B3** | Generate data-quality reports | After each load, produce a summary report: row counts by service/year/exhibit, missing data, and validation warnings. | ✅ **Complete** — `validate_budget_db.py` generates `data_quality_report.json`; `scripts/pdf_quality_audit.py` audits PDF extraction quality |
-| **2.B4** | Establish a data refresh workflow | Document and script the process for incorporating new fiscal-year data as it becomes available (download → parse → load → validate). | ✅ **Complete** — `refresh_data.py` implements `RefreshWorkflow` class with staged pipeline (download → parse → load → validate), dry-run support, and webhook notifications |
+| **2.B3** | Generate data-quality reports | After each load, produce a summary report: row counts by service/year/exhibit, missing data, and validation warnings. | ✅ **Complete** — `pipeline/db_validator.py` generates `data_quality_report.json`; `scripts/pdf_quality_audit.py` audits PDF extraction quality |
+| **2.B4** | Establish a data refresh workflow | Document and script the process for incorporating new fiscal-year data as it becomes available (download → parse → load → validate). | ✅ **Complete** — `pipeline/refresh.py` implements `RefreshWorkflow` class with staged pipeline (download → parse → load → validate), dry-run support, and webhook notifications |
 
 ### 2.C — API Layer
 
@@ -159,7 +159,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | ID | Task | Details | Status |
 |----|------|---------|--------|
 | **4.B1** | Soft launch to a small group | Share the tool with a small set of known users (analysts, researchers, journalists) and collect structured feedback. | ⚠️ Not started — requires deployed application |
-| **4.B2** | Create a feedback mechanism | Add a "Feedback" button or form in the UI that lets users report bugs, request features, or note data issues. Route submissions to GitHub Issues. | ⚠️ Not started — requires secrets/deployment |
+| **4.B2** | Create a feedback mechanism | Add a "Feedback" button or form in the UI that lets users report bugs, request features, or note data issues. Route submissions to GitHub Issues. | ✅ **Complete** — POST `/api/v1/feedback` endpoint, modal form in base template, 16 tests; stores to local `feedback.json` (GitHub Issues integration optional future work) |
 | **4.B3** | Write a launch announcement | Draft a blog post or README update explaining what the tool does, who it's for, and how to use it. | ⚠️ Not started |
 | **4.B4** | Public launch | Announce on relevant forums, social media, and communities (defense policy, open data, civic tech). | ⚠️ Not started — `docker-compose.staging.yml` ready for staging deployment |
 
@@ -170,10 +170,10 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | **4.C1** | Triage and prioritize feedback | Review all feedback, categorize (bug, feature request, data quality, UX), and prioritize for the next development cycle. | ⚠️ Not started — requires public launch and user feedback |
 | **4.C2** | Implement high-priority improvements | Address the most impactful issues identified during the soft launch and public feedback rounds. | ⚠️ Not started — depends on user feedback |
 | **4.C3** | Keyword Explorer page | Generalized keyword search tool (`/explorer`). User-supplied keywords with fuzzy matching (prefix, acronym expansion, edit-distance). Async cache build with progress polling. PE-level preview. Drag-and-drop column picker for XLSX export. Shared backend extracted from hypersonics page. | ✅ **Complete** |
-| **4.C3** | Automate annual data refresh | When new President's Budget or enacted appropriations are published, the pipeline should detect and ingest them with minimal manual intervention. | ✅ **Complete** — `refresh_data.py` with 4-stage pipeline (download → build → validate → report), automatic rollback, progress tracking, `--schedule` flag; `.github/workflows/refresh-data.yml` with weekly cron |
+| **4.C3b** | Automate annual data refresh | When new President's Budget or enacted appropriations are published, the pipeline should detect and ingest them with minimal manual intervention. | ✅ **Complete** — `pipeline/refresh.py` with 4-stage pipeline (download → build → validate → report), automatic rollback, progress tracking, `--schedule` flag; `.github/workflows/refresh-data.yml` with weekly cron |
 | **4.C4** | Performance optimization | Profile and optimize slow queries, large downloads, and page-load times based on real usage patterns. | ✅ Mostly Complete — Connection pooling, FTS5 indexing, rate limiting, pagination, in-memory TTL cache, streaming exports, BM25 relevance scoring; profiling-based tuning pending real traffic |
 | **4.C5** | Ongoing documentation updates | Keep the data dictionary, FAQ, and methodology page current as the data and features evolve. | ✅ Mostly Complete — Comprehensive docs in `docs/user-guide/` and `docs/developer/` (20+ files); ongoing updates needed as features evolve |
-| **4.C6** | Community contribution guidelines | If the project attracts contributors, publish `CONTRIBUTING.md` with development setup, coding standards, and PR process. | ✅ **Complete** — `CONTRIBUTING.md` (261 lines) with prerequisites, dev setup, code standards, testing guide, PR process, and architecture overview |
+| **4.C6** | Community contribution guidelines | If the project attracts contributors, publish `CONTRIBUTING.md` with development setup, coding standards, and PR process. | ✅ **Complete** — `CONTRIBUTING.md` with prerequisites, dev setup, code standards, testing guide, PR process, and architecture overview |
 
 ---
 
@@ -192,7 +192,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 - Remaining: data source doc update (1.A5 minor)
 
 **Phase 2 (Database Design & Population):** ✅ **COMPLETE**
-- All schema design tasks (2.A1-2.A5) implemented in `schema_design.py`
+- All schema design tasks (2.A1-2.A5) implemented in `pipeline/schema.py`
 - All data loading tasks (2.B1-2.B4) implemented with reconciliation and refresh workflow
 - All API tasks (2.C1-2.C6) implemented with FastAPI — 15 route modules, 11 Pydantic models, 115 API-related tests
 
@@ -204,11 +204,11 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 - **Round 4 UI/UX fixes:** Shared budget type donut utility, stacked YoY chart by service, multi-entity comparison (2-6), faceted filter counts with cross-filtering, service dropdown sorted by count, FY dropdown ordered newest-first, chart click-through scroll anchors, dashboard loading feedback, consolidated view total program value, sub-PE tag visibility
 - Remaining: Lighthouse/axe-core accessibility audit (requires running UI)
 
-**Phase 4 (Publish, Feedback & Iteration):** 🔄 **~50% COMPLETE**
+**Phase 4 (Publish, Feedback & Iteration):** 🔄 **~56% COMPLETE** (9/16 tasks)
 - Containerization complete: `Dockerfile`, `Dockerfile.multistage`, `docker-compose.yml`, `docker-compose.staging.yml`
 - CI pipeline complete: matrix testing, linting, type checking, coverage, Docker build validation
 - Monitoring & backup complete: `/health/detailed` metrics, `scripts/backup_db.py`, structured logging
-- Automated data refresh complete: `refresh_data.py` + GitHub Actions weekly cron
+- Automated data refresh complete: `pipeline/refresh.py` + GitHub Actions weekly cron
 - `CONTRIBUTING.md` with full development guidelines
 - **Round 4 backend fixes:** `budget_type` column backfill, composite DB indexes, `exclude_summary` parameter, related programs confidence ≥0.8, PE search prefix matching, faceted counts endpoint (`/api/v1/facets`), cache TTL tuning
 - Remaining: hosting platform selection, domain/TLS, CD deployment workflow, feedback mechanism, public launch
@@ -217,72 +217,144 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 
 | Component | File(s) | Lines | Status |
 |-----------|---------|-------|--------|
-| **Document downloader** | `downloader/` (5 modules) | 2,442 | ✅ Functional — 5 sources, multi-year, parallel, Playwright |
-| **Database builder (CLI)** | `build_budget_db.py` | 1,957 | ✅ Functional — Excel/PDF parsing, incremental updates, dynamic FY columns, failure log + retry |
-| **Database builder (GUI)** | `build_budget_gui.py` | 497 | ✅ Functional — tkinter interface with progress/ETA |
-| **Schema & migrations** | `schema_design.py` | 482 | ✅ Complete — versioned migrations, reference table seeding |
-| **Exhibit catalog** | `exhibit_catalog.py` | 429 | ✅ Complete — 9 exhibit types with column layouts |
-| **Validation suite** | `validate_budget_db.py` + `utils/validation.py` | 777 | ✅ Complete — 10+ checks, ValidationRegistry, cross-exhibit consistency, outlier detection |
-| **Search interface** | `search_budget.py` | 582 | ✅ Functional — FTS5 full-text search, BM25 scoring, export |
+| **Document downloader** | `downloader/` (6 modules) | 3,229 | ✅ Functional — 5 sources, multi-year, parallel, Playwright |
+| **Database builder (CLI)** | `pipeline/builder.py` | 3,676 | ✅ Functional — Excel/PDF parsing, incremental updates, dynamic FY columns, failure log + retry |
+| **Database builder (GUI)** | `pipeline/gui.py` | 496 | ✅ Functional — tkinter interface with progress/ETA |
+| **Schema & migrations** | `pipeline/schema.py` | 718 | ✅ Complete — versioned migrations, reference table seeding |
+| **Exhibit catalog** | `pipeline/exhibit_catalog.py` | 576 | ✅ Complete — 9 exhibit types with column layouts |
+| **Validation suite** | `pipeline/db_validator.py` + `pipeline/validator.py` + `utils/validation.py` | 2,627 | ✅ Complete — 10+ checks, ValidationRegistry, cross-exhibit consistency, outlier detection |
+| **Search interface** | `pipeline/search.py` | 569 | ✅ Functional — FTS5 full-text search, BM25 scoring, export |
 | **Data reconciliation** | `scripts/reconcile_budget_data.py` | 481 | ✅ Complete — cross-service + cross-exhibit checks |
 | **PDF quality audit** | `scripts/pdf_quality_audit.py` | 312 | ✅ Complete — automated extraction quality scoring |
-| **Refresh workflow** | `refresh_data.py` | — | ✅ Complete — staged pipeline with dry-run, webhooks, rollback, progress tracking, scheduling |
-| **REST API** | `api/` (app, models, routes) | 1,239 | ✅ Complete — FastAPI with 15 route modules, CORS, CSP headers, rate limiting, connection pooling |
+| **Refresh workflow** | `pipeline/refresh.py` | — | ✅ Complete — staged pipeline with dry-run, webhooks, rollback, progress tracking, scheduling |
+| **REST API** | `api/` (app, models, routes) | 8,421 | ✅ Complete — FastAPI with 15 route modules, CORS, CSP headers, rate limiting, connection pooling |
 | **Web UI** | `templates/` + `static/` | — | ✅ Complete — HTMX + Jinja2 with search, filters, results, detail panel, download modal, charts |
 | **User documentation** | `docs/` (6 guides) | — | ✅ Complete — getting started, data dictionary, FAQ, API reference, methodology, deployment |
-| **Utility libraries** | `utils/` (19 modules) | 2,093 | ✅ Complete — config, database, HTTP, patterns, strings, validation, cache, query, formatting |
+| **Utility libraries** | `utils/` (19 modules) | 5,164 | ✅ Complete — config, database, HTTP, patterns, strings, validation, cache, query, formatting |
 | **Test suite** | `tests/` (104 files) | — | ✅ **2,590 tests** — comprehensive coverage across all modules |
 | **CI/CD** | `.github/workflows/` (4 files) | — | ✅ Complete — CI pipeline, data refresh, optimization tests, scheduled downloads |
 | **Containerization** | `Dockerfile*`, `docker-compose*.yml` | — | ✅ Complete — production, multistage, dev, staging configurations |
 | **Backup & monitoring** | `scripts/backup_db.py`, `api/app.py` | — | ✅ Complete — automated backups, /health/detailed, structured logging |
 
-### Remaining TODOs (as of 2026-04-02)
+### Remaining Work
 
-**LION / TIGER / BEAR agent groups:** ✅ **ALL COMPLETE** (33/33 tasks done)
+All code TODOs (H1, H2, M1, L1–L5) and agent groups (LION/TIGER/BEAR, 33/33) are
+**resolved**. Data quality issues are catalogued in
+[`docs/NOTICED_ISSUES.md`](NOTICED_ISSUES.md).
 
-**Code TODOs (8 items):** ✅ **ALL COMPLETE** — TODO-H1, H2, M1, L1-L5 resolved
+Remaining work is organized into groups A–G:
 
-**Data quality issues:** See [`docs/NOTICED_ISSUES.md`](NOTICED_ISSUES.md) for full issue catalog with root cause analysis and resolution status.
-
-**Actionable work groups:** See [`docs/TODO_PLAN.md`](TODO_PLAN.md) for executable task assignments. Summary:
-
-| Group | Focus | Status |
-|-------|-------|--------|
-| **A–C** | DB verification (prior fixes, reference tables, org normalization) | Code complete — needs DB verification |
-| **D** | FY attribution correction | Partial — mismatch detection exists, auto-correction missing |
-| **E** | Tag quality + description gaps | Partial — confidence scores exist, API filtering missing |
-| **F** | Download retry CLI | ✅ Complete |
-| **G** | Deploy & launch | Blocked on user infrastructure decisions |
+| Group | Focus | Code Status | What Remains |
+|-------|-------|-------------|-------------|
+| **A** | Verify prior fixes | ✅ Resolved (11/14 via test suite) | 3 items need `repair_database.py` on production |
+| **B** | Reference tables & dropdowns | ✅ Resolved via test suite | — |
+| **C** | Org name normalization | ✅ Resolved via test suite | — |
+| **D** | FY attribution | ⚠️ Partial | Mismatch logs but no auto-correction (deferred) |
+| **E** | Enrichment quality | ✅ Resolved via test suite | — |
+| **F** | Download retry CLI | ✅ Complete | — |
+| **G** | Deploy & launch | ❌ Blocked | Needs user infrastructure decisions |
 
 ---
 
-## Active TODOs — Groups A–G
+#### Groups A–C: DB Verification Queries
 
-All code TODOs (H1, H2, M1, L1–L5) are **resolved**. Remaining work is organized into
-groups A–G. Full specifications in **[`docs/TODO_PLAN.md`](TODO_PLAN.md)** — the single
-source of truth for task execution.
+All fixes are implemented in code. Run these queries against `dod_budget.sqlite`,
+then update [`docs/NOTICED_ISSUES.md`](NOTICED_ISSUES.md) status markers from
+`[CODE COMPLETE]` to `[RESOLVED — verified YYYY-MM-DD]`.
 
-## Recent Improvements
+**Group A — Prior Fixes** (NOTICED_ISSUES ~~#6~~, ~~#7~~, #9, #18, #26, ~~#52~~):
+```sql
+SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_bl_%';     -- #9: indexes
+SELECT COUNT(*) FROM budget_lines WHERE budget_type IS NULL;                      -- expect ≤116
+```
+Code-only checks: FY sort (`api/routes/frontend.py:540`), z-index (`static/css/main.css`).
 
-### Round 5 — Database Data Quality Fixes (2026-02-27)
+**Group B — Reference Tables** (NOTICED_ISSUES #1, #2, #4, ~~#5~~, #21, ~~#57~~):
+```sql
+SELECT COUNT(*) FROM budget_cycles;                                               -- expect 5
+SELECT COUNT(*) FROM appropriation_titles;                                        -- expect ~225
+SELECT COUNT(*) FROM services_agencies;                                           -- expect 22+
+SELECT COUNT(*) FROM exhibit_types;                                               -- expect 11+
+SELECT COUNT(*) FROM budget_lines WHERE appropriation_code IS NULL;               -- expect ~3,531
+```
 
-Ran a 9-step migration (`scripts/fix_data_quality.py`) and hardened the ingestion
-pipeline to eliminate duplicates, fill NULL fields, and clean reference tables.
+**Group C — Org Normalization** (NOTICED_ISSUES #3, #20, #38):
+```sql
+SELECT organization_name, COUNT(*) FROM budget_lines
+GROUP BY organization_name ORDER BY 2 DESC;
+-- expect canonical names only (Army, Navy, Air Force, etc.)
+```
 
-| Change | Result |
-|--------|--------|
-| Cross-file deduplication (`pipeline/builder.py` + migration) | 124,670 rows to 47,531 (62% reduction) |
-| Appropriation code backfill (`repair_database.py`) | NULL appropriation_code: 17.5% to 7.4% |
-| Budget type expansion (`scripts/fix_budget_types.py`) | NULL budget_type: 388 to 116 |
-| Organization name fill (migration step 5) | Empty organization_name: 311 to 0 |
-| Footnote cleanup (`pipeline/backfill.py`) | Reference table footnotes: 31 to 0 |
-| `*a.xlsx` exclusion in builder | Prevents amendment file duplicates at ingestion |
+**Group E — Enrichment Quality** (NOTICED_ISSUES ~~#27~~, ~~#39~~, ~~#55~~):
+```sql
+SELECT tag, COUNT(*) c FROM pe_tags WHERE confidence >= 0.85
+GROUP BY tag ORDER BY c DESC LIMIT 20;
 
-**New files:** `scripts/fix_data_quality.py`, `tests/test_pipeline_group/test_data_quality_fixes.py` (34 tests)
+SELECT COUNT(*) FROM pe_index
+WHERE pe_number NOT IN (SELECT DISTINCT pe_number FROM pe_descriptions);          -- expect 0
+```
 
-**Modified:** `pipeline/builder.py`, `repair_database.py`, `scripts/fix_budget_types.py`, `pipeline/backfill.py`
+---
 
-See [NOTICED_ISSUES.md](NOTICED_ISSUES.md) Round 5 for full details.
+#### Group D: Fiscal Year Attribution (Partial)
+
+NOTICED_ISSUES refs: #10, #25, #56
+
+**What exists:**
+- FY extraction from file path: `pipeline/builder.py:1663-1673`
+- FY mismatch detection: `pipeline/builder.py:1213-1222` (logs warning, prefers sheet value)
+- FY validation at download: `downloader/metadata.py:273-285` (`validate_fy_match`)
+
+**What's missing (deferred):**
+- Auto-correction when file-path FY disagrees with content FY (currently only logs — the safer default)
+- Investigation of PE FY gaps (#56) — needs production DB
+
+```sql
+SELECT pe_number, fiscal_year, COUNT(*) FROM budget_lines
+WHERE pe_number IN (SELECT pe_number FROM pe_index WHERE fiscal_years LIKE '%2025%')
+GROUP BY 1, 2 ORDER BY 1, 2;
+```
+
+---
+
+#### Group G: Deploy & Launch (Blocked)
+
+**Blocked on:** User infrastructure decisions (hosting platform, domain, credentials).
+
+Scaffolding in place:
+- Docker: `Dockerfile` (production), `Dockerfile.multistage` (embedded DB)
+- CI/CD template: `.github/workflows/deploy.yml` (4 TODO placeholders)
+- Health checks, monitoring, backup scripts all ready
+
+Sub-tasks (sequential):
+1. **G1** Choose hosting platform → create `docs/HOSTING_DECISION.md`
+2. **G2** Configure CD workflow → fill deploy.yml TODOs + GitHub secrets
+3. **G3** Register domain + TLS
+4. **G4** Accessibility audit (Lighthouse score ≥ 90)
+5. **G5** Soft launch to 5–10 users
+6. **G6** Public launch + announcement
+
+---
+
+### Known Limitations (not actionable)
+
+Documented in `docs/PRD.md` §9 and `docs/NOTICED_ISSUES.md`:
+- #8, #53: 67% of rows lack PE numbers (O-1/M-1/P-1 exhibits don't carry PE)
+- #16, #19, #28: FY2000-2009 data gap (documents not publicly available)
+- #49: Inline styles (ongoing gradual refactor)
+
+### Completed Code TODOs
+
+| ID | Task | Resolution |
+|----|------|------------|
+| TODO-H1 | R-1 titles for PDF-only PEs | `_extract_r1_titles_for_stubs()` in `keyword_search.py` |
+| TODO-H2 | R-1 funding for D8Z PEs | `_aggregate_r2_funding_into_r1_stubs()` in `keyword_search.py` |
+| TODO-M1 | Explorer PE number search | `pe_index` fallback + 8 tests |
+| TODO-L1 | Enricher progress reporting | `_log_progress()` in all 5 phases |
+| TODO-L2 | RuntimeWarning fix | Lazy `__getattr__` imports in `pipeline/__init__.py` |
+| TODO-L3 | Anthropic import consolidation | Single `_HAS_ANTHROPIC` flag |
+| TODO-L4 | Rule-based tagger fix | Expanded text sources + diagnostics |
+| TODO-L5 | Rebuild Cache button | Button + JS in `templates/hypersonics.html` |
 
 ---
 
@@ -301,8 +373,9 @@ Use the ID column when referencing tasks in issues, PRs, or discussions:
 
 | Phase | Tasks |
 |-------|-------|
+| Phase 0 — Documentation | 2 |
 | Phase 1 — Data Extraction & Normalization | 15 |
 | Phase 2 — Database Design & Population | 15 |
-| Phase 3 — Front-End & Documentation | 15 |
-| Phase 4 — Publish, Feedback & Iteration | 12 |
-| **Total** | **57** |
+| Phase 3 — Front-End & Documentation | 16 |
+| Phase 4 — Publish, Feedback & Iteration | 17 |
+| **Total** | **65** |

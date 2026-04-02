@@ -10,11 +10,11 @@
 <h2>Spruill Funding Comparison</h2>
 <p class="programs-subtitle">Side-by-side funding comparison across fiscal years for selected program elements.</p>
 
-<div id="spruill-controls" style="margin-bottom:1rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-  <label for="spruill-detail" style="font-size:.85rem;cursor:pointer">
+<div id="spruill-controls" class="mb-lg d-flex items-center flex-wrap gap-sm">
+  <label for="spruill-detail" class="text-lg" style="cursor:pointer">
     <input type="checkbox" id="spruill-detail"> Show sub-element detail
   </label>
-  <a id="spruill-export" href="#" class="btn btn-secondary btn-sm" style="margin-left:auto" download>
+  <a id="spruill-export" href="#" class="btn btn-secondary btn-sm ml-auto" download>
     &darr; Export CSV
   </a>
 </div>
@@ -30,10 +30,10 @@
 </div>
 
 {% if not selected_pes %}
-<div class="empty-state" style="margin-top:1rem;background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:2rem;text-align:center">
+<div class="empty-state mt-lg card-surface p-xl" style="text-align:center">
   <div class="empty-state-icon" aria-hidden="true">&#128202;</div>
   <p><strong>No programs selected.</strong></p>
-  <p style="font-size:.85rem">Go to the <a href="/programs">Program Explorer</a> to select PEs for comparison.</p>
+  <p class="text-lg">Go to the <a href="/programs">Program Explorer</a> to select PEs for comparison.</p>
 </div>
 {% endif %}
 {% endblock %}
