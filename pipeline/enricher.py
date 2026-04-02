@@ -31,13 +31,19 @@ import time
 from pathlib import Path
 
 # TODO [TODO-L1]: Add uniform progress reporting to all 5 enrichment phases.
-# TODO [TODO-L3]: Consolidate anthropic import to single top-level _HAS_ANTHROPIC flag.
-# TODO [TODO-L4]: Debug rule-based tagger in Phase 3 — currently produces 0 rows.
-# See docs/TODO_PLAN.md for full specifications.
 
 from utils import get_connection
 from utils.patterns import PE_NUMBER, FISCAL_YEAR
 from utils.pdf_sections import parse_narrative_sections, detect_project_boundaries
+
+# Single top-of-file anthropic import (TODO-L3).
+# Check _HAS_ANTHROPIC once at Phase 3 entry rather than per-batch.
+_HAS_ANTHROPIC = False
+try:
+    import anthropic  # noqa: F401, E402
+    _HAS_ANTHROPIC = True
+except ImportError:
+    anthropic = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -822,11 +828,8 @@ def _tags_from_llm(
     Returns dict mapping pe_number → list of tag strings.
     Silently returns empty results on any error.
     """
-    try:
-        import anthropic
-    except ImportError:
-        logger.warning("anthropic package not installed. Skipping LLM tags.")
-        logger.warning("Run: pip install anthropic")
+    # _HAS_ANTHROPIC is checked once at Phase 3 entry; this is a safety fallback.
+    if not _HAS_ANTHROPIC:
         return {}
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -879,6 +882,13 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
     LION-106: Tracks source_files for each tag.
     """
     logger.info("[Phase 3] Generating tags (LLM=%s)...", "yes" if with_llm else "no")
+
+    # Check anthropic availability once at phase entry (TODO-L3)
+    if with_llm and not _HAS_ANTHROPIC:
+        logger.warning("--with-llm requested but anthropic package is not installed.")
+        logger.warning("Install with: pip install anthropic")
+        logger.warning("Falling back to rule-based tagging only.")
+        with_llm = False
 
     pe_numbers = [
         r[0] for r in conn.execute("SELECT pe_number FROM pe_index").fetchall()
@@ -937,12 +947,17 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
     # so PEs without PDF coverage still get keyword tags.
     bl_texts: dict[str, str] = {}
     for row in conn.execute(f"""
-        SELECT pe_number, GROUP_CONCAT(line_item_title, ' ') AS titles
+        SELECT pe_number, GROUP_CONCAT(combined_text, ' ') AS titles
         FROM (
-            SELECT DISTINCT pe_number, line_item_title
+            SELECT DISTINCT pe_number,
+                   COALESCE(line_item_title, '') || ' ' ||
+                   COALESCE(budget_activity_title, '') || ' ' ||
+                   COALESCE(account_title, '') AS combined_text
             FROM budget_lines
             WHERE pe_number IN ({placeholders})
-              AND line_item_title IS NOT NULL
+              AND (line_item_title IS NOT NULL
+                   OR budget_activity_title IS NOT NULL
+                   OR account_title IS NOT NULL)
         )
         GROUP BY pe_number
     """, to_tag).fetchall():
@@ -1067,6 +1082,41 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
                     if pat.search(proj_text):
                         insert_buf.append((pe, proj_num, tag, "keyword", 0.65, desc_src_json))
                         break
+
+        # TODO-L4: Per-PE debug logging for rule-based tagger diagnostics
+        pe_tags_in_buf = [t for t in insert_buf if t[0] == pe]
+        if pe_tags_in_buf:
+            tag_names = [t[2] for t in pe_tags_in_buf]
+            logger.debug("Rule-based tagger: PE %s matched tags %s", pe, tag_names)
+
+    # Debug logging for rule-based tagger (TODO-L4)
+    if insert_buf:
+        # Count unique PEs with tags for diagnostic
+        tagged_pes = {row[0] for row in insert_buf}
+        logger.info(
+            "  Rule-based tagger: %d tag rows for %d / %d PEs (sources: %s)",
+            len(insert_buf),
+            len(tagged_pes),
+            len(to_tag),
+            ", ".join(
+                f"{src}={cnt}"
+                for src, cnt in sorted(
+                    {
+                        row[3]: sum(1 for r in insert_buf if r[3] == row[3])
+                        for row in insert_buf
+                    }.items()
+                )
+            ),
+        )
+    else:
+        logger.warning(
+            "  Rule-based tagger: 0 tag rows for %d PEs. "
+            "bl_texts populated: %d, desc_texts populated: %d, structured_fields populated: %d",
+            len(to_tag),
+            sum(1 for v in bl_texts.values() if v.strip()),
+            sum(1 for v in desc_texts.values() if v),
+            len(structured_fields),
+        )
 
     # Flush structured + keyword tags
     if insert_buf:
