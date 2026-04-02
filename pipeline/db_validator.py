@@ -12,15 +12,6 @@ Usage:
     python validate_budget_db.py --html > report.html # HTML report (TIGER-007)
     python validate_budget_db.py --threshold warning  # Exit non-zero on warnings+
 
----
-TODOs for this file
----
-
-DONE LION-108-val: Validation checks for LION schema changes.
-    (a) check_pdf_pages_fiscal_year — warns if >5% of pdf_pages have NULL fiscal_year
-    (b) check_pdf_pe_numbers_populated — warns if junction table is empty/missing
-    (c) check_pe_tags_source_files — warns if pe_tags.source_files has NULLs
-
 """
 
 import argparse
@@ -34,7 +25,7 @@ from pathlib import Path
 # Shared utilities: Import from utils package for consistency across codebase
 from utils import get_connection
 from utils.patterns import PE_NUMBER_STRICT as _PE_PATTERN
-from utils.database import _validate_identifier
+from utils.database import _validate_identifier, table_exists
 from pipeline.schema import check_database_integrity
 
 # Known exhibit types — imported from exhibit_catalog so it stays in sync
@@ -60,14 +51,6 @@ def _get_amount_columns(conn: sqlite3.Connection) -> list[str]:
     cols = conn.execute("PRAGMA table_info(budget_lines)").fetchall()
     return [c[1] for c in cols if c[1].startswith("amount_fy")]
 
-
-# DONE [Group: TIGER] TIGER-001: Add cross-year budget consistency validation — flag >10x YoY changes
-# DONE [Group: TIGER] TIGER-002: Add appropriation title consistency validation
-# DONE [Group: TIGER] TIGER-003: Add line item rollup reconciliation
-# DONE [Group: TIGER] TIGER-004: Add referential integrity validation (budget_lines → lookup tables)
-# DONE [Group: TIGER] TIGER-005: Add FY column completeness check
-# DONE [Group: TIGER] TIGER-006: Integrate PDF quality metrics into validation report
-# DONE [Group: TIGER] TIGER-007: Add HTML validation report export and --threshold flag
 
 # ── Individual checks ────────────────────────────────────────────────────────
 
@@ -915,7 +898,7 @@ def check_pdf_pe_numbers_populated(conn: sqlite3.Connection) -> list[dict]:
     """
     issues = []
 
-    if not _table_exists(conn, "pdf_pe_numbers"):
+    if not table_exists(conn, "pdf_pe_numbers"):
         return [{
             "check": "pdf_pe_numbers_populated",
             "severity": "warning",
@@ -968,7 +951,7 @@ def check_pe_tags_source_files(conn: sqlite3.Connection) -> list[dict]:
     """
     issues = []
 
-    if not _table_exists(conn, "pe_tags"):
+    if not table_exists(conn, "pe_tags"):
         return []
 
     try:
@@ -1174,7 +1157,7 @@ def check_enrichment_orphans(conn: sqlite3.Connection) -> list[dict]:
     tables retain data from a prior run with different PE numbers.
     """
     issues = []
-    if not _table_exists(conn, "pe_index"):
+    if not table_exists(conn, "pe_index"):
         return []
 
     checks = [
@@ -1184,7 +1167,7 @@ def check_enrichment_orphans(conn: sqlite3.Connection) -> list[dict]:
         ("pe_lineage", "referenced_pe"),
     ]
     for table, col in checks:
-        if not _table_exists(conn, table):
+        if not table_exists(conn, table):
             continue
         try:
             orphans = conn.execute(f"""
@@ -1223,7 +1206,7 @@ def check_enrichment_staleness(conn: sqlite3.Connection) -> list[dict]:
     in the Program Explorer and tag/topic search.
     """
     issues = []
-    if not _table_exists(conn, "pe_index"):
+    if not table_exists(conn, "pe_index"):
         return []
 
     try:
@@ -1448,13 +1431,6 @@ def check_expected_indexes(conn: sqlite3.Connection) -> list[dict]:
 
     return issues
 
-
-def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
-    r = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-        (name,)
-    ).fetchone()
-    return r is not None
 
 
 ALL_CHECKS = [

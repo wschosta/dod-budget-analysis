@@ -27,6 +27,10 @@ PE_NUMBER = re.compile(rf'\b\d{{7}}{PE_SUFFIX_PATTERN}\b')
 # (no surrounding text allowed). Used by pipeline/db_validator.py.
 PE_NUMBER_STRICT = re.compile(rf'^[0-9]{{7}}{PE_SUFFIX_PATTERN}$')
 
+# Case-insensitive anchored variant for matching user-supplied PE numbers
+# (e.g. keyword search inputs that may use lowercase letters).
+PE_NUMBER_STRICT_CI = re.compile(rf'^[0-9]{{7}}{PE_SUFFIX_PATTERN}$', re.IGNORECASE)
+
 # FTS5 special characters that need escaping in full-text search queries
 FTS5_SPECIAL_CHARS = re.compile(r'[\"()*:^+]')
 

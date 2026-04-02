@@ -15,22 +15,6 @@ Usage:
     python enrich_budget_db.py --rebuild                # drop and rebuild enrichment tables
     python enrich_budget_db.py --db path/to/db.sqlite   # custom DB path
 
-──────────────────────────────────────────────────────────────────────────────
-LION TODOs — Enrichment Alignment & Tag Quality
-──────────────────────────────────────────────────────────────────────────────
-
-LION-104 [DONE]: Include budget_lines text fields in keyword tagging.
-    run_phase3() concatenates line_item_title, budget_activity_title, and
-    account_title from budget_lines into the keyword matching text.
-
-LION-105 [DONE]: Differentiate confidence scoring by tag source.
-    Confidence levels: 1.0 (structured), 0.9 (budget_lines keywords),
-    0.8 (PDF narrative keywords), 0.7 (LLM-generated tags).
-
-LION-106 [DONE]: Add source_files tracking to pe_tags table.
-    source_files TEXT column (JSON array) tracks provenance from both
-    structured and keyword tagging sources.
-
 """
 
 from __future__ import annotations
@@ -44,11 +28,20 @@ import sqlite3
 import sys
 import threading
 import time
+from collections import Counter
 from pathlib import Path
 
 from utils import get_connection
 from utils.patterns import PE_NUMBER, FISCAL_YEAR
 from utils.pdf_sections import parse_narrative_sections, detect_project_boundaries
+
+# Check _HAS_ANTHROPIC once at Phase 3 entry rather than per-batch.
+_HAS_ANTHROPIC = False
+try:
+    import anthropic  # noqa: F401, E402
+    _HAS_ANTHROPIC = True
+except ImportError:
+    anthropic = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -323,6 +316,44 @@ def _ensure_pe_index_source_column(conn: sqlite3.Connection) -> None:
         )
         conn.commit()
         logger.info("  Added 'source' column to pe_index (upgrade).")
+
+
+def _fmt_time(s: float) -> str:
+    """Format seconds as a compact elapsed/ETA string."""
+    if s < 60:
+        return f"{s:.0f}s"
+    m, s = divmod(s, 60)
+    return f"{int(m)}m{int(s)}s"
+
+
+def _log_progress(
+    phase_name: str,
+    completed: int,
+    total: int,
+    start_time: float,
+) -> None:
+    """Log a uniform progress line for an enrichment phase.
+
+    Format:
+        Phase X: {completed}/{total} ({pct:.1f}%) | Elapsed: {elapsed} | ETA: {eta} | {rate:.0f} items/s
+    """
+    if total <= 0:
+        return
+    elapsed = time.monotonic() - start_time
+    pct = completed / total * 100
+    rate = completed / elapsed if elapsed > 0 else 0
+    eta_s = (total - completed) / rate if rate > 0 else 0
+
+    logger.info(
+        "%s: %s/%s (%.1f%%) | Elapsed: %s | ETA: %s | %.0f items/s",
+        phase_name,
+        f"{completed:,}",
+        f"{total:,}",
+        pct,
+        _fmt_time(elapsed),
+        _fmt_time(eta_s),
+        rate,
+    )
 
 
 def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
@@ -611,7 +642,8 @@ def run_phase1(conn: sqlite3.Connection, stop_event: threading.Event | None = No
 
         # ── Build insert buffer from pre-fetched data ─────────────────────
         insert_buf: list[tuple] = []
-        for pe in pe_list:
+        t0_pass2 = time.monotonic()
+        for pass2_idx, pe in enumerate(pe_list):
             title = None
             for text in pe_texts[pe]:
                 title = _extract_pe_title_from_text(pe, text)
@@ -634,6 +666,9 @@ def run_phase1(conn: sqlite3.Connection, stop_event: threading.Event | None = No
                 pe, title, org_name, budget_type,
                 fiscal_years_json, exhibit_types_json,
             ))
+
+            if (pass2_idx + 1) % 200 == 0 or pass2_idx + 1 == len(pe_list):
+                _log_progress("Phase 1 Pass 2", pass2_idx + 1, len(pe_list), t0_pass2)
 
         if insert_buf:
             conn.executemany("""
@@ -687,7 +722,7 @@ def run_phase2(conn: sqlite3.Connection, stop_event: threading.Event | None = No
     logger.info("Processing %d PDF file(s)...", len(pdf_files))
     total_desc = 0
     insert_buf: list[tuple] = []
-    t0 = time.time()
+    t0_mono = time.monotonic()
 
     errors: list[str] = []
     for i, source_file in enumerate(pdf_files, 1):
@@ -759,14 +794,7 @@ def run_phase2(conn: sqlite3.Connection, stop_event: threading.Event | None = No
             conn.commit()
             total_desc += len(insert_buf)
             insert_buf = []
-            elapsed = time.time() - t0
-            pct = i / len(pdf_files) * 100
-            rate = i / elapsed if elapsed > 0 else 0
-            eta = (len(pdf_files) - i) / rate if rate > 0 else 0
-            logger.info(
-                "  [Phase 2] %d / %d files (%.1f%%) — %d descriptions — %.0f files/s — ETA %.0fs",
-                i, len(pdf_files), pct, total_desc, rate, eta,
-            )
+            _log_progress("Phase 2", i, len(pdf_files), t0_mono)
 
     if insert_buf:
         conn.executemany("""
@@ -833,11 +861,8 @@ def _tags_from_llm(
     Returns dict mapping pe_number → list of tag strings.
     Silently returns empty results on any error.
     """
-    try:
-        import anthropic
-    except ImportError:
-        logger.warning("anthropic package not installed. Skipping LLM tags.")
-        logger.warning("Run: pip install anthropic")
+    # _HAS_ANTHROPIC is checked once at Phase 3 entry; this is a safety fallback.
+    if not _HAS_ANTHROPIC:
         return {}
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -890,6 +915,13 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
     LION-106: Tracks source_files for each tag.
     """
     logger.info("[Phase 3] Generating tags (LLM=%s)...", "yes" if with_llm else "no")
+
+    # Check anthropic availability once at phase entry
+    if with_llm and not _HAS_ANTHROPIC:
+        logger.warning("--with-llm requested but anthropic package is not installed.")
+        logger.warning("Install with: pip install anthropic")
+        logger.warning("Falling back to rule-based tagging only.")
+        with_llm = False
 
     pe_numbers = [
         r[0] for r in conn.execute("SELECT pe_number FROM pe_index").fetchall()
@@ -948,12 +980,17 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
     # so PEs without PDF coverage still get keyword tags.
     bl_texts: dict[str, str] = {}
     for row in conn.execute(f"""
-        SELECT pe_number, GROUP_CONCAT(line_item_title, ' ') AS titles
+        SELECT pe_number, GROUP_CONCAT(combined_text, ' ') AS titles
         FROM (
-            SELECT DISTINCT pe_number, line_item_title
+            SELECT DISTINCT pe_number,
+                   COALESCE(line_item_title, '') || ' ' ||
+                   COALESCE(budget_activity_title, '') || ' ' ||
+                   COALESCE(account_title, '') AS combined_text
             FROM budget_lines
             WHERE pe_number IN ({placeholders})
-              AND line_item_title IS NOT NULL
+              AND (line_item_title IS NOT NULL
+                   OR budget_activity_title IS NOT NULL
+                   OR account_title IS NOT NULL)
         )
         GROUP BY pe_number
     """, to_tag).fetchall():
@@ -992,7 +1029,7 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
     except sqlite3.OperationalError:
         pass  # project_descriptions table may not exist yet
 
-    t0 = time.time()
+    t0_mono = time.monotonic()
     for tag_idx, pe in enumerate(to_tag):
         if stop_event and stop_event.is_set():
             logger.info("  Phase 3 stopped at PE %d/%d.", tag_idx, len(to_tag))
@@ -1000,13 +1037,10 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
 
         # Progress every 100 PEs
         if tag_idx > 0 and tag_idx % 100 == 0:
-            elapsed = time.time() - t0
-            logger.info(
-                "  [Phase 3] %d / %d PEs tagged (%.1f%%) — %.1fs elapsed",
-                tag_idx, len(to_tag), tag_idx / len(to_tag) * 100, elapsed,
-            )
+            _log_progress("Phase 3", tag_idx, len(to_tag), t0_mono)
 
         # LION-106: Source files for this PE's structured tags
+        buf_start = len(insert_buf)
         pe_src_json = json.dumps(structured_sources.get(pe, []))
 
         # 3a: structured field tags — LION-105: confidence=1.0 (direct match)
@@ -1078,6 +1112,35 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
                     if pat.search(proj_text):
                         insert_buf.append((pe, proj_num, tag, "keyword", 0.65, desc_src_json))
                         break
+
+        # Per-PE debug logging for rule-based tagger diagnostics
+        pe_tags = insert_buf[buf_start:]
+        if pe_tags:
+            logger.debug("Rule-based tagger: PE %s matched tags %s", pe, [t[2] for t in pe_tags])
+
+    # Debug logging for rule-based tagger
+    if insert_buf:
+        # Count unique PEs with tags for diagnostic
+        tagged_pes = {row[0] for row in insert_buf}
+        logger.info(
+            "  Rule-based tagger: %d tag rows for %d / %d PEs (sources: %s)",
+            len(insert_buf),
+            len(tagged_pes),
+            len(to_tag),
+            ", ".join(
+                f"{src}={cnt}"
+                for src, cnt in sorted(Counter(row[3] for row in insert_buf).items())
+            ),
+        )
+    else:
+        logger.warning(
+            "  Rule-based tagger: 0 tag rows for %d PEs. "
+            "bl_texts populated: %d, desc_texts populated: %d, structured_fields populated: %d",
+            len(to_tag),
+            sum(1 for v in bl_texts.values() if v.strip()),
+            sum(1 for v in desc_texts.values() if v),
+            len(structured_fields),
+        )
 
     # Flush structured + keyword tags
     if insert_buf:
@@ -1248,7 +1311,7 @@ def run_phase4(conn: sqlite3.Connection, stop_event: threading.Event | None = No
     rows_processed = 0
     skipped = 0
     chunk_max_rowid = checkpoint_rowid
-    t0 = time.time()
+    t0_mono = time.monotonic()
     while True:
         if stop_event and stop_event.is_set():
             logger.info("  Phase 4 stopped at row %s.", f"{rows_processed:,}")
@@ -1350,16 +1413,8 @@ def run_phase4(conn: sqlite3.Connection, stop_event: threading.Event | None = No
 
         # Progress every 10,000 rows
         if rows_processed % 10_000 < CHUNK:
-            elapsed = time.time() - t0
-            pct = rows_processed / desc_remaining * 100 if desc_remaining else 0
-            rate = rows_processed / elapsed if elapsed > 0 else 0
-            eta = (desc_remaining - rows_processed) / rate if rate > 0 else 0
-            logger.info(
-                "  [Phase 4] %s / %s rows (%.1f%%) — %d links found — %.0f rows/s — ETA %.0fs",
-                f"{rows_processed:,}", f"{desc_remaining:,}", pct, total, rate, eta,
-            )
+            _log_progress("Phase 4", rows_processed, desc_remaining, t0_mono)
 
-    elapsed = time.time() - t0
     if skipped:
         logger.info("Skipped %s already-processed (PE, file) pairs.", f"{skipped:,}")
 
@@ -1497,7 +1552,7 @@ def run_phase5(conn: sqlite3.Connection, stop_event: threading.Event | None = No
     pe_level_fallback = 0
     rows_processed = 0
     chunk_max_rowid = checkpoint_rowid
-    t0 = time.time()
+    t0_mono = time.monotonic()
 
     while True:
         if stop_event and stop_event.is_set():
@@ -1590,14 +1645,7 @@ def run_phase5(conn: sqlite3.Connection, stop_event: threading.Event | None = No
 
         # Progress every 10,000 rows
         if rows_processed % 10_000 < CHUNK and desc_remaining > 0:
-            elapsed = time.time() - t0
-            pct = rows_processed / desc_remaining * 100
-            rate = rows_processed / elapsed if elapsed > 0 else 0
-            eta = (desc_remaining - rows_processed) / rate if rate > 0 else 0
-            logger.info(
-                "  [Phase 5] %s / %s rows (%.1f%%) — %d project rows — %.0f rows/s — ETA %.0fs",
-                f"{rows_processed:,}", f"{desc_remaining:,}", pct, total_rows, rate, eta,
-            )
+            _log_progress("Phase 5", rows_processed, desc_remaining, t0_mono)
 
     if insert_buf:
         conn.executemany("""

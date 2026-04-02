@@ -37,6 +37,8 @@ Downloads budget justification documents from official DoD sources.
 - **Parallel discovery and download** with configurable worker count and per-domain rate limiting
 - **Smart file skipping** using hash-based change detection and file manifest tracking
 - **Retry with exponential backoff** (3 attempts per file, configurable timeouts)
+- **`--retry-failures` CLI flag** re-attempts only previously failed downloads from a structured `failed_downloads.json` log (records URL, destination, error, browser flag, and timestamp)
+- **GUI completion dialog** shows failure count and a "Copy retry command" button for easy CLI retry
 - **CLI and GUI modes** (`--no-gui` for automation/cron)
 - **File formats downloaded:** Excel (.xlsx), PDF, CSV, ZIP
 - **Output directory:** `DoD_Budget_Documents/` organized by fiscal year and source
@@ -84,6 +86,7 @@ Adds contextual metadata to program elements.
 - **PE tags:** Keyword-based categorization with confidence scoring (1.0 structured match, 0.9 budget-lines keyword, 0.85 project-level, 0.8 PDF narrative, 0.7 LLM-generated)
 - **PE lineage:** Historical tracking of program element changes over time
 - **Project descriptions:** Program-level detail decomposition
+- **Uniform progress reporting** across all 5 phases: logs completed/total count, percentage, elapsed time, ETA, and throughput rate via `_log_progress()` helper
 
 ---
 
@@ -127,7 +130,7 @@ FastAPI application serving the database through versioned endpoints (`/api/v1`)
 - **ETag caching** for conditional responses and bandwidth reduction
 - **CORS middleware** with configurable origins
 - **Security headers:** CSP, X-Content-Type-Options, X-Frame-Options
-- **Connection pooling:** Queue-based, thread-safe pool (configurable size, default 10)
+- **Per-request connections:** Fresh SQLite connection per request with WAL mode and configurable pragmas
 - **Auto-generated API docs:** OpenAPI/Swagger at `/docs`, ReDoc at `/redoc`
 - **Structured access logging** middleware with response timing
 
@@ -142,7 +145,7 @@ Server-side rendered HTML using Jinja2 templates with HTMX for dynamic updates.
 | Page | Route | Description |
 |------|-------|-------------|
 | **Explorer** | `/explorer` (also `/`) | **Default landing page.** Generalized keyword search tool. Enter any keywords (comma-separated, max 20) or PE numbers (e.g., `0604030N`) to search budget lines and PE descriptions with fuzzy matching (prefix, acronym expansion, edit-distance). PE numbers entered as keywords are matched directly against `budget_lines` and `pe_index`. Async cache build with progress polling and elapsed-time display. Collapsible PE-level preview table showing match counts. Two-list drag-and-drop column picker for XLSX download with customizable column order. Toggle to filter to directly matching sub-elements only. XLSX export includes totals row for keyword-matched rows and italic styling for non-matching rows. |
-| **Hypersonics** | `/hypersonics` | Pivoted table of all hypersonics-related PE lines and sub-programs, FY2015+. One row per unique PE + sub-element; one column per fiscal year showing primary requested/enacted funding ($K). Filter by service, exhibit type, and FY range. 25 forced-inclusion PEs (`_EXTRA_PES`) including 9 D8Z Defense-Wide programs. PDF-only PEs get stub R-1 rows with funding mined from R-2 detail PDFs. CSV and XLSX download; XLSX includes per-FY description columns from `pe_descriptions`. Filter presets with save/load/delete. |
+| **Hypersonics** | `/hypersonics` | Pivoted table of all hypersonics-related PE lines and sub-programs, FY2015+. One row per unique PE + sub-element; one column per fiscal year showing primary requested/enacted funding ($K). Filter by service, exhibit type, and FY range. 25 forced-inclusion PEs (`_EXTRA_PES`) including 9 D8Z Defense-Wide programs. PDF-only PEs get stub R-1 rows with funding mined from R-2 detail PDFs. CSV and XLSX download; XLSX includes per-FY description columns from `pe_descriptions`. Filter presets with save/load/delete. **Rebuild Cache** button in the filter bar triggers `POST /api/v1/hypersonics/rebuild` and reloads the page with fresh data. |
 | **Home (legacy)** | `/home` | Original full-text keyword search with filter sidebar: fiscal year, service/agency (sorted by count), exhibit type, budget type, amount range. Faceted filter counts, HTMX-driven results table. Still accessible but removed from nav. |
 | **Charts** | `/charts` | Budget by service (horizontal bar), stacked budget totals by service & FY, Top-N programs (excludes summary exhibits), multi-entity comparison (2-6 services across all FY columns), budget hierarchy treemap, budget type breakdown (shared doughnut utility). FY selector (newest first) and multi-select service filter. Not in primary nav; accessible via direct URL. |
 | **Dashboard** | `/dashboard` | Summary cards (FY totals, YOY change), budget-by-service bar chart, Top-10 programs, appropriation breakdown. Not in primary nav; accessible via direct URL. |
@@ -226,7 +229,7 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 | Tool | Description |
 |------|-------------|
 | `run_pipeline.py` | Full 5-step pipeline orchestrator with skip/only flags per step |
-| `dod_budget_downloader.py` | Multi-source document downloader (CLI + GUI) |
+| `dod_budget_downloader.py` | Multi-source document downloader (CLI + GUI) with `--retry-failures` support |
 | `build_budget_db.py` | Database builder (CLI + GUI via `build_budget_gui.py`) |
 | `repair_database.py` | Database repair/normalization |
 | `validate_budget_data.py` | Data quality validation with JSON report output |
@@ -250,7 +253,7 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 
 ### 7.2 CI/CD
 
-- **GitHub Actions CI:** Matrix testing (Python 3.11, 3.12), ruff lint, mypy type check, pytest with coverage (80% threshold on `api/` and `utils/`), Docker build validation
+- **GitHub Actions CI:** Matrix testing (Python 3.11, 3.12), ruff lint, mypy type check, pytest with coverage reporting on `api/` and `utils/`, Docker build validation
 - **Automated data refresh:** Weekly cron via `refresh-data.yml`
 - **Automated downloads:** Scheduled via `download.yml`
 - **Deploy workflow:** Docker build/push to GHCR (template)
@@ -270,7 +273,6 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 | `APP_PORT` | `8000` | API server port |
 | `APP_LOG_FORMAT` | `text` | Logging format (`text` or `json`) |
 | `APP_CORS_ORIGINS` | `*` | CORS allowed origins |
-| `APP_DB_POOL_SIZE` | `10` | Connection pool size |
 | `RATE_LIMIT_SEARCH` | `60` | Search rate limit (req/min/IP) |
 | `RATE_LIMIT_DOWNLOAD` | `10` | Download rate limit (req/min/IP) |
 | `RATE_LIMIT_DEFAULT` | `120` | Default rate limit (req/min/IP) |
@@ -296,9 +298,9 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 2. **PDF extraction accuracy** — Varies by document layout; some tables extract poorly from complex PDFs
 3. **Appropriation codes** — Not fully parsed for all exhibit types
 4. **Classified programs** — Excluded per DoD public release policy; budget totals will not match classified-inclusive figures
-5. **Tag over-indexing** — Enrichment pipeline assigns overly broad tags for some categories (tuning needed)
+5. **Tag over-indexing** — Enrichment pipeline assigns overly broad tags for some categories (e.g., `rdte` on 97% of PEs). Tags covering >60% of programs are too broad for meaningful filtering. See TODO Group E in `docs/TODO_PLAN.md`.
 6. **Dollar rounding** — Service/program totals computed from parsed line items may not match official totals exactly due to rounding and coverage gaps
-7. **PDF-only PEs lack R-1 totals** — D8Z Defense-Wide PEs that exist only in PDFs (not in Excel `budget_lines`) have R-2 sub-element funding from PDF mining but their R-1 stub rows show NULL amounts. R-1 title extraction from PDFs is planned (see ROADMAP TODO-H1/H2).
+7. **PDF-only PE handling** — D8Z Defense-Wide PEs that exist only in PDFs now have R-1 titles extracted from PDF pages and R-1 funding aggregated from R-2 sub-elements (fixed 2026-04-02). Some edge cases may remain for PEs with unusual PDF layouts.
 8. **Description quality varies** — R-1 descriptions may contain page headers or artifacts; `_is_garbage_description()` filters the worst cases but some noise may remain. R-2 descriptions are cleaned via `clean_narrative()` but multi-page artifacts can still slip through.
 
 ---

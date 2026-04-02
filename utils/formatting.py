@@ -6,10 +6,6 @@ Provides reusable functions for:
 - Tabular report output
 - Data serialization for display
 
-──────────────────────────────────────────────────────────────────────────────
-TODOs for this file
-──────────────────────────────────────────────────────────────────────────────
-
 """
 
 import html as _html_mod

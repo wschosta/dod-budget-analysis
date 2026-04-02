@@ -14,8 +14,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-# DONE [Group: TIGER] TIGER-010: Add OpenAPI example responses to all endpoint models
-
 # ── Reference data models ─────────────────────────────────────────────────────
 
 class ServiceOut(BaseModel):

@@ -9,8 +9,6 @@ Usage:
     python scripts/smoke_test.py --base-url http://staging:8000
     python scripts/smoke_test.py --timeout 10
 """
-# DONE [Group: BEAR] BEAR-005: Add smoke test script for deployment verification (~2,000 tokens)
-
 import argparse
 import csv
 import io

@@ -182,8 +182,8 @@ class TestFiscalYearGlobFix:
     """The GLOB pattern must match 'FY YYYY' (with space) — the canonical format."""
 
     def test_index_shows_fy_space_format(self, browser_fix_client):
-        """The index page should list FY 2024/2025/2026 from 'FY YYYY' data."""
-        resp = browser_fix_client.get("/")
+        """The home page should list FY 2024/2025/2026 from 'FY YYYY' data."""
+        resp = browser_fix_client.get("/home")
         assert resp.status_code == 200
         # The fiscal year dropdown should contain the values
         assert "FY 2026" in resp.text
@@ -200,7 +200,7 @@ class TestFiscalYearGlobFix:
 
     def test_all_fy_formats_appear_in_dropdown(self, fy_format_client):
         """All valid FY formats should appear: 'FY 2026', 'FY 2025', '2024', 'FY2023'."""
-        resp = fy_format_client.get("/")
+        resp = fy_format_client.get("/home")
         assert resp.status_code == 200
         # "FY YYYY" (with space) must match
         assert "FY 2026" in resp.text

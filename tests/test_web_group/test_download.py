@@ -17,7 +17,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from api.routes.download import _iter_rows, _DOWNLOAD_COLUMNS, _ALLOWED_SORT, _build_download_sql
+from api.routes.download import _iter_rows, _DOWNLOAD_COLUMNS, _build_download_sql
+from utils.query import ALLOWED_SORT_COLUMNS as _ALLOWED_SORT
 from fastapi.testclient import TestClient
 from api.app import create_app
 

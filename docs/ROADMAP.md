@@ -38,20 +38,20 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 
 | ID | Task | Details | Status |
 |----|------|---------|--------|
-| **1.A1** | Audit existing downloader coverage | Catalog every source the current `dod_budget_downloader.py` supports (Comptroller, Defense-Wide, Army, Navy/USMC, Air Force/Space Force). Identify gaps — e.g., Defense Logistics Agency, MDA standalone exhibits, or SOCOM. | ✅ Partially Complete — 5 main sources implemented; additional sources identified but not added. Remaining: network audit needed (TODO 1.A1-a/b/c) |
-| **1.A2** | Expand fiscal-year coverage | Ensure the downloader can discover and retrieve documents for all publicly available fiscal years (currently dynamic discovery works for recent years; verify historical reach back to at least FY2017). | 🔄 In Progress — FY2025-2026 confirmed; historical reach needs network verification (TODO 1.A2-a/b/c) |
+| **1.A1** | Audit existing downloader coverage | Catalog every source the current `dod_budget_downloader.py` supports (Comptroller, Defense-Wide, Army, Navy/USMC, Air Force/Space Force). Identify gaps — e.g., Defense Logistics Agency, MDA standalone exhibits, or SOCOM. | ✅ **Complete** — 5 main sources implemented; network audit completed (OH-MY-001/002/003 done 2026-02-19). Additional DoD component sources (DLA, MDA, SOCOM) identified but not yet added. |
+| **1.A2** | Expand fiscal-year coverage | Ensure the downloader can discover and retrieve documents for all publicly available fiscal years (currently dynamic discovery works for recent years; verify historical reach back to at least FY2017). | ✅ **Complete** — FY2025-2026 confirmed; historical reach tested (OH-MY-004/005 done 2026-02-19). FY2000-2009 gap remains (documents not publicly available in structured format). |
 | **1.A3** | Harden download reliability | Improve retry logic, handle WAF/CAPTCHA changes on government sites, add checksum or size verification for downloaded files, and implement a manifest of expected vs. actual downloads. | ✅ Partially Complete — Smart file skipping, 3-attempt retry with exponential backoff, WAF/bot detection helper; hash verification stub remaining |
 | **1.A4** | Automate download scheduling | Create a repeatable, scriptable download pipeline (CLI-only, no GUI dependency) that can be run via cron or CI to keep data current when new fiscal-year documents are published. | ✅ **Complete** — CLI `--no-gui` mode, `scripts/scheduled_download.py` orchestrator with dry-run support |
 | **1.A5** | Document all data sources | Create a data sources reference listing every URL pattern, document type, file format, and fiscal-year availability for each service and agency. | 🔄 In Progress — `docs/user-guide/data-sources.md` exists; coverage matrix needs live audit (depends on 1.A1) |
-| **1.A6** | Retry failed downloads | Write a structured failure log (`failed_downloads.json`) with URL, dest path, and browser flag for each failed file. Add a `--retry-failures` CLI flag that reads the log and re-attempts only those files. Update the GUI completion dialog to show failure URLs and a copy-retry-command button. | ⚠️ Not started |
+| **1.A6** | Retry failed downloads | Write a structured failure log (`failed_downloads.json`) with URL, dest path, and browser flag for each failed file. Add a `--retry-failures` CLI flag that reads the log and re-attempts only those files. Update the GUI completion dialog to show failure URLs and a copy-retry-command button. | ✅ **Complete** — `--retry-failures` CLI flag, structured `failed_downloads.json` log, GUI completion dialog with retry command copy button. Implemented in `downloader/core.py` (CLI + JSON) and `downloader/gui.py` (GUI dialog). |
 
 ### 1.B — Parsing & Normalization
 
 | ID | Task | Details | Status |
 |----|------|---------|--------|
-| **1.B1** | Catalog all exhibit types | Enumerate every exhibit type encountered (P-1, R-1, O-1, M-1, C-1, P-5, R-2, R-3, R-4, etc.) and document the column layout and semantics for each. | ✅ Mostly Complete — `exhibit_catalog.py` (429 lines) defines column layouts for P-1, P-5, R-1, R-2, O-1, M-1, C-1, P-1R, RF-1 with `ExhibitCatalog` class; `scripts/exhibit_audit.py` scans corpus; remaining: inventory against downloaded files (needs corpus) |
+| **1.B1** | Catalog all exhibit types | Enumerate every exhibit type encountered (P-1, R-1, O-1, M-1, C-1, P-5, R-2, R-3, R-4, etc.) and document the column layout and semantics for each. | ✅ **Complete** — `exhibit_catalog.py` (429 lines) defines column layouts for P-1, P-5, R-1, R-2, O-1, M-1, C-1, P-1R, RF-1 with `ExhibitCatalog` class; `scripts/exhibit_audit.py` scans corpus; cross-validated against corpus (OH-MY-006 done 2026-02-19) |
 | **1.B2** | Standardize column mappings | Extend `build_budget_db.py` column-mapping logic to handle all known exhibit formats consistently; add unit tests for each exhibit type with sample data. | ✅ Mostly Complete — Data-driven catalog approach implemented in `exhibit_catalog.py`; `_map_columns()`, `_merge_header_rows()`, catalog-driven detection all tested; multi-row header handling implemented |
-| **1.B3** | Normalize monetary values | Ensure all dollar amounts use a consistent unit (thousands of dollars), currency-year label, and handle the distinction between Budget Authority (BA), Appropriations, and Outlays. | 🔄 In Progress — FY2024-2026 columns supported with `_safe_float()` normalization; `amount_type` field tracks BA vs appropriation; full currency-year labeling TODO |
+| **1.B3** | Normalize monetary values | Ensure all dollar amounts use a consistent unit (thousands of dollars), currency-year label, and handle the distinction between Budget Authority (BA), Appropriations, and Outlays. | ✅ Mostly Complete — FY2024-2026 columns with `_safe_float()` normalization; `amount_type` field tracks BA vs appropriation; currency-year detection implemented (`_detect_currency_year`, DONE 1.B3-b); exhibit→budget_type mapping implemented (`_EXHIBIT_BUDGET_TYPE`, DONE 1.B3-d); amount-unit detection and normalization (DONE 1.B3-a/c) |
 | **1.B4** | Extract and normalize program element (PE) and line-item metadata | Parse PE numbers, line-item numbers, budget activity codes, appropriation titles, and sub-activity groups into dedicated, queryable fields. | ✅ Mostly Complete — `pe_number`, `line_item`, `budget_activity_title`, `sub_activity_title`, `appropriation_code`, `appropriation_title` all extracted; regex patterns validated in `utils/patterns.py` |
 | **1.B5** | PDF text extraction quality audit | Review `pdfplumber` output for the most common PDF layouts; identify tables that extract poorly and implement targeted extraction improvements or fallback strategies. | ✅ Mostly Complete — `scripts/pdf_quality_audit.py` (312 lines) implements automated audit; `utils/pdf_sections.py` handles R-2/R-3 narrative sections; remaining: targeted improvements for identified poor extractions |
 | **1.B6** | Build validation suite | Create automated checks that flag anomalies: missing fiscal years for a service, duplicate rows, zero-sum line items, column misalignment, and unexpected exhibit formats. | ✅ **Complete** — `validate_budget_db.py` (522 lines) + `utils/validation.py` (255 lines) with `ValidationRegistry`, 10+ checks, and cross-service/cross-exhibit reconciliation in `scripts/reconcile_budget_data.py` |
@@ -184,15 +184,17 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 - Wiki skeleton created with performance optimizations documented (3-6x speedup achieved)
 - ROADMAP established with 57 tasks across 4 phases
 
-**Phase 1 (Data Extraction & Normalization):** ✅ **~90% COMPLETE**
-- All testing tasks (1.C1-1.C3) complete with 1183 tests across 63 test files
+**Phase 1 (Data Extraction & Normalization):** ✅ **~97% COMPLETE**
+- All testing tasks (1.C1-1.C3) complete with 2,590+ tests across 104 test files
 - Parsing, normalization, and validation fully functional
-- Remaining items require network access / downloaded corpus (see Remaining TODOs below)
+- Network audits completed (OH-MY-001 through OH-MY-006, 2026-02-19)
+- Download retry (1.A6) complete with `--retry-failures` CLI flag and GUI dialog
+- Remaining: data source doc update (1.A5 minor)
 
 **Phase 2 (Database Design & Population):** ✅ **COMPLETE**
 - All schema design tasks (2.A1-2.A5) implemented in `schema_design.py`
 - All data loading tasks (2.B1-2.B4) implemented with reconciliation and refresh workflow
-- All API tasks (2.C1-2.C6) implemented with FastAPI — 6 route modules, 11 Pydantic models, 115 API-related tests
+- All API tasks (2.C1-2.C6) implemented with FastAPI — 15 route modules, 11 Pydantic models, 115 API-related tests
 
 **Phase 3 (Front-End & Documentation):** ✅ **COMPLETE**
 - Frontend technology decision: HTMX + Jinja2 (`docs/FRONTEND_TECHNOLOGY_DECISION.md`)
@@ -215,7 +217,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 
 | Component | File(s) | Lines | Status |
 |-----------|---------|-------|--------|
-| **Document downloader** | `dod_budget_downloader.py` | 2,442 | ✅ Functional — 5 sources, multi-year, parallel, Playwright |
+| **Document downloader** | `downloader/` (5 modules) | 2,442 | ✅ Functional — 5 sources, multi-year, parallel, Playwright |
 | **Database builder (CLI)** | `build_budget_db.py` | 1,957 | ✅ Functional — Excel/PDF parsing, incremental updates, dynamic FY columns, failure log + retry |
 | **Database builder (GUI)** | `build_budget_gui.py` | 497 | ✅ Functional — tkinter interface with progress/ETA |
 | **Schema & migrations** | `schema_design.py` | 482 | ✅ Complete — versioned migrations, reference table seeding |
@@ -225,74 +227,40 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | **Data reconciliation** | `scripts/reconcile_budget_data.py` | 481 | ✅ Complete — cross-service + cross-exhibit checks |
 | **PDF quality audit** | `scripts/pdf_quality_audit.py` | 312 | ✅ Complete — automated extraction quality scoring |
 | **Refresh workflow** | `refresh_data.py` | — | ✅ Complete — staged pipeline with dry-run, webhooks, rollback, progress tracking, scheduling |
-| **REST API** | `api/` (app, models, routes) | 1,239 | ✅ Complete — FastAPI with 8 route modules, CORS, CSP headers, rate limiting, connection pooling |
+| **REST API** | `api/` (app, models, routes) | 1,239 | ✅ Complete — FastAPI with 15 route modules, CORS, CSP headers, rate limiting, connection pooling |
 | **Web UI** | `templates/` + `static/` | — | ✅ Complete — HTMX + Jinja2 with search, filters, results, detail panel, download modal, charts |
 | **User documentation** | `docs/` (6 guides) | — | ✅ Complete — getting started, data dictionary, FAQ, API reference, methodology, deployment |
-| **Utility libraries** | `utils/` (14 modules) | 2,093 | ✅ Complete — config, database, HTTP, patterns, strings, validation, cache, query, formatting |
-| **Test suite** | `tests/` (63 files) | — | ✅ **1,248 tests** — comprehensive coverage across all modules |
+| **Utility libraries** | `utils/` (19 modules) | 2,093 | ✅ Complete — config, database, HTTP, patterns, strings, validation, cache, query, formatting |
+| **Test suite** | `tests/` (104 files) | — | ✅ **2,590 tests** — comprehensive coverage across all modules |
 | **CI/CD** | `.github/workflows/` (4 files) | — | ✅ Complete — CI pipeline, data refresh, optimization tests, scheduled downloads |
 | **Containerization** | `Dockerfile*`, `docker-compose*.yml` | — | ✅ Complete — production, multistage, dev, staging configurations |
 | **Backup & monitoring** | `scripts/backup_db.py`, `api/app.py` | — | ✅ Complete — automated backups, /health/detailed, structured logging |
 
-### Remaining TODOs (45 new + 12 OH MY)
+### Remaining TODOs (as of 2026-04-02)
 
-**New autonomous agent tasks (45 items):**
+**LION / TIGER / BEAR agent groups:** ✅ **ALL COMPLETE** (33/33 tasks done)
 
-| Group | Focus | Count | Est. Tokens | Instruction File |
-|-------|-------|-------|-------------|------------------|
-| **LION** | Frontend polish, UX, documentation | 10 | ~17,000 | `docs/archive/instructions/LION_INSTRUCTIONS.md` |
-| **TIGER** | Data quality validation, API enhancements | 11 | ~20,500 | `docs/archive/instructions/TIGER_INSTRUCTIONS.md` |
-| **BEAR** | Test suites, CI/CD, infrastructure | 12 | ~26,000 | `docs/archive/instructions/BEAR_INSTRUCTIONS.md` |
+**Code TODOs (8 items):** ✅ **ALL COMPLETE** — TODO-H1, H2, M1, L1-L5 resolved
 
-**Items requiring external resources (12 items):**
+**Data quality issues:** See [`docs/NOTICED_ISSUES.md`](NOTICED_ISSUES.md) for full issue catalog with root cause analysis and resolution status.
 
-| Category | Count | Blocker |
-|----------|-------|---------|
-| Data Source Auditing (1.A) | 5 | Network access to DoD websites |
-| Exhibit Inventory (1.B) | 1 | Downloaded document corpus |
-| Hosting & Deployment (4.A) | 3 | Cloud account + domain + secrets |
-| Accessibility Audit (3.A) | 1 | Running UI + Lighthouse/axe-core |
-| Launch & Feedback (4.B) | 2 | Deployed application + community |
-| **Total** | **12** | See `docs/archive/instructions/OH_MY_INSTRUCTIONS.md` |
+**Actionable work groups:** See [`docs/TODO_PLAN.md`](TODO_PLAN.md) for executable task assignments. Summary:
 
-See [REMAINING_TODOS.md](archive/implementation-logs/REMAINING_TODOS.md) for detailed descriptions.
-Each LION/TIGER/BEAR instruction file is prompt-ready: open a new branch and run `execute the LION instructions`.
+| Group | Focus | Status |
+|-------|-------|--------|
+| **A–C** | DB verification (prior fixes, reference tables, org normalization) | Code complete — needs DB verification |
+| **D** | FY attribution correction | Partial — mismatch detection exists, auto-correction missing |
+| **E** | Tag quality + description gaps | Partial — confidence scores exist, API filtering missing |
+| **F** | Download retry CLI | ✅ Complete |
+| **G** | Deploy & launch | Blocked on user infrastructure decisions |
 
 ---
 
-## Active TODOs (2026-04-01)
+## Active TODOs — Groups A–G
 
-These are prioritized work items ready to be picked up by agents. Each item includes enough context to be completed independently.
-
-### HIGH — Data Quality & Correctness
-
-| ID | Task | Details |
-|----|------|---------|
-| **TODO-H1** | Fix R-1 title/description for PDF-only PEs | **Problem:** PEs that exist only in PDFs (not in Excel `budget_lines`) get stub R-1 rows in `keyword_search.py` `build_cache_table()` (~line 885) with `line_item_title` set to the raw PE number (e.g., `0603183D8Z`) and no description. The actual R-1 title (e.g., "Joint Hypersonic Technology Development") is available in the R-1 PDF pages but isn't being extracted. **Where to look:** `pdf_pe_numbers` links PE numbers to `pdf_pages` via `pdf_page_id`. R-1 pages contain lines like `PE 0603183D8Z / Joint Hypersonic Technology Development` in the first 10 lines. The R-2 parser in `parse_r2_cost_block()` (`api/routes/keyword_search.py` ~line 291) already extracts PE title from this pattern — reuse this approach for R-1 pages. **What to do:** (1) After inserting stub rows for PDF-only PEs, scan `pdf_pages` for R-1 summary pages (contain `Exhibit R-1` in `page_text`, join via `pdf_pe_numbers`) for each stub PE. (2) Extract the PE title using the regex `PE\s+(\d{7}PE_SUFFIX_PATTERN)\s*[/:]\s*(.+)` from `utils.patterns.PE_SUFFIX_PATTERN`. (3) UPDATE the stub row's `line_item_title` with the extracted title. (4) **Cross-check opportunity:** For PEs that exist in BOTH Excel and PDFs, compare `budget_lines.line_item_title` against the PDF-extracted title and log mismatches (don't auto-correct, just log). **Files:** `api/routes/keyword_search.py` (stub insertion ~line 885, add title extraction), `utils/patterns.py` (PE_SUFFIX_PATTERN already available). **Test:** After rebuild, `SELECT pe_number, line_item_title FROM hypersonics_cache WHERE pe_number LIKE '%D8Z' AND exhibit_type='r1'` should show real titles, not raw PE numbers. |
-| **TODO-H2** | Fix missing R-1 rows for Defense-Wide D8Z PEs on hypersonics page | **Problem:** The hypersonics cache shows D8Z PEs as having only R-2 sub-element rows with no top-level R-1 summary row. Every PE should have at least one R-1 row showing the PE-level title, organization, and total funding across FY columns. Currently, the stub R-1 rows inserted for PDF-only PEs have NULL funding amounts because the budget_lines pivot query (`api/routes/keyword_search.py` ~line 806) returns zero rows for PEs not in `budget_lines`. **Where to look:** R-1 summary PDFs are at paths like `FY2026\PB\Comptroller\summary\FY2026_r1.pdf`. These contain tables with PE-level totals. Also, `pdf_pe_numbers` has entries for D8Z PEs on R-1 pages (e.g., `0603183D8Z` has 2 entries per FY in Comptroller summary files). **What to do:** (1) After inserting stub R-1 rows and after the R-2 PDF mining step, aggregate the R-2 sub-element funding amounts per PE into the R-1 stub row. Specifically: `UPDATE {cache_table} SET fy2024 = (SELECT SUM(fy2024) FROM {cache_table} WHERE pe_number = ? AND exhibit_type = 'r2'), ... WHERE pe_number = ? AND exhibit_type = 'r1'` for each stub PE. (2) Alternatively, parse R-1 PDF pages for PE-level totals (more accurate but more work). Option 1 is simpler and sufficient for now. **Files:** `api/routes/keyword_search.py` — add aggregation step after R-2 mining (~line 993, before index creation). **Test:** `SELECT pe_number, fy2024, fy2025, fy2026 FROM hypersonics_cache WHERE pe_number='0603183D8Z' AND exhibit_type='r1'` should show non-NULL totals matching the sum of its R-2 rows. |
-
-### MEDIUM — Feature Parity & UX
-
-| ID | Task | Details |
-|----|------|---------|
-| **TODO-M1** | Explorer page: PE number search returns matching PE in results | **Problem:** On the Keyword Explorer page (`/explorer`), if a user enters a PE number like `0604030N` as a keyword, it may or may not appear in results depending on whether the PE's text fields match. The hypersonics page has `_EXTRA_PES` for forced inclusion, but Explorer has no equivalent. **Current state:** `collect_matching_pe_numbers_split()` in `api/routes/keyword_search.py` (~line 143) already has a `pe_pattern` check that detects PE-number-shaped keywords and searches `budget_lines` for exact matches. This was added recently. **What to verify:** (1) Start the dev server (`uvicorn api.app:app --reload --port 8000`). (2) Go to `/explorer`, enter `0604030N` as a keyword, and trigger a search. (3) Confirm that `0604030N` appears in the results table. (4) If it doesn't, check that `collect_matching_pe_numbers_split()` is being called with the PE keyword and that `bl_matched` includes the PE. Debug the `build_cache_table()` flow. **If it works but only returns that one PE:** This is the "mixed feelings" scenario. The current behavior includes the PE alongside any keyword-matched PEs, which is correct. No change needed unless the user requests otherwise. **If it does NOT work:** The likely issue is that `build_cache_table()` calls `collect_matching_pe_numbers_split()` with keywords, but the PE detection regex at line 147 (`pe_pattern = re.compile(rf"^\d{{7}}{PE_SUFFIX_PATTERN}$", re.IGNORECASE)`) might not match because the keyword has surrounding whitespace or is mixed with other keywords. Ensure `kw.strip()` is applied before matching. Also check that the PE is in `budget_lines` — if it's PDF-only, it won't be found by the current query on `budget_lines`. Add a fallback to `pe_index` (same pattern as `extra_pes` logic at ~line 740). **Files:** `api/routes/keyword_search.py` (~line 143-160), `api/routes/explorer.py` (verify `start_build` passes keywords correctly). **Test:** `python -m pytest tests/ -k explorer -v` should pass; manual test on `/explorer` with PE number keyword. |
-
-### LOW — Pipeline & Infrastructure
-
-| ID | Task | Details |
-|----|------|---------|
-| **TODO-L1** | Pipeline enricher progress reporting | **Problem:** The pipeline enricher (`pipeline/enricher.py`) has inconsistent progress messages across its 5 phases. Some phases show row counts, others show nothing. **What to do:** For each phase's main loop, add a progress reporter that prints every N iterations (or every 5 seconds): `Phase X: {completed}/{total} ({pct:.1f}%) | Elapsed: {elapsed} | ETA: {eta} | {rate:.0f} items/s`. Use `time.monotonic()` for timing. Phases to update: Phase 1 (`_build_pe_index`, ~line 150), Phase 2 (`_extract_descriptions`, ~line 640), Phase 3 (`_tag_programs`, ~line 850), Phase 4 (`_build_cross_refs`, ~line 1050), Phase 5 (`_compute_metrics`, ~line 1200). **Files:** `pipeline/enricher.py`. **Test:** Run `python -m pipeline.enricher --phases 1 2>&1 | head -20` and verify progress lines appear. |
-| **TODO-L2** | Fix RuntimeWarning on `python -m pipeline.enricher` | **Problem:** Running `python -m pipeline.enricher` produces a `RuntimeWarning: 'pipeline.enricher' found in sys.modules after import of package 'pipeline'`. **Cause:** `pipeline/__init__.py` likely imports from `enricher` at module level, and running `enricher` as `__main__` creates a duplicate module entry. **Fix:** In `pipeline/__init__.py`, either remove the eager import of `enricher` or guard it with `if 'pipeline.enricher' not in sys.modules`. **Files:** `pipeline/__init__.py`. **Test:** `python -m pipeline.enricher --help 2>&1 | grep -i warning` should produce no output. |
-| **TODO-L3** | Fix `--with-llm` in Phase 3 | **Problem:** Running `python -m pipeline.enricher --phases 3 --with-llm` reports `anthropic package not installed` partway through, despite some LLM batches succeeding earlier. **Likely cause:** A `try/except ImportError` block around `import anthropic` in the LLM tagging function catches a transient import issue or there's a code path that re-checks the import and fails. **What to do:** Search `pipeline/enricher.py` for `import anthropic` or `anthropic` — there may be multiple import attempts. Consolidate to a single top-of-file import with a clear flag: `_HAS_ANTHROPIC = False; try: import anthropic; _HAS_ANTHROPIC = True; except ImportError: pass`. Then check `_HAS_ANTHROPIC` in the phase 3 entry point, not in each batch. **Files:** `pipeline/enricher.py`. **Test:** `python -m pipeline.enricher --phases 3 --with-llm --dry-run` (if dry-run exists) or run on a small subset. |
-| **TODO-L4** | Fix Phase 3 non-LLM tagging (0 rows) | **Problem:** Running `python -m pipeline.enricher --phases 3` (without `--with-llm`) completes but inserts 0 tag rows for 85 PEs. The rule-based tagger produces no output. **What to do:** Find the rule-based tagging function in `pipeline/enricher.py` (search for `tag` or `classify` in phase 3 code). Check (1) whether the rules actually match any PE descriptions (they may be too narrow), (2) whether results are being inserted into the correct table, (3) whether the INSERT statement has a bug (wrong column count, constraint violation silently caught). Add debug logging: `logger.debug("Rule-based tagger: PE %s matched tags %s", pe, tags)`. **Files:** `pipeline/enricher.py`. **Test:** After fix, `python -m pipeline.enricher --phases 3` should report >0 tags inserted. |
-| **TODO-L5** | Add Rebuild Cache button to Hypersonics page | **Problem:** Currently the only way to rebuild the hypersonics cache is via API call or Python script. Users need a UI button. **What to do:** (1) In `templates/hypersonics.html`, add a button in the controls area: `<button class="btn btn-secondary" id="rebuild-cache-btn" onclick="rebuildCache()">Rebuild Cache</button>`. (2) Add JS function `rebuildCache()` that calls `POST /api/v1/hypersonics/rebuild` via fetch, shows a spinner, and reloads the page on completion. (3) The endpoint already exists in `api/routes/hypersonics.py` as `rebuild_hypersonics_cache_endpoint` (search for `@router.post`). If it doesn't exist, create it: call `rebuild_hypersonics_cache(conn)` and return `{"status": "ok", "rows": count}`. **Files:** `templates/hypersonics.html` (button + JS), `api/routes/hypersonics.py` (verify or create POST endpoint). **Test:** Click the button on `/hypersonics` — should show progress and reload with fresh data. |
-
-### Notes for agents
-
-- **`PE_SUFFIX_PATTERN`** is defined in `utils/patterns.py` as `r'(?:[A-Z]{1,2}|[A-Z]\d[A-Z])'`. Use it for all PE regex construction — never hardcode the suffix pattern.
-- **Cache table name** for hypersonics is `hypersonics_cache`. Explorer caches use `kw_cache_{hash}`.
-- **`_EXTRA_PES`** in `api/routes/hypersonics.py` lists 25 PE numbers that are always included in the hypersonics cache regardless of keyword matching.
-- Run `python -m pytest tests/ --ignore=tests/test_gui_tracker.py --ignore=tests/optimization_validation -q` to verify changes don't break existing tests (21 pre-existing GUI test failures are expected).
+All code TODOs (H1, H2, M1, L1–L5) are **resolved**. Remaining work is organized into
+groups A–G. Full specifications in **[`docs/TODO_PLAN.md`](TODO_PLAN.md)** — the single
+source of truth for task execution.
 
 ## Recent Improvements
 

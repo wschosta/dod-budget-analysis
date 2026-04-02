@@ -287,7 +287,7 @@ class TestFtsScanLimit:
             limit=21,
             offset=40,
         )
-        assert f"ORDER BY rank LIMIT 61" in sql
+        assert "ORDER BY rank LIMIT 61" in sql
 
     def test_budget_select_filtered_uses_scan_cap(self):
         """Filtered queries use _FTS_SCAN_LIMIT as cap."""

@@ -6,10 +6,6 @@ Provides reusable functions for:
 - Formatting validation issues
 - Type checking and coercion
 
-──────────────────────────────────────────────────────────────────────────────
-TODOs for this file
-──────────────────────────────────────────────────────────────────────────────
-
 """
 
 from typing import List, Dict, Any, Callable, Optional

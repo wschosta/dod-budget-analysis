@@ -6,11 +6,6 @@ Provides reusable functions for:
 - Common database queries and aggregations
 - Connection lifecycle management
 
-──────────────────────────────────────────────────────────────────────────────
-TODOs for this file
-──────────────────────────────────────────────────────────────────────────────
-
-# DONE [Group: TIGER] TIGER-011: Add query performance logging — slow query tracking
 """
 
 import logging

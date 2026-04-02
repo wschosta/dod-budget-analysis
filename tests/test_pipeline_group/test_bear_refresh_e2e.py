@@ -9,8 +9,6 @@ Test the full refresh pipeline in dry-run mode:
 5. Webhook notification structure is correct (mock requests.post).
 6. Summary report is generated with expected fields.
 """
-# DONE [Group: BEAR] BEAR-010: Add data refresh end-to-end test (dry-run, rollback, webhook) (~2,500 tokens)
-
 import json
 from unittest.mock import patch, MagicMock
 

@@ -177,7 +177,7 @@ class TestFix002ServiceDropdown:
     """FIX-002: Service dropdown should show deduplicated values from budget_lines."""
 
     def test_service_dropdown_no_duplicates(self, gui_client):
-        resp = gui_client.get("/")
+        resp = gui_client.get("/home")
         assert resp.status_code == 200
         html = resp.text
         # Count occurrences of each service in option tags
@@ -186,7 +186,7 @@ class TestFix002ServiceDropdown:
         assert army_count == 1, f"Army appears {army_count} times in dropdown"
 
     def test_service_dropdown_shows_actual_data(self, gui_client):
-        resp = gui_client.get("/")
+        resp = gui_client.get("/home")
         assert resp.status_code == 200
         # The services shown should be the actual org names from budget_lines
         assert "Army" in resp.text
@@ -216,7 +216,7 @@ class TestFix003FiscalYearDropdown:
     """FIX-003: FY dropdown should filter out invalid values like 'Details'."""
 
     def test_fy_dropdown_no_invalid_values(self, gui_client):
-        resp = gui_client.get("/")
+        resp = gui_client.get("/home")
         assert resp.status_code == 200
         html = resp.text
         # Invalid values should NOT appear as FY dropdown options
@@ -225,7 +225,7 @@ class TestFix003FiscalYearDropdown:
         assert 'value="Emergency Disaster Relief Act"' not in html
 
     def test_fy_dropdown_has_valid_years(self, gui_client):
-        resp = gui_client.get("/")
+        resp = gui_client.get("/home")
         assert resp.status_code == 200
         # Valid fiscal years should be present
         assert "2026" in resp.text or "2025" in resp.text

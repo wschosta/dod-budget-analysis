@@ -9,8 +9,6 @@ Tests that the schema auto-ALTER TABLE works for new fiscal years:
 4. Verify _ensure_fy_columns() is idempotent (calling twice doesn't error).
 5. Verify FTS5 triggers still work after ALTER TABLE.
 """
-# DONE [Group: BEAR] BEAR-001: Add dynamic FY schema tests — ALTER TABLE, idempotency, FTS triggers (~2,500 tokens)
-
 import sqlite3
 
 import pytest

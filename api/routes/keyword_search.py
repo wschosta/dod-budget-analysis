@@ -18,7 +18,7 @@ from typing import Any
 
 from scripts.clean_pe_narratives import clean_narrative
 from utils.database import get_amount_columns
-from utils.patterns import PE_SUFFIX_PATTERN
+from utils.patterns import PE_NUMBER_STRICT_CI, PE_SUFFIX_PATTERN
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,11 @@ SEARCH_COLS = ["line_item_title", "account_title", "budget_activity_title"]
 
 FY_START = 2015
 FY_END = 2026
+
+# Regex to extract PE number and title from PDF exhibit header lines
+_PE_TITLE_RE = re.compile(
+    rf"PE\s+(\d{{7}}{PE_SUFFIX_PATTERN})\s*[/:]\s*(.+?)(?:\s+\d|$)"
+)
 
 # RDT&E BA categories (BA 01-07) — canonical titles
 BA_CANONICAL: dict[str, str] = {
@@ -52,11 +57,11 @@ _ORG_FROM_PATH = [
 
 # ── Cache DDL ─────────────────────────────────────────────────────────────────
 
+
 def cache_ddl(table_name: str, fy_start: int = FY_START, fy_end: int = FY_END) -> str:
     """Return the CREATE TABLE DDL for a keyword-search cache table."""
     fy_cols = "\n".join(
-        f"    fy{yr} REAL, fy{yr}_ref TEXT,"
-        for yr in range(fy_start, fy_end + 1)
+        f"    fy{yr} REAL, fy{yr}_ref TEXT," for yr in range(fy_start, fy_end + 1)
     )
     # Remove trailing comma from last FY line
     fy_cols = fy_cols.rstrip(",")
@@ -83,6 +88,7 @@ CREATE TABLE IF NOT EXISTS {table_name} (
 
 
 # ── Normalization helpers ─────────────────────────────────────────────────────
+
 
 def normalize_budget_activity(ba_number: str | None, ba_title: str | None) -> str:
     """Map budget_activity number to canonical BA label, falling back to title."""
@@ -113,6 +119,7 @@ def color_of_money(approp_title: str | None) -> str:
 
 # ── Keyword matching ─────────────────────────────────────────────────────────
 
+
 def find_matched_keywords(
     text_fields: list[str | None],
     keywords: list[str],
@@ -125,6 +132,7 @@ def find_matched_keywords(
 
 
 # ── PE discovery ──────────────────────────────────────────────────────────────
+
 
 def collect_matching_pe_numbers_split(
     conn: sqlite3.Connection,
@@ -144,8 +152,7 @@ def collect_matching_pe_numbers_split(
     bl_matched: set[str] = set()
 
     # (a0) Direct PE number match — detect keywords that look like PE numbers
-    pe_pattern = re.compile(rf"^\d{{7}}{PE_SUFFIX_PATTERN}$", re.IGNORECASE)
-    pe_keywords = [kw for kw in keywords if pe_pattern.match(kw.strip())]
+    pe_keywords = [kw for kw in keywords if PE_NUMBER_STRICT_CI.match(kw.strip())]
     if pe_keywords:
         pe_placeholders = ", ".join("?" for _ in pe_keywords)
         pe_upper = [pk.strip().upper() for pk in pe_keywords]
@@ -154,6 +161,18 @@ def collect_matching_pe_numbers_split(
             pe_upper,
         ).fetchall()
         bl_matched.update(r[0] for r in rows if r[0])
+        # Fallback: check pe_index for PDF-only PEs not in budget_lines
+        remaining_pes = set(pe_upper) - bl_matched
+        if remaining_pes:
+            try:
+                rp = ", ".join("?" for _ in remaining_pes)
+                pi_rows = conn.execute(
+                    f"SELECT DISTINCT pe_number FROM pe_index WHERE pe_number IN ({rp})",
+                    list(remaining_pes),
+                ).fetchall()
+                bl_matched.update(r[0] for r in pi_rows if r[0])
+            except sqlite3.OperationalError:
+                pass  # pe_index table may not exist
 
     # (a) Budget-lines keyword match
     kw_clauses: list[str] = []
@@ -190,8 +209,10 @@ def collect_matching_pe_numbers_split(
 
 # ── Description helpers ───────────────────────────────────────────────────────
 
+
 def get_description_map(
-    conn: sqlite3.Connection, pe_numbers: set[str],
+    conn: sqlite3.Connection,
+    pe_numbers: set[str],
 ) -> dict[str, str]:
     """Build PE → truncated description text map for UI display."""
     if not pe_numbers:
@@ -201,20 +222,28 @@ def get_description_map(
     except sqlite3.OperationalError:
         return {}
 
+    placeholders = ", ".join("?" for _ in pe_numbers)
+    pe_list = list(pe_numbers)
+    rows = conn.execute(
+        f"SELECT pe_number, description_text, "
+        f"CASE "
+        f"  WHEN section_header LIKE '%Mission Description%' THEN 1 "
+        f"  WHEN section_header LIKE '%Accomplishments%' THEN 2 "
+        f"  WHEN section_header LIKE '%Acquisition Strategy%' THEN 3 "
+        f"  ELSE 4 END AS priority "
+        f"FROM pe_descriptions "
+        f"WHERE pe_number IN ({placeholders}) AND section_header IS NOT NULL "
+        f"ORDER BY pe_number, priority",
+        pe_list,
+    ).fetchall()
+
+    # Group by PE, take top 3 per PE
+    from itertools import groupby
+
     result: dict[str, str] = {}
-    for pe in pe_numbers:
-        rows = conn.execute(
-            "SELECT description_text FROM pe_descriptions "
-            "WHERE pe_number = ? AND section_header IS NOT NULL "
-            "ORDER BY CASE "
-            "  WHEN section_header LIKE '%Mission Description%' THEN 1 "
-            "  WHEN section_header LIKE '%Accomplishments%' THEN 2 "
-            "  WHEN section_header LIKE '%Acquisition Strategy%' THEN 3 "
-            "  ELSE 4 END "
-            "LIMIT 3",
-            [pe],
-        ).fetchall()
-        text = " ".join(r[0] for r in rows if r[0])
+    for pe, group in groupby(rows, key=lambda r: r[0]):
+        texts = [r[1] for r in group if r[1]][:3]
+        text = " ".join(texts)
         if len(text) > 2000:
             text = text[:2000] + "…"
         if text.strip():
@@ -228,7 +257,7 @@ def get_desc_keyword_map(
     desc_keywords: list[str],
 ) -> dict[str, list[str]]:
     """Build PE → list of desc_keywords that match in pe_descriptions (via SQL LIKE)."""
-    if not pe_numbers:
+    if not pe_numbers or not desc_keywords:
         return {}
     try:
         conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
@@ -237,18 +266,25 @@ def get_desc_keyword_map(
 
     placeholders = ", ".join("?" for _ in pe_numbers)
     pe_list = list(pe_numbers)
-    result: dict[str, list[str]] = {}
 
-    for kw in desc_keywords:
-        rows = conn.execute(
-            f"SELECT DISTINCT pe_number FROM pe_descriptions "
-            f"WHERE pe_number IN ({placeholders}) AND description_text LIKE ?",
-            pe_list + [f"%{kw}%"],
-        ).fetchall()
-        for r in rows:
-            result.setdefault(r[0], [])
-            if kw not in result[r[0]]:
-                result[r[0]].append(kw)
+    # Single query: fetch all (pe_number, description_text) pairs
+    rows = conn.execute(
+        f"SELECT DISTINCT pe_number, description_text FROM pe_descriptions "
+        f"WHERE pe_number IN ({placeholders})",
+        pe_list,
+    ).fetchall()
+
+    # Application-side keyword matching
+    result: dict[str, list[str]] = {}
+    for pe, desc_text in rows:
+        if not desc_text:
+            continue
+        desc_lower = desc_text.lower()
+        for kw in desc_keywords:
+            if kw.lower() in desc_lower:
+                result.setdefault(pe, [])
+                if kw not in result[pe]:
+                    result[pe].append(kw)
 
     return result
 
@@ -275,8 +311,11 @@ def _is_garbage_description(text: str | None) -> bool:
 
 # ── R-2 PDF parsing ──────────────────────────────────────────────────────────
 
+
 def parse_r2_cost_block(
-    page_text: str, source_file: str, fiscal_year: str,
+    page_text: str,
+    source_file: str,
+    fiscal_year: str,
 ) -> list[dict[str, Any]]:
     """Parse R-2/R-2A COST block from a PDF page to extract project-level funding.
 
@@ -291,7 +330,7 @@ def parse_r2_cost_block(
     pe_number = None
     pe_title = None
     for line in lines[:10]:
-        m = re.search(rf"PE\s+(\d{{7}}{PE_SUFFIX_PATTERN})\s*[/:]\s*(.+?)(?:\s+\d|$)", line)
+        m = _PE_TITLE_RE.search(line)
         if m:
             pe_number = m.group(1)
             pe_title = m.group(2).strip()
@@ -316,7 +355,8 @@ def parse_r2_cost_block(
     col_fy_map: list[int | None] = []
     col_tokens = re.finditer(
         r"(?:FY\s+\d{4}|Years|Base|OOC|OCO|Total|Complete|Cost)\b",
-        fy_header_line, re.IGNORECASE,
+        fy_header_line,
+        re.IGNORECASE,
     )
     for m in col_tokens:
         tok = m.group().strip()
@@ -349,13 +389,16 @@ def parse_r2_cost_block(
         line = lines[i].strip()
         if not line:
             continue
-        if any(line.startswith(s) for s in (
-            "Quantity of RDT&E",
-            "A. Mission",
-            "B. Accomplishments",
-            "Note",
-            "Program MDAP",
-        )):
+        if any(
+            line.startswith(s)
+            for s in (
+                "Quantity of RDT&E",
+                "A. Mission",
+                "B. Accomplishments",
+                "Note",
+                "Program MDAP",
+            )
+        ):
             break
 
         if "Total Program Element" in line:
@@ -369,7 +412,7 @@ def parse_r2_cost_block(
 
         first_num_pos = re.search(r"\s[\d,]+\.\d{3}|\s-\s|\s-$", line)
         if first_num_pos:
-            prefix = line[:first_num_pos.start()].strip()
+            prefix = line[: first_num_pos.start()].strip()
         else:
             prefix = line.strip()
 
@@ -399,16 +442,18 @@ def parse_r2_cost_block(
                 continue
 
         if fy_amounts:
-            results.append({
-                "pe_number": pe_number,
-                "pe_title": pe_title,
-                "project_code": project_code,
-                "project_title": project_title,
-                "source_file": source_file,
-                "fiscal_year": fiscal_year,
-                "fy_amounts": fy_amounts,
-                "description_text": "",
-            })
+            results.append(
+                {
+                    "pe_number": pe_number,
+                    "pe_title": pe_title,
+                    "project_code": project_code,
+                    "project_title": project_title,
+                    "source_file": source_file,
+                    "fiscal_year": fiscal_year,
+                    "fy_amounts": fy_amounts,
+                    "description_text": "",
+                }
+            )
 
     # 4. Extract description text from Section A and Section B
     desc_parts: list[str] = []
@@ -431,7 +476,9 @@ def parse_r2_cost_block(
     in_section_b = False
     for i, line in enumerate(lines):
         stripped = line.strip()
-        if stripped.startswith("B. Accomplishments") or stripped.startswith("C. Accomplishments"):
+        if stripped.startswith("B. Accomplishments") or stripped.startswith(
+            "C. Accomplishments"
+        ):
             in_section_b = True
             continue
         if not in_section_b:
@@ -441,12 +488,12 @@ def parse_r2_cost_block(
         if stripped.startswith("Title:"):
             if current_title and current_desc_parts:
                 project_descs[current_title] = " ".join(current_desc_parts).strip()
-            title_text = stripped[len("Title:"):].strip()
+            title_text = stripped[len("Title:") :].strip()
             title_text = re.sub(r"\s+[\d,.]+\s*$", "", title_text).strip()
             current_title = title_text
             current_desc_parts = []
         elif stripped.startswith("Description:") and current_title:
-            current_desc_parts.append(stripped[len("Description:"):].strip())
+            current_desc_parts.append(stripped[len("Description:") :].strip())
         elif current_title and current_desc_parts and not stripped.startswith("FY "):
             if not re.match(r"^(Accomplishments|Congressional|Title:)", stripped):
                 current_desc_parts.append(stripped)
@@ -459,8 +506,9 @@ def parse_r2_cost_block(
             parts.append(section_a_text)
         proj_title = item["project_title"]
         for desc_title, desc_text in project_descs.items():
-            if (proj_title.lower().startswith(desc_title[:20].lower())
-                    or desc_title.lower().startswith(proj_title[:20].lower())):
+            if proj_title.lower().startswith(
+                desc_title[:20].lower()
+            ) or desc_title.lower().startswith(proj_title[:20].lower()):
                 parts.append(f"[{desc_title}] {desc_text}")
                 break
         raw_desc = "\n\n".join(parts) if parts else ""
@@ -480,6 +528,7 @@ def consolidate_r2_timeseries(
 
     results: list[dict[str, Any]] = []
     for (pe, proj_code), group in groups.items():
+
         def _doc_fy(item: dict[str, Any]) -> int:
             m = re.search(r"(\d{4})", item.get("fiscal_year", ""))
             return int(m.group(1)) if m else 0
@@ -500,17 +549,19 @@ def consolidate_r2_timeseries(
             desc = item.get("description_text", "")
             if len(desc) > len(best_desc):
                 best_desc = desc
-        results.append({
-            "pe_number": pe,
-            "pe_title": latest.get("pe_title"),
-            "project_code": proj_code,
-            "project_title": latest["project_title"],
-            "source_file": latest["source_file"],
-            "fiscal_year": latest["fiscal_year"],
-            "fy_amounts": golden_amounts,
-            "fy_refs": golden_refs,
-            "description_text": best_desc,
-        })
+        results.append(
+            {
+                "pe_number": pe,
+                "pe_title": latest.get("pe_title"),
+                "project_code": proj_code,
+                "project_title": latest["project_title"],
+                "source_file": latest["source_file"],
+                "fiscal_year": latest["fiscal_year"],
+                "fy_amounts": golden_amounts,
+                "fy_refs": golden_refs,
+                "description_text": best_desc,
+            }
+        )
 
     return results
 
@@ -552,8 +603,11 @@ def mine_pdf_subelements(
         [fy_min_str],
     ).fetchall()
 
-    logger.info("PDF sub-element mining: scanning %d R-2/R-2A pages for %d PEs",
-                len(rows), len(pe_numbers))
+    logger.info(
+        "PDF sub-element mining: scanning %d R-2/R-2A pages for %d PEs",
+        len(rows),
+        len(pe_numbers),
+    )
 
     seen: set[tuple[str, str | None, str]] = set()
     raw_items: list[dict[str, Any]] = []
@@ -585,10 +639,15 @@ def mine_pdf_subelements(
                     discovered_pes.add(pe)
 
     if discovered_pes:
-        logger.info("PDF sub-element mining: discovered %d new PEs via R-2 keyword matches: %s",
-                    len(discovered_pes), ", ".join(sorted(discovered_pes)))
+        logger.info(
+            "PDF sub-element mining: discovered %d new PEs via R-2 keyword matches: %s",
+            len(discovered_pes),
+            ", ".join(sorted(discovered_pes)),
+        )
 
-    logger.info("PDF sub-element mining: %d raw rows before consolidation", len(raw_items))
+    logger.info(
+        "PDF sub-element mining: %d raw rows before consolidation", len(raw_items)
+    )
 
     consolidated = consolidate_r2_timeseries(raw_items)
 
@@ -603,8 +662,11 @@ def mine_pdf_subelements(
             if matched:
                 item["_matched_r2_keywords"] = matched
 
-    logger.info("PDF sub-element mining: %d final project rows (%d discovered PEs)",
-                len(consolidated), len(discovered_pes))
+    logger.info(
+        "PDF sub-element mining: %d final project rows (%d discovered PEs)",
+        len(consolidated),
+        len(discovered_pes),
+    )
     return consolidated, discovered_pes
 
 
@@ -630,6 +692,7 @@ def annotate_cross_pe_lineages(
         return
 
     from collections import defaultdict
+
     name_groups: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
     for row_id, pe, title in rows:
         norm = normalize_program_name(title)
@@ -658,6 +721,7 @@ def annotate_cross_pe_lineages(
 
 
 # ── Query helpers ─────────────────────────────────────────────────────────────
+
 
 def apply_filters(
     service: str | None,
@@ -704,7 +768,122 @@ def cache_rows_to_dicts(
     return result
 
 
+# ── R-1 stub enrichment helpers ──────────────────────────────────────────────
+
+
+def _extract_r1_titles_for_stubs(
+    conn: sqlite3.Connection,
+    cache_table: str,
+    pdf_only_pes: set[str],
+) -> None:
+    """Extract real R-1 titles from PDF pages for stub rows.
+
+    For each PDF-only PE, query pdf_pages (joined with pdf_pe_numbers) for
+    pages whose text contains 'Exhibit R-1'. Parse the PE title from the
+    first ~10 lines using the standard ``PE <number> / <title>`` pattern
+    and UPDATE the stub row's line_item_title.
+
+    If the PE already has a non-PE-number title (e.g. from pe_index), and
+    the PDF title differs, log the mismatch but don't overwrite.
+    """
+    sorted_pes = sorted(pdf_only_pes)
+    placeholders = ", ".join("?" for _ in sorted_pes)
+
+    # Batch-fetch all R-1 exhibit pages for the full PE set in one query
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT ppn.pe_number, pp.page_text
+            FROM pdf_pages pp
+            JOIN pdf_pe_numbers ppn ON ppn.pdf_page_id = pp.id
+            WHERE ppn.pe_number IN ({placeholders})
+              AND pp.page_text LIKE '%Exhibit R-1%'
+            """,
+            sorted_pes,
+        ).fetchall()
+    except sqlite3.OperationalError:
+        logger.debug("Cannot query pdf_pe_numbers for R-1 titles (table missing?)")
+        return
+
+    # Group page texts by PE
+    pe_pages: dict[str, list[str]] = {}
+    for pe_num, page_text in rows:
+        pe_pages.setdefault(pe_num, []).append(page_text)
+
+    # Batch-fetch current cache titles for all PEs
+    cache_rows = conn.execute(
+        f"SELECT pe_number, line_item_title FROM {cache_table} "
+        f"WHERE pe_number IN ({placeholders}) AND exhibit_type = 'r1'",
+        sorted_pes,
+    ).fetchall()
+    current_titles = {r[0]: r[1] for r in cache_rows}
+
+    for pe in sorted_pes:
+        pages = pe_pages.get(pe, [])
+        pdf_title = None
+        for page_text in pages:
+            for line in page_text.split("\n")[:10]:
+                m = _PE_TITLE_RE.search(line)
+                if m and m.group(1) == pe:
+                    pdf_title = m.group(2).strip()
+                    break
+            if pdf_title:
+                break
+
+        if not pdf_title:
+            continue
+
+        current_title = current_titles.get(pe)
+        if current_title == pe:
+            conn.execute(
+                f"UPDATE {cache_table} SET line_item_title = ? "
+                f"WHERE pe_number = ? AND exhibit_type = 'r1' AND line_item_title = ?",
+                [pdf_title, pe, pe],
+            )
+            logger.debug("R-1 title for %s set from PDF: %s", pe, pdf_title)
+        elif current_title and current_title != pdf_title:
+            logger.info(
+                "R-1 title mismatch for %s: cache='%s', pdf='%s'",
+                pe,
+                current_title,
+                pdf_title,
+            )
+
+
+def _aggregate_r2_funding_into_r1_stubs(
+    conn: sqlite3.Connection,
+    cache_table: str,
+    year_range: list[int],
+) -> None:
+    """Sum R-2 sub-element funding into R-1 stub rows with NULL amounts.
+
+    Only updates stub rows (where the FY amounts are NULL), preserving any
+    R-1 rows that already have budget_lines-sourced funding data.
+    """
+    fy_cols = [f"fy{yr}" for yr in year_range]
+    null_check = " AND ".join(f"stub.{col} IS NULL" for col in fy_cols)
+
+    # Aggregate all FY columns in one pass via CTE, then UPDATE-FROM
+    sum_cols = ", ".join(f"SUM({col}) AS {col}" for col in fy_cols)
+    set_sql = ", ".join(f"{col} = sums.{col}" for col in fy_cols)
+
+    result = conn.execute(
+        f"WITH sums AS ("
+        f"  SELECT pe_number, {sum_cols} FROM {cache_table} "
+        f"  WHERE exhibit_type = 'r2' GROUP BY pe_number"
+        f") "
+        f"UPDATE {cache_table} AS stub SET {set_sql} "
+        f"FROM sums "
+        f"WHERE stub.pe_number = sums.pe_number "
+        f"AND stub.exhibit_type = 'r1' AND ({null_check})"
+    )
+
+    if result.rowcount:
+        logger.info("R-1 funding aggregated from R-2 sub-elements for %d PEs", result.rowcount)
+
+
 # ── Cache builder ─────────────────────────────────────────────────────────────
+
 
 def build_cache_table(
     conn: sqlite3.Connection,
@@ -724,6 +903,7 @@ def build_cache_table(
     *progress_callback*, if provided, is called with ``(step_name, detail_dict)``
     at key milestones so callers can surface build progress.
     """
+
     def _progress(step: str, **kw: Any) -> None:
         if progress_callback:
             progress_callback(step, kw)
@@ -732,7 +912,10 @@ def build_cache_table(
 
     # 1. Collect matching PE numbers
     (bl_pes, _desc_pes), matched_pes = collect_matching_pe_numbers_split(
-        conn, keywords, desc_keywords, search_cols,
+        conn,
+        keywords,
+        desc_keywords,
+        search_cols,
     )
 
     # 1b. Include explicitly listed PEs
@@ -760,7 +943,9 @@ def build_cache_table(
         if found_extra:
             bl_pes |= found_extra
             matched_pes |= found_extra
-            logger.info("Extra PEs: %d requested, %d found", len(extra_set), len(found_extra))
+            logger.info(
+                "Extra PEs: %d requested, %d found", len(extra_set), len(found_extra)
+            )
 
     if not matched_pes:
         conn.execute(f"DROP TABLE IF EXISTS {cache_table}")
@@ -800,7 +985,8 @@ def build_cache_table(
         year_parts.append(f"{coalesce_expr} AS fy{yr}")
         year_parts.append(
             f"MAX(CASE WHEN {available[0]} IS NOT NULL THEN source_file END) AS fy{yr}_ref"
-            if available else f"NULL AS fy{yr}_ref"
+            if available
+            else f"NULL AS fy{yr}_ref"
         )
 
     year_cols_sql = ",\n        ".join(year_parts)
@@ -831,10 +1017,19 @@ def build_cache_table(
 
     # 6. Insert enriched rows
     insert_cols = [
-        "pe_number", "organization_name", "exhibit_type", "line_item_title",
-        "budget_activity", "budget_activity_title", "budget_activity_norm",
-        "appropriation_title", "account_title", "color_of_money",
-        "matched_keywords_row", "matched_keywords_desc", "description_text",
+        "pe_number",
+        "organization_name",
+        "exhibit_type",
+        "line_item_title",
+        "budget_activity",
+        "budget_activity_title",
+        "budget_activity_norm",
+        "appropriation_title",
+        "account_title",
+        "color_of_money",
+        "matched_keywords_row",
+        "matched_keywords_desc",
+        "description_text",
     ]
     for yr in year_range:
         insert_cols.extend([f"fy{yr}", f"fy{yr}_ref"])
@@ -844,7 +1039,11 @@ def build_cache_table(
     count = 0
     for r in rows:
         d = dict(r)
-        text_fields = [d.get("line_item_title"), d.get("account_title"), d.get("budget_activity_title")]
+        text_fields = [
+            d.get("line_item_title"),
+            d.get("account_title"),
+            d.get("budget_activity_title"),
+        ]
         row_kws = find_matched_keywords(text_fields, keywords)
 
         vals = [
@@ -854,13 +1053,19 @@ def build_cache_table(
             d.get("line_item_title"),
             d.get("budget_activity"),
             d.get("budget_activity_title"),
-            normalize_budget_activity(d.get("budget_activity"), d.get("budget_activity_title")),
+            normalize_budget_activity(
+                d.get("budget_activity"), d.get("budget_activity_title")
+            ),
             d.get("appropriation_title"),
             d.get("account_title"),
             color_of_money(d.get("appropriation_title")),
             json.dumps(row_kws) if row_kws else "[]",
             "[]",  # matched_keywords_desc — set per-row only for R-2 sub-elements
-            None if _is_garbage_description(desc_map.get(d["pe_number"])) else desc_map.get(d["pe_number"]),
+            (
+                None
+                if _is_garbage_description(desc_map.get(d["pe_number"]))
+                else desc_map.get(d["pe_number"])
+            ),
         ]
         for yr in year_range:
             vals.append(d.get(f"fy{yr}"))
@@ -872,9 +1077,12 @@ def build_cache_table(
     # 6a. Insert stub R-1 rows for extra PEs that exist only in PDFs (no budget_lines data).
     # This ensures they appear in the cache even if the R-2 mining step doesn't find them.
     if extra_pes:
-        cached_pes = {r[0] for r in conn.execute(
-            f"SELECT DISTINCT pe_number FROM {cache_table}"
-        ).fetchall()}
+        cached_pes = {
+            r[0]
+            for r in conn.execute(
+                f"SELECT DISTINCT pe_number FROM {cache_table}"
+            ).fetchall()
+        }
         pdf_only_pes = (set(extra_pes) & matched_pes) - cached_pes
         if pdf_only_pes:
             # Pull metadata from pe_index
@@ -891,21 +1099,39 @@ def build_cache_table(
                 if _is_garbage_description(desc):
                     desc = None
                 vals = [
-                    pe, org, "r1", title or pe,
-                    None, None, None, None, None, "RDT&E",
-                    "[]", "[]", desc,
+                    pe,
+                    org,
+                    "r1",
+                    title or pe,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    "RDT&E",
+                    "[]",
+                    "[]",
+                    desc,
                 ]
                 for yr in year_range:
                     vals.extend([None, None])
                 conn.execute(insert_sql, vals)
                 count += 1
-            logger.info("Cache: inserted %d stub rows for PDF-only extra PEs", len(pdf_only_pes))
+            logger.info(
+                "Cache: inserted %d stub rows for PDF-only extra PEs", len(pdf_only_pes)
+            )
+
+            _extract_r1_titles_for_stubs(conn, cache_table, pdf_only_pes)
 
     _progress("mining_pdfs", budget_line_rows=count)
 
     # 6b. Insert PDF-mined R-2/R-2A sub-elements
     pdf_subelements, discovered_pes = mine_pdf_subelements(
-        conn, matched_pes, keywords, core_pes=bl_pes, fy_start=fy_start,
+        conn,
+        matched_pes,
+        keywords,
+        core_pes=bl_pes,
+        fy_start=fy_start,
     )
 
     # For PEs discovered via R-2 keyword matches, also insert R-1 budget_lines rows
@@ -932,25 +1158,43 @@ def build_cache_table(
         disc_desc_map = get_description_map(conn, discovered_pes)
         for r in disc_rows:
             d = dict(r)
-            text_fields = [d.get("line_item_title"), d.get("account_title"), d.get("budget_activity_title")]
+            text_fields = [
+                d.get("line_item_title"),
+                d.get("account_title"),
+                d.get("budget_activity_title"),
+            ]
             row_kws = find_matched_keywords(text_fields, keywords)
             vals = [
-                d["pe_number"], d.get("organization_name"), d.get("exhibit_type"),
-                d.get("line_item_title"), d.get("budget_activity"), d.get("budget_activity_title"),
-                normalize_budget_activity(d.get("budget_activity"), d.get("budget_activity_title")),
-                d.get("appropriation_title"), d.get("account_title"),
+                d["pe_number"],
+                d.get("organization_name"),
+                d.get("exhibit_type"),
+                d.get("line_item_title"),
+                d.get("budget_activity"),
+                d.get("budget_activity_title"),
+                normalize_budget_activity(
+                    d.get("budget_activity"), d.get("budget_activity_title")
+                ),
+                d.get("appropriation_title"),
+                d.get("account_title"),
                 color_of_money(d.get("appropriation_title")),
                 json.dumps(row_kws) if row_kws else "[]",
                 "[]",  # matched_keywords_desc — set per-row only for R-2 sub-elements
-                None if _is_garbage_description(disc_desc_map.get(d["pe_number"])) else disc_desc_map.get(d["pe_number"]),
+                (
+                    None
+                    if _is_garbage_description(disc_desc_map.get(d["pe_number"]))
+                    else disc_desc_map.get(d["pe_number"])
+                ),
             ]
             for yr in year_range:
                 vals.append(d.get(f"fy{yr}"))
                 vals.append(d.get(f"fy{yr}_ref"))
             conn.execute(insert_sql, vals)
             count += 1
-        logger.info("Cache: added %d R-1 rows for %d discovered PEs",
-                    len(disc_rows), len(discovered_pes))
+        logger.info(
+            "Cache: added %d R-1 rows for %d discovered PEs",
+            len(disc_rows),
+            len(discovered_pes),
+        )
 
     pdf_count = 0
     for item in pdf_subelements:
@@ -959,7 +1203,9 @@ def build_cache_table(
         if item.get("project_code"):
             title = f"{item['project_code']}: {title}"
 
-        row_kws = item.get("_matched_r2_keywords") or find_matched_keywords([title], keywords)
+        row_kws = item.get("_matched_r2_keywords") or find_matched_keywords(
+            [title], keywords
+        )
         r2_desc = item.get("description_text", "")
         if _is_garbage_description(r2_desc):
             r2_desc = ""
@@ -968,7 +1214,9 @@ def build_cache_table(
             fallback = None
         description = r2_desc if r2_desc else fallback
         # Check the sub-element's own description for keyword matches
-        desc_kws = find_matched_keywords([r2_desc, title], desc_keywords) if r2_desc else []
+        desc_kws = (
+            find_matched_keywords([r2_desc, title], desc_keywords) if r2_desc else []
+        )
         desc_kws = [kw for kw in desc_kws if kw not in row_kws]
 
         vals = [
@@ -990,7 +1238,11 @@ def build_cache_table(
         for yr in year_range:
             fy_key = f"fy{yr}"
             vals.append(item["fy_amounts"].get(fy_key))
-            vals.append(fy_refs.get(fy_key) if item["fy_amounts"].get(fy_key) is not None else None)
+            vals.append(
+                fy_refs.get(fy_key)
+                if item["fy_amounts"].get(fy_key) is not None
+                else None
+            )
 
         conn.execute(insert_sql, vals)
         pdf_count += 1
@@ -1012,7 +1264,9 @@ def build_cache_table(
 
         # Fallback: infer organization from source_file path
         latest_ref_col = f"fy{year_range[-1]}_ref"
-        fallback_ref_col = f"fy{year_range[-2]}_ref" if len(year_range) > 1 else latest_ref_col
+        fallback_ref_col = (
+            f"fy{year_range[-2]}_ref" if len(year_range) > 1 else latest_ref_col
+        )
         for path_fragment, org_name in _ORG_FROM_PATH:
             conn.execute(
                 f"""
@@ -1031,16 +1285,28 @@ def build_cache_table(
     if pdf_count:
         annotate_cross_pe_lineages(conn, cache_table)
 
+    _aggregate_r2_funding_into_r1_stubs(conn, cache_table, year_range)
+
     # 7. Create indexes for fast filtering
     # Use short hash suffix to avoid name collisions across cache tables
     idx_suffix = cache_table.replace(".", "_")
-    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{idx_suffix}_pe ON {cache_table}(pe_number)")
-    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{idx_suffix}_org ON {cache_table}(organization_name)")
-    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{idx_suffix}_ex ON {cache_table}(exhibit_type)")
+    conn.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{idx_suffix}_pe ON {cache_table}(pe_number)"
+    )
+    conn.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{idx_suffix}_org ON {cache_table}(organization_name)"
+    )
+    conn.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{idx_suffix}_ex ON {cache_table}(exhibit_type)"
+    )
 
     conn.commit()
-    logger.info("Cache rebuilt: %d rows (%d from budget_lines, %d from PDFs)",
-                count, count - pdf_count, pdf_count)
+    logger.info(
+        "Cache rebuilt: %d rows (%d from budget_lines, %d from PDFs)",
+        count,
+        count - pdf_count,
+        pdf_count,
+    )
     _progress("done", row_count=count, pe_count=len(matched_pes))
     return count
 
@@ -1063,9 +1329,16 @@ def ensure_cache(
     except sqlite3.OperationalError:
         pass
     logger.info("%s not found or empty — rebuilding...", cache_table)
-    return build_cache_table(
-        conn, cache_table, keywords, desc_keywords,
-        fy_start=fy_start, fy_end=fy_end,
-        progress_callback=progress_callback,
-        extra_pes=extra_pes,
-    ) > 0
+    return (
+        build_cache_table(
+            conn,
+            cache_table,
+            keywords,
+            desc_keywords,
+            fy_start=fy_start,
+            fy_end=fy_end,
+            progress_callback=progress_callback,
+            extra_pes=extra_pes,
+        )
+        > 0
+    )

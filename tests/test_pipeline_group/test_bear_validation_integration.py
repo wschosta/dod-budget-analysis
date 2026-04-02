@@ -11,8 +11,6 @@ catch them:
 6. Unknown exhibit type
 7. Column misalignment (account without organization)
 """
-# DONE [Group: BEAR] BEAR-003: Add validation integration tests with 7+ intentional data errors (~3,000 tokens)
-
 import json
 import sqlite3
 

@@ -7,9 +7,6 @@ Supports the three core GUI use cases:
   3. Export — Spruill-style funding table (CSV) or ZIP of PDF pages for a PE set
 
 LION integration:
-  DONE LION-100: pdf_pages now has fiscal_year/exhibit_type — used in pdf-pages endpoint.
-  DONE LION-103: pdf_pe_numbers junction — get_pe_pdf_pages uses direct JOIN.
-  DONE LION-106: pe_tags.source_files + confidence included in tag responses.
 """
 
 from __future__ import annotations
