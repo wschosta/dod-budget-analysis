@@ -28,13 +28,13 @@ import sqlite3
 import sys
 import threading
 import time
+from collections import Counter
 from pathlib import Path
 
 from utils import get_connection
 from utils.patterns import PE_NUMBER, FISCAL_YEAR
 from utils.pdf_sections import parse_narrative_sections, detect_project_boundaries
 
-# Single top-of-file anthropic import (TODO-L3).
 # Check _HAS_ANTHROPIC once at Phase 3 entry rather than per-batch.
 _HAS_ANTHROPIC = False
 try:
@@ -318,6 +318,14 @@ def _ensure_pe_index_source_column(conn: sqlite3.Connection) -> None:
         logger.info("  Added 'source' column to pe_index (upgrade).")
 
 
+def _fmt_time(s: float) -> str:
+    """Format seconds as a compact elapsed/ETA string."""
+    if s < 60:
+        return f"{s:.0f}s"
+    m, s = divmod(s, 60)
+    return f"{int(m)}m{int(s)}s"
+
+
 def _log_progress(
     phase_name: str,
     completed: int,
@@ -335,12 +343,6 @@ def _log_progress(
     pct = completed / total * 100
     rate = completed / elapsed if elapsed > 0 else 0
     eta_s = (total - completed) / rate if rate > 0 else 0
-
-    def _fmt_time(s: float) -> str:
-        if s < 60:
-            return f"{s:.0f}s"
-        m, s = divmod(s, 60)
-        return f"{int(m)}m{int(s)}s"
 
     logger.info(
         "%s: %s/%s (%.1f%%) | Elapsed: %s | ETA: %s | %.0f items/s",
@@ -1127,12 +1129,7 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
             len(to_tag),
             ", ".join(
                 f"{src}={cnt}"
-                for src, cnt in sorted(
-                    {
-                        row[3]: sum(1 for r in insert_buf if r[3] == row[3])
-                        for row in insert_buf
-                    }.items()
-                )
+                for src, cnt in sorted(Counter(row[3] for row in insert_buf).items())
             ),
         )
     else:

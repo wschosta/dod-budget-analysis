@@ -147,7 +147,6 @@ def collect_matching_pe_numbers_split(
     bl_matched: set[str] = set()
 
     # (a0) Direct PE number match — detect keywords that look like PE numbers
-    # TODO [TODO-M1]: Verify this works on /explorer; add pe_index fallback for PDF-only PEs.
     pe_pattern = re.compile(rf"^\d{{7}}{PE_SUFFIX_PATTERN}$", re.IGNORECASE)
     pe_keywords = [kw for kw in keywords if pe_pattern.match(kw.strip())]
     if pe_keywords:
@@ -760,7 +759,7 @@ def _extract_r1_titles_for_stubs(
     cache_table: str,
     pdf_only_pes: set[str],
 ) -> None:
-    """TODO-H1: Extract real R-1 titles from PDF pages for stub rows.
+    """Extract real R-1 titles from PDF pages for stub rows.
 
     For each PDF-only PE, query pdf_pages (joined with pdf_pe_numbers) for
     pages whose text contains 'Exhibit R-1'. Parse the PE title from the
@@ -774,27 +773,42 @@ def _extract_r1_titles_for_stubs(
         rf"PE\s+(\d{{7}}{PE_SUFFIX_PATTERN})\s*[/:]\s*(.+?)(?:\s+\d|$)"
     )
 
-    for pe in sorted(pdf_only_pes):
-        # Find R-1 exhibit pages mentioning this PE
-        try:
-            rows = conn.execute(
-                """
-                SELECT pp.page_text
-                FROM pdf_pages pp
-                JOIN pdf_pe_numbers ppn ON ppn.pdf_page_id = pp.id
-                WHERE ppn.pe_number = ?
-                  AND pp.page_text LIKE '%Exhibit R-1%'
-                LIMIT 5
-                """,
-                [pe],
-            ).fetchall()
-        except sqlite3.OperationalError:
-            # pdf_pe_numbers table may not exist in all databases
-            logger.debug("Cannot query pdf_pe_numbers for R-1 titles (table missing?)")
-            return
+    sorted_pes = sorted(pdf_only_pes)
+    placeholders = ", ".join("?" for _ in sorted_pes)
 
+    # Batch-fetch all R-1 exhibit pages for the full PE set in one query
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT ppn.pe_number, pp.page_text
+            FROM pdf_pages pp
+            JOIN pdf_pe_numbers ppn ON ppn.pdf_page_id = pp.id
+            WHERE ppn.pe_number IN ({placeholders})
+              AND pp.page_text LIKE '%Exhibit R-1%'
+            """,
+            sorted_pes,
+        ).fetchall()
+    except sqlite3.OperationalError:
+        logger.debug("Cannot query pdf_pe_numbers for R-1 titles (table missing?)")
+        return
+
+    # Group page texts by PE
+    pe_pages: dict[str, list[str]] = {}
+    for pe_num, page_text in rows:
+        pe_pages.setdefault(pe_num, []).append(page_text)
+
+    # Batch-fetch current cache titles for all PEs
+    cache_rows = conn.execute(
+        f"SELECT pe_number, line_item_title FROM {cache_table} "
+        f"WHERE pe_number IN ({placeholders}) AND exhibit_type = 'r1'",
+        sorted_pes,
+    ).fetchall()
+    current_titles = {r[0]: r[1] for r in cache_rows}
+
+    for pe in sorted_pes:
+        pages = pe_pages.get(pe, [])
         pdf_title = None
-        for (page_text,) in rows:
+        for page_text in pages:
             for line in page_text.split("\n")[:10]:
                 m = pe_title_re.search(line)
                 if m and m.group(1) == pe:
@@ -806,30 +820,21 @@ def _extract_r1_titles_for_stubs(
         if not pdf_title:
             continue
 
-        # Check current title in cache — only update if it's the raw PE number
-        current = conn.execute(
-            f"SELECT line_item_title FROM {cache_table} WHERE pe_number = ? AND exhibit_type = 'r1'",
-            [pe],
-        ).fetchone()
-
-        if current:
-            current_title = current[0]
-            if current_title == pe:
-                # Stub row still has PE number as title — replace
-                conn.execute(
-                    f"UPDATE {cache_table} SET line_item_title = ? "
-                    f"WHERE pe_number = ? AND exhibit_type = 'r1' AND line_item_title = ?",
-                    [pdf_title, pe, pe],
-                )
-                logger.debug("R-1 title for %s set from PDF: %s", pe, pdf_title)
-            elif current_title and current_title != pdf_title:
-                # Title exists from pe_index but differs from PDF — log only
-                logger.info(
-                    "R-1 title mismatch for %s: cache='%s', pdf='%s'",
-                    pe,
-                    current_title,
-                    pdf_title,
-                )
+        current_title = current_titles.get(pe)
+        if current_title == pe:
+            conn.execute(
+                f"UPDATE {cache_table} SET line_item_title = ? "
+                f"WHERE pe_number = ? AND exhibit_type = 'r1' AND line_item_title = ?",
+                [pdf_title, pe, pe],
+            )
+            logger.debug("R-1 title for %s set from PDF: %s", pe, pdf_title)
+        elif current_title and current_title != pdf_title:
+            logger.info(
+                "R-1 title mismatch for %s: cache='%s', pdf='%s'",
+                pe,
+                current_title,
+                pdf_title,
+            )
 
 
 def _aggregate_r2_funding_into_r1_stubs(
@@ -837,56 +842,32 @@ def _aggregate_r2_funding_into_r1_stubs(
     cache_table: str,
     year_range: list[int],
 ) -> None:
-    """TODO-H2: Sum R-2 sub-element funding into R-1 stub rows with NULL amounts.
+    """Sum R-2 sub-element funding into R-1 stub rows with NULL amounts.
 
     Only updates stub rows (where the FY amounts are NULL), preserving any
     R-1 rows that already have budget_lines-sourced funding data.
     """
-    # Find R-1 stubs that have all-NULL funding
     fy_cols = [f"fy{yr}" for yr in year_range]
-    null_check = " AND ".join(f"{col} IS NULL" for col in fy_cols)
+    null_check = " AND ".join(f"stub.{col} IS NULL" for col in fy_cols)
 
-    stub_pes = conn.execute(
-        f"SELECT DISTINCT pe_number FROM {cache_table} "
-        f"WHERE exhibit_type = 'r1' AND ({null_check})"
-    ).fetchall()
+    # Single correlated UPDATE: set each FY column to the SUM of R-2 rows
+    set_parts = [
+        f"{col} = (SELECT SUM(r2.{col}) FROM {cache_table} r2 "
+        f"WHERE r2.pe_number = stub.pe_number AND r2.exhibit_type = 'r2')"
+        for col in fy_cols
+    ]
+    set_sql = ", ".join(set_parts)
 
-    if not stub_pes:
-        return
+    # Only update stubs that have at least one R-2 row (EXISTS guard)
+    result = conn.execute(
+        f"UPDATE {cache_table} AS stub SET {set_sql} "
+        f"WHERE stub.exhibit_type = 'r1' AND ({null_check}) "
+        f"AND EXISTS (SELECT 1 FROM {cache_table} r2 "
+        f"WHERE r2.pe_number = stub.pe_number AND r2.exhibit_type = 'r2')"
+    )
 
-    updated = 0
-    for (pe,) in stub_pes:
-        # Check if there are R-2 rows with funding for this PE
-        r2_check = conn.execute(
-            f"SELECT COUNT(*) FROM {cache_table} "
-            f"WHERE pe_number = ? AND exhibit_type = 'r2'",
-            [pe],
-        ).fetchone()[0]
-
-        if not r2_check:
-            continue
-
-        # Build SET clause: fy2024 = (SELECT SUM(fy2024) FROM cache WHERE ...)
-        set_parts = []
-        for col in fy_cols:
-            set_parts.append(
-                f"{col} = (SELECT SUM({col}) FROM {cache_table} "
-                f"WHERE pe_number = ? AND exhibit_type = 'r2')"
-            )
-        set_sql = ", ".join(set_parts)
-
-        # Parameters: one PE per SUM subquery, plus PE for the WHERE clause
-        params: list[str] = [pe] * len(fy_cols) + [pe]
-
-        conn.execute(
-            f"UPDATE {cache_table} SET {set_sql} "
-            f"WHERE pe_number = ? AND exhibit_type = 'r1' AND ({null_check})",
-            params,
-        )
-        updated += 1
-
-    if updated:
-        logger.info("R-1 funding aggregated from R-2 sub-elements for %d PEs", updated)
+    if result.rowcount:
+        logger.info("R-1 funding aggregated from R-2 sub-elements for %d PEs", result.rowcount)
 
 
 # ── Cache builder ─────────────────────────────────────────────────────────────
@@ -1105,9 +1086,6 @@ def build_cache_table(
                 desc = stub_desc_map.get(pe)
                 if _is_garbage_description(desc):
                     desc = None
-                # TODO [TODO-H1]: title falls back to raw PE number for PDF-only PEs.
-                # Extract real R-1 title from pdf_pages using PE regex pattern.
-                # See docs/TODO_PLAN.md for full specification.
                 vals = [
                     pe,
                     org,
@@ -1131,9 +1109,6 @@ def build_cache_table(
                 "Cache: inserted %d stub rows for PDF-only extra PEs", len(pdf_only_pes)
             )
 
-            # TODO-H1: Extract real R-1 titles from PDF pages for stub rows.
-            # Stub rows default to the PE number as line_item_title; replace
-            # with the actual program title parsed from R-1 exhibit pages.
             _extract_r1_titles_for_stubs(conn, cache_table, pdf_only_pes)
 
     _progress("mining_pdfs", budget_line_rows=count)
@@ -1298,8 +1273,6 @@ def build_cache_table(
     if pdf_count:
         annotate_cross_pe_lineages(conn, cache_table)
 
-    # TODO-H2: Aggregate R-2 sub-element funding into R-1 stub rows.
-    # PDF-only PEs have NULL amounts on their R-1 stub; sum the R-2 values.
     _aggregate_r2_funding_into_r1_stubs(conn, cache_table, year_range)
 
     # 7. Create indexes for fast filtering
