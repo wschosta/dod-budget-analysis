@@ -1,7 +1,7 @@
 # Program Requirements Document (PRD)
 
-> **Version:** 1.1
-> **Last Updated:** 2026-02-26
+> **Version:** 1.2
+> **Last Updated:** 2026-04-01
 > **Update Policy:** This document must be updated whenever features are added, changed, or removed. It is the canonical description of what the system does. Reference this document before implementing new features to avoid duplicating or overwriting existing functionality.
 
 ---
@@ -47,7 +47,8 @@ Parses downloaded documents into a normalized SQLite database.
 
 - **Excel parsing:** 15+ exhibit types including P-1, P-5, R-1, R-2, R-3, R-4, O-1, M-1, C-1, RF-1, P-1R, plus OCO, OGSI, supplemental, amendment, ENL, TOA variants
 - **Column mapping:** Data-driven catalog (`exhibit_catalog.py`) maps exhibit-specific column layouts to canonical field names
-- **PDF extraction:** Text and table extraction via pdfplumber, stored page-by-page
+- **PDF extraction:** Text and table extraction via pdfplumber, stored page-by-page. PE numbers extracted from PDF text into `pdf_pe_numbers` table using shared `PE_NUMBER` regex from `utils/patterns.py`.
+- **PE number format support:** Standard suffixes (1-2 letters, e.g., `0602702E`) and Defense-Wide D8Z suffixes (letter-digit-letter, e.g., `0603183D8Z`). All PE regex patterns derive from `PE_SUFFIX_PATTERN` in `utils/patterns.py`.
 - **Incremental and full-rebuild modes** with checkpoint/resume for interrupted builds
 - **Parallel PDF processing** using ProcessPoolExecutor with configurable worker count
 - **FTS5 full-text search index** creation with content-sync triggers
@@ -107,8 +108,10 @@ FastAPI application serving the database through versioned endpoints (`/api/v1`)
 | `/api/v1/dashboard/summary` | GET | Dashboard summary statistics |
 | `/api/v1/dashboard/top-programs` | GET | Top programs by funding amount |
 | `/api/v1/facets` | GET | Faceted filter counts with cross-filtering per dimension |
-| `/api/v1/hypersonics` | GET | Pivoted hypersonics PE lines: one row per sub-element, columns for FY2015–FY2026. Filters: service, exhibit, fy_from, fy_to. |
+| `/api/v1/hypersonics` | GET | Pivoted hypersonics PE lines: one row per sub-element, columns for FY2015–FY2026. Filters: service, exhibit, fy_from, fy_to. Includes 25 forced-inclusion PEs via `_EXTRA_PES` (including 9 D8Z Defense-Wide programs). |
 | `/api/v1/hypersonics/download` | GET | CSV download of the pivoted hypersonics table (same filters). |
+| `/api/v1/hypersonics/download/xlsx` | GET | XLSX download with per-FY description columns (`Desc FY{yr}`) sourced from `pe_descriptions` table, priority-ordered by section_header (Mission Description > Accomplishments > Acquisition Strategy). |
+| `/api/v1/hypersonics/rebuild` | POST | Rebuild the hypersonics cache table from budget_lines + PDF mining. |
 | `/api/v1/explorer/build` | POST | Start async cache build for user-supplied keywords. Returns keyword_set_id. |
 | `/api/v1/explorer/status` | GET | Poll cache build progress (state, progress text, PE count). |
 | `/api/v1/explorer` | GET | PE-level summary + available download columns for a built keyword set. |
@@ -138,14 +141,14 @@ Server-side rendered HTML using Jinja2 templates with HTMX for dynamic updates.
 
 | Page | Route | Description |
 |------|-------|-------------|
-| **Search** | `/` | Full-text keyword search with filter sidebar: fiscal year, service/agency (sorted by count), exhibit type, budget type, amount range. Faceted filter counts show result counts per option with zero-result options disabled. HTMX-driven results table with sorting, pagination, column toggle. Landing page charts (service bar, budget type doughnut) using shared utility. |
-| **Charts** | `/charts` | Budget by service (horizontal bar), stacked budget totals by service & FY, Top-N programs (excludes summary exhibits), multi-entity comparison (2-6 services across all FY columns), budget hierarchy treemap, budget type breakdown (shared doughnut utility). FY selector (newest first) and multi-select service filter. |
-| **Dashboard** | `/dashboard` | Summary cards (FY totals, YOY change), budget-by-service bar chart, Top-10 programs, appropriation breakdown. |
-| **Programs** | `/programs` | Program element browsing with tag filters, search, and funding history table. |
+| **Explorer** | `/explorer` (also `/`) | **Default landing page.** Generalized keyword search tool. Enter any keywords (comma-separated, max 20) or PE numbers (e.g., `0604030N`) to search budget lines and PE descriptions with fuzzy matching (prefix, acronym expansion, edit-distance). PE numbers entered as keywords are matched directly against `budget_lines` and `pe_index`. Async cache build with progress polling and elapsed-time display. Collapsible PE-level preview table showing match counts. Two-list drag-and-drop column picker for XLSX download with customizable column order. Toggle to filter to directly matching sub-elements only. XLSX export includes totals row for keyword-matched rows and italic styling for non-matching rows. |
+| **Hypersonics** | `/hypersonics` | Pivoted table of all hypersonics-related PE lines and sub-programs, FY2015+. One row per unique PE + sub-element; one column per fiscal year showing primary requested/enacted funding ($K). Filter by service, exhibit type, and FY range. 25 forced-inclusion PEs (`_EXTRA_PES`) including 9 D8Z Defense-Wide programs. PDF-only PEs get stub R-1 rows with funding mined from R-2 detail PDFs. CSV and XLSX download; XLSX includes per-FY description columns from `pe_descriptions`. Filter presets with save/load/delete. |
+| **Home (legacy)** | `/home` | Original full-text keyword search with filter sidebar: fiscal year, service/agency (sorted by count), exhibit type, budget type, amount range. Faceted filter counts, HTMX-driven results table. Still accessible but removed from nav. |
+| **Charts** | `/charts` | Budget by service (horizontal bar), stacked budget totals by service & FY, Top-N programs (excludes summary exhibits), multi-entity comparison (2-6 services across all FY columns), budget hierarchy treemap, budget type breakdown (shared doughnut utility). FY selector (newest first) and multi-select service filter. Not in primary nav; accessible via direct URL. |
+| **Dashboard** | `/dashboard` | Summary cards (FY totals, YOY change), budget-by-service bar chart, Top-10 programs, appropriation breakdown. Not in primary nav; accessible via direct URL. |
+| **Programs** | `/programs` | Program element browsing with tag filters, search, and funding history table. Not in primary nav; accessible via direct URL. |
 | **Program Detail** | `/programs/{pe}` | Individual PE detail: funding breakdown by FY, narrative descriptions, related exhibits, source documents. |
 | **About** | `/about` | Project description, data coverage summary, methodology overview. |
-| **Hypersonics** | `/hypersonics` | Pivoted table of all hypersonics-related PE lines and sub-programs, FY2015+. One row per unique PE + sub-element; one column per fiscal year showing primary requested/enacted funding ($K). Filter by service, exhibit type, and FY range. CSV download. |
-| **Explorer** | `/explorer` | Generalized keyword search tool. Enter any keywords (comma-separated, max 20) to search budget lines and PE descriptions with fuzzy matching (prefix, acronym expansion, edit-distance). Async cache build with progress polling. PE-level preview table showing match counts. Two-list drag-and-drop column picker for XLSX download with customizable column order. Toggle to filter to directly matching sub-elements only. |
 
 ### 4.2 HTMX Partials
 
@@ -161,6 +164,7 @@ Server-side rendered HTML using Jinja2 templates with HTMX for dynamic updates.
 ### 4.3 UI Features
 
 - **Dark mode** with CSS custom properties, `localStorage` persistence, system `prefers-color-scheme` detection
+- **Navigation:** Streamlined nav bar with Hypersonics, Explorer, About, and API Docs links. Legacy pages (Home, Charts, Dashboard, Programs, Consolidated) are still served but not in the primary nav. `/` redirects to `/explorer`.
 - **Download modal** supporting CSV, JSON (NDJSON), and Excel (.xlsx) formats with column subset selection
 - **Responsive design** with mobile, tablet, and desktop breakpoints
 - **Keyboard shortcuts** for navigation
@@ -196,13 +200,20 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 
 ### 5.4 Enrichment Tables
 
-- **`pe_index`** — Master program element list
-- **`pe_descriptions`** — Narrative descriptions from R-2/PDF sources
+- **`pe_index`** — Master program element list with display_title, organization_name, budget_type, fiscal_years, exhibit_types, and source (budget_lines or pdf)
+- **`pdf_pe_numbers`** — Links PE numbers found in PDF text to `pdf_pages` (via `pdf_page_id`), with source_file and fiscal_year. Populated during build step.
+- **`pe_descriptions`** — Narrative descriptions from R-2/PDF sources, keyed by (pe_number, fiscal_year, section_header). Section headers include "Mission Description", "Accomplishments/Planned Programs", "Acquisition Strategy", etc. Rows with NULL section_header are R-1 page headers (not real descriptions).
 - **`pe_tags`** — Keyword tags with confidence scores and `source_files` provenance
 - **`pe_lineage`** — Historical PE change tracking
 - **`project_descriptions`** — Project-level detail within PEs
 
-### 5.5 Schema Management
+### 5.5 Cache Tables
+
+- **`hypersonics_cache`** — Pivoted cache for hypersonics page. Built by `build_cache_table()` in `api/routes/keyword_search.py`. Columns: pe_number, organization_name, exhibit_type, line_item_title, budget_activity, budget_activity_title, budget_activity_norm, appropriation_title, account_title, color_of_money, matched_keywords_row, matched_keywords_desc, description_text, plus per-FY amount and source reference columns.
+- **`kw_cache_{hash}`** — Per-keyword-set caches for Explorer page. Same schema as hypersonics_cache.
+- **`explorer_cache_meta`** — Tracks built Explorer caches with keyword_set_id, row_count, and built_at timestamp. Survives process restarts.
+
+### 5.6 Schema Management
 
 - Versioned via `schema_version` table
 - Incremental `migrate()` function in `schema_design.py`
@@ -287,6 +298,8 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 4. **Classified programs** — Excluded per DoD public release policy; budget totals will not match classified-inclusive figures
 5. **Tag over-indexing** — Enrichment pipeline assigns overly broad tags for some categories (tuning needed)
 6. **Dollar rounding** — Service/program totals computed from parsed line items may not match official totals exactly due to rounding and coverage gaps
+7. **PDF-only PEs lack R-1 totals** — D8Z Defense-Wide PEs that exist only in PDFs (not in Excel `budget_lines`) have R-2 sub-element funding from PDF mining but their R-1 stub rows show NULL amounts. R-1 title extraction from PDFs is planned (see ROADMAP TODO-H1/H2).
+8. **Description quality varies** — R-1 descriptions may contain page headers or artifacts; `_is_garbage_description()` filters the worst cases but some noise may remain. R-2 descriptions are cleaned via `clean_narrative()` but multi-page artifacts can still slip through.
 
 ---
 
