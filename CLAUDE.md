@@ -6,7 +6,7 @@ Instructions for AI agents working on this codebase.
 
 - **[docs/PRD.md](docs/PRD.md)** — Program Requirements Document. The canonical description of all features. **Read this before implementing anything** to avoid duplicating or overwriting existing functionality. **Update this file whenever features are added, changed, or removed.**
 - **[docs/ROADMAP.md](docs/ROADMAP.md)** — All project tasks (completed and remaining).
-- **[docs/TODO_PLAN.md](docs/TODO_PLAN.md)** — Active work items organized into groups A–F with step-by-step agent instructions. **This is the actionable task list.** To execute: _"Clean up TODO groups A–F from `docs/TODO_PLAN.md`"_ or target a single group.
+- **[docs/TODO_PLAN.md](docs/TODO_PLAN.md)** — Active work items organized into groups A–G with step-by-step agent instructions. **This is the actionable task list.** To execute: _"Clean up TODO groups A–G from `docs/TODO_PLAN.md`"_ or target a single group.
 - **[docs/NOTICED_ISSUES.md](docs/NOTICED_ISSUES.md)** — Data quality and UI issues observed against the live database, with resolution status.
 - **[GitHub Wiki](https://github.com/wschosta/dod-budget-analysis/wiki)** — Detailed user guide, developer guide, architecture decisions, and API reference.
 

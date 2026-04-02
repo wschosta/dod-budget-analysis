@@ -261,16 +261,16 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 |----|------|--------|
 | 1.A6 | `--retry-failures` CLI flag for downloader | Stub exists, CLI not implemented |
 
-**Deferred items requiring external resources (6 items):**
+**Group G — Deploy & Launch (6 items, requires user infrastructure decisions):**
 
-| ID | Task | Blocker |
-|----|------|---------|
-| OH-MY-007 | Choose hosting platform | Cloud account setup |
-| OH-MY-008 | Configure CD deployment | Depends on OH-MY-007 + secrets |
-| OH-MY-009 | Domain + TLS | Domain registration |
-| OH-MY-010 | Accessibility audit | Running UI instance |
-| OH-MY-011 | Soft launch | Deployed application |
-| OH-MY-012 | Public launch | Depends on OH-MY-011 |
+| Sub-task | Task | Blocker |
+|----------|------|---------|
+| G1 (OH-MY-007) | Choose hosting platform | Cloud account setup |
+| G2 (OH-MY-008) | Configure CD deployment | Depends on G1 + secrets |
+| G3 (OH-MY-009) | Domain + TLS | Domain registration + G1 |
+| G4 (OH-MY-010) | Accessibility audit | Running UI (G1 or localhost) |
+| G5 (OH-MY-011) | Soft launch + feedback | Deployed app (G2 + G3) |
+| G6 (OH-MY-012) | Public launch | Depends on G5 |
 
 See [`docs/TODO_PLAN.md`](TODO_PLAN.md) for full plan with sub-agent assignments.
 See [REMAINING_TODOS.md](archive/implementation-logs/REMAINING_TODOS.md) for historical context.
@@ -283,7 +283,7 @@ All code TODOs (H1, H2, M1, L1–L5) are **resolved**. Remaining work is databas
 data quality fixes organized into 6 groups. Full specifications with SQL queries, file
 lists, and step-by-step instructions are in **[`docs/TODO_PLAN.md`](TODO_PLAN.md)**.
 
-To execute: _"Clean up TODO groups A–F from `docs/TODO_PLAN.md`"_
+To execute: _"Clean up TODO groups A–G from `docs/TODO_PLAN.md`"_
 
 | Group | Branch | Focus | Issues | Needs DB? |
 |-------|--------|-------|--------|-----------|
@@ -293,8 +293,9 @@ To execute: _"Clean up TODO groups A–F from `docs/TODO_PLAN.md`"_
 | **D** | `fix/fy-attribution` | Fix fiscal year attribution | #10, #25, #56 | Yes |
 | **E** | `fix/enrichment-quality` | Tune tags, fill missing descriptions | #27, #39, #55 | Yes |
 | **F** | `fix/retry-failures-cli` | Implement download retry CLI | ROADMAP 1.A6 | No |
+| **G** | `infra/deploy-and-launch` | Hosting, domain, CD, accessibility, launch | OH-MY-007–012 | No (needs credentials) |
 
-**Parallelism:** A first (verification), then B–E in parallel. F is independent (no DB).
+**Parallelism:** A first (verification), then B–E in parallel. F independent (no DB). G requires user infrastructure decisions.
 
 ## Recent Improvements
 

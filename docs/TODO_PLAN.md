@@ -1,8 +1,8 @@
 # Open TODO Plan — DoD Budget Analysis
 
 > **Last Updated:** 2026-04-02
-> **Purpose:** Canonical list of all remaining work, organized into agent-executable groups A–F.
-> **Usage:** Tell an agent _"Execute TODO groups A–F from `docs/TODO_PLAN.md`"_ or target a single group: _"Execute TODO group C"_.
+> **Purpose:** Canonical list of all remaining work, organized into agent-executable groups A–G.
+> **Usage:** Tell an agent _"Execute TODO groups A–G from `docs/TODO_PLAN.md`"_ or target a single group: _"Execute TODO group C"_.
 
 ---
 
@@ -16,8 +16,9 @@
 | **D** | `fix/fy-attribution` | Fix fiscal year attribution | #10, #25, #56 | Yes |
 | **E** | `fix/enrichment-quality` | Tune tags, fill missing descriptions | #27, #39, #55 | Yes |
 | **F** | `fix/retry-failures-cli` | Implement download retry CLI | ROADMAP 1.A6 | No |
+| **G** | `infra/deploy-and-launch` | Hosting, domain, CD, accessibility, launch | OH-MY-007–012 | No (needs credentials) |
 
-**Parallelism:** A runs first (verification). B–F can run in parallel after A confirms the current DB state. F is independent of all others (no DB needed).
+**Parallelism:** A runs first (verification). B–F can run in parallel after A confirms the current DB state. F is independent (no DB). G requires user infrastructure decisions before an agent can execute.
 
 ---
 
@@ -293,20 +294,61 @@ These are structural constraints, not bugs. Already documented in `docs/PRD.md` 
 
 ---
 
-## Deferred — Require External Resources
+## Group G: Deploy & Launch
 
-These cannot be completed by code agents. They require infrastructure decisions and credentials.
+**Branch:** `infra/deploy-and-launch`
+**Goal:** Take the application from localhost to production. **Requires user decisions on hosting, domain, and credentials before an agent can execute.**
 
-| ID | Task | Blocker | Dependency |
-|----|------|---------|------------|
-| OH-MY-007 | Choose hosting platform (Fly.io/Railway/Render) | Cloud account setup | — |
-| OH-MY-008 | Configure CD deployment workflow | Secrets + OH-MY-007 | OH-MY-007 |
-| OH-MY-009 | Register domain + configure TLS | Domain registration | OH-MY-007 |
-| OH-MY-010 | Lighthouse accessibility audit | Running UI instance | OH-MY-007 |
-| OH-MY-011 | Soft launch + collect feedback | Deployed application | OH-MY-008 |
-| OH-MY-012 | Public launch + announcement | Community channels | OH-MY-011 |
+### Prerequisites (user must provide)
+- Cloud platform account (Fly.io, Railway, Render, or similar)
+- Domain name (registered or chosen)
+- GitHub secrets configured for CD workflow
 
-Infrastructure TODOs in `.github/workflows/deploy.yml` (4 placeholder items) are blocked by OH-MY-007/008.
+### Sub-tasks (sequential — each unblocks the next)
+
+#### G1: Choose hosting platform (OH-MY-007)
+1. Evaluate: Fly.io, Railway, Render, AWS ECS, DigitalOcean App Platform
+2. Criteria: cost (free tier?), SQLite support (persistent disk), auto-deploy from GitHub, custom domain, HTTPS
+3. Recommendation: Fly.io or Railway (both support persistent volumes for SQLite)
+4. Write decision record to `docs/HOSTING_DECISION.md`
+5. Create account and do a test deploy of the Docker image
+- **Files:** `docs/HOSTING_DECISION.md` (new)
+
+#### G2: Configure CD deployment workflow (OH-MY-008)
+1. Fill in `.github/workflows/deploy.yml` placeholder TODOs (lines 9, 71, 151, 160)
+2. Configure GitHub secrets: `GHCR_TOKEN` (or PAT), platform-specific deploy token
+3. Add environment protection rules for production
+4. Test: merge to main → auto-deploy within minutes
+- **Files:** `.github/workflows/deploy.yml`
+- **Depends on:** G1
+
+#### G3: Register domain + configure TLS (OH-MY-009)
+1. Register domain (e.g., `dodbudget.org` or similar)
+2. Configure DNS to point to hosting platform
+3. Enable HTTPS (most platforms provide free TLS via Let's Encrypt)
+4. Verify: `curl -I https://custom-domain.com` returns 200
+- **Depends on:** G1
+
+#### G4: Lighthouse accessibility audit (OH-MY-010)
+1. Run Lighthouse or axe-core against the deployed (or local) UI at `/` and `/hypersonics`
+2. Target accessibility score ≥ 90
+3. File issues for findings below target; fix critical items inline
+4. Update `docs/NOTICED_ISSUES.md` with audit results
+- **Files:** templates, CSS
+- **Depends on:** G1 (or can run against `localhost:8000`)
+
+#### G5: Soft launch + collect feedback (OH-MY-011)
+1. Identify 5-10 target users (analysts, researchers, journalists)
+2. Configure feedback form to create GitHub Issues (the `POST /api/v1/feedback` endpoint already exists)
+3. Share the URL; monitor for 1-2 weeks; triage issues
+- **Depends on:** G2, G3
+
+#### G6: Public launch (OH-MY-012)
+1. Review README for public-facing accuracy
+2. Verify LICENSE file exists (recommend MIT or public domain for gov data)
+3. Create GitHub Release with changelog
+4. Write announcement; share on r/dataisbeautiful, Hacker News, civic tech communities
+- **Depends on:** G5
 
 ---
 
