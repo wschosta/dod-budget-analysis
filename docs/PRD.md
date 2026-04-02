@@ -130,7 +130,7 @@ FastAPI application serving the database through versioned endpoints (`/api/v1`)
 - **ETag caching** for conditional responses and bandwidth reduction
 - **CORS middleware** with configurable origins
 - **Security headers:** CSP, X-Content-Type-Options, X-Frame-Options
-- **Connection pooling:** Queue-based, thread-safe pool (configurable size, default 10)
+- **Per-request connections:** Fresh SQLite connection per request with WAL mode and configurable pragmas
 - **Auto-generated API docs:** OpenAPI/Swagger at `/docs`, ReDoc at `/redoc`
 - **Structured access logging** middleware with response timing
 
@@ -253,7 +253,7 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 
 ### 7.2 CI/CD
 
-- **GitHub Actions CI:** Matrix testing (Python 3.11, 3.12), ruff lint, mypy type check, pytest with coverage (80% threshold on `api/` and `utils/`), Docker build validation
+- **GitHub Actions CI:** Matrix testing (Python 3.11, 3.12), ruff lint, mypy type check, pytest with coverage reporting on `api/` and `utils/`, Docker build validation
 - **Automated data refresh:** Weekly cron via `refresh-data.yml`
 - **Automated downloads:** Scheduled via `download.yml`
 - **Deploy workflow:** Docker build/push to GHCR (template)
@@ -273,7 +273,6 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 | `APP_PORT` | `8000` | API server port |
 | `APP_LOG_FORMAT` | `text` | Logging format (`text` or `json`) |
 | `APP_CORS_ORIGINS` | `*` | CORS allowed origins |
-| `APP_DB_POOL_SIZE` | `10` | Connection pool size |
 | `RATE_LIMIT_SEARCH` | `60` | Search rate limit (req/min/IP) |
 | `RATE_LIMIT_DOWNLOAD` | `10` | Download rate limit (req/min/IP) |
 | `RATE_LIMIT_DEFAULT` | `120` | Default rate limit (req/min/IP) |

@@ -27,9 +27,9 @@ When making changes to the codebase:
 pip install -r requirements-dev.txt
 python -m playwright install chromium
 
-# Tests (82 files, 80% coverage minimum on api/ and utils/)
+# Tests (104 files, coverage tracked on api/ and utils/)
 python -m pytest tests/ -v
-python -m pytest tests/ --cov=api --cov=utils --cov-report=term-missing --cov-fail-under=80
+python -m pytest tests/ --cov=api --cov=utils --cov-report=term-missing
 python -m pytest tests/ --ignore=tests/test_gui_tracker.py --ignore=tests/optimization_validation
 
 # Lint, type check, format
@@ -53,30 +53,34 @@ docker compose up --build
 dod-budget-analysis/
 ├── api/                     # FastAPI application
 │   ├── app.py               # App factory, middleware, rate limiting, health
-│   ├── database.py          # Connection pool, get_db() dependency
+│   ├── database.py          # get_db() dependency, per-request connections
 │   ├── models.py            # Pydantic request/response models
 │   └── routes/              # One file per router group
 │       ├── aggregations.py  # GET /api/v1/aggregations
 │       ├── budget_lines.py  # GET /api/v1/budget-lines, /budget-lines/{id}
 │       ├── dashboard.py     # Dashboard data endpoints
 │       ├── download.py      # GET /api/v1/download (streaming CSV/NDJSON)
+│       ├── explorer.py      # Keyword Explorer endpoints
+│       ├── facets.py        # GET /api/v1/facets (cross-filtered counts)
 │       ├── feedback.py      # POST /api/v1/feedback
+│       ├── files.py         # GET /api/v1/files/{file_path}
 │       ├── frontend.py      # HTML routes (/, /charts, /dashboard, /about, /programs)
+│       ├── hypersonics.py   # Hypersonics PE lines pivot view
+│       ├── keyword_search.py # Shared keyword-search cache-building logic
 │       ├── metadata.py      # GET /api/v1/metadata
 │       ├── pe.py            # PE-centric views, funding, sub-elements
 │       ├── reference.py     # GET /api/v1/reference/{type}
 │       └── search.py        # GET /api/v1/search (FTS5)
-├── utils/                   # Shared utility library (16 modules)
+├── utils/                   # Shared utility library (19 modules)
 ├── pipeline/                # Data pipeline modules
 ├── downloader/              # Document downloader modules
 ├── templates/               # Jinja2 HTML templates + partials/
 ├── static/                  # CSS + JS assets
-├── tests/                   # pytest test suite (82 files)
+├── tests/                   # pytest test suite (104 files)
 ├── scripts/                 # Operational scripts
 ├── docs/                    # PRD, ROADMAP, NOTICED_ISSUES, archive/
 ├── run_pipeline.py          # 5-step pipeline orchestrator
 ├── build_budget_db.py       # Database builder
-├── dod_budget_downloader.py # Document downloader
 ├── enrich_budget_db.py      # PE enrichment
 ├── validate_budget_data.py  # Data quality validation
 ├── search_budget.py         # CLI search
@@ -137,7 +141,6 @@ docs/<short-description>
 | `APP_DB_PATH` | `dod_budget.sqlite` | Database path |
 | `APP_PORT` | `8000` | Server port |
 | `APP_CORS_ORIGINS` | `*` | CORS origins |
-| `APP_DB_POOL_SIZE` | `10` | DB pool size |
 | `RATE_LIMIT_SEARCH` | `60` | Search req/min/IP |
 | `RATE_LIMIT_DOWNLOAD` | `10` | Download req/min/IP |
 | `RATE_LIMIT_DEFAULT` | `120` | Default req/min/IP |

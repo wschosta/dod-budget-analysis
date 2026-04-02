@@ -184,16 +184,17 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 - Wiki skeleton created with performance optimizations documented (3-6x speedup achieved)
 - ROADMAP established with 57 tasks across 4 phases
 
-**Phase 1 (Data Extraction & Normalization):** ✅ **~95% COMPLETE**
-- All testing tasks (1.C1-1.C3) complete with 1,248+ tests across 63+ test files
+**Phase 1 (Data Extraction & Normalization):** ✅ **~97% COMPLETE**
+- All testing tasks (1.C1-1.C3) complete with 2,590+ tests across 104 test files
 - Parsing, normalization, and validation fully functional
 - Network audits completed (OH-MY-001 through OH-MY-006, 2026-02-19)
+- Download retry (1.A6) complete with `--retry-failures` CLI flag and GUI dialog
 - Remaining: data source doc update (1.A5 minor)
 
 **Phase 2 (Database Design & Population):** ✅ **COMPLETE**
 - All schema design tasks (2.A1-2.A5) implemented in `schema_design.py`
 - All data loading tasks (2.B1-2.B4) implemented with reconciliation and refresh workflow
-- All API tasks (2.C1-2.C6) implemented with FastAPI — 6 route modules, 11 Pydantic models, 115 API-related tests
+- All API tasks (2.C1-2.C6) implemented with FastAPI — 15 route modules, 11 Pydantic models, 115 API-related tests
 
 **Phase 3 (Front-End & Documentation):** ✅ **COMPLETE**
 - Frontend technology decision: HTMX + Jinja2 (`docs/FRONTEND_TECHNOLOGY_DECISION.md`)
@@ -216,7 +217,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 
 | Component | File(s) | Lines | Status |
 |-----------|---------|-------|--------|
-| **Document downloader** | `dod_budget_downloader.py` | 2,442 | ✅ Functional — 5 sources, multi-year, parallel, Playwright |
+| **Document downloader** | `downloader/` (5 modules) | 2,442 | ✅ Functional — 5 sources, multi-year, parallel, Playwright |
 | **Database builder (CLI)** | `build_budget_db.py` | 1,957 | ✅ Functional — Excel/PDF parsing, incremental updates, dynamic FY columns, failure log + retry |
 | **Database builder (GUI)** | `build_budget_gui.py` | 497 | ✅ Functional — tkinter interface with progress/ETA |
 | **Schema & migrations** | `schema_design.py` | 482 | ✅ Complete — versioned migrations, reference table seeding |
@@ -226,11 +227,11 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | **Data reconciliation** | `scripts/reconcile_budget_data.py` | 481 | ✅ Complete — cross-service + cross-exhibit checks |
 | **PDF quality audit** | `scripts/pdf_quality_audit.py` | 312 | ✅ Complete — automated extraction quality scoring |
 | **Refresh workflow** | `refresh_data.py` | — | ✅ Complete — staged pipeline with dry-run, webhooks, rollback, progress tracking, scheduling |
-| **REST API** | `api/` (app, models, routes) | 1,239 | ✅ Complete — FastAPI with 8 route modules, CORS, CSP headers, rate limiting, connection pooling |
+| **REST API** | `api/` (app, models, routes) | 1,239 | ✅ Complete — FastAPI with 15 route modules, CORS, CSP headers, rate limiting, connection pooling |
 | **Web UI** | `templates/` + `static/` | — | ✅ Complete — HTMX + Jinja2 with search, filters, results, detail panel, download modal, charts |
 | **User documentation** | `docs/` (6 guides) | — | ✅ Complete — getting started, data dictionary, FAQ, API reference, methodology, deployment |
-| **Utility libraries** | `utils/` (14 modules) | 2,093 | ✅ Complete — config, database, HTTP, patterns, strings, validation, cache, query, formatting |
-| **Test suite** | `tests/` (63 files) | — | ✅ **1,248 tests** — comprehensive coverage across all modules |
+| **Utility libraries** | `utils/` (19 modules) | 2,093 | ✅ Complete — config, database, HTTP, patterns, strings, validation, cache, query, formatting |
+| **Test suite** | `tests/` (104 files) | — | ✅ **2,590 tests** — comprehensive coverage across all modules |
 | **CI/CD** | `.github/workflows/` (4 files) | — | ✅ Complete — CI pipeline, data refresh, optimization tests, scheduled downloads |
 | **Containerization** | `Dockerfile*`, `docker-compose*.yml` | — | ✅ Complete — production, multistage, dev, staging configurations |
 | **Backup & monitoring** | `scripts/backup_db.py`, `api/app.py` | — | ✅ Complete — automated backups, /health/detailed, structured logging |
