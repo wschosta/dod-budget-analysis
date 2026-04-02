@@ -252,3 +252,102 @@ class TestSuggest:
         org_entries = [s for s in result if s["field"] == "organization_name"]
         assert len(org_entries) >= 1
         assert any("Army" in s["value"] for s in org_entries)
+
+
+# ── FTS scan limit tests (SEARCH-005 / issue #60) ─────────────────────────
+
+from api.routes.search import _budget_select, _pdf_select, _FTS_SCAN_LIMIT  # noqa: E402
+
+
+class TestFtsScanLimit:
+    """Verify that FTS subqueries include a LIMIT to cap materialisation."""
+
+    def test_budget_select_unfiltered_relevance_uses_exact_limit(self):
+        """Unfiltered relevance query uses offset+limit as FTS cap."""
+        sql, _ = _budget_select(
+            fts_query="helicopter",
+            sort="relevance",
+            fiscal_year=None,
+            service=None,
+            exhibit_type=None,
+            limit=21,   # fetch_limit = limit+1
+            offset=0,
+        )
+        # FTS subquery should contain ORDER BY rank LIMIT 21
+        assert "ORDER BY rank LIMIT 21" in sql
+
+    def test_budget_select_unfiltered_relevance_respects_offset(self):
+        """Offset is added to the FTS cap for mid-page queries."""
+        sql, _ = _budget_select(
+            fts_query="helicopter",
+            sort="relevance",
+            fiscal_year=None,
+            service=None,
+            exhibit_type=None,
+            limit=21,
+            offset=40,
+        )
+        assert f"ORDER BY rank LIMIT 61" in sql
+
+    def test_budget_select_filtered_uses_scan_cap(self):
+        """Filtered queries use _FTS_SCAN_LIMIT as cap."""
+        sql, _ = _budget_select(
+            fts_query="helicopter",
+            sort="relevance",
+            fiscal_year=["FY 2026"],
+            service=None,
+            exhibit_type=None,
+            limit=21,
+            offset=0,
+        )
+        assert f"LIMIT {_FTS_SCAN_LIMIT}" in sql
+
+    def test_budget_select_amount_sort_uses_scan_cap(self):
+        """Amount-sorted queries use _FTS_SCAN_LIMIT regardless of filters."""
+        sql, _ = _budget_select(
+            fts_query="helicopter",
+            sort="amount_desc",
+            fiscal_year=None,
+            service=None,
+            exhibit_type=None,
+            limit=21,
+            offset=0,
+        )
+        assert f"LIMIT {_FTS_SCAN_LIMIT}" in sql
+        # Must NOT add ORDER BY rank (sort is by amount, not relevance)
+        assert "ORDER BY rank" not in sql
+
+    def test_pdf_select_unfiltered_uses_exact_limit(self):
+        """Unfiltered PDF query uses offset+limit as FTS cap."""
+        sql, _ = _pdf_select(
+            fts_query="helicopter",
+            fiscal_year=None,
+            exhibit_type=None,
+            limit=21,
+            offset=0,
+        )
+        assert "ORDER BY rank LIMIT 21" in sql
+
+    def test_pdf_select_filtered_uses_scan_cap(self):
+        """Filtered PDF query uses _FTS_SCAN_LIMIT."""
+        sql, _ = _pdf_select(
+            fts_query="helicopter",
+            fiscal_year=["FY 2026"],
+            exhibit_type=None,
+            limit=21,
+            offset=0,
+        )
+        assert f"LIMIT {_FTS_SCAN_LIMIT}" in sql
+
+    def test_fts_scan_limit_cap_applied(self):
+        """FTS limit is capped at _FTS_SCAN_LIMIT even for large offsets."""
+        sql, _ = _budget_select(
+            fts_query="helicopter",
+            sort="relevance",
+            fiscal_year=None,
+            service=None,
+            exhibit_type=None,
+            limit=21,
+            offset=_FTS_SCAN_LIMIT + 1000,
+        )
+        assert f"LIMIT {_FTS_SCAN_LIMIT}" in sql

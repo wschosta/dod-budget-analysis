@@ -444,11 +444,18 @@ rebuild via webhook/signal.
 
 ---
 
-#### 60. FTS Queries With Large Result Sets **[OPEN — Perf]**
+#### ~~60. FTS Queries With Large Result Sets~~ **[RESOLVED]**
 
-FTS5 `MATCH` returns all matches before pagination is applied. Consider using
-`LIMIT` inside the FTS subquery for early termination when only the first page
-is needed.
+Added `_FTS_SCAN_LIMIT = 10_000` constant and bounded FTS subqueries in
+`api/routes/search.py` (`_budget_select`, `_pdf_select`, `_description_select`).
+
+- Unfiltered relevance queries use `ORDER BY rank LIMIT offset+limit`, enabling
+  FTS5's early-termination optimiser path so only the needed rows are scored.
+- Filtered or amount-sorted queries use `LIMIT _FTS_SCAN_LIMIT` to cap
+  materialisation while still covering typical paginated access patterns.
+
+**Files changed:** `api/routes/search.py`
+**Test coverage:** `tests/test_web_group/test_search_endpoint.py::TestFtsScanLimit` (7 cases)
 
 ---
 
@@ -634,7 +641,8 @@ are rows without enough context to infer an appropriation code.
 | **Round 4 RESOLVED** | 3 | #52, #58, #59 |
 | **Round 4 DOCUMENTED** | 1 | #62 (tag assessment) |
 | **Round 3 OPEN (Data)** | 5 | #51, 53-56 (pipeline/DB data quality) |
-| **Round 3 OPEN (Perf)** | 2 | #60-61 (performance optimization) |
+| **Round 3 RESOLVED (Perf)** | 1 | #60 (FTS scan limit) |
+| **Round 3 OPEN (Perf)** | 1 | #61 (aggregation full table scans) |
 | **Round 2 RESOLVED** | 20 | #29-37, #40-48, #50 |
 | **Round 2 OPEN** | 2 | #38 (service normalization — DB), #39 (tag quality — pipeline) |
 | **Round 2 GRADUAL** | 1 | #49 (inline styles — ongoing) |
