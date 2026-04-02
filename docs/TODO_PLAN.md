@@ -11,7 +11,7 @@
 |----------|-------|-------------|
 | **HIGH** | 2 | Data correctness — PDF-only PE titles and R-1 funding rows |
 | **MEDIUM** | 1 | Feature verification — Explorer PE number search |
-| **LOW** | 5 | Pipeline fixes and UI polish |
+| **LOW** | 5 (3 done) | Pipeline fixes and UI polish |
 | **DEFERRED** | 6 | Require external resources (hosting, domain, launch) |
 | **CLEANUP** | 3 | Inline code TODOs (partially implemented stubs) |
 | **Total** | **17** | |
@@ -63,26 +63,23 @@ These directly affect data accuracy on the hypersonics and explorer pages.
 - **Files:** `pipeline/enricher.py` (phases 1-5)
 - **Estimated effort:** Low (~1h)
 
-### TODO-L2: Fix RuntimeWarning on `python -m pipeline.enricher`
+### ~~TODO-L2: Fix RuntimeWarning on `python -m pipeline.enricher`~~ DONE
 
 - **Problem:** `RuntimeWarning: 'pipeline.enricher' found in sys.modules` due to eager import in `pipeline/__init__.py`.
-- **Fix:** Guard import with `if 'pipeline.enricher' not in sys.modules` or use lazy imports.
+- **Fix:** Replaced eager imports in `pipeline/__init__.py` with lazy `__getattr__`-based imports. `__all__` still exports correctly.
 - **Files:** `pipeline/__init__.py`
-- **Estimated effort:** Low (~15min)
 
-### TODO-L3: Fix `--with-llm` in Phase 3
+### ~~TODO-L3: Fix `--with-llm` in Phase 3~~ DONE
 
 - **Problem:** `anthropic package not installed` error partway through LLM tagging despite some batches succeeding.
-- **Fix:** Consolidate to single top-of-file import with `_HAS_ANTHROPIC` flag; check once at phase entry.
+- **Fix:** Consolidated to single top-of-file `_HAS_ANTHROPIC` flag; check once at `run_phase3()` entry, falls back to rule-based tagging with a warning.
 - **Files:** `pipeline/enricher.py`
-- **Estimated effort:** Low (~30min)
 
-### TODO-L4: Fix Phase 3 non-LLM tagging (0 rows)
+### ~~TODO-L4: Fix Phase 3 non-LLM tagging (0 rows)~~ DONE
 
 - **Problem:** Rule-based tagger in Phase 3 produces 0 tag rows for 85 PEs.
-- **Fix:** Debug rule-based tagging function — check rule matching, INSERT correctness, constraint handling.
+- **Fix:** `bl_texts` query now concatenates `line_item_title`, `budget_activity_title`, and `account_title` (was only using `line_item_title`). Added diagnostic logging: summary stats after rule-based pass and per-PE `logger.debug()` showing matched tags.
 - **Files:** `pipeline/enricher.py`
-- **Estimated effort:** Medium (~1.5h, requires investigation)
 
 ### TODO-L5: Add Rebuild Cache button to Hypersonics page
 
