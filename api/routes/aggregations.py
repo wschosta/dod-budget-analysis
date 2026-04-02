@@ -12,6 +12,7 @@ OPT-AGG-002: Background cache warmup at startup for common no-filter queries.
 
 import logging
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -261,7 +262,7 @@ def hierarchy(
 _WARMUP_GROUP_KEYS = ("service", "fiscal_year", "budget_type", "exhibit_type")
 
 
-def warm_caches(db_path: "Path") -> None:  # noqa: F821
+def warm_caches(db_path: Path) -> None:
     """Pre-populate aggregation caches for common no-filter queries.
 
     Called from the app lifespan in a background daemon thread so the first
