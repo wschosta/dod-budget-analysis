@@ -3,11 +3,11 @@
 {% block title %}Charts — DoD Budget Explorer{% endblock %}
 
 {% block content %}
-<h2 style="margin-bottom:1rem">Budget Visualizations</h2>
+<h2 class="mb-lg">Budget Visualizations</h2>
 
-<div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem;align-items:center">
+<div class="d-flex flex-wrap items-center gap-md mb-lg">
   {# FY selector #}
-  <label style="font-size:.85rem">Fiscal Year:
+  <label class="text-lg">Fiscal Year:
     <select id="chart-fy" onchange="loadCharts()" style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid var(--border-color)">
       {% for fy in fiscal_years %}
       <option value="{{ fy.fiscal_year }}" {% if loop.last %}selected{% endif %}>{{ fy.fiscal_year }}</option>
@@ -16,7 +16,7 @@
   </label>
 
   {# VIZ-003: Service filter #}
-  <label style="font-size:.85rem">Service:
+  <label class="text-lg">Service:
     <select id="chart-service-filter" multiple
             style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid var(--border-color);min-height:2.5rem;max-height:150px"
             onchange="loadCharts()">
@@ -26,13 +26,13 @@
   <!-- DONE [Group: LION] LION-006: Chart export buttons added per card below -->
 
   {# VIZ-004: Print button #}
-  <button class="btn btn-secondary btn-sm print-btn" onclick="window.print()" style="margin-left:auto" aria-label="Print charts page">
+  <button class="btn btn-secondary btn-sm print-btn ml-auto" onclick="window.print()" aria-label="Print charts page">
     <span aria-hidden="true">&#128424;</span> Print Charts
   </button>
 </div>
 
 {# VIZ-002: Loading indicator #}
-<div id="charts-loading" style="display:none;text-align:center;padding:2rem">
+<div id="charts-loading" class="d-none p-xl" style="text-align:center">
   <span class="spinner"></span> Loading charts…
 </div>
 
@@ -56,7 +56,7 @@
   </div>
 
   {# 3.B3-a: Top-N budget items #}
-  <div class="chart-card" id="card-topn" style="grid-column: 1 / -1">
+  <div class="chart-card col-full" id="card-topn">
     <h3>Top 10 Budget Line Items — FY Request ($M)</h3>
     <div id="err-topn" style="display:none" class="empty-state" role="alert"></div>
     <canvas id="chart-topn" height="120" role="img" aria-label="Horizontal bar chart showing top 10 budget line items by FY request"></canvas>
@@ -64,9 +64,9 @@
   </div>
 
   {# 3.5: Multi-entity budget comparison across all FY columns #}
-  <div class="chart-card" id="card-compare" style="grid-column: 1 / -1">
+  <div class="chart-card col-full" id="card-compare">
     <h3>Budget Comparison (Multi-Entity)</h3>
-    <div id="compare-entities" style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:.75rem;align-items:center">
+    <div id="compare-entities" class="d-flex flex-wrap items-center gap-md mb-md">
       <select class="compare-entity-select" onchange="loadComparison()"
               style="padding:.3rem .5rem;border-radius:4px;border:1px solid var(--border-color)">
         <option value="">-- Select service --</option>
@@ -83,7 +83,7 @@
   </div>
 
   {# Treemap: Hierarchical budget breakdown #}
-  <div class="chart-card" id="card-treemap" style="grid-column: 1 / -1">
+  <div class="chart-card col-full" id="card-treemap">
     <h3>Budget Hierarchy: Service &gt; Appropriation</h3>
     <div id="err-treemap" style="display:none" class="empty-state" role="alert"></div>
     <canvas id="chart-treemap" height="300" role="img" aria-label="Treemap chart showing budget hierarchy by service and appropriation"></canvas>

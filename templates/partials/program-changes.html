@@ -1,24 +1,24 @@
 {% if changes %}
 {# Summary row #}
 {% if summary %}
-<div style="display:flex;flex-wrap:wrap;gap:1rem;margin-bottom:1rem;font-size:.85rem">
+<div class="d-flex flex-wrap mb-lg text-lg" style="gap:1rem">
   <div>
-    <span style="color:var(--text-secondary)">Prior Year Total:</span>
+    <span class="text-secondary">Prior Year Total:</span>
     <strong>{{ summary.total_fy2025 | fmt_amount if summary.total_fy2025 is not none else "—" }}</strong>
   </div>
   <div>
-    <span style="color:var(--text-secondary)">Current Request:</span>
+    <span class="text-secondary">Current Request:</span>
     <strong>{{ summary.total_fy2026_request | fmt_amount if summary.total_fy2026_request is not none else "—" }}</strong>
   </div>
   <div>
-    <span style="color:var(--text-secondary)">Total Delta:</span>
+    <span class="text-secondary">Total Delta:</span>
     <strong class="delta {{ 'positive' if summary.total_delta and summary.total_delta >= 0 else 'negative' }}">
       {{ summary.total_delta | fmt_amount if summary.total_delta is not none else "—" }}
     </strong>
   </div>
   {% if summary.pct_change is not none %}
   <div>
-    <span style="color:var(--text-secondary)">Change:</span>
+    <span class="text-secondary">Change:</span>
     <strong class="delta {{ 'positive' if summary.pct_change >= 0 else 'negative' }}">
       {{ "{:+.1f}".format(summary.pct_change) }}%
     </strong>
@@ -78,7 +78,7 @@
   </table>
 </div>
 {% else %}
-<div class="empty-state" style="padding:1.5rem">
+<div class="empty-state p-lg">
   <p>No funding changes found for this PE.</p>
 </div>
 {% endif %}

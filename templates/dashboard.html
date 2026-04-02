@@ -3,7 +3,7 @@
 {% block title %}Dashboard — DoD Budget Explorer{% endblock %}
 
 {% block content %}
-<h2 style="margin-bottom:1rem">DoD Budget Overview</h2>
+<h2 class="mb-lg">DoD Budget Overview</h2>
 
 <!-- Summary stat cards -->
 <div class="dashboard-stats" role="region" aria-label="Budget summary statistics">
@@ -30,7 +30,7 @@
 </div>
 
 <!-- Loading indicator -->
-<div id="dash-loading" style="text-align:center;padding:2rem">
+<div id="dash-loading" class="p-xl" style="text-align:center">
   <span class="spinner"></span> Loading dashboard data&hellip;
 </div>
 
@@ -50,7 +50,7 @@
 
 <!-- Top 10 programs -->
 <div class="dashboard-grid" id="dash-programs" style="display:none" role="region" aria-label="Top programs">
-  <div class="chart-card" style="grid-column: 1 / -1">
+  <div class="chart-card col-full">
     <h3>Top 10 Programs by Request</h3>
     <div id="dash-top-programs"></div>
   </div>

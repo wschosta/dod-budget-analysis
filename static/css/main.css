@@ -1990,3 +1990,70 @@ tr:focus-within td {
 
 /* ── Quantity column toggle ──────────────────────────────────────────────── */
 .qty-col { display: none; }
+
+/* ── Utility classes (Issue #49) ─────────────────────────────────────────── */
+
+/* Display */
+.d-none         { display: none; }
+.d-block        { display: block; }
+.d-flex         { display: flex; }
+.d-grid         { display: grid; }
+
+/* Flexbox shortcuts */
+.flex-wrap      { flex-wrap: wrap; }
+.items-center   { align-items: center; }
+.gap-xs         { gap: .25rem; }
+.gap-sm         { gap: .35rem; }
+.gap-md         { gap: .75rem; }
+
+/* Margins */
+.mt-xs          { margin-top: .25rem; }
+.mt-sm          { margin-top: .5rem; }
+.mt-md          { margin-top: .75rem; }
+.mt-lg          { margin-top: 1rem; }
+.mb-xs          { margin-bottom: .25rem; }
+.mb-sm          { margin-bottom: .5rem; }
+.mb-md          { margin-bottom: .75rem; }
+.mb-lg          { margin-bottom: 1rem; }
+.mb-xl          { margin-bottom: 1.5rem; }
+.ml-auto        { margin-left: auto; }
+
+/* Padding */
+.p-md           { padding: .75rem; }
+.p-lg           { padding: 1.5rem; }
+.p-xl           { padding: 2rem; }
+
+/* Typography */
+.text-xs        { font-size: .68rem; }
+.text-sm        { font-size: .72rem; }
+.text-base-sm   { font-size: .75rem; }
+.text-md        { font-size: .78rem; }
+.text-std       { font-size: .8rem; }
+.text-lg        { font-size: .85rem; }
+.text-secondary { color: var(--text-secondary); }
+.text-italic    { font-style: italic; }
+.text-mono      { font-family: var(--font-mono); }
+.text-right     { text-align: right; }
+.text-upper     { text-transform: uppercase; letter-spacing: .04em; }
+.text-nowrap    { white-space: nowrap; }
+.text-ellipsis  { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+
+/* Compound: muted text at small sizes (most common inline patterns) */
+.meta-xs        { font-size: .68rem; color: var(--text-secondary); }
+.meta-sm        { font-size: .72rem; color: var(--text-secondary); }
+.meta-md        { font-size: .75rem; color: var(--text-secondary); }
+.meta-std       { font-size: .8rem; color: var(--text-secondary); }
+.meta-lg        { font-size: .85rem; color: var(--text-secondary); }
+
+/* Section label (repeated in consolidated views) */
+.section-label  { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); margin-bottom: .25rem; }
+.section-label-lg { font-size: .82rem; text-transform: uppercase; letter-spacing: .04em; color: var(--text-secondary); margin-bottom: .5rem; display: flex; align-items: center; gap: .35rem; }
+
+/* Card surface */
+.card-surface   { background: var(--bg-surface); border: 1px solid var(--border-color); border-radius: var(--radius); }
+
+/* Grid span full width */
+.col-full       { grid-column: 1 / -1; }
+
+/* Width */
+.w-half         { width: 50%; }

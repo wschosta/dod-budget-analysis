@@ -1,5 +1,5 @@
 {% if items %}
-<p class="results-count" style="margin-bottom:.75rem">
+<p class="results-count mb-md">
   {{ total }} program{{ "s" if total != 1 }} found
 </p>
 <div class="pe-card-grid">
@@ -17,10 +17,10 @@
       </div>
       <h4>{{ item.display_title or item.pe_number }}</h4>
       {% if item.budget_type %}
-      <div style="font-size:.78rem;color:var(--text-secondary);margin-top:.25rem">{{ item.budget_type }}</div>
+      <div class="meta-md mt-xs">{{ item.budget_type }}</div>
       {% endif %}
       {% if item.total_fy2026_request is defined and item.total_fy2026_request is not none %}
-      <div style="font-size:.78rem;color:var(--text-secondary);margin-top:.25rem;font-family:var(--font-mono)">
+      <div class="meta-md mt-xs text-mono">
         FY26: ${{ "{:,.0f}".format(item.total_fy2026_request) }}K
       </div>
       {% endif %}
@@ -30,7 +30,7 @@
         <span class="filter-chip">{{ t.tag }}</span>
         {% endfor %}
         {% if item.tags | length > 5 %}
-        <span class="filter-chip" style="font-style:italic">+{{ item.tags | length - 5 }} more</span>
+        <span class="filter-chip text-italic">+{{ item.tags | length - 5 }} more</span>
         {% endif %}
       </div>
       {% endif %}
@@ -47,8 +47,8 @@
 </div>
 
 {% if total > items | length %}
-<div style="margin-top:1rem;text-align:center">
-  <p style="font-size:.85rem;color:var(--text-secondary)">
+<div class="mt-lg" style="text-align:center">
+  <p class="meta-lg">
     Showing {{ items | length }} of {{ total }} programs.
   </p>
 </div>
@@ -59,15 +59,15 @@
 <div class="empty-state">
   <div class="empty-state-icon" aria-hidden="true">&#128203;</div>
   <p><strong>No programs match your filters.</strong></p>
-  <p style="font-size:.85rem;max-width:480px;margin:0 auto">
+  <p class="text-lg" style="max-width:480px;margin:0 auto">
     No Program Elements found for the selected criteria. Try broadening your search or removing some filters.
   </p>
-  <ul style="font-size:.82rem;text-align:left;max-width:360px;margin:.75rem auto 0;color:var(--text-secondary);list-style:disc;padding-left:1.5rem">
+  <ul class="text-secondary" style="font-size:.82rem;text-align:left;max-width:360px;margin:.75rem auto 0;list-style:disc;padding-left:1.5rem">
     <li>Try a different keyword (e.g., "F-35", "cyber", "missile")</li>
     <li>Select "All Services" to broaden results</li>
     <li>Remove tag filters to see more programs</li>
   </ul>
-  <div style="margin-top:1rem">
+  <div class="mt-lg">
     <a href="/programs" class="btn btn-primary btn-sm">Clear all filters</a>
   </div>
 </div>

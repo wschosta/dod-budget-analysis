@@ -2,8 +2,8 @@
 {% if related %}
 
 {# Confidence filter controls #}
-<div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.75rem;flex-wrap:wrap">
-  <label for="confidence-filter" style="font-size:.8rem;color:var(--text-secondary)">Min confidence:</label>
+<div class="d-flex items-center flex-wrap mb-md" style="gap:.5rem">
+  <label for="confidence-filter" class="meta-std">Min confidence:</label>
   <select id="confidence-filter"
           style="font-size:.8rem;padding:.2rem .4rem;border-radius:4px;border:1px solid var(--border-color);background:var(--bg-surface);color:var(--text-primary)"
           hx-get="/partials/program-related/{{ pe_number }}"
@@ -16,7 +16,7 @@
     <option value="0.8" {% if min_confidence == 0.8 %}selected{% endif %}>&ge; 80%</option>
     <option value="0.9" {% if min_confidence == 0.9 %}selected{% endif %}>&ge; 90%</option>
   </select>
-  <span style="font-size:.8rem;color:var(--text-secondary)">
+  <span class="meta-std">
     Showing {{ related | length }} of {{ total }} related programs
   </span>
 </div>
@@ -36,25 +36,25 @@
 {% endfor %}
 
 {% if explicit_refs %}
-<div style="margin-bottom:1rem">
-  <h4 style="font-size:.82rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin-bottom:.5rem;display:flex;align-items:center;gap:.35rem">
+<div class="mb-lg">
+  <h4 class="section-label-lg">
     <span class="badge" style="background:var(--clr-blue);color:var(--text-on-primary);font-size:.68rem">Explicit Reference</span>
     <span>{{ explicit_refs | length }} found</span>
   </h4>
   <div class="pe-related-grid">
     {% for rel in explicit_refs %}
     <a href="/programs/{{ rel.referenced_pe }}" class="pe-card pe-card-sm">
-      <div style="display:flex;gap:.35rem;align-items:center;flex-wrap:wrap">
+      <div class="d-flex gap-sm items-center flex-wrap">
         <span class="badge">{{ rel.referenced_pe }}</span>
         <span class="badge" style="background:var(--clr-blue);color:var(--text-on-primary);font-size:.65rem">Explicit Reference</span>
       </div>
       {% if rel.referenced_title %}
-      <span style="font-size:.85rem">{{ rel.referenced_title }}</span>
+      <span class="text-lg">{{ rel.referenced_title }}</span>
       {% endif %}
       {% if rel.referenced_org %}
-      <span style="font-size:.75rem;color:var(--text-secondary)">{{ rel.referenced_org }}</span>
+      <span class="meta-md">{{ rel.referenced_org }}</span>
       {% endif %}
-      <span style="font-size:.75rem;color:var(--text-secondary)">
+      <span class="meta-md">
         {% if rel.confidence %}
         <span class="confidence-indicator" style="
           display:inline-block;width:1.8rem;height:.4rem;border-radius:2px;vertical-align:middle;margin-left:.3rem;
@@ -69,7 +69,7 @@
       <span style="font-size:.7rem;color:var(--text-secondary)">{{ rel.mention_count }} mentions</span>
       {% endif %}
       {% if rel.sample_snippet %}
-      <span style="font-size:.72rem;color:var(--text-secondary);font-style:italic;display:block;margin-top:.25rem;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%"
+      <span class="meta-sm text-italic d-block mt-xs text-ellipsis" style="line-height:1.4"
             title="{{ rel.sample_snippet }}">&ldquo;{{ rel.sample_snippet[:120] }}{% if rel.sample_snippet|length > 120 %}&hellip;{% endif %}&rdquo;</span>
       {% endif %}
     </a>
@@ -79,25 +79,25 @@
 {% endif %}
 
 {% if name_matches %}
-<div style="margin-bottom:1rem">
-  <h4 style="font-size:.82rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin-bottom:.5rem;display:flex;align-items:center;gap:.35rem">
+<div class="mb-lg">
+  <h4 class="section-label-lg">
     <span class="badge" style="background:transparent;color:var(--text-secondary);border:1px solid var(--border-color);font-size:.68rem">Name Match</span>
     <span>{{ name_matches | length }} found</span>
   </h4>
   <div class="pe-related-grid">
     {% for rel in name_matches %}
     <a href="/programs/{{ rel.referenced_pe }}" class="pe-card pe-card-sm">
-      <div style="display:flex;gap:.35rem;align-items:center;flex-wrap:wrap">
+      <div class="d-flex gap-sm items-center flex-wrap">
         <span class="badge">{{ rel.referenced_pe }}</span>
         <span class="badge" style="background:transparent;color:var(--text-secondary);border:1px solid var(--border-color);font-size:.65rem">Name Match</span>
       </div>
       {% if rel.referenced_title %}
-      <span style="font-size:.85rem">{{ rel.referenced_title }}</span>
+      <span class="text-lg">{{ rel.referenced_title }}</span>
       {% endif %}
       {% if rel.referenced_org %}
-      <span style="font-size:.75rem;color:var(--text-secondary)">{{ rel.referenced_org }}</span>
+      <span class="meta-md">{{ rel.referenced_org }}</span>
       {% endif %}
-      <span style="font-size:.75rem;color:var(--text-secondary)">
+      <span class="meta-md">
         {% if rel.confidence %}
         <span class="confidence-indicator" style="
           display:inline-block;width:1.8rem;height:.4rem;border-radius:2px;vertical-align:middle;margin-left:.3rem;
@@ -112,7 +112,7 @@
       <span style="font-size:.7rem;color:var(--text-secondary)">{{ rel.mention_count }} mentions</span>
       {% endif %}
       {% if rel.sample_snippet %}
-      <span style="font-size:.72rem;color:var(--text-secondary);font-style:italic;display:block;margin-top:.25rem;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%"
+      <span class="meta-sm text-italic d-block mt-xs text-ellipsis" style="line-height:1.4"
             title="{{ rel.sample_snippet }}">&ldquo;{{ rel.sample_snippet[:120] }}{% if rel.sample_snippet|length > 120 %}&hellip;{% endif %}&rdquo;</span>
       {% endif %}
     </a>
@@ -122,8 +122,8 @@
 {% endif %}
 
 {% if other_refs %}
-<div style="margin-bottom:1rem">
-  <h4 style="font-size:.82rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-secondary);margin-bottom:.5rem">
+<div class="mb-lg">
+  <h4 class="section-label-lg">
     Other Links ({{ other_refs | length }})
   </h4>
   <div class="pe-related-grid">
@@ -131,12 +131,12 @@
     <a href="/programs/{{ rel.referenced_pe }}" class="pe-card pe-card-sm">
       <span class="badge">{{ rel.referenced_pe }}</span>
       {% if rel.referenced_title %}
-      <span style="font-size:.85rem">{{ rel.referenced_title }}</span>
+      <span class="text-lg">{{ rel.referenced_title }}</span>
       {% endif %}
       {% if rel.referenced_org %}
-      <span style="font-size:.75rem;color:var(--text-secondary)">{{ rel.referenced_org }}</span>
+      <span class="meta-md">{{ rel.referenced_org }}</span>
       {% endif %}
-      <span style="font-size:.75rem;color:var(--text-secondary)">
+      <span class="meta-md">
         {{ rel.link_type | replace("_", " ") }}
         {% if rel.confidence %}
         <span class="confidence-indicator" style="
@@ -152,7 +152,7 @@
       <span style="font-size:.7rem;color:var(--text-secondary)">{{ rel.mention_count }} mentions</span>
       {% endif %}
       {% if rel.sample_snippet %}
-      <span style="font-size:.72rem;color:var(--text-secondary);font-style:italic;display:block;margin-top:.25rem;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%"
+      <span class="meta-sm text-italic d-block mt-xs text-ellipsis" style="line-height:1.4"
             title="{{ rel.sample_snippet }}">&ldquo;{{ rel.sample_snippet[:120] }}{% if rel.sample_snippet|length > 120 %}&hellip;{% endif %}&rdquo;</span>
       {% endif %}
     </a>
@@ -163,7 +163,7 @@
 
 {# Pagination #}
 {% if total > related | length %}
-<div style="margin-top:.75rem;text-align:center">
+<div class="mt-md" style="text-align:center">
   <button class="btn btn-secondary btn-sm"
           hx-get="/partials/program-related/{{ pe_number }}?limit={{ limit + 20 }}{% if min_confidence %}&min_confidence={{ min_confidence }}{% endif %}"
           hx-target="#pe-related"
@@ -174,7 +174,7 @@
 {% endif %}
 
 {% else %}
-<p style="color:var(--text-secondary);font-size:.85rem">
+<p class="meta-lg">
   No related programs detected. Cross-PE references are identified during
   the enrichment pipeline (Phase 4).
 </p>

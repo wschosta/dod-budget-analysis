@@ -27,14 +27,14 @@
           {% if row.is_subtotal %}
           <a href="/programs/{{ row.pe_number }}" class="badge" style="text-decoration:none">{{ row.pe_number }}</a>
           {% else %}
-          <span style="padding-left:1rem;font-size:.8rem;color:var(--text-secondary)">{{ row.pe_number }}</span>
+          <span class="meta-std" style="padding-left:1rem">{{ row.pe_number }}</span>
           {% endif %}
         </td>
         <td>
           {% if row.is_subtotal %}
           <strong>{{ row.display_title or row.pe_number }}</strong>
           {% else %}
-          <span style="padding-left:1rem;font-size:.85rem">{{ row.line_item_title or row.display_title or "—" }}</span>
+          <span class="text-lg" style="padding-left:1rem">{{ row.line_item_title or row.display_title or "—" }}</span>
           {% endif %}
         </td>
         <td>{{ row.organization_name or "—" }}</td>
@@ -82,15 +82,15 @@
   </table>
 </div>
 
-<p style="margin-top:.75rem;font-size:.8rem;color:var(--text-secondary)">
+<p class="mt-md meta-std">
   {{ pe_count }} program{{ "s" if pe_count != 1 }} &middot; {{ rows | length }} row{{ "s" if rows | length != 1 }} &middot;
   Amounts in thousands of dollars ($K). Delta = Request - Enacted.
 </p>
 
 {% else %}
-<div class="empty-state" style="padding:2rem;text-align:center">
+<div class="empty-state p-xl" style="text-align:center">
   <div class="empty-state-icon" aria-hidden="true">&#128202;</div>
   <p><strong>No comparison data available.</strong></p>
-  <p style="font-size:.85rem">Select program elements from the <a href="/programs">Program Explorer</a> to compare funding.</p>
+  <p class="text-lg">Select program elements from the <a href="/programs">Program Explorer</a> to compare funding.</p>
 </div>
 {% endif %}

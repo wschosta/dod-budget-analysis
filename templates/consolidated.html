@@ -72,10 +72,10 @@
 
   <section aria-label="Consolidated PE list">
     {% if items %}
-    <p class="results-count" style="margin-bottom:.75rem">
+    <p class="results-count mb-md">
       {{ total }} line item{{ "s" if total != 1 }} found
       {% if q or service or budget_type %}
-      <span style="font-size:.8rem;color:var(--text-secondary)">
+      <span class="meta-std">
         (filtered{% if q %} by "{{ q }}"{% endif %}{% if service %}, {{ service }}{% endif %}{% if budget_type %}, {{ budget_type }}{% endif %})
       </span>
       {% endif %}
@@ -90,32 +90,32 @@
         </div>
         <h4>{{ item.line_item_title or item.pe_number }}</h4>
         {% if item.budget_type %}
-        <div style="font-size:.78rem;color:var(--text-secondary);margin-top:.25rem">{{ item.budget_type }}</div>
+        <div class="meta-md mt-xs">{{ item.budget_type }}</div>
         {% endif %}
         {% if item.appropriation_name %}
-        <div style="font-size:.75rem;color:var(--text-secondary);margin-top:.15rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+        <div class="meta-md text-ellipsis" style="margin-top:.15rem"
              title="{{ item.appropriation_name }}">{{ item.appropriation_name }}</div>
         {% endif %}
-        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:.5rem;font-size:.78rem">
+        <div class="d-flex text-md mt-sm" style="justify-content:space-between;align-items:baseline">
           {% if item.fy_min and item.fy_max %}
-          <span style="color:var(--text-secondary)">FY{{ item.fy_min }}–{{ item.fy_max }}{% if item.fy_count %} ({{ item.fy_count }} FYs){% endif %}</span>
+          <span class="text-secondary">FY{{ item.fy_min }}–{{ item.fy_max }}{% if item.fy_count %} ({{ item.fy_count }} FYs){% endif %}</span>
           {% endif %}
           {% if item.total_program_value is not none and item.total_program_value %}
-          <span style="font-family:var(--font-mono);color:var(--clr-blue)" title="Total program value across all fiscal years">
+          <span class="text-mono" style="color:var(--clr-blue)" title="Total program value across all fiscal years">
             ${{ "{:,.0f}".format(item.total_program_value) }}K
-            <span style="font-size:.7rem;color:var(--text-secondary)">(total)</span>
+            <span class="meta-sm" style="font-size:.7rem">(total)</span>
           </span>
           {% elif item.best_amount is not none %}
-          <span style="font-family:var(--font-mono);color:var(--clr-blue)">
+          <span class="text-mono" style="color:var(--clr-blue)">
             ${{ "{:,.0f}".format(item.best_amount) }}K
             {% if item.best_label %}
-            <span style="font-size:.7rem;color:var(--text-secondary)">({{ item.best_label }})</span>
+            <span class="meta-sm" style="font-size:.7rem">({{ item.best_label }})</span>
             {% endif %}
           </span>
           {% endif %}
         </div>
         {% if item.submission_count %}
-        <div style="font-size:.72rem;color:var(--text-secondary);margin-top:.35rem">
+        <div class="meta-sm" style="margin-top:.35rem">
           {{ item.submission_count }} submission{{ "s" if item.submission_count != 1 }}
         </div>
         {% endif %}
@@ -141,20 +141,20 @@
          class="page-btn">Next &#8250;</a>
       {% endif %}
 
-      <span style="font-size:.8rem;color:var(--text-secondary);margin-left:.5rem">
+      <span class="meta-std" style="margin-left:.5rem">
         Page {{ page }} of {{ total_pages }}
       </span>
     </div>
     {% endif %}
 
     {% else %}
-    <div class="empty-state" style="background:var(--bg-surface);border:1px solid var(--border-color);border-radius:var(--radius);padding:2rem">
+    <div class="empty-state card-surface p-xl">
       <div class="empty-state-icon" aria-hidden="true">&#128203;</div>
       <p><strong>No consolidated line items match your filters.</strong></p>
-      <p style="font-size:.85rem;max-width:480px;margin:0 auto">
+      <p class="text-lg" style="max-width:480px;margin:0 auto">
         Try broadening your search or removing some filters.
       </p>
-      <div style="margin-top:1rem">
+      <div class="mt-lg">
         <a href="/consolidated" class="btn btn-primary btn-sm">Clear all filters</a>
       </div>
     </div>
