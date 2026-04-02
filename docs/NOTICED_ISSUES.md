@@ -304,9 +304,12 @@ Added `<select name="amount_column">` dropdown that iterates
 
 ---
 
-### 49. Excessive Inline Styles Throughout Templates **[OPEN — GRADUAL]**
+### 49. Excessive Inline Styles Throughout Templates **[RESOLVED — 2026-04-02]**
 
-This is an ongoing refactor to be addressed as files are touched. Not a discrete fix.
+Added 60+ utility CSS classes to `static/css/main.css` and converted inline styles
+across all 21 template files. Inline style count reduced from **301 to 161** (47% reduction).
+Remaining 161 use properties without utility matches (table borders, sticky positioning,
+custom widths, dynamic Jinja values, JS-toggled display).
 
 ---
 
@@ -662,7 +665,7 @@ are rows without enough context to infer an appropriation code.
 | **OPEN — partial** | 2 | #10, #25 (FY mismatch — remaining sub-items are Group D, deferred) |
 | **OPEN** | 1 | #56 (FY gaps in PE funding — needs DB investigation) |
 | **DOCUMENTED** | 1 | #62 (tag coverage assessment) |
-| **GRADUAL** | 1 | #49 (inline styles — 301 instances across 21 templates) |
+| **RESOLVED (partial)** | 1 | #49 (inline styles — 301→161, 47% reduction; remainder has no utility match) |
 
 ### Infrastructure Added to Prevent Regression
 
