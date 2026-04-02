@@ -236,53 +236,125 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | **Containerization** | `Dockerfile*`, `docker-compose*.yml` | — | ✅ Complete — production, multistage, dev, staging configurations |
 | **Backup & monitoring** | `scripts/backup_db.py`, `api/app.py` | — | ✅ Complete — automated backups, /health/detailed, structured logging |
 
-### Remaining TODOs (as of 2026-04-02)
+### Remaining Work
 
-**LION / TIGER / BEAR agent groups:** ✅ **ALL COMPLETE** (33/33 tasks done)
+All code TODOs (H1, H2, M1, L1–L5) and agent groups (LION/TIGER/BEAR, 33/33) are
+**resolved**. Data quality issues are catalogued in
+[`docs/NOTICED_ISSUES.md`](NOTICED_ISSUES.md).
 
-**Code TODOs (8 items):** ✅ **ALL COMPLETE** — TODO-H1, H2, M1, L1-L5 resolved
+Remaining work is organized into groups A–G:
 
-**Data quality issues:** See [`docs/NOTICED_ISSUES.md`](NOTICED_ISSUES.md) for full issue catalog with root cause analysis and resolution status.
-
-**Actionable work groups:** See [`docs/TODO_PLAN.md`](TODO_PLAN.md) for executable task assignments. Summary:
-
-| Group | Focus | Status |
-|-------|-------|--------|
-| **A–C** | DB verification (prior fixes, reference tables, org normalization) | Code complete — needs DB verification |
-| **D** | FY attribution correction | Partial — mismatch detection exists, auto-correction missing |
-| **E** | Tag quality + description gaps | ✅ Code complete — API filtering + description fallback done |
-| **F** | Download retry CLI | ✅ Complete |
-| **G** | Deploy & launch | Blocked on user infrastructure decisions |
+| Group | Focus | Code Status | What Remains |
+|-------|-------|-------------|-------------|
+| **A** | Verify prior fixes | ✅ Code complete | DB verification only |
+| **B** | Reference tables & dropdowns | ✅ Code complete | DB verification only |
+| **C** | Org name normalization | ✅ Code complete | DB verification only |
+| **D** | FY attribution | ⚠️ Partial | Mismatch logs but no auto-correction |
+| **E** | Enrichment quality | ✅ Code complete | Tag filtering + description fallback done |
+| **F** | Download retry CLI | ✅ Complete | — |
+| **G** | Deploy & launch | ❌ Blocked | Needs user infrastructure decisions |
 
 ---
 
-## Active TODOs — Groups A–G
+#### Groups A–C: DB Verification Queries
 
-All code TODOs (H1, H2, M1, L1–L5) are **resolved**. Remaining work is organized into
-groups A–G. Full specifications in **[`docs/TODO_PLAN.md`](TODO_PLAN.md)** — the single
-source of truth for task execution.
+All fixes are implemented in code. Run these queries against `dod_budget.sqlite`,
+then update [`docs/NOTICED_ISSUES.md`](NOTICED_ISSUES.md) status markers from
+`[CODE COMPLETE]` to `[RESOLVED — verified YYYY-MM-DD]`.
 
-## Recent Improvements
+**Group A — Prior Fixes** (NOTICED_ISSUES ~~#6~~, ~~#7~~, #9, #18, #26, ~~#52~~):
+```sql
+SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_bl_%';     -- #9: indexes
+SELECT COUNT(*) FROM budget_lines WHERE budget_type IS NULL;                      -- expect ≤116
+```
+Code-only checks: FY sort (`api/routes/frontend.py:540`), z-index (`static/css/main.css`).
 
-### Round 5 — Database Data Quality Fixes (2026-02-27)
+**Group B — Reference Tables** (NOTICED_ISSUES #1, #2, #4, ~~#5~~, #21, ~~#57~~):
+```sql
+SELECT COUNT(*) FROM budget_cycles;                                               -- expect 5
+SELECT COUNT(*) FROM appropriation_titles;                                        -- expect ~225
+SELECT COUNT(*) FROM services_agencies;                                           -- expect 22+
+SELECT COUNT(*) FROM exhibit_types;                                               -- expect 11+
+SELECT COUNT(*) FROM budget_lines WHERE appropriation_code IS NULL;               -- expect ~3,531
+```
 
-Ran a 9-step migration (`scripts/fix_data_quality.py`) and hardened the ingestion
-pipeline to eliminate duplicates, fill NULL fields, and clean reference tables.
+**Group C — Org Normalization** (NOTICED_ISSUES #3, #20, #38):
+```sql
+SELECT organization_name, COUNT(*) FROM budget_lines
+GROUP BY organization_name ORDER BY 2 DESC;
+-- expect canonical names only (Army, Navy, Air Force, etc.)
+```
 
-| Change | Result |
-|--------|--------|
-| Cross-file deduplication (`pipeline/builder.py` + migration) | 124,670 rows to 47,531 (62% reduction) |
-| Appropriation code backfill (`repair_database.py`) | NULL appropriation_code: 17.5% to 7.4% |
-| Budget type expansion (`scripts/fix_budget_types.py`) | NULL budget_type: 388 to 116 |
-| Organization name fill (migration step 5) | Empty organization_name: 311 to 0 |
-| Footnote cleanup (`pipeline/backfill.py`) | Reference table footnotes: 31 to 0 |
-| `*a.xlsx` exclusion in builder | Prevents amendment file duplicates at ingestion |
+**Group E — Enrichment Quality** (NOTICED_ISSUES ~~#27~~, ~~#39~~, ~~#55~~):
+```sql
+SELECT tag, COUNT(*) c FROM pe_tags WHERE confidence >= 0.85
+GROUP BY tag ORDER BY c DESC LIMIT 20;
 
-**New files:** `scripts/fix_data_quality.py`, `tests/test_pipeline_group/test_data_quality_fixes.py` (34 tests)
+SELECT COUNT(*) FROM pe_index
+WHERE pe_number NOT IN (SELECT DISTINCT pe_number FROM pe_descriptions);          -- expect 0
+```
 
-**Modified:** `pipeline/builder.py`, `repair_database.py`, `scripts/fix_budget_types.py`, `pipeline/backfill.py`
+---
 
-See [NOTICED_ISSUES.md](NOTICED_ISSUES.md) Round 5 for full details.
+#### Group D: Fiscal Year Attribution (Partial)
+
+NOTICED_ISSUES refs: #10, #25, #56
+
+**What exists:**
+- FY extraction from file path: `pipeline/builder.py:1663-1673`
+- FY mismatch detection: `pipeline/builder.py:1213-1222` (logs warning, prefers sheet value)
+- FY validation at download: `downloader/metadata.py:273-285` (`validate_fy_match`)
+
+**What's missing (deferred):**
+- Auto-correction when file-path FY disagrees with content FY (currently only logs — the safer default)
+- Investigation of PE FY gaps (#56) — needs production DB
+
+```sql
+SELECT pe_number, fiscal_year, COUNT(*) FROM budget_lines
+WHERE pe_number IN (SELECT pe_number FROM pe_index WHERE fiscal_years LIKE '%2025%')
+GROUP BY 1, 2 ORDER BY 1, 2;
+```
+
+---
+
+#### Group G: Deploy & Launch (Blocked)
+
+**Blocked on:** User infrastructure decisions (hosting platform, domain, credentials).
+
+Scaffolding in place:
+- Docker: `Dockerfile` (production), `Dockerfile.multistage` (embedded DB)
+- CI/CD template: `.github/workflows/deploy.yml` (4 TODO placeholders)
+- Health checks, monitoring, backup scripts all ready
+
+Sub-tasks (sequential):
+1. **G1** Choose hosting platform → create `docs/HOSTING_DECISION.md`
+2. **G2** Configure CD workflow → fill deploy.yml TODOs + GitHub secrets
+3. **G3** Register domain + TLS
+4. **G4** Accessibility audit (Lighthouse score ≥ 90)
+5. **G5** Soft launch to 5–10 users
+6. **G6** Public launch + announcement
+
+---
+
+### Known Limitations (not actionable)
+
+Documented in `docs/PRD.md` §9 and `docs/NOTICED_ISSUES.md`:
+- #8, #53: 67% of rows lack PE numbers (O-1/M-1/P-1 exhibits don't carry PE)
+- #16, #19, #28: FY2000-2009 data gap (documents not publicly available)
+- #49: Inline styles (ongoing gradual refactor)
+
+### Completed Code TODOs
+
+| ID | Task | Resolution |
+|----|------|------------|
+| TODO-H1 | R-1 titles for PDF-only PEs | `_extract_r1_titles_for_stubs()` in `keyword_search.py` |
+| TODO-H2 | R-1 funding for D8Z PEs | `_aggregate_r2_funding_into_r1_stubs()` in `keyword_search.py` |
+| TODO-M1 | Explorer PE number search | `pe_index` fallback + 8 tests |
+| TODO-L1 | Enricher progress reporting | `_log_progress()` in all 5 phases |
+| TODO-L2 | RuntimeWarning fix | Lazy `__getattr__` imports in `pipeline/__init__.py` |
+| TODO-L3 | Anthropic import consolidation | Single `_HAS_ANTHROPIC` flag |
+| TODO-L4 | Rule-based tagger fix | Expanded text sources + diagnostics |
+| TODO-L5 | Rebuild Cache button | Button + JS in `templates/hypersonics.html` |
 
 ---
 
