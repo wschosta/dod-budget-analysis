@@ -22,11 +22,16 @@
 .kw-input-row input[type="text"] {
   flex: 1;
   padding: 0.5rem 0.75rem;
-  border: 1px solid var(--color-border);
+  border: 2px solid var(--color-text-muted, #888);
   border-radius: 4px;
   font-size: 0.95rem;
   background: var(--color-bg);
   color: var(--color-text);
+}
+.kw-input-row input[type="text"]:focus {
+  border-color: var(--color-primary, #3498db);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.25);
 }
 .kw-input-row .btn { white-space: nowrap; }
 .kw-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.5rem; }
@@ -67,6 +72,15 @@
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 .build-progress .status-text { font-size: 0.95rem; }
+
+/* ── PE details toggle ──────────────────────────────────── */
+.pe-toggle {
+  cursor: pointer; font-weight: 600; font-size: 0.95rem;
+  padding: 0.5rem 0; user-select: none; list-style: none;
+}
+.pe-toggle::-webkit-details-marker { display: none; }
+.pe-toggle .toggle-icon { display: inline-block; transition: transform 0.2s; }
+details[open] .pe-toggle .toggle-icon { transform: rotate(90deg); }
 
 /* ── Preview table ───────────────────────────────────────── */
 .preview-section { margin-bottom: 1rem; }
@@ -159,7 +173,7 @@
   <div class="kw-input-area">
     <label for="kw-input">Keywords <span style="font-weight:normal; color:var(--color-text-muted)">(comma-separated, max 20)</span></label>
     <div class="kw-input-row">
-      <input type="text" id="kw-input" placeholder="e.g. hypersonic, scramjet, directed energy"
+      <input type="text" id="kw-input" placeholder="e.g. hypersonic, scramjet, directed energy, 0604030N"
              value="{{ keyword_input or '' }}"
              aria-describedby="kw-validation">
       <button class="btn btn-primary" id="kw-search-btn" onclick="startSearch()">Search</button>
@@ -173,29 +187,36 @@
   <div class="build-progress" id="build-progress">
     <span class="spinner"></span>
     <span class="status-text" id="progress-text">Building cache...</span>
+    <div class="elapsed-time" id="elapsed-time" style="margin-top:0.5rem; font-size:0.85rem; color:var(--color-text-muted);">
+      Elapsed: <span id="elapsed-clock">0:00</span>
+    </div>
   </div>
 
   <!-- 3. Results area (hidden until data loaded) -->
   <div id="results-area" style="display:none">
 
-    <!-- 3a. Preview table -->
+    <!-- 3a. Preview table (collapsible, starts collapsed) -->
     <div class="preview-section">
-      <h3>Matching Program Elements</h3>
       <div class="summary-stats" id="summary-stats"></div>
-      <div style="overflow-x:auto">
-        <table class="preview-table" id="preview-table">
-          <thead>
-            <tr>
-              <th>PE Number</th>
-              <th>Service</th>
-              <th>PE Title</th>
-              <th>Total Sub-Elements</th>
-              <th>Matching Sub-Elements</th>
-            </tr>
-          </thead>
-          <tbody id="preview-tbody"></tbody>
-        </table>
-      </div>
+      <details id="pe-details">
+        <summary class="pe-toggle">
+          <span class="toggle-icon">&#9654;</span> Show Program Element Details
+        </summary>
+        <div style="overflow-x:auto; margin-top:0.5rem;">
+          <table class="preview-table" id="preview-table">
+            <thead>
+              <tr>
+                <th>PE Number</th>
+                <th>Service</th>
+                <th>PE Title</th>
+                <th>Total Sub-Elements</th>
+                <th>Matching Sub-Elements</th>
+              </tr>
+            </thead>
+            <tbody id="preview-tbody"></tbody>
+          </table>
+        </div>
+      </details>
     </div>
 
     <!-- 3b. Column picker -->
@@ -244,6 +265,8 @@ let currentKeywords = [];
 let currentExpanded = [];
 let kwSetId = null;
 let pollTimer = null;
+let elapsedTimer = null;
+let buildStartTime = null;
 let explorerData = null;  // Cached response from GET /api/v1/explorer
 
 /* ── Keyword input ──────────────────────────────────────── */
@@ -290,6 +313,23 @@ function validateKeywords(keywords) {
   return null;
 }
 
+/* ── Elapsed timer ──────────────────────────────────────── */
+function startElapsedTimer() {
+  buildStartTime = Date.now();
+  updateElapsedClock();
+  if (elapsedTimer) clearInterval(elapsedTimer);
+  elapsedTimer = setInterval(updateElapsedClock, 1000);
+}
+function stopElapsedTimer() {
+  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+}
+function updateElapsedClock() {
+  const secs = Math.floor((Date.now() - buildStartTime) / 1000);
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  document.getElementById('elapsed-clock').textContent = m + ':' + String(s).padStart(2, '0');
+}
+
 /* ── Search flow ────────────────────────────────────────── */
 function startSearch() {
   clearValidation();
@@ -310,14 +350,15 @@ function startSearch() {
   document.getElementById('results-area').style.display = 'none';
   document.getElementById('no-results').style.display = 'none';
 
-  // Show progress
+  // Show progress + start elapsed timer
   const prog = document.getElementById('build-progress');
   prog.style.display = 'block';
   document.getElementById('progress-text').textContent = 'Starting cache build...';
+  startElapsedTimer();
 
   // Start build
   fetch('/api/v1/explorer/build?keywords=' + encodeURIComponent(keywords.join(',')), {
-    method: 'POST',
+    method: 'POST', cache: 'no-store',
   })
   .then(r => r.json())
   .then(data => {
@@ -355,7 +396,7 @@ function startPolling() {
 }
 
 function pollStatus() {
-  fetch('/api/v1/explorer/status?keywords=' + encodeURIComponent(currentKeywords.join(',')))
+  fetch('/api/v1/explorer/status?keywords=' + encodeURIComponent(currentKeywords.join(',')), {cache: 'no-store'})
   .then(r => r.json())
   .then(data => {
     const textEl = document.getElementById('progress-text');
@@ -364,24 +405,42 @@ function pollStatus() {
       onBuildReady();
     } else if (data.state === 'error') {
       clearInterval(pollTimer); pollTimer = null;
+      stopElapsedTimer();
       document.getElementById('build-progress').style.display = 'none';
       showValidationError('Build failed: ' + (data.progress || 'Unknown error'));
     } else {
-      // Building — show progress
+      // Building — show progress with step description
       let msg = 'Building cache...';
-      if (data.progress === 'collecting_pes') msg = 'Searching budget lines for matching PEs...';
-      else if (data.progress === 'building_pivot') msg = `Found ${data.pe_count || '?'} PEs. Pivoting budget data...`;
-      else if (data.progress === 'mining_pdfs') msg = `Mining PDF sub-elements (${data.budget_line_rows || 0} budget rows so far)...`;
+      let detail = '';
+      if (data.progress === 'collecting_pes') {
+        msg = 'Step 1/3 — Searching budget lines for matching Program Elements';
+        detail = 'Scanning line items, account titles, and descriptions for your keywords.';
+      } else if (data.progress === 'building_pivot') {
+        msg = `Step 2/3 — Found ${data.pe_count || '?'} PEs. Building funding pivot table`;
+        detail = 'Aggregating yearly funding amounts across all matched program elements.';
+      } else if (data.progress === 'mining_pdfs') {
+        msg = `Step 3/3 — Mining R-2 PDF sub-elements`;
+        detail = `Extracting detailed cost breakdowns from budget justification PDFs (${data.budget_line_rows || 0} rows processed). This is the slowest step.`;
+      }
       textEl.textContent = msg;
+      let detailEl = document.getElementById('progress-detail');
+      if (!detailEl) {
+        detailEl = document.createElement('div');
+        detailEl.id = 'progress-detail';
+        detailEl.style.cssText = 'font-size:0.82rem; color:var(--color-text-muted); margin-top:0.3rem;';
+        textEl.parentNode.insertBefore(detailEl, document.getElementById('elapsed-time'));
+      }
+      detailEl.textContent = detail;
     }
   });
 }
 
 function onBuildReady() {
+  stopElapsedTimer();
   document.getElementById('build-progress').style.display = 'none';
 
   // Fetch full data
-  fetch('/api/v1/explorer?keywords=' + encodeURIComponent(currentKeywords.join(',')))
+  fetch('/api/v1/explorer?keywords=' + encodeURIComponent(currentKeywords.join(',')), {cache: 'no-store'})
   .then(r => r.json())
   .then(data => {
     if (data.error) { showValidationError(data.error); return; }

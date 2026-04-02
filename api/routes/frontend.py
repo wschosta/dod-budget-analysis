@@ -18,7 +18,7 @@ import sqlite3
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.responses import RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
@@ -468,9 +468,15 @@ def _query_results(
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
-@router.get("/", response_class=HTMLResponse, include_in_schema=False)
-def index(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
-    """Main search page."""
+@router.get("/", include_in_schema=False)
+def index(request: Request) -> RedirectResponse:
+    """Redirect to Explorer page."""
+    return RedirectResponse(url="/explorer", status_code=302)
+
+
+@router.get("/home", response_class=HTMLResponse, include_in_schema=False)
+def home_page(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTMLResponse:
+    """Original search/home page (archived, still accessible via /home)."""
     filters        = _parse_filters(request)
     results        = _query_results(filters, conn)
     fiscal_years   = _get_fiscal_years(conn)

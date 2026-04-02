@@ -16,13 +16,16 @@ import re
 # File extensions for downloadable budget documents
 DOWNLOADABLE_EXTENSIONS = re.compile(r'\.(pdf|xlsx?|xls|zip|csv)$', re.IGNORECASE)
 
-# Program Element (PE) numbers: 7 digits followed by 1-2 letters
-# Examples: 0602702E, 0801273F
-PE_NUMBER = re.compile(r'\b\d{7}[A-Z]{1,2}\b')
+# Program Element (PE) numbers: 7 digits followed by a service suffix.
+# Standard suffixes: 1-2 letters (e.g., 0602702E, 0801273F).
+# Defense-Wide suffixes: letter-digit-letter (e.g., 0603183D8Z).
+# PE_SUFFIX_PATTERN is the raw suffix regex for embedding in larger patterns.
+PE_SUFFIX_PATTERN = r'(?:[A-Z]{1,2}|[A-Z]\d[A-Z])'
+PE_NUMBER = re.compile(rf'\b\d{{7}}{PE_SUFFIX_PATTERN}\b')
 
 # Anchored variant for validating that an entire string is a PE number
 # (no surrounding text allowed). Used by pipeline/db_validator.py.
-PE_NUMBER_STRICT = re.compile(r'^[0-9]{7}[A-Z]{1,2}$')
+PE_NUMBER_STRICT = re.compile(rf'^[0-9]{{7}}{PE_SUFFIX_PATTERN}$')
 
 # FTS5 special characters that need escaping in full-text search queries
 FTS5_SPECIAL_CHARS = re.compile(r'[\"()*:^+]')

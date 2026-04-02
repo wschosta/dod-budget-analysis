@@ -99,6 +99,15 @@ _DESC_KEYWORDS = [
 
 _CACHE_TABLE = "hypersonics_cache"
 
+# PEs to always include regardless of keyword matching
+_EXTRA_PES = [
+    "0101101F", "0210600A", "0601102F", "0601153N", "0602102F",
+    "0602114N", "0602235N", "0602602F", "0602750N", "0603032F",
+    "0603183D8Z", "0603273F", "0603467E", "0603601F", "0603673N",
+    "0603680D8Z", "0603680F", "0603941D8Z", "0603945D8Z", "0604250D8Z",
+    "0604331D8Z", "0604940D8Z", "0605456A", "0607210D8Z", "0902199D8Z",
+]
+
 
 # ── Cache management ──────────────────────────────────────────────────────────
 
@@ -107,7 +116,7 @@ def rebuild_hypersonics_cache(conn: sqlite3.Connection) -> int:
     logger.info("Rebuilding hypersonics cache table...")
     return build_cache_table(
         conn, _CACHE_TABLE, _HYPERSONICS_KEYWORDS, _DESC_KEYWORDS,
-        fy_start=FY_START, fy_end=FY_END,
+        fy_start=FY_START, fy_end=FY_END, extra_pes=_EXTRA_PES,
     )
 
 
@@ -115,7 +124,7 @@ def _ensure_cache(conn: sqlite3.Connection) -> bool:
     """Ensure hypersonics_cache exists and is populated."""
     return ensure_cache(
         conn, _CACHE_TABLE, _HYPERSONICS_KEYWORDS, _DESC_KEYWORDS,
-        fy_start=FY_START, fy_end=FY_END,
+        fy_start=FY_START, fy_end=FY_END, extra_pes=_EXTRA_PES,
     )
 
 
@@ -280,6 +289,29 @@ def download_hypersonics_xlsx(
         if any(row.get(f"fy{yr}") is not None for _, row in selected_rows)
     ]
 
+    # Build per-FY description map from pe_descriptions
+    selected_pes = list({row.get("pe_number") for _, row in selected_rows if row.get("pe_number")})
+    desc_by_pe_fy: dict[tuple[str, str], str] = {}
+    if selected_pes:
+        pe_placeholders = ", ".join("?" for _ in selected_pes)
+        desc_rows = conn.execute(
+            f"SELECT pe_number, fiscal_year, section_header, description_text "
+            f"FROM pe_descriptions "
+            f"WHERE pe_number IN ({pe_placeholders}) "
+            f"  AND section_header IS NOT NULL "
+            f"ORDER BY pe_number, fiscal_year, "
+            f"  CASE "
+            f"    WHEN section_header LIKE '%Mission Description%' THEN 1 "
+            f"    WHEN section_header LIKE '%Accomplishments%' THEN 2 "
+            f"    WHEN section_header LIKE '%Acquisition Strategy%' THEN 3 "
+            f"    ELSE 4 END",
+            selected_pes,
+        ).fetchall()
+        for dr in desc_rows:
+            key = (dr[0], dr[1])  # (pe_number, fiscal_year)
+            if key not in desc_by_pe_fy and dr[3] and len(dr[3].strip()) >= 80:
+                desc_by_pe_fy[key] = dr[3].strip()
+
     # Build workbook
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -292,20 +324,27 @@ def download_hypersonics_xlsx(
     normal_font = Font(size=10)
     total_font = Font(bold=True, size=11)
     money_fmt = '#,##0'
+    desc_font = Font(size=9, color="444444")
+    desc_font_italic = Font(size=9, color="999999", italic=True)
 
-    # Headers
+    # Headers: fixed cols + FY funding + FY descriptions
     headers = [
         "PE Number", "Service/Org", "Exhibit", "Line Item / Sub-Program",
         "Budget Activity", "Color of Money", "Description", "In Totals",
     ]
     for yr in active_years:
         headers.append(f"FY{yr} ($K)")
+    for yr in active_years:
+        headers.append(f"Desc FY{yr}")
 
     for col_idx, h in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col_idx, value=h)
         cell.font = header_font_white
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="center", wrap_text=True)
+
+    fixed_col_count = 8  # PE through In Totals
+    fy_funding_count = len(active_years)
 
     # Data rows
     total_sums: dict[int, float] = {}  # FY year → sum
@@ -328,9 +367,9 @@ def download_hypersonics_xlsx(
             cell = ws.cell(row=row_num, column=i, value=v)
             cell.font = font
 
-        # FY columns
+        # FY funding columns
         for fy_col_idx, yr in enumerate(active_years):
-            col = len(vals) + fy_col_idx + 1
+            col = fixed_col_count + fy_col_idx + 1
             amount = row.get(f"fy{yr}")
             cell = ws.cell(row=row_num, column=col, value=amount)
             cell.font = font
@@ -339,14 +378,25 @@ def download_hypersonics_xlsx(
                 if is_total:
                     total_sums[yr] = total_sums.get(yr, 0) + amount
 
+        # FY description columns
+        pe = row.get("pe_number", "")
+        d_font = desc_font if is_total else desc_font_italic
+        for desc_col_idx, yr in enumerate(active_years):
+            col = fixed_col_count + fy_funding_count + desc_col_idx + 1
+            desc_text = desc_by_pe_fy.get((pe, str(yr)), "")
+            if desc_text:
+                cell = ws.cell(row=row_num, column=col, value=desc_text)
+                cell.font = d_font
+                cell.alignment = Alignment(wrap_text=True, vertical="top")
+
         row_num += 1
 
     # Totals row
     if total_sums:
         ws.cell(row=row_num, column=1, value="TOTALS").font = total_font
-        ws.cell(row=row_num, column=8, value="Sum").font = total_font
+        ws.cell(row=row_num, column=fixed_col_count, value="Sum").font = total_font
         for fy_col_idx, yr in enumerate(active_years):
-            col = 8 + fy_col_idx + 1
+            col = fixed_col_count + fy_col_idx + 1
             val = total_sums.get(yr)
             if val is not None:
                 cell = ws.cell(row=row_num, column=col, value=val)
@@ -354,7 +404,11 @@ def download_hypersonics_xlsx(
                 cell.number_format = money_fmt
 
     # Column widths
-    col_widths = [14, 14, 8, 50, 20, 12, 60, 10] + [14] * len(active_years)
+    col_widths = (
+        [14, 14, 8, 50, 20, 12, 60, 10]
+        + [14] * fy_funding_count
+        + [40] * fy_funding_count
+    )
     for i, w in enumerate(col_widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
 

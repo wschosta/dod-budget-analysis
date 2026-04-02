@@ -42,6 +42,8 @@ class TestPeNumber:
         ("0801273F", "0801273F"),
         ("PE 0603114N funding", "0603114N"),
         ("1234567AB end", "1234567AB"),
+        ("0603183D8Z", "0603183D8Z"),
+        ("PE 0604331D8Z funding", "0604331D8Z"),
     ])
     def test_matches_valid(self, text, expected):
         m = PE_NUMBER.search(text)

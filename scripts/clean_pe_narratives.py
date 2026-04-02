@@ -21,6 +21,8 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from utils.patterns import PE_SUFFIX_PATTERN
+
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger(__name__)
 
@@ -32,7 +34,7 @@ DB_PATH = Path(__file__).resolve().parent.parent / "dod_budget_work.sqlite"
 # Multi-line block: from "PE XXXXXXX:" header through the
 # "B. Accomplishments/Planned Programs ($ in Millions) FY ..." line
 _ARTIFACT_BLOCK = re.compile(
-    r"PE\s+\d{7}[A-Z]?\s*:.*?"  # PE XXXXXXX: Program Name
+    rf"PE\s+\d{{7}}{PE_SUFFIX_PATTERN}?\s*:.*?"  # PE XXXXXXX: Program Name
     r"B\.\s*Accomplishments/Planned\s+Programs\s*"
     r"\(\$\s*in\s+Millions\)\s*"
     r"(?:FY\s*\d{4}\s*)+",  # FY columns header
@@ -63,7 +65,7 @@ _APPROP_HEADER = re.compile(
 
 # Page number markers like "Volume 3 - 355" or "Air Force Page 5 of 70"
 _PAGE_MARKERS = re.compile(
-    r"(?:Volume\s+\d+\s*-\s*\d+|Air Force Page \d+ of \d+|R-1 Line #\d+)",
+    r"(?:Volume\s+\d+\s*-\s*\d+|(?:Air Force|Navy|Army|Defense[- ]Wide|MDA)\s+Page \d+ of \d+|R-1 Line #\d+)",
     re.IGNORECASE,
 )
 

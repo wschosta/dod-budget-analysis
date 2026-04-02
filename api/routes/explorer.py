@@ -305,8 +305,13 @@ def start_build(
 )
 def build_status(
     keywords: str = Query(..., description="Comma-separated keywords"),
+    conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
-    """Return current build state for a keyword set."""
+    """Return current build state for a keyword set.
+
+    Checks in-memory progress first; falls back to the database so that
+    completed builds survive process restarts / uvicorn reloads.
+    """
     try:
         keyword_list = _parse_keywords(keywords)
     except ValueError as e:
@@ -317,10 +322,28 @@ def build_status(
     with _build_lock:
         status = _build_progress.get(kw_id)
 
-    if status is None:
-        return {"state": "not_started", "keyword_set_id": kw_id}
+    # If in-memory says "ready" or "error", trust it
+    if status and status.get("state") in ("ready", "error"):
+        return {"keyword_set_id": kw_id, **status}
 
-    return {"keyword_set_id": kw_id, **status}
+    # Check DB — the build may have finished (in this or a previous process)
+    _ensure_meta_table(conn)
+    meta = conn.execute(
+        "SELECT row_count, built_at FROM explorer_cache_meta WHERE keyword_set_id = ?",
+        [kw_id],
+    ).fetchone()
+    if meta is not None:
+        # Refresh in-memory state so subsequent polls are fast
+        ready = {"state": "ready", "progress": "done", "row_count": meta[0]}
+        with _build_lock:
+            _build_progress[kw_id] = ready
+        return {"keyword_set_id": kw_id, **ready}
+
+    # In-memory says "building" but DB has no result yet — still in progress
+    if status and status.get("state") == "building":
+        return {"keyword_set_id": kw_id, **status}
+
+    return {"state": "not_started", "keyword_set_id": kw_id}
 
 
 # ── GET /api/v1/explorer ─────────────────────────────────────────────────────
@@ -459,35 +482,56 @@ def download_explorer_xlsx(
     ws = wb.active
     ws.title = "Explorer"
 
-    # Styles
+    # Styles (matching hypersonics formatting)
     header_fill = PatternFill(start_color="2C3E50", end_color="2C3E50", fill_type="solid")
-    header_font = Font(bold=True, size=11, color="FFFFFF")
+    header_font_white = Font(bold=True, size=11, color="FFFFFF")
     normal_font = Font(size=10)
+    italic_font = Font(italic=True, color="888888", size=10)
+    total_font = Font(bold=True, size=11)
     money_fmt = '#,##0'
 
     # Headers
     for col_idx, col_name in enumerate(columns, 1):
         cell = ws.cell(row=1, column=col_idx, value=col_name)
-        cell.font = header_font
+        cell.font = header_font_white
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="center", wrap_text=True)
 
     # Data rows
+    # Track totals for FY columns
+    fy_totals: dict[str, float] = {}
     for row_num, row in enumerate(items, 2):
+        has_match = bool(row.get("matched_keywords_row") or row.get("matched_keywords_desc"))
+        font = normal_font if has_match else italic_font
         for col_idx, col_name in enumerate(columns, 1):
             value = _extract_column_value(row, col_name, year_range)
             cell = ws.cell(row=row_num, column=col_idx, value=value)
-            cell.font = normal_font
-            # Apply number format for FY amount columns
+            cell.font = font
             if col_name.endswith("($K)") and isinstance(value, (int, float)):
                 cell.number_format = money_fmt
+                if has_match:
+                    fy_totals[col_name] = fy_totals.get(col_name, 0) + value
 
-    # Column widths (auto-estimate)
+    # Totals row
+    if fy_totals:
+        totals_row = len(items) + 2
+        ws.cell(row=totals_row, column=1, value="TOTALS").font = total_font
+        for col_idx, col_name in enumerate(columns, 1):
+            if col_name in fy_totals:
+                cell = ws.cell(row=totals_row, column=col_idx, value=fy_totals[col_name])
+                cell.font = total_font
+                cell.number_format = money_fmt
+
+    # Column widths
+    _WIDTH_MAP = {
+        "Description": 60, "Line Item Title": 50,
+        "Budget Activity": 20, "Budget Activity (Normalized)": 20,
+        "PE Number": 14, "Service/Org": 14, "Exhibit Type": 8,
+        "Color of Money": 12, "Appropriation": 30,
+    }
     for col_idx, col_name in enumerate(columns, 1):
-        if col_name in ("Description",):
-            width = 60
-        elif col_name in ("Line Item Title",):
-            width = 50
+        if col_name in _WIDTH_MAP:
+            width = _WIDTH_MAP[col_name]
         elif col_name.endswith("($K)"):
             width = 14
         elif col_name.endswith("Source"):
@@ -496,8 +540,9 @@ def download_explorer_xlsx(
             width = max(14, len(col_name) + 2)
         ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = width
 
-    # Freeze header row
-    ws.freeze_panes = "A2"
+    # Freeze header row + first 4 columns (PE, Service, Exhibit, Title)
+    freeze_col = min(5, len(columns) + 1)
+    ws.freeze_panes = f"{openpyxl.utils.get_column_letter(freeze_col)}2"
     ws.auto_filter.ref = ws.dimensions
 
     buf = io.BytesIO()

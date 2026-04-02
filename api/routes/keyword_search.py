@@ -16,7 +16,9 @@ import re
 import sqlite3
 from typing import Any
 
+from scripts.clean_pe_narratives import clean_narrative
 from utils.database import get_amount_columns
+from utils.patterns import PE_SUFFIX_PATTERN
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +143,18 @@ def collect_matching_pe_numbers_split(
 
     bl_matched: set[str] = set()
 
+    # (a0) Direct PE number match — detect keywords that look like PE numbers
+    pe_pattern = re.compile(rf"^\d{{7}}{PE_SUFFIX_PATTERN}$", re.IGNORECASE)
+    pe_keywords = [kw for kw in keywords if pe_pattern.match(kw.strip())]
+    if pe_keywords:
+        pe_placeholders = ", ".join("?" for _ in pe_keywords)
+        pe_upper = [pk.strip().upper() for pk in pe_keywords]
+        rows = conn.execute(
+            f"SELECT DISTINCT pe_number FROM budget_lines WHERE pe_number IN ({pe_placeholders})",
+            pe_upper,
+        ).fetchall()
+        bl_matched.update(r[0] for r in rows if r[0])
+
     # (a) Budget-lines keyword match
     kw_clauses: list[str] = []
     kw_params: list[Any] = []
@@ -191,7 +205,13 @@ def get_description_map(
     for pe in pe_numbers:
         rows = conn.execute(
             "SELECT description_text FROM pe_descriptions "
-            "WHERE pe_number = ? LIMIT 5",
+            "WHERE pe_number = ? AND section_header IS NOT NULL "
+            "ORDER BY CASE "
+            "  WHEN section_header LIKE '%Mission Description%' THEN 1 "
+            "  WHEN section_header LIKE '%Accomplishments%' THEN 2 "
+            "  WHEN section_header LIKE '%Acquisition Strategy%' THEN 3 "
+            "  ELSE 4 END "
+            "LIMIT 3",
             [pe],
         ).fetchall()
         text = " ".join(r[0] for r in rows if r[0])
@@ -233,6 +253,26 @@ def get_desc_keyword_map(
     return result
 
 
+def _is_garbage_description(text: str | None) -> bool:
+    """Detect R-1 page header text or other artifacts masquerading as descriptions."""
+    if not text:
+        return True
+    stripped = text.strip()
+    if len(stripped) < 80:
+        return True
+    garbage_markers = [
+        "Exhibit R-1",
+        "President's Budget",
+        "Total Obligational Authority",
+        "R D T & E Program Exhibit",
+        "RDT&E PROGRAM EXHIBIT",
+    ]
+    for marker in garbage_markers:
+        if marker in stripped[:300]:
+            return True
+    return False
+
+
 # ── R-2 PDF parsing ──────────────────────────────────────────────────────────
 
 def parse_r2_cost_block(
@@ -251,7 +291,7 @@ def parse_r2_cost_block(
     pe_number = None
     pe_title = None
     for line in lines[:10]:
-        m = re.search(r"PE\s+(\d{7}[A-Z])\s*/\s*(.+?)(?:\s+\d|$)", line)
+        m = re.search(rf"PE\s+(\d{{7}}{PE_SUFFIX_PATTERN})\s*[/:]\s*(.+?)(?:\s+\d|$)", line)
         if m:
             pe_number = m.group(1)
             pe_title = m.group(2).strip()
@@ -423,7 +463,8 @@ def parse_r2_cost_block(
                     or desc_title.lower().startswith(proj_title[:20].lower())):
                 parts.append(f"[{desc_title}] {desc_text}")
                 break
-        item["description_text"] = "\n\n".join(parts) if parts else ""
+        raw_desc = "\n\n".join(parts) if parts else ""
+        item["description_text"] = clean_narrative(raw_desc) if raw_desc else ""
 
     return results
 
@@ -674,6 +715,7 @@ def build_cache_table(
     fy_end: int = FY_END,
     search_cols: list[str] | None = None,
     progress_callback: Any | None = None,
+    extra_pes: list[str] | None = None,
 ) -> int:
     """Full cache rebuild: keyword match → pivot → PDF mine → insert.
 
@@ -692,6 +734,34 @@ def build_cache_table(
     (bl_pes, _desc_pes), matched_pes = collect_matching_pe_numbers_split(
         conn, keywords, desc_keywords, search_cols,
     )
+
+    # 1b. Include explicitly listed PEs
+    if extra_pes:
+        extra_set = set(extra_pes)
+        # Check budget_lines first
+        ep_placeholders = ", ".join("?" for _ in extra_set)
+        existing = conn.execute(
+            f"SELECT DISTINCT pe_number FROM budget_lines WHERE pe_number IN ({ep_placeholders})",
+            list(extra_set),
+        ).fetchall()
+        found_extra = {r[0] for r in existing}
+        # Also check pe_index for PDF-only PEs (e.g., D8Z Defense-Wide programs)
+        remaining = extra_set - found_extra
+        if remaining:
+            try:
+                rp = ", ".join("?" for _ in remaining)
+                pi_rows = conn.execute(
+                    f"SELECT DISTINCT pe_number FROM pe_index WHERE pe_number IN ({rp})",
+                    list(remaining),
+                ).fetchall()
+                found_extra |= {r[0] for r in pi_rows}
+            except sqlite3.OperationalError:
+                pass
+        if found_extra:
+            bl_pes |= found_extra
+            matched_pes |= found_extra
+            logger.info("Extra PEs: %d requested, %d found", len(extra_set), len(found_extra))
+
     if not matched_pes:
         conn.execute(f"DROP TABLE IF EXISTS {cache_table}")
         conn.execute(cache_ddl(cache_table, fy_start, fy_end))
@@ -704,7 +774,6 @@ def build_cache_table(
 
     # 2. Get description text per PE
     desc_map = get_description_map(conn, matched_pes)
-    desc_kw_map = get_desc_keyword_map(conn, matched_pes, desc_keywords)
 
     # 3. Get amount columns
     all_amount_cols = set(get_amount_columns(conn))
@@ -777,7 +846,6 @@ def build_cache_table(
         d = dict(r)
         text_fields = [d.get("line_item_title"), d.get("account_title"), d.get("budget_activity_title")]
         row_kws = find_matched_keywords(text_fields, keywords)
-        desc_kws = desc_kw_map.get(d["pe_number"], [])
 
         vals = [
             d["pe_number"],
@@ -791,8 +859,8 @@ def build_cache_table(
             d.get("account_title"),
             color_of_money(d.get("appropriation_title")),
             json.dumps(row_kws) if row_kws else "[]",
-            json.dumps(desc_kws) if desc_kws else "[]",
-            desc_map.get(d["pe_number"]) or None,
+            "[]",  # matched_keywords_desc — set per-row only for R-2 sub-elements
+            None if _is_garbage_description(desc_map.get(d["pe_number"])) else desc_map.get(d["pe_number"]),
         ]
         for yr in year_range:
             vals.append(d.get(f"fy{yr}"))
@@ -800,6 +868,38 @@ def build_cache_table(
 
         conn.execute(insert_sql, vals)
         count += 1
+
+    # 6a. Insert stub R-1 rows for extra PEs that exist only in PDFs (no budget_lines data).
+    # This ensures they appear in the cache even if the R-2 mining step doesn't find them.
+    if extra_pes:
+        cached_pes = {r[0] for r in conn.execute(
+            f"SELECT DISTINCT pe_number FROM {cache_table}"
+        ).fetchall()}
+        pdf_only_pes = (set(extra_pes) & matched_pes) - cached_pes
+        if pdf_only_pes:
+            # Pull metadata from pe_index
+            pp = ", ".join("?" for _ in pdf_only_pes)
+            pi_meta = conn.execute(
+                f"SELECT pe_number, display_title, organization_name FROM pe_index WHERE pe_number IN ({pp})",
+                list(pdf_only_pes),
+            ).fetchall()
+            pi_map = {r[0]: (r[1], r[2]) for r in pi_meta}
+            stub_desc_map = get_description_map(conn, pdf_only_pes)
+            for pe in sorted(pdf_only_pes):
+                title, org = pi_map.get(pe, (None, None))
+                desc = stub_desc_map.get(pe)
+                if _is_garbage_description(desc):
+                    desc = None
+                vals = [
+                    pe, org, "r1", title or pe,
+                    None, None, None, None, None, "RDT&E",
+                    "[]", "[]", desc,
+                ]
+                for yr in year_range:
+                    vals.extend([None, None])
+                conn.execute(insert_sql, vals)
+                count += 1
+            logger.info("Cache: inserted %d stub rows for PDF-only extra PEs", len(pdf_only_pes))
 
     _progress("mining_pdfs", budget_line_rows=count)
 
@@ -830,12 +930,10 @@ def build_cache_table(
         """
         disc_rows = conn.execute(disc_sql, list(discovered_pes)).fetchall()
         disc_desc_map = get_description_map(conn, discovered_pes)
-        disc_desc_kw_map = get_desc_keyword_map(conn, discovered_pes, desc_keywords)
         for r in disc_rows:
             d = dict(r)
             text_fields = [d.get("line_item_title"), d.get("account_title"), d.get("budget_activity_title")]
             row_kws = find_matched_keywords(text_fields, keywords)
-            dkws = disc_desc_kw_map.get(d["pe_number"], [])
             vals = [
                 d["pe_number"], d.get("organization_name"), d.get("exhibit_type"),
                 d.get("line_item_title"), d.get("budget_activity"), d.get("budget_activity_title"),
@@ -843,8 +941,8 @@ def build_cache_table(
                 d.get("appropriation_title"), d.get("account_title"),
                 color_of_money(d.get("appropriation_title")),
                 json.dumps(row_kws) if row_kws else "[]",
-                json.dumps(dkws) if dkws else "[]",
-                disc_desc_map.get(d["pe_number"]) or None,
+                "[]",  # matched_keywords_desc — set per-row only for R-2 sub-elements
+                None if _is_garbage_description(disc_desc_map.get(d["pe_number"])) else disc_desc_map.get(d["pe_number"]),
             ]
             for yr in year_range:
                 vals.append(d.get(f"fy{yr}"))
@@ -862,10 +960,16 @@ def build_cache_table(
             title = f"{item['project_code']}: {title}"
 
         row_kws = item.get("_matched_r2_keywords") or find_matched_keywords([title], keywords)
-        desc_kws = desc_kw_map.get(pe, [])
-
         r2_desc = item.get("description_text", "")
-        description = r2_desc if r2_desc else (desc_map.get(pe) or None)
+        if _is_garbage_description(r2_desc):
+            r2_desc = ""
+        fallback = desc_map.get(pe)
+        if _is_garbage_description(fallback):
+            fallback = None
+        description = r2_desc if r2_desc else fallback
+        # Check the sub-element's own description for keyword matches
+        desc_kws = find_matched_keywords([r2_desc, title], desc_keywords) if r2_desc else []
+        desc_kws = [kw for kw in desc_kws if kw not in row_kws]
 
         vals = [
             pe,
@@ -949,6 +1053,7 @@ def ensure_cache(
     fy_start: int = FY_START,
     fy_end: int = FY_END,
     progress_callback: Any | None = None,
+    extra_pes: list[str] | None = None,
 ) -> bool:
     """Ensure cache table exists and is populated. Returns True if data available."""
     try:
@@ -962,4 +1067,5 @@ def ensure_cache(
         conn, cache_table, keywords, desc_keywords,
         fy_start=fy_start, fy_end=fy_end,
         progress_callback=progress_callback,
+        extra_pes=extra_pes,
     ) > 0
