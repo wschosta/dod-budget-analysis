@@ -33,7 +33,7 @@ import os
 
 from utils import safe_float
 from utils.config import SUMMARY_EXHIBIT_KEYS, _SHORT_SUMMARY_KEYS
-from utils.database import init_pragmas
+from utils.database import init_pragmas, APPROP_TO_BUDGET_TYPE
 from utils.normalization import (
     ORG_NORMALIZE as ORG_MAP,
     parse_appropriation as _parse_appropriation_util,
@@ -895,18 +895,11 @@ _EXHIBIT_BUDGET_TYPE: dict[str, str] = {
     "c1": "Construction",
 }
 
-# Issue #52: Fallback mapping from appropriation_code to budget_type for detail exhibits
-_APPROP_TO_BUDGET_TYPE: dict[str, str] = {
-    "RDTE": "RDT&E",
-    "OPROC": "Procurement", "PROC": "Procurement", "APAF": "Procurement",
-    "MPAF": "Procurement", "WPN": "Procurement", "SCN": "Procurement",
-    "NGRE": "Procurement", "DPA": "Procurement", "CHEM": "Procurement",
-    "AMMO": "Procurement",
-    "O&M": "O&M", "ER": "O&M", "DRUG": "O&M", "DHP": "O&M",
-    "MILCON": "Construction", "FHSG": "Construction",
-    "MILPERS": "MilPers",
-    "RFUND": "Revolving",
-}
+def _resolve_budget_type(exhibit_type: str, approp_code: str | None) -> str | None:
+    """Derive budget_type from exhibit type, falling back to appropriation code."""
+    return _EXHIBIT_BUDGET_TYPE.get(exhibit_type) or (
+        APPROP_TO_BUDGET_TYPE.get(approp_code) if approp_code else None
+    )
 
 # 1.B3-c: Amount type describes what kind of budget authority the amounts represent.
 # C-1 (MilCon) uses Congressional authorization; other exhibits use enacted BA or
@@ -1269,10 +1262,6 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
         # values by 1000 before inserting (Step 1.B3-c)
         unit_multiplier = 1000.0 if amount_unit == "millions" else 1.0
 
-        # Derive budget_type from exhibit type (Step 1.B3-d)
-        # Falls back to appropriation_code mapping for detail exhibits (r2, p5, etc.)
-        budget_type = _EXHIBIT_BUDGET_TYPE.get(exhibit_type)
-
         # Derive amount_type from exhibit type (Step 1.B3-c)
         amount_type = _EXHIBIT_AMOUNT_TYPE.get(exhibit_type, "budget_authority")
 
@@ -1334,11 +1323,7 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
             # Split appropriation code and title from account_title (Step 1.B4-c implementation)
             approp_code, approp_title = _parse_appropriation(acct_title_val)
 
-            # Issue #52: Derive budget_type from appropriation_code when exhibit type
-            # doesn't provide one (detail exhibits like r2, p5, amendment, ogsi)
-            row_budget_type = budget_type
-            if not row_budget_type and approp_code:
-                row_budget_type = _APPROP_TO_BUDGET_TYPE.get(approp_code)
+            row_budget_type = _resolve_budget_type(exhibit_type, approp_code)
 
             def _amt(field):
                 """Read a float amount and apply the unit multiplier (1.B3-c)."""
@@ -1513,7 +1498,6 @@ def _extract_excel_rows(args: tuple) -> dict:
         currency_year = _detect_currency_year(sheet_name, file_path.name)
         amount_unit = _detect_amount_unit(first_rows, header_idx)
         unit_multiplier = 1000.0 if amount_unit == "millions" else 1.0
-        budget_type = _EXHIBIT_BUDGET_TYPE.get(exhibit_type)
         amount_type = _EXHIBIT_AMOUNT_TYPE.get(exhibit_type, "budget_authority")
 
         _fy_cols_in_map = sorted([
@@ -1568,11 +1552,7 @@ def _extract_excel_rows(args: tuple) -> dict:
             additional_pes = all_pes[1:]
             approp_code, approp_title = _parse_appropriation(acct_title_val)
 
-            # Issue #52: Derive budget_type from appropriation_code when exhibit
-            # type doesn't provide one (detail exhibits)
-            row_budget_type = budget_type
-            if not row_budget_type and approp_code:
-                row_budget_type = _APPROP_TO_BUDGET_TYPE.get(approp_code)
+            row_budget_type = _resolve_budget_type(exhibit_type, approp_code)
 
             fy_dict: dict[str, float | None] = {}
             for fc in _fy_cols_in_map:
@@ -3420,8 +3400,6 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     # but NULL budget_type.  Backfill using the canonical mapping so that
     # downstream GROUP BY budget_type queries produce clean results without
     # needing runtime CASE expressions.
-    from scripts.fix_budget_types import APPROP_TO_BUDGET_TYPE
-
     _t0 = time.time()
     _bt_before = conn.execute(
         "SELECT COUNT(*) FROM budget_lines WHERE budget_type IS NULL"

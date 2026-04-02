@@ -15,28 +15,7 @@ import sys
 import time
 
 
-# Same mapping as utils/database.py BUDGET_TYPE_CASE_EXPR
-APPROP_TO_BUDGET_TYPE = {
-    "RDTE": "RDT&E",
-    "OPROC": "Procurement",
-    "PROC": "Procurement",
-    "APAF": "Procurement",
-    "MPAF": "Procurement",
-    "WPN": "Procurement",
-    "SCN": "Procurement",
-    "NGRE": "Procurement",
-    "DPA": "Procurement",
-    "CHEM": "Procurement",
-    "O&M": "O&M",
-    "ER": "O&M",
-    "DRUG": "O&M",
-    "MILCON": "Construction",
-    "FHSG": "Construction",
-    "MILPERS": "MilPers",
-    "RFUND": "Revolving",
-    "DHP": "O&M",
-    "AMMO": "Procurement",
-}
+from utils.database import APPROP_TO_BUDGET_TYPE
 
 # Composite indexes to ensure exist (may already be created by builder.py)
 INDEXES = [

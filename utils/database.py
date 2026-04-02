@@ -329,24 +329,32 @@ def vacuum_database(db_path: Path) -> None:
     conn.close()
 
 
-# ── Shared SQL expressions ───────────────────────────────────────────────────
+# ── Shared budget-type mapping ───────────────────────────────────────────────
 
-# CASE expression to derive budget_type from appropriation_code when budget_type
-# is NULL (common for detail exhibit rows like r2, p5, amendment, ogsi).
-# Used by dashboard.py and aggregations.py to ensure consistent "colors of money"
-# grouping across the application.
-BUDGET_TYPE_CASE_EXPR = """COALESCE(budget_type, CASE appropriation_code
-    WHEN 'RDTE' THEN 'RDT&E'
-    WHEN 'OPROC' THEN 'Procurement' WHEN 'PROC' THEN 'Procurement'
-    WHEN 'APAF' THEN 'Procurement' WHEN 'MPAF' THEN 'Procurement'
-    WHEN 'WPN' THEN 'Procurement' WHEN 'SCN' THEN 'Procurement'
-    WHEN 'NGRE' THEN 'Procurement' WHEN 'DPA' THEN 'Procurement'
-    WHEN 'CHEM' THEN 'Procurement'
-    WHEN 'O&M' THEN 'O&M' WHEN 'ER' THEN 'O&M' WHEN 'DRUG' THEN 'O&M'
-    WHEN 'MILCON' THEN 'Construction' WHEN 'FHSG' THEN 'Construction'
-    WHEN 'MILPERS' THEN 'MilPers'
-    WHEN 'RFUND' THEN 'Revolving'
-    ELSE appropriation_code END, 'Unknown')"""
+# Canonical mapping from appropriation_code to budget_type.  Used by:
+# - pipeline/builder.py  (ingestion-time derivation)
+# - scripts/fix_budget_types.py  (migration backfill)
+# - BUDGET_TYPE_CASE_EXPR below  (query-time fallback)
+APPROP_TO_BUDGET_TYPE: dict[str, str] = {
+    "RDTE": "RDT&E",
+    "OPROC": "Procurement", "PROC": "Procurement", "APAF": "Procurement",
+    "MPAF": "Procurement", "WPN": "Procurement", "SCN": "Procurement",
+    "NGRE": "Procurement", "DPA": "Procurement", "CHEM": "Procurement",
+    "AMMO": "Procurement",
+    "O&M": "O&M", "ER": "O&M", "DRUG": "O&M", "DHP": "O&M",
+    "MILCON": "Construction", "FHSG": "Construction",
+    "MILPERS": "MilPers",
+    "RFUND": "Revolving",
+}
+
+# SQL CASE expression derived from APPROP_TO_BUDGET_TYPE for use in SELECT queries.
+_when_clauses = " ".join(
+    f"WHEN '{code}' THEN '{bt}'" for code, bt in APPROP_TO_BUDGET_TYPE.items()
+)
+BUDGET_TYPE_CASE_EXPR = (
+    f"COALESCE(budget_type, CASE appropriation_code {_when_clauses}"
+    " ELSE appropriation_code END, 'Unknown')"
+)
 
 
 # ── OPT-DBUTIL-001: Dynamic schema introspection ──────────────────────────────
