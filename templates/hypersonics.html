@@ -320,7 +320,7 @@
       <button type="submit" class="btn btn-primary btn-sm">Apply</button>
       <a href="/hypersonics" class="btn btn-secondary btn-sm">Reset</a>
       <a href="#" class="btn btn-secondary btn-sm" onclick="downloadFilteredCSV(); return false;">&#8681; Excel</a>
-      {# TODO [TODO-L5]: Add Rebuild Cache button here calling POST /api/v1/hypersonics/rebuild #}
+      <button class="btn btn-secondary btn-sm" id="rebuild-cache-btn" onclick="rebuildCache()">&#x21bb; Rebuild Cache</button>
     </div>
   </form>
 
@@ -1371,5 +1371,22 @@ function deletePreset() {
 }
 
 _refreshPresetSelect();
+
+async function rebuildCache() {
+  const btn = document.getElementById('rebuild-cache-btn');
+  btn.disabled = true;
+  btn.textContent = 'Rebuilding...';
+  try {
+    const resp = await fetch('/api/v1/hypersonics/rebuild', { method: 'POST' });
+    if (resp.ok) {
+      window.location.reload();
+    } else {
+      alert('Rebuild failed: ' + resp.statusText);
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '\u21bb Rebuild Cache';
+  }
+}
 </script>
 {% endblock %}
