@@ -33,11 +33,11 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
 9. **[CODE COMPLETE — needs DB verification]** **Detail tab is very slow** to load when clicking a search result
    _Fix: Composite indexes added in `pipeline/builder.py` and `repair_database.py:step_5`. Table reduced from 644K to 47K rows._
 10. **[OPEN — partial]** **Detail tab data errors (CPS example):**
-    - Shows FY 1998 — incorrect, program didn't exist then
-    - Appropriation shows "- -" (meaningless)
-    - Source file path says "FY1998\PB\Defense_wide..." — wrong
-    - Related Fiscal Years shows "FYFY 1998" — duplicated prefix typo
-    _Note: FY mismatch detection exists (`pipeline/builder.py:1213-1222`) but only logs warning, doesn't auto-correct._
+    - Shows FY 1998 — incorrect, program didn't exist then ← **FY attribution (Group D, deferred)**
+    - ~~Appropriation shows "- -" (meaningless)~~ ← **fixed by appropriation backfill (Round 5)**
+    - Source file path says "FY1998\PB\Defense_wide..." — wrong ← **FY attribution (Group D, deferred)**
+    - ~~Related Fiscal Years shows "FYFY 1998" — duplicated prefix typo~~ ← **fixed by `format_fy` filter**
+    _Remaining: FY mismatch detection exists (`pipeline/builder.py:1213-1222`) but only logs warning, doesn't auto-correct. See Group D in ROADMAP._
 
 ### Dashboard (/dashboard)
 
@@ -77,8 +77,8 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
     _Note: Same root cause as #10 — FY mismatch detection exists but no auto-correction._
 26. **[CODE COMPLETE — needs DB verification]** **Tags dropdown is mispositioned** — overlaps onto the program cards
     _Fix: CSS z-index fix in `static/css/main.css:1698`. Issue #26 explicitly referenced in comment._
-27. **[OPEN — partial]** **Tag counts look inflated** — rdte: 1539/1579, communications: 1502, aviation: 1438 (nearly every program tagged with nearly everything)
-    _Note: Confidence scoring exists in enricher but API endpoint doesn't filter by confidence or coverage threshold._
+27. **[RESOLVED — 2026-04-02]** **Tag counts look inflated** — rdte: 1539/1579, communications: 1502, aviation: 1438 (nearly every program tagged with nearly everything)
+    _Fix: API endpoint `GET /api/v1/pe/tags/all` now filters by `min_confidence` (default 0.85) and `max_coverage` (default 0.5). Pipeline-level over-tagging still exists in the raw data but is filtered at query time._
 
 ### Footer (all pages)
 
@@ -656,10 +656,10 @@ are rows without enough context to infer an appropriation code.
 
 | Status | Count | Issues |
 |--------|-------|--------|
-| **RESOLVED** | 37 | #5, #6/14, #7/17/22, #29-37, #39-48, #50-52, #54, #55, #57-61, #63 |
+| **RESOLVED** | 38 | #5, #6/14, #7/17/22, #27, #29-37, #39-48, #50-52, #54, #55, #57-61, #63 |
 | **CODE COMPLETE — needs DB verification** | 14 | #1, #2, #3, #4, #9, #11, #12, #13, #15, #18, #20, #21, #26, #38 |
 | **STRUCTURAL — documented in PRD §9** | 7 | #8, #16, #19, #23, #24, #28, #53 (data coverage limitations) |
-| **OPEN — partial** | 2 | #10, #25 (FY mismatch — detection only, auto-correction deferred) |
+| **OPEN — partial** | 2 | #10, #25 (FY mismatch — remaining sub-items are Group D, deferred) |
 | **OPEN** | 1 | #56 (FY gaps in PE funding — needs DB investigation) |
 | **DOCUMENTED** | 1 | #62 (tag coverage assessment) |
 | **GRADUAL** | 1 | #49 (inline styles — ongoing refactor) |
