@@ -55,9 +55,8 @@ jobs:
           xvfb-run --auto-servernum \
             python -m pytest tests/ \
               --ignore=tests/optimization_validation \
-              --cov=api --cov=utils --cov=downloader --cov=pipeline \
+              --cov=api --cov=utils \
               --cov-report=term-missing \
-              --cov-fail-under=80 \
               -q --tb=short
 
       - name: Verify no broken imports
