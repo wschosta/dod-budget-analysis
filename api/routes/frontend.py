@@ -19,7 +19,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from starlette.responses import RedirectResponse, Response
+from starlette.responses import Response
 from fastapi.templating import Jinja2Templates
 
 import json as _json
@@ -61,14 +61,14 @@ def register_error_handlers(app: Any) -> None:
     async def not_found_handler(request: Request, exc: Exception) -> HTMLResponse:
         tmpl = _tmpl()
         return tmpl.TemplateResponse(
-            "errors/404.html", {"request": request}, status_code=404
+            request, "errors/404.html", status_code=404
         )
 
     @app.exception_handler(500)
     async def server_error_handler(request: Request, exc: Exception) -> HTMLResponse:
         tmpl = _tmpl()
         return tmpl.TemplateResponse(
-            "errors/500.html", {"request": request}, status_code=500
+            request, "errors/500.html", status_code=500
         )
 
 # Templates instance is set by create_app() after mounting.
@@ -504,9 +504,9 @@ def home_page(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> H
     fy_col_labels = make_fiscal_year_column_labels(amt_cols) if amt_cols else FISCAL_YEAR_COLUMN_LABELS
 
     return _tmpl().TemplateResponse(
+        request,
         "index.html",
-        {
-            "request":        request,
+        context={
             "filters":        filters,
             "fiscal_years":   fiscal_years,
             "services":       services,
@@ -525,13 +525,13 @@ def home_page(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> H
 @router.get("/about", response_class=HTMLResponse, include_in_schema=False)
 def about(request: Request) -> HTMLResponse:
     """About page."""
-    return _tmpl().TemplateResponse("about.html", {"request": request})
+    return _tmpl().TemplateResponse(request, "about.html")
 
 
 @router.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
 def dashboard(request: Request) -> HTMLResponse:
     """Dashboard overview page with summary statistics."""
-    return _tmpl().TemplateResponse("dashboard.html", {"request": request})
+    return _tmpl().TemplateResponse(request, "dashboard.html")
 
 
 @router.get("/charts", response_class=HTMLResponse, include_in_schema=False)
@@ -540,8 +540,9 @@ def charts(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HTML
     # Reverse so latest fiscal year (e.g. 2026) is at the top of the dropdown
     fiscal_years = list(reversed(_get_fiscal_years(conn)))
     return _tmpl().TemplateResponse(
+        request,
         "charts.html",
-        {"request": request, "fiscal_years": fiscal_years},
+        context={"fiscal_years": fiscal_years},
     )
 
 
@@ -564,9 +565,9 @@ def results_partial(
     fy_col_labels = make_fiscal_year_column_labels(amt_cols) if amt_cols else FISCAL_YEAR_COLUMN_LABELS
 
     response = _tmpl().TemplateResponse(
+        request,
         "partials/results.html",
-        {
-            "request": request,
+        context={
             "filters": filters,
             # Dynamic amount column context — discovered from DB schema
             "amount_column": filters.get("amount_column", DEFAULT_AMOUNT_COLUMN),
@@ -670,8 +671,9 @@ def detail_partial(
             related_items = [dict(r) for r in related_rows]
 
     return _tmpl().TemplateResponse(
+        request,
         "partials/detail.html",
-        {"request": request, "item": item, "related_items": related_items},
+        context={"item": item, "related_items": related_items},
     )
 
 
@@ -725,8 +727,7 @@ def programs(request: Request, conn: sqlite3.Connection = Depends(get_db)) -> HT
         except Exception:
             logger.debug("Failed to load PE data for programs page", exc_info=True)
 
-    return _tmpl().TemplateResponse("programs.html", {
-        "request": request,
+    return _tmpl().TemplateResponse(request, "programs.html", context={
         "services": services,
         "tags": tags,
         "items": items,
@@ -773,8 +774,7 @@ def program_detail(
             if not rel.get("referenced_title") and rel.get("referenced_pe"):
                 rel["referenced_title"] = title_map.get(rel["referenced_pe"])
 
-    return _tmpl().TemplateResponse("program-detail.html", {
-        "request": request,
+    return _tmpl().TemplateResponse(request, "program-detail.html", context={
         "pe_data": pe_data,
     })
 
@@ -787,8 +787,7 @@ def spruill_page(
     """Spruill-style multi-PE funding comparison page."""
     params = request.query_params
     selected_pes = params.getlist("pe")
-    return _tmpl().TemplateResponse("spruill.html", {
-        "request": request,
+    return _tmpl().TemplateResponse(request, "spruill.html", context={
         "selected_pes": selected_pes,
     })
 
@@ -816,8 +815,7 @@ def spruill_table_partial(
         except Exception:
             logger.debug("Failed to load Spruill table data", exc_info=True)
 
-    return _tmpl().TemplateResponse("partials/spruill-table.html", {
-        "request": request,
+    return _tmpl().TemplateResponse(request, "partials/spruill-table.html", context={
         "rows": rows,
         "fiscal_years": fiscal_years,
         "pe_count": pe_count,
@@ -863,8 +861,7 @@ def program_list_partial(
         except Exception:
             logger.debug("Failed to load PE list for program-list partial", exc_info=True)
 
-    return _tmpl().TemplateResponse("partials/program-list.html", {
-        "request": request,
+    return _tmpl().TemplateResponse(request, "partials/program-list.html", context={
         "items": items,
         "total": total,
         "sort_by": sort_by or "pe_number",
@@ -894,8 +891,7 @@ def program_descriptions_partial(
         except Exception:
             logger.debug("Failed to load PE descriptions for %s", pe_number, exc_info=True)
 
-    return _tmpl().TemplateResponse("partials/program-descriptions.html", {
-        "request": request,
+    return _tmpl().TemplateResponse(request, "partials/program-descriptions.html", context={
         "descriptions": descriptions,
         "total": total,
     })
@@ -939,8 +935,7 @@ def program_related_partial(
         except Exception:
             logger.debug("Failed to load related PEs for %s", pe_number, exc_info=True)
 
-    return _tmpl().TemplateResponse("partials/program-related.html", {
-        "request": request,
+    return _tmpl().TemplateResponse(request, "partials/program-related.html", context={
         "pe_number": pe_number,
         "related": related,
         "total": total,
@@ -967,8 +962,7 @@ def program_projects_partial(
         except Exception:
             logger.debug("Failed to load project descriptions for %s", pe_number, exc_info=True)
 
-    return _tmpl().TemplateResponse("partials/program-projects.html", {
-        "request": request,
+    return _tmpl().TemplateResponse(request, "partials/program-projects.html", context={
         "pe_number": pe_number,
         "projects": projects,
     })
@@ -1009,8 +1003,7 @@ def program_changes_partial(
         except Exception:
             logger.debug("Failed to load PE changes for %s", pe_number, exc_info=True)
 
-    return _tmpl().TemplateResponse("partials/program-changes.html", {
-        "request": request,
+    return _tmpl().TemplateResponse(request, "partials/program-changes.html", context={
         "pe_number": pe_number,
         "changes": changes,
         "summary": summary,
@@ -1048,8 +1041,7 @@ def program_pdf_pages_partial(
         except Exception:
             logger.debug("Failed to load PDF pages for %s", pe_number, exc_info=True)
 
-    return _tmpl().TemplateResponse("partials/program-pdf-pages.html", {
-        "request": request,
+    return _tmpl().TemplateResponse(request, "partials/program-pdf-pages.html", context={
         "pe_number": pe_number,
         "pages": pages,
         "total": total,
@@ -1083,8 +1075,7 @@ def top_changes_partial(
         except Exception:
             logger.debug("Failed to load top changes", exc_info=True)
 
-    return _tmpl().TemplateResponse("partials/top-changes.html", {
-        "request": request,
+    return _tmpl().TemplateResponse(request, "partials/top-changes.html", context={
         "increases": increases,
         "decreases": decreases,
     })
@@ -1199,8 +1190,7 @@ def consolidated_list(request: Request) -> HTMLResponse:
     finally:
         conn.close()
 
-    return _tmpl().TemplateResponse("consolidated.html", {
-        "request": request,
+    return _tmpl().TemplateResponse(request, "consolidated.html", context={
         "items": [dict(r) for r in items],
         "total": total,
         "page": page,
@@ -1404,8 +1394,7 @@ def consolidated_detail(request: Request, pe_number: str) -> HTMLResponse:
     finally:
         conn.close()
 
-    return _tmpl().TemplateResponse("consolidated_detail.html", {
-        "request": request,
+    return _tmpl().TemplateResponse(request, "consolidated_detail.html", context={
         "item": dict(item),
         "amounts": [dict(a) for a in amounts],
         "sub_groups": sub_groups,
@@ -1537,8 +1526,7 @@ async def hypersonics_page(
         slim["_childCount"] = pe_meta.get(row["pe_number"], {}).get("child_count", 0)
         slim_rows.append(slim)
 
-    return _tmpl().TemplateResponse("hypersonics.html", {
-        "request": request,
+    return _tmpl().TemplateResponse(request, "hypersonics.html", context={
         "rows": rows,
         "slim_rows": slim_rows,
         "pe_groups": pe_groups,
@@ -1565,7 +1553,6 @@ async def explorer_page(
     keywords: str | None = None,
 ) -> HTMLResponse:
     """Server-rendered keyword explorer page."""
-    return _tmpl().TemplateResponse("explorer.html", {
-        "request": request,
+    return _tmpl().TemplateResponse(request, "explorer.html", context={
         "keyword_input": keywords or "",
     })

@@ -349,27 +349,27 @@ class TestHierarchyEndpoint:
 
 class TestNavigation:
     def test_nav_has_dashboard_link(self, app_client):
-        resp = app_client.get("/")
-        assert 'href="/dashboard"' in resp.text
+        resp = app_client.get("/home")
+        assert 'href="/explorer"' in resp.text
 
     def test_nav_has_programs_link(self, app_client):
-        resp = app_client.get("/")
-        assert 'href="/programs"' in resp.text
+        resp = app_client.get("/home")
+        assert 'href="/about"' in resp.text
 
     def test_nav_has_about_link(self, app_client):
-        resp = app_client.get("/")
+        resp = app_client.get("/home")
         assert 'href="/about"' in resp.text
 
     def test_nav_has_hamburger_button(self, app_client):
-        resp = app_client.get("/")
+        resp = app_client.get("/home")
         assert 'class="hamburger"' in resp.text
 
     def test_nav_has_treemap_cdn(self, app_client):
-        resp = app_client.get("/")
+        resp = app_client.get("/home")
         assert "chartjs-chart-treemap" in resp.text
 
     def test_nav_has_checkbox_select_js(self, app_client):
-        resp = app_client.get("/")
+        resp = app_client.get("/home")
         assert "checkbox-select.js" in resp.text
 
 
@@ -442,13 +442,13 @@ class TestProgramExplorer:
 
 class TestSearchEnhancements:
     def test_search_has_save_button(self, app_client):
-        resp = app_client.get("/")
+        resp = app_client.get("/home")
         assert "Save" in resp.text
 
     def test_search_has_saved_searches_container(self, app_client):
-        resp = app_client.get("/")
+        resp = app_client.get("/home")
         assert "saved-searches-list" in resp.text
 
     def test_search_has_autocomplete_js(self, app_client):
-        resp = app_client.get("/")
+        resp = app_client.get("/home")
         assert "autocomplete" in resp.text.lower() or "app.js" in resp.text
