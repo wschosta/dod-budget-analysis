@@ -158,7 +158,9 @@ _RESPONSE_TIME_WINDOW = 100  # number of recent response times to average
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Validate database path on startup (Step 2.C7-a lifecycle)."""
+    """Validate database path on startup and warm aggregation caches (OPT-AGG-002)."""
+    import threading
+
     db_path = get_db_path()
     if not db_path.exists():
         import warnings
@@ -167,6 +169,16 @@ async def lifespan(app: FastAPI):
             "Run 'python build_budget_db.py' first.",
             stacklevel=2,
         )
+    else:
+        # OPT-AGG-002: Pre-warm aggregation caches in a background daemon thread
+        # so the first real request hits the cache rather than doing a cold scan.
+        from api.routes.aggregations import warm_caches
+        threading.Thread(
+            target=warm_caches,
+            args=(db_path,),
+            daemon=True,
+            name="agg-cache-warmup",
+        ).start()
     yield
 
 

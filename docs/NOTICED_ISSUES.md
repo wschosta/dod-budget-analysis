@@ -462,11 +462,31 @@ Added `_FTS_SCAN_LIMIT = 10_000` constant and bounded FTS subqueries in
 
 ---
 
-#### 61. Full Table Scans for Aggregation Queries **[OPEN — Perf]**
+#### ~~61. Full Table Scans for Aggregation Queries~~ **[RESOLVED — Perf]**
 
-Most aggregation queries scan 124K+ rows in `budget_lines`. Consider materialized
-summary tables or pre-computed aggregations for common groupings (by service, by
-fiscal year, by budget type).
+Two improvements applied:
+
+1. **Hierarchy endpoint — hardcoded FY columns removed.** `api/routes/aggregations.py`
+   `/hierarchy` previously hardcoded `fy2026_request` / `fy2025_enacted` as its
+   primary and prior columns. It now uses `amount_cols[-1]` (latest column from schema
+   introspection) and `amount_cols[-2]` as the prior column — consistent with the main
+   aggregation endpoint. This means the treemap stays correct when FY2027+ data is
+   added without any code change.
+
+2. **Startup cache warmup (OPT-AGG-002).** A `warm_caches(db_path)` function was
+   added to `api/routes/aggregations.py`. It pre-populates the TTL caches for the four
+   most common no-filter group keys (`service`, `fiscal_year`, `budget_type`,
+   `exhibit_type`) plus the hierarchy endpoint by running queries at startup time in
+   a background daemon thread (via `api/app.py` lifespan). This eliminates cold-cache
+   full-table scans on the first real request after startup.
+
+Note: TTL caches for aggregations (600s) and dashboard (900s) were already in place
+from prior work; composite indexes were added in #58. After Round 5 deduplication
+the table is 47,531 rows (down from 124K), so all queries are fast.
+
+**Files changed:** `api/routes/aggregations.py`, `api/app.py`
+**Test coverage:** `tests/test_web_group/test_reference_aggregation.py::TestHierarchyDynamicColumns` (8 cases),
+`::TestWarmCaches` (3 cases)
 
 ---
 
@@ -645,8 +665,8 @@ are rows without enough context to infer an appropriation code.
 | **Round 4 DOCUMENTED** | 1 | #62 (tag assessment) |
 | **Round 3 RESOLVED (Data)** | 1 | #54 (taxonomy expansion) |
 | **Round 3 OPEN (Data)** | 4 | #51, 53, 55-56 (pipeline/DB data quality) |
-| **Round 3 RESOLVED (Perf)** | 1 | #60 (FTS scan limit) |
-| **Round 3 OPEN (Perf)** | 1 | #61 (aggregation full table scans) |
+| **Round 3 RESOLVED (Perf)** | 2 | #60 (FTS scan limit), #61 (aggregation warmup + dynamic cols) |
+| **Round 3 OPEN (Perf)** | 0 | — |
 | **Round 2 RESOLVED** | 20 | #29-37, #40-48, #50 |
 | **Round 2 OPEN** | 2 | #38 (service normalization — DB), #39 (tag quality — pipeline) |
 | **Round 2 GRADUAL** | 1 | #49 (inline styles — ongoing) |
