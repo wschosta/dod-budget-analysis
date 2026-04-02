@@ -149,18 +149,33 @@ def _get_exhibit_types(conn: sqlite3.Connection) -> list[dict]:
     cached = _exhibit_types_cache.get(cache_key)
     if cached is not None:
         return cached
+    # _EXHIBIT_TYPE_NAMES merged with KEYWORD_ONLY_EXHIBIT_TYPES for full coverage
+    from pipeline.builder import KEYWORD_ONLY_EXHIBIT_TYPES as _EXTRA_NAMES
+    _all_names = {**_EXHIBIT_TYPE_NAMES, **_EXTRA_NAMES}
+
+    def _clean_display(code: str, raw: str | None) -> str:
+        """Return a human-readable label, falling back to the static map.
+
+        Fixes issue #4: when the exhibit_types table exists but display_name
+        is NULL, empty, or identical to the code (e.g. 'c1'), use the static
+        map so the dropdown shows 'Military Construction (C-1)' not 'c1 — c1'.
+        """
+        if raw and raw.strip() and raw.strip().lower() != code.lower():
+            return raw.strip()
+        return _all_names.get(code, code.upper())
+
     try:
         rows = conn.execute(
             "SELECT code, display_name FROM exhibit_types ORDER BY code"
         ).fetchall()
-        result = [dict(r) for r in rows]
+        result = [{"code": r["code"], "display_name": _clean_display(r["code"], r["display_name"])} for r in rows]
         _exhibit_types_cache.set(cache_key, result)  # only cache stable reference table
     except sqlite3.OperationalError:
         rows = conn.execute(
             "SELECT DISTINCT exhibit_type AS code FROM budget_lines "
             "WHERE exhibit_type IS NOT NULL ORDER BY exhibit_type"
         ).fetchall()
-        result = [{"code": r["code"], "display_name": _EXHIBIT_TYPE_NAMES.get(r["code"], r["code"].upper())} for r in rows]
+        result = [{"code": r["code"], "display_name": _clean_display(r["code"], None)} for r in rows]
     return result
 
 

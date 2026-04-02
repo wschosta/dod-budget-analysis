@@ -123,7 +123,7 @@
             {% for et in exhibit_types %}
             <option value="{{ et.code }}"
                     {% if et.code in filters.exhibit_type %}selected{% endif %}>
-              {{ et.code }} — {{ et.display_name }}
+              {{ et.display_name }}
             </option>
             {% endfor %}
           </select>

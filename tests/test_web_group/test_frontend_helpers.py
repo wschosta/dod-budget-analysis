@@ -169,6 +169,38 @@ class TestGetExhibitTypes:
         assert "o1" in codes
         conn.close()
 
+    def test_bad_display_name_replaced_by_static_map(self):
+        """Issue #4: display_name equal to code should fall back to static label."""
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE exhibit_types (code TEXT, display_name TEXT, exhibit_class TEXT)")
+        conn.execute("INSERT INTO exhibit_types VALUES ('c1', 'c1', 'summary')")   # bad: equals code
+        conn.execute("INSERT INTO exhibit_types VALUES ('r1', NULL, 'summary')")    # bad: NULL
+        conn.execute("INSERT INTO exhibit_types VALUES ('p5', '', 'detail')")       # bad: empty
+        conn.execute("INSERT INTO exhibit_types VALUES ('p1', 'Procurement (P-1)', 'summary')")  # good
+        conn.commit()
+        exhibits = _get_exhibit_types(conn)
+        by_code = {e["code"]: e["display_name"] for e in exhibits}
+        assert by_code["c1"] == "Military Construction (C-1)"
+        assert by_code["r1"] == "RDT&E (R-1)"
+        assert by_code["p5"] == "Procurement Detail (P-5)"
+        assert by_code["p1"] == "Procurement (P-1)"   # good value preserved
+        conn.close()
+
+    def test_fallback_display_names_use_static_map(self):
+        """Fallback path (no exhibit_types table) uses human-readable names."""
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE budget_lines (id INTEGER PRIMARY KEY, exhibit_type TEXT)")
+        conn.execute("INSERT INTO budget_lines (exhibit_type) VALUES ('c1')")
+        conn.execute("INSERT INTO budget_lines (exhibit_type) VALUES ('r2')")
+        conn.commit()
+        exhibits = _get_exhibit_types(conn)
+        by_code = {e["code"]: e["display_name"] for e in exhibits}
+        assert by_code["c1"] == "Military Construction (C-1)"
+        assert by_code["r2"] == "RDT&E PE Detail (R-2)"
+        conn.close()
+
 
 # ── _get_fiscal_years ─────────────────────────────────────────────────────────
 
