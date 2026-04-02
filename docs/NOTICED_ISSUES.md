@@ -305,27 +305,31 @@ future sprints.
 
 ### Data Quality Issues
 
-#### 51. Project-Level Tags Are Empty (0 tags) **[OPEN — Pipeline]**
+#### ~~51. Project-Level Tags Are Empty (0 tags)~~ **[RESOLVED — Pipeline]**
 
-Despite 412,071 `project_descriptions` records, the `pe_tags` table has **zero**
-rows where `project_number IS NOT NULL`. The enricher's project-level keyword
-matching (`enricher.py:985-993`) either isn't running or the taxonomy patterns
-find no hits in project description text.
+Root cause identified and fixed: `detect_project_boundaries()` in
+`utils/pdf_sections.py` only handled explicit `"Project: 1234"` / `"Project Number:
+1234"` markers, but actual DoD R-2A exhibits use numeric project codes like:
 
-**Impact:** Consolidated view sub-project panels show no tags. Users see tags at
-PE level but not at sub-project level.
+- `671810 / B-52 AEHF INTEGRATION` — modern R-2A format (project number / TITLE)
+- `675144: GLOBAL HAWK` — older R-2A format (project number: TITLE)
+- `PE 0101113F / B-52 Squadrons  671810 / B-52 AEHF INTEGRATION` — page-header
+  artifact containing the project number
 
-```sql
-SELECT COUNT(*) FROM pe_tags WHERE project_number IS NOT NULL;
--- Result: 0
-SELECT COUNT(*) FROM project_descriptions;
--- Result: 412,071
-```
+Three new patterns were added to `_PROJECT_BOUNDARY_PATTERNS`:
+1. `r"^(\d{4,7})\s*/\s*([A-Z][A-Z0-9 \-&,()/.]{3,})$"` — R-2A slash format
+2. `r"PE\s+\w+\s*/\s*[^\n]+?\s+(\d{4,7})\s*/\s*([^\n]+?)"` — page-header artifact
+3. `r"^(\d{4,7})\s*:\s*([A-Z][A-Z0-9 \-&,()/.]{3,})$"` — older colon format
 
-**Suggested fix:** Debug the enricher Phase 3 project-level tagging loop. The
-keyword regex patterns may not match the shorter, more technical project titles.
-Consider adding a broader second-tier taxonomy or running LLM tagging on project
-descriptions.
+The uppercase-title constraint on patterns 1 and 3 prevents false positives on
+numeric ratios like "2024 / 2025" or monetary amounts.
+
+With these patterns in place, Phase 5 will now correctly populate
+`project_descriptions.project_number` for R-2A exhibit text, and Phase 3 will
+produce project-level `pe_tags` rows on the next pipeline run.
+
+**Files changed:** `utils/pdf_sections.py`
+**Test coverage:** `tests/test_pipeline_group/test_project_decomposition.py::TestDetectProjectBoundariesR2A` (6 cases)
 
 ---
 
@@ -367,19 +371,22 @@ FROM budget_lines GROUP BY exhibit_type ORDER BY cnt DESC;
 
 ---
 
-#### 54. Keyword Taxonomy May Be Too Restrictive (41 terms) **[OPEN — Pipeline]**
+#### ~~54. Keyword Taxonomy May Be Too Restrictive (41 terms)~~ **[RESOLVED — Pipeline]**
 
-The domain taxonomy in `enricher.py:64-127` has 41 keyword patterns. Current tag
-distribution: 39,059 keyword tags + 4,140 structured tags across 3,357 PEs (~12.9
-tags/PE average).
+Added `_TAXONOMY_TIER2` in `pipeline/enricher.py` with 14 new domain tags at
+lower confidence (0.7 budget_lines / 0.65 PDF narrative):
 
-**Potential expansion terms:** JADC2, kill-chain, integrated-air-defense, SIGINT,
-ELINT, COMINT, GEOINT, PNT, GPS, EMP, CBRNE, force-protection, readiness,
-mobility, airlift, tanker, refueling, amphibious, counter-intelligence,
-information-warfare, cyber-operations, unmanned-systems.
+`jadc2`, `sigint` (SIGINT/ELINT/COMINT/MASINT), `geoint`, `pnt` (GPS/GNSS),
+`iads`, `information-warfare`, `strategic-mobility` (airlift/tanker/refueling),
+`amphibious`, `force-protection`, `readiness`, `emp`, `cbrn` (CBRNE),
+`counter-intelligence`, `kill-chain`.
 
-**Suggested fix:** Add a second tier of tags with confidence 0.6-0.7. Consider
-running LLM-based tagging (Phase 3 optional) for broader coverage.
+Tier-1 taxonomy confidence unchanged (0.9/0.8). Tier-2 tags use 0.7/0.65 to
+reflect broader, lower-signal patterns. `run_phase3()` loops over both tiers;
+project-level tagging also uses both.
+
+**Files changed:** `pipeline/enricher.py`
+**Test coverage:** `tests/test_pipeline_group/test_enrich_budget_db.py::TestHelpers` (15 new cases including confidence-level assertion)
 
 ---
 
@@ -444,19 +451,46 @@ rebuild via webhook/signal.
 
 ---
 
-#### 60. FTS Queries With Large Result Sets **[OPEN — Perf]**
+#### ~~60. FTS Queries With Large Result Sets~~ **[RESOLVED]**
 
-FTS5 `MATCH` returns all matches before pagination is applied. Consider using
-`LIMIT` inside the FTS subquery for early termination when only the first page
-is needed.
+Added `_FTS_SCAN_LIMIT = 10_000` constant and bounded FTS subqueries in
+`api/routes/search.py` (`_budget_select`, `_pdf_select`, `_description_select`).
+
+- Unfiltered relevance queries use `ORDER BY rank LIMIT offset+limit`, enabling
+  FTS5's early-termination optimiser path so only the needed rows are scored.
+- Filtered or amount-sorted queries use `LIMIT _FTS_SCAN_LIMIT` to cap
+  materialisation while still covering typical paginated access patterns.
+
+**Files changed:** `api/routes/search.py`
+**Test coverage:** `tests/test_web_group/test_search_endpoint.py::TestFtsScanLimit` (7 cases)
 
 ---
 
-#### 61. Full Table Scans for Aggregation Queries **[OPEN — Perf]**
+#### ~~61. Full Table Scans for Aggregation Queries~~ **[RESOLVED — Perf]**
 
-Most aggregation queries scan 124K+ rows in `budget_lines`. Consider materialized
-summary tables or pre-computed aggregations for common groupings (by service, by
-fiscal year, by budget type).
+Two improvements applied:
+
+1. **Hierarchy endpoint — hardcoded FY columns removed.** `api/routes/aggregations.py`
+   `/hierarchy` previously hardcoded `fy2026_request` / `fy2025_enacted` as its
+   primary and prior columns. It now uses `amount_cols[-1]` (latest column from schema
+   introspection) and `amount_cols[-2]` as the prior column — consistent with the main
+   aggregation endpoint. This means the treemap stays correct when FY2027+ data is
+   added without any code change.
+
+2. **Startup cache warmup (OPT-AGG-002).** A `warm_caches(db_path)` function was
+   added to `api/routes/aggregations.py`. It pre-populates the TTL caches for the four
+   most common no-filter group keys (`service`, `fiscal_year`, `budget_type`,
+   `exhibit_type`) plus the hierarchy endpoint by running queries at startup time in
+   a background daemon thread (via `api/app.py` lifespan). This eliminates cold-cache
+   full-table scans on the first real request after startup.
+
+Note: TTL caches for aggregations (600s) and dashboard (900s) were already in place
+from prior work; composite indexes were added in #58. After Round 5 deduplication
+the table is 47,531 rows (down from 124K), so all queries are fast.
+
+**Files changed:** `api/routes/aggregations.py`, `api/app.py`
+**Test coverage:** `tests/test_web_group/test_reference_aggregation.py::TestHierarchyDynamicColumns` (8 cases),
+`::TestWarmCaches` (3 cases)
 
 ---
 
@@ -633,8 +667,10 @@ are rows without enough context to infer an appropriation code.
 | **Round 5 RESOLVED** | 5 | #5, #6/14, #7/17/22, #57, #63 |
 | **Round 4 RESOLVED** | 3 | #52, #58, #59 |
 | **Round 4 DOCUMENTED** | 1 | #62 (tag assessment) |
-| **Round 3 OPEN (Data)** | 5 | #51, 53-56 (pipeline/DB data quality) |
-| **Round 3 OPEN (Perf)** | 2 | #60-61 (performance optimization) |
+| **Round 3 RESOLVED (Data)** | 2 | #51 (project boundary detection), #54 (taxonomy expansion) |
+| **Round 3 OPEN (Data)** | 3 | #53, #55, #56 (pipeline/DB data quality) |
+| **Round 3 RESOLVED (Perf)** | 2 | #60 (FTS scan limit), #61 (aggregation warmup + dynamic cols) |
+| **Round 3 OPEN (Perf)** | 0 | — |
 | **Round 2 RESOLVED** | 20 | #29-37, #40-48, #50 |
 | **Round 2 OPEN** | 2 | #38 (service normalization — DB), #39 (tag quality — pipeline) |
 | **Round 2 GRADUAL** | 1 | #49 (inline styles — ongoing) |

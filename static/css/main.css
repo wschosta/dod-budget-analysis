@@ -418,7 +418,7 @@ a:hover { text-decoration: underline; }
   background: var(--clr-gray-50);
   color: var(--clr-gray-900);
 }
-.filter-group select[multiple] { height: 100px; }
+.filter-group select[multiple] { min-height: 80px; max-height: 160px; }
 .filter-actions {
   display: flex;
   gap: .5rem;
@@ -1351,6 +1351,11 @@ tr:focus-within td {
 }
 .programs-layout .filter-panel {
   overflow: visible;
+  /* Issue #26: establish a stacking context so native select dropdowns and
+     any absolutely-positioned children (e.g. autocomplete) appear above the
+     card grid column rather than being clipped or rendered behind it. */
+  position: relative;
+  z-index: 2;
 }
 .pe-card-grid {
   display: grid;

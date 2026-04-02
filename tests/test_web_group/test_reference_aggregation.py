@@ -15,15 +15,17 @@ from api.routes.reference import (
     list_services, list_exhibit_types, list_fiscal_years,
     list_appropriations, list_budget_types,
 )
-from api.routes.aggregations import aggregate, _ALLOWED_GROUPS
+from api.routes.aggregations import (
+    aggregate, hierarchy, warm_caches,
+    _ALLOWED_GROUPS, _agg_cache, _hierarchy_cache,
+)
 
 
 @pytest.fixture(autouse=True)
-def _clear_column_cache():
-    """No-op: column cache was removed in favor of direct PRAGMA table_info.
-
-    Kept as autouse fixture placeholder so test ordering stays consistent.
-    """
+def _clear_caches():
+    """Clear aggregation caches before each test to prevent cross-test pollution."""
+    _agg_cache.clear()
+    _hierarchy_cache.clear()
     yield
 
 
@@ -329,3 +331,184 @@ class TestAggregate:
         # Only rows with appropriation_code=3010 (3 of 4 rows)
         total_rows = sum(r.row_count for r in result.rows)
         assert total_rows == 3
+
+
+# ---------------------------------------------------------------------------
+# OPT-AGG-002: Hierarchy endpoint — dynamic latest-column tests
+# ---------------------------------------------------------------------------
+
+@pytest.fixture()
+def db_hierarchy():
+    """DB with budget_lines, org, approp, and two FY amount columns."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE budget_lines (
+            id INTEGER PRIMARY KEY,
+            fiscal_year TEXT,
+            organization_name TEXT,
+            exhibit_type TEXT,
+            line_item_title TEXT,
+            pe_number TEXT,
+            appropriation_code TEXT,
+            appropriation_title TEXT,
+            budget_type TEXT,
+            amount_fy2025_enacted REAL,
+            amount_fy2026_request REAL
+        );
+        INSERT INTO budget_lines VALUES
+          (1, 'FY 2026', 'Army', 'p1', 'Program A', 'PE0001', '3010', 'Aircraft Proc', 'Procurement', 900, 1000),
+          (2, 'FY 2026', 'Navy', 'p1', 'Program B', 'PE0002', '3415', 'Ship Proc',     'Procurement', 400, 500),
+          (3, 'FY 2026', 'Army', 'r1', 'Program C', 'PE0003', '3600', 'RDT&E',         'RDT&E',       1800, 2000),
+          (4, 'FY 2026', 'Army', 'p1', 'Program D', NULL,     NULL,   NULL,            NULL,          NULL,  NULL);
+    """)
+    yield conn
+    conn.close()
+
+
+@pytest.fixture()
+def db_hierarchy_fy2027():
+    """DB that only has FY2027 data — no fy2026 column at all."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE budget_lines (
+            id INTEGER PRIMARY KEY,
+            fiscal_year TEXT,
+            organization_name TEXT,
+            exhibit_type TEXT,
+            line_item_title TEXT,
+            pe_number TEXT,
+            appropriation_code TEXT,
+            appropriation_title TEXT,
+            budget_type TEXT,
+            amount_fy2026_enacted REAL,
+            amount_fy2027_request REAL
+        );
+        INSERT INTO budget_lines VALUES
+          (1, 'FY 2027', 'Army', 'p1', 'Program A', 'PE0001', '3010', 'Aircraft Proc', 'Procurement', 950, 1100),
+          (2, 'FY 2027', 'Navy', 'p1', 'Program B', 'PE0002', '3415', 'Ship Proc',     'Procurement', 420, 550);
+    """)
+    yield conn
+    conn.close()
+
+
+class TestHierarchyDynamicColumns:
+    """OPT-AGG-002: hierarchy endpoint uses latest available FY column."""
+
+    def test_returns_items_with_amount(self, db_hierarchy):
+        result = hierarchy(fiscal_year=None, service=None, exhibit_type=None,
+                           conn=db_hierarchy)
+        assert result["grand_total"] > 0
+        assert len(result["items"]) >= 1
+
+    def test_excludes_null_amount_rows(self, db_hierarchy):
+        """Rows with NULL latest-FY amount are excluded (HAVING > 0)."""
+        result = hierarchy(fiscal_year=None, service=None, exhibit_type=None,
+                           conn=db_hierarchy)
+        # Program D has NULL amount_fy2026_request — should not appear
+        titles = [item["program"] for item in result["items"]]
+        assert "Program D" not in titles
+
+    def test_uses_latest_column_for_fy2027_db(self, db_hierarchy_fy2027):
+        """When only fy2027 column exists, hierarchy uses it instead of fy2026."""
+        result = hierarchy(fiscal_year=None, service=None, exhibit_type=None,
+                           conn=db_hierarchy_fy2027)
+        # Should succeed and return items using amount_fy2027_request
+        assert result["grand_total"] > 0
+        assert len(result["items"]) == 2
+        # Totals should reflect fy2027 amounts (1100 + 550)
+        assert result["grand_total"] == pytest.approx(1650.0)
+
+    def test_prior_column_used_for_prev_amount(self, db_hierarchy):
+        """prev_amount reflects the prior FY column (not NULL)."""
+        result = hierarchy(fiscal_year=None, service=None, exhibit_type=None,
+                           conn=db_hierarchy)
+        items = {item["program"]: item for item in result["items"]}
+        assert items["Program A"]["prev_amount"] == pytest.approx(900.0)
+        assert items["Program B"]["prev_amount"] == pytest.approx(400.0)
+
+    def test_filter_by_service(self, db_hierarchy):
+        result = hierarchy(fiscal_year=None, service="Army", exhibit_type=None,
+                           conn=db_hierarchy)
+        services = {item["service"] for item in result["items"]}
+        assert services == {"Army"}
+
+    def test_filter_by_fiscal_year(self, db_hierarchy):
+        result = hierarchy(fiscal_year="FY 2026", service=None, exhibit_type=None,
+                           conn=db_hierarchy)
+        assert len(result["items"]) >= 1
+
+    def test_pct_of_total_sums_to_100(self, db_hierarchy):
+        result = hierarchy(fiscal_year=None, service=None, exhibit_type=None,
+                           conn=db_hierarchy)
+        total_pct = sum(
+            item["pct_of_total"] for item in result["items"]
+            if item["pct_of_total"] is not None
+        )
+        assert abs(total_pct - 100.0) < 0.1
+
+    def test_empty_table(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("""
+            CREATE TABLE budget_lines (
+                id INTEGER PRIMARY KEY,
+                organization_name TEXT,
+                fiscal_year TEXT,
+                exhibit_type TEXT,
+                line_item_title TEXT,
+                pe_number TEXT,
+                appropriation_code TEXT,
+                appropriation_title TEXT,
+                amount_fy2026_request REAL
+            )
+        """)
+        result = hierarchy(fiscal_year=None, service=None, exhibit_type=None, conn=conn)
+        assert result["grand_total"] == 0
+        assert result["items"] == []
+        conn.close()
+
+
+class TestWarmCaches:
+    """OPT-AGG-002: warm_caches helper."""
+
+    def test_nonexistent_db_is_safe(self, tmp_path):
+        """warm_caches does nothing when DB file doesn't exist."""
+        warm_caches(tmp_path / "nonexistent.sqlite")  # must not raise
+
+    def test_valid_db_populates_agg_cache(self, tmp_path):
+        """warm_caches pre-populates the aggregation cache."""
+        from api.routes.aggregations import _agg_cache
+
+        db_file = tmp_path / "test.sqlite"
+        conn = sqlite3.connect(str(db_file))
+        conn.execute("""
+            CREATE TABLE budget_lines (
+                id INTEGER PRIMARY KEY,
+                fiscal_year TEXT,
+                organization_name TEXT,
+                exhibit_type TEXT,
+                appropriation_code TEXT,
+                budget_activity_title TEXT,
+                budget_type TEXT,
+                amount_fy2026_request REAL
+            )
+        """)
+        conn.execute(
+            "INSERT INTO budget_lines VALUES (1, 'FY 2026', 'Army', 'p1', '3010', 'Aircraft', 'Procurement', 1000)"
+        )
+        conn.commit()
+        conn.close()
+
+        _agg_cache.clear()
+        warm_caches(db_file)
+
+        # At least one cache entry should have been added
+        assert _agg_cache.stats()["size"] > 0
+
+    def test_corrupt_db_is_safe(self, tmp_path):
+        """warm_caches logs a warning and returns if DB is unreadable."""
+        bad_db = tmp_path / "corrupt.sqlite"
+        bad_db.write_bytes(b"not a real sqlite db")
+        warm_caches(bad_db)  # must not raise

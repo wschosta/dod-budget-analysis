@@ -11,7 +11,7 @@
     </span>
     <span style="display:flex;gap:.35rem;align-items:center">
       {% if page.fiscal_year %}
-      <span class="badge" style="font-size:.68rem">FY{{ page.fiscal_year }}</span>
+      <span class="badge" style="font-size:.68rem">{{ page.fiscal_year|format_fy }}</span>
       {% endif %}
       {% if page.exhibit_type %}
       <span class="badge" style="font-size:.68rem">{{ page.exhibit_type | upper }}</span>

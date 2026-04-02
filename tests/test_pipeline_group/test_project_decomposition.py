@@ -115,6 +115,92 @@ class TestDetectProjectBoundaries:
         assert projects[0]["project_number"] == "1234"
 
 
+class TestDetectProjectBoundariesR2A:
+    """Tests for R-2A numeric project format (DoD standard exhibits)."""
+
+    def test_r2a_slash_format(self):
+        """Detect '671810 / B-52 AEHF INTEGRATION' R-2A numeric format."""
+        text = (
+            "671810 / B-52 AEHF INTEGRATION\n"
+            "In FY2024 the integration was completed.\n"
+            "671820 / WEAPONS BAY UPGRADE\n"
+            "The upgrade program advanced to PDR.\n"
+        )
+        projects = detect_project_boundaries(text)
+        assert len(projects) == 2
+        assert projects[0]["project_number"] == "671810"
+        assert projects[0]["project_title"] == "B-52 AEHF INTEGRATION"
+        assert projects[1]["project_number"] == "671820"
+        assert projects[1]["project_title"] == "WEAPONS BAY UPGRADE"
+
+    def test_r2a_slash_format_with_text_between(self):
+        """Each project captures text up to the next R-2A boundary."""
+        text = (
+            "675144 / GLOBAL HAWK\n"
+            "In FY2025, Global Hawk completed milestone X.\n"
+            "675048 / SENSOR INTEGRATION\n"
+            "Sensor integration advanced to CDR.\n"
+        )
+        projects = detect_project_boundaries(text)
+        assert len(projects) == 2
+        assert "milestone X" in projects[0]["text"]
+        assert "CDR" in projects[1]["text"]
+
+    def test_r2a_older_colon_format(self):
+        """Detect '675144: Global Hawk' older R-2A numeric colon format."""
+        text = (
+            "675144: GLOBAL HAWK\n"
+            "FY2024 accomplishments:\n"
+            "- Completed sensor testing.\n"
+        )
+        projects = detect_project_boundaries(text)
+        assert len(projects) == 1
+        assert projects[0]["project_number"] == "675144"
+        assert projects[0]["project_title"] == "GLOBAL HAWK"
+
+    def test_r2a_page_header_format(self):
+        """Detect project number embedded in R-2A page-break artifact header."""
+        # Simulates a page-break artifact that hasn't been cleaned yet:
+        # "3600 / 7 PE 0101113F / B-52 Squadrons 671810 / B-52 AEHF Integration"
+        text = (
+            "PE 0101113F / B-52 Squadrons  671810 / B-52 AEHF INTEGRATION\n"
+            "B. Accomplishments/Planned Programs\n"
+            "In FY2024, the B-52 AEHF integration completed testing.\n"
+        )
+        projects = detect_project_boundaries(text)
+        assert len(projects) >= 1
+        proj_nums = {p["project_number"] for p in projects}
+        assert "671810" in proj_nums
+
+    def test_r2a_does_not_match_numeric_ratios(self):
+        """Numeric ratios like '2024 / 2025' should NOT be treated as project boundaries."""
+        text = (
+            "Budget covers FY2024 / FY2025 activities.\n"
+            "Total: 100 / 200 split between base and OCO.\n"
+        )
+        projects = detect_project_boundaries(text)
+        # 2024 and 2025 are exactly 4 digits, but the titles after "/" are
+        # not uppercase-letter-led: "FY2025" starts with "F" but is short;
+        # "200 split..." should match uppercase check — these are edge cases.
+        # The important thing: no entry with project_number in ["2024", "2025"]
+        # should appear given our uppercase-title constraint.
+        for p in projects:
+            assert p["project_number"] not in ("2024", "2025", "100", "200")
+
+    def test_r2a_mixed_with_explicit_format(self):
+        """R-2A numeric and explicit 'Project:' formats coexist in one text."""
+        text = (
+            "Project: A001 — Explicit Format\n"
+            "This uses explicit keyword.\n"
+            "671810 / R2A NUMERIC FORMAT\n"
+            "This uses R-2A numeric style.\n"
+        )
+        projects = detect_project_boundaries(text)
+        proj_nums = {p["project_number"] for p in projects}
+        assert "A001" in proj_nums
+        assert "671810" in proj_nums
+
+
 # ── Phase 5 integration tests ───────────────────────────────────────────────
 
 

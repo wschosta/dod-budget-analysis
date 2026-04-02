@@ -43,6 +43,16 @@ def _snippet(text: str | None, query: str | None, max_len: int = 200) -> str | N
 # sort=relevance orders by BM25 score (lower magnitude = better rank).
 # sort=amount_desc orders by the current FY request amount.
 
+# SEARCH-005: FTS scan cap (issue #60).
+# Without this, the FTS subquery materialises *all* matching rows before the
+# outer JOIN+LIMIT is applied, which is expensive on large corpora.
+# When there are no structured WHERE filters and sorting is by relevance, we
+# pass exactly offset+limit to the FTS subquery (ORDER BY rank enables FTS5's
+# early-termination optimiser path).  When structured filters are present the
+# filter attrition rate is unknown, so we use a generous cap instead.
+_FTS_SCAN_LIMIT = 10_000
+
+
 def _budget_select(
     fts_query: str,
     sort: str,
@@ -64,12 +74,24 @@ def _budget_select(
         appropriation_code=appropriation_code,
     )
 
-    # Combine FTS MATCH with structured filters via subquery
-    fts_subquery = (
-        "SELECT rowid, bm25(budget_lines_fts) AS score "
-        "FROM budget_lines_fts "
-        "WHERE budget_lines_fts MATCH ?"
-    )
+    # SEARCH-005: Bound the FTS scan to avoid full materialisation (issue #60).
+    # For unfiltered relevance queries the exact row count is known up-front;
+    # ORDER BY rank lets FTS5 stop scanning once the top rows are found.
+    # For filtered or amount-sorted queries a generous cap is used instead.
+    if not where and sort == "relevance":
+        fts_limit = min(_FTS_SCAN_LIMIT, offset + limit)
+        fts_subquery = (
+            "SELECT rowid, bm25(budget_lines_fts) AS score "
+            "FROM budget_lines_fts "
+            "WHERE budget_lines_fts MATCH ? "
+            f"ORDER BY rank LIMIT {fts_limit}"
+        )
+    else:
+        fts_subquery = (
+            "SELECT rowid, bm25(budget_lines_fts) AS score "
+            "FROM budget_lines_fts "
+            f"WHERE budget_lines_fts MATCH ? LIMIT {_FTS_SCAN_LIMIT}"
+        )
 
     if where:
         sql = f"""
@@ -136,6 +158,9 @@ def _pdf_select(
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
+    # SEARCH-005: Bound the FTS scan (issue #60).
+    pdf_fts_limit = min(_FTS_SCAN_LIMIT, offset + limit) if not conditions else _FTS_SCAN_LIMIT
+
     sql = f"""
         SELECT p.id, p.source_file, p.source_category, p.page_number,
                p.page_text, p.has_tables, p.fiscal_year, p.exhibit_type,
@@ -145,6 +170,7 @@ def _pdf_select(
             SELECT rowid, bm25(pdf_pages_fts) AS score
             FROM pdf_pages_fts
             WHERE pdf_pages_fts MATCH ?
+            ORDER BY rank LIMIT {pdf_fts_limit}
         ) fts ON p.id = fts.rowid
         {where}
         ORDER BY fts.score ASC
@@ -170,7 +196,9 @@ def _description_select(
     # Try FTS5 first
     try:
         conn.execute("SELECT 1 FROM pe_descriptions_fts LIMIT 0")
-        rows = conn.execute("""
+        # SEARCH-005: Bound the FTS scan (issue #60).
+        desc_fts_limit = min(_FTS_SCAN_LIMIT, offset + limit)
+        rows = conn.execute(f"""
             SELECT d.id, d.pe_number, d.section_header, d.description_text,
                    d.source_file, d.fiscal_year,
                    bm25(pe_descriptions_fts) AS score
@@ -179,6 +207,7 @@ def _description_select(
                 SELECT rowid, bm25(pe_descriptions_fts) AS score
                 FROM pe_descriptions_fts
                 WHERE pe_descriptions_fts MATCH ?
+                ORDER BY rank LIMIT {desc_fts_limit}
             ) fts ON d.id = fts.rowid
             ORDER BY fts.score ASC
             LIMIT ? OFFSET ?

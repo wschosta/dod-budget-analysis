@@ -6,9 +6,11 @@ Supports optional pre-filter by fiscal_year, service, or exhibit_type.
 
 AGG-001: Dynamic FY columns discovered from schema at runtime.
 AGG-002: pct_of_total and yoy_change_pct added to each row.
-OPT-AGG-001: Server-side TTL cache (60 seconds) for aggregation queries.
+OPT-AGG-001: Server-side TTL cache (600 seconds) for aggregation queries.
+OPT-AGG-002: Background cache warmup at startup for common no-filter queries.
 """
 
+import logging
 import sqlite3
 from typing import Any
 
@@ -20,6 +22,8 @@ from api.models import AggregationResponse, AggregationRow
 from utils.cache import TTLCache, make_cache_key
 from utils.database import BUDGET_TYPE_CASE_EXPR, _validate_identifier, get_amount_columns
 from utils.query import build_where_clause, compute_yoy_change
+
+_logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/aggregations", tags=["aggregations"])
 
@@ -192,15 +196,20 @@ def hierarchy(
     if cached is not None:
         return cached
 
-    # Use dynamic FY column detection (consistent with main aggregation endpoint)
+    # OPT-AGG-002: Use latest available FY columns dynamically so the treemap
+    # stays correct when new fiscal-year data (FY2027+) is added.
     amount_cols = get_amount_columns(conn)
-    fy26_col = next((c for c in amount_cols if "fy2026_request" in c),
-                    "amount_fy2026_request")
-    fy25_col = next((c for c in amount_cols if "fy2025_enacted" in c),
-                    "amount_fy2025_enacted")
+    latest_col = amount_cols[-1] if amount_cols else "amount_fy2026_request"
+    prior_col = amount_cols[-2] if len(amount_cols) >= 2 else None
+
+    prev_amount_expr = (
+        f"SUM(COALESCE({prior_col}, 0)) AS prev_amount"
+        if prior_col else
+        "NULL AS prev_amount"
+    )
 
     conditions: list[str] = [
-        f"{fy26_col} IS NOT NULL",
+        f"{latest_col} IS NOT NULL",
         "organization_name IS NOT NULL",
     ]
     params: list[Any] = []
@@ -223,13 +232,13 @@ def hierarchy(
         f"appropriation_title AS approp_title, "
         f"line_item_title AS program, "
         f"pe_number, "
-        f"SUM({fy26_col}) AS amount, "
-        f"SUM(COALESCE({fy25_col}, 0)) AS prev_amount "
+        f"SUM({latest_col}) AS amount, "
+        f"{prev_amount_expr} "
         f"FROM budget_lines "
         f"{where} "
         f"GROUP BY organization_name, appropriation_code, line_item_title "
-        f"HAVING SUM({fy26_col}) > 0 "
-        f"ORDER BY SUM({fy26_col}) DESC",
+        f"HAVING SUM({latest_col}) > 0 "
+        f"ORDER BY SUM({latest_col}) DESC",
         params,
     ).fetchall()
 
@@ -246,3 +255,51 @@ def hierarchy(
     result = {"items": items, "grand_total": grand_total}
     _hierarchy_cache.set(cache_key, result)
     return result
+
+
+# OPT-AGG-002: Common no-filter group keys to pre-warm on startup.
+_WARMUP_GROUP_KEYS = ("service", "fiscal_year", "budget_type", "exhibit_type")
+
+
+def warm_caches(db_path: "Path") -> None:  # noqa: F821
+    """Pre-populate aggregation caches for common no-filter queries.
+
+    Called from the app lifespan in a background daemon thread so the first
+    real request hits the cache rather than doing a cold full-table scan.
+
+    Args:
+        db_path: Path to the SQLite database file.
+    """
+    import sqlite3 as _sqlite3
+    from pathlib import Path as _Path
+
+    if not _Path(db_path).exists():
+        return
+    try:
+        conn = _sqlite3.connect(str(db_path))
+        conn.row_factory = _sqlite3.Row
+        _logger.info("OPT-AGG-002: warming aggregation caches for %d group keys",
+                     len(_WARMUP_GROUP_KEYS))
+        for grp in _WARMUP_GROUP_KEYS:
+            try:
+                # Re-use the request handler logic by calling aggregate() directly.
+                # We pass conn explicitly; no FastAPI Depends() needed here.
+                aggregate(
+                    group_by=grp,
+                    fiscal_year=None,
+                    service=None,
+                    exhibit_type=None,
+                    appropriation_code=None,
+                    conn=conn,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _logger.warning("OPT-AGG-002: warmup failed for group=%s: %s", grp, exc)
+        # Warm the hierarchy endpoint (no filters)
+        try:
+            hierarchy(fiscal_year=None, service=None, exhibit_type=None, conn=conn)
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning("OPT-AGG-002: hierarchy warmup failed: %s", exc)
+        conn.close()
+        _logger.info("OPT-AGG-002: aggregation cache warmup complete")
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning("OPT-AGG-002: cache warmup skipped (%s)", exc)

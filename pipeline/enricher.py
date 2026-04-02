@@ -126,6 +126,63 @@ _COMPILED_TAXONOMY: list[tuple[str, list[re.Pattern]]] = [
     for tag, terms in _TAXONOMY
 ]
 
+# ── Tier-2 taxonomy — broader signal, lower confidence (issue #54) ─────────────
+# Confidence assigned in run_phase3(): 0.7 (budget_lines), 0.65 (PDF narrative).
+# Standalone _tags_from_keywords() uses 0.7 for tier-2 terms.
+
+_TAXONOMY_TIER2: list[tuple[str, list[str]]] = [
+    ("jadc2",              [r"\bJADC2\b", r"joint\s+all[- ]domain\s+command",
+                            r"all[- ]domain\s+(?:operations|battle)",
+                            r"combined\s+joint\s+all[- ]domain"]),
+    ("sigint",             [r"\bSIGINT\b", r"\bELINT\b", r"\bCOMINT\b", r"\bMASINT\b",
+                            r"signals?\s+intelligence", r"signal\s+collection"]),
+    ("geoint",             [r"\bGEOINT\b", r"geospatial\s+intelligence", r"\bNGA\b",
+                            r"geospatial\s+(?:analysis|data|imagery)"]),
+    ("pnt",                [r"\bPNT\b", r"positioning,?\s+navigation,?\s+and\s+timing",
+                            r"\bGPS\b", r"\bGNSS\b", r"navigation\s+warfare",
+                            r"anti[- ]jam(?:ming)?\s+(?:GPS|navigation)"]),
+    ("iads",               [r"\bIADS\b", r"integrated\s+air\s+(?:and\s+missile\s+)?defense",
+                            r"\bSHORAD\b", r"\bHIMAD\b", r"layered\s+air\s+defense"]),
+    ("information-warfare", [r"information\s+warfare", r"information\s+operations",
+                             r"\bIO\b.*(?:capability|operation|program)",
+                             r"cognitive\s+(?:warfare|operations)",
+                             r"influence\s+operations", r"military\s+deception",
+                             r"\bMILDEC\b", r"psychological\s+operations", r"\bPSYOP\b"]),
+    ("strategic-mobility", [r"strategic\s+(?:airlift|mobility|lift)",
+                            r"\bairlift\b", r"aerial\s+refueling", r"air\s+refueling",
+                            r"\btanker\b.*(?:aircraft|program|fleet)",
+                            r"\bKC-46\b", r"\bKC-135\b", r"\bC-17\b", r"\bC-5\b"]),
+    ("amphibious",         [r"amphibious\s+(?:warfare|operations|assault|ship)",
+                            r"\bMEF\b", r"\bMEB\b", r"expeditionary\s+(?:force|operations)",
+                            r"\bLHA\b", r"\bLHD\b", r"\bLPD\b", r"littoral\s+(?:combat|warfare)"]),
+    ("force-protection",   [r"force\s+protection", r"\bATFP\b", r"anti[- ]terrorism",
+                            r"physical\s+security", r"base\s+defense",
+                            r"installation\s+security"]),
+    ("readiness",          [r"\breadiness\b", r"operational\s+readiness",
+                            r"mission\s+capable\s+rate", r"\bMCR\b",
+                            r"full\s+mission\s+capable", r"\bFMC\b.*rate",
+                            r"materiel\s+readiness"]),
+    ("emp",                [r"\bEMP\b", r"electromagnetic\s+pulse",
+                            r"EMP\s+(?:hardening|protection|survivability)",
+                            r"transient\s+electromagnetic"]),
+    ("cbrn",               [r"\bCBRN\b", r"\bCBRNE\b",
+                            r"chemical[,/]?\s*biological[,/]?\s*radiological",
+                            r"chem[- ]bio\s+(?:defense|threat)",
+                            r"nuclear\s+(?:consequence|hazard|defense\s+program)",
+                            r"decontamination"]),
+    ("counter-intelligence", [r"counterintelligence", r"counter[- ]intelligence",
+                              r"\bCI\b.*(?:program|investigation|operation)",
+                              r"insider\s+threat", r"foreign\s+intelligence\s+threat"]),
+    ("kill-chain",         [r"kill\s+chain", r"kill[- ]chain",
+                            r"sensor[-\s]to[-\s]shooter", r"time[-\s]sensitive\s+targeting",
+                            r"find,?\s*fix,?\s*track,?\s*target"]),
+]
+
+_COMPILED_TAXONOMY_TIER2: list[tuple[str, list[re.Pattern]]] = [
+    (tag, [re.compile(term, re.IGNORECASE) for term in terms])
+    for tag, terms in _TAXONOMY_TIER2
+]
+
 # ── Structured field → tag mappings ───────────────────────────────────────────
 
 _BUDGET_ACTIVITY_TAGS: list[tuple[re.Pattern, str]] = [
@@ -749,15 +806,20 @@ def run_phase2(conn: sqlite3.Connection, stop_event: threading.Event | None = No
 def _tags_from_keywords(pe_number: str, text: str) -> list[tuple]:
     """Match description text against predefined domain taxonomy.
 
-    Note: run_phase3() inlines an equivalent batch loop with differentiated
-    confidence (0.8 for PDF text, 0.9 for budget_lines text). This standalone
-    version uses 0.9 and is kept for tests and ad-hoc use.
+    Checks tier-1 taxonomy (confidence 0.9) then tier-2 broader terms
+    (confidence 0.7).  run_phase3() inlines equivalent loops with source-
+    differentiated confidence (budget_lines vs PDF narrative).
     """
     tags: list[tuple] = []
     for tag, patterns in _COMPILED_TAXONOMY:
         for pat in patterns:
             if pat.search(text):
                 tags.append((pe_number, tag, "keyword", 0.9))
+                break
+    for tag, patterns in _COMPILED_TAXONOMY_TIER2:
+        for pat in patterns:
+            if pat.search(text):
+                tags.append((pe_number, tag, "keyword", 0.7))
                 break
     return tags
 
@@ -972,7 +1034,7 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
 
         # 3b: keyword tags from budget_lines text fields (PE-level)
         # LION-104: Use line_item_title etc. for PEs with or without PDF text
-        # LION-105: confidence=0.9 (field-level match, high signal)
+        # LION-105: confidence=0.9 tier-1, 0.7 tier-2 (field-level match)
         bl_text = bl_texts.get(pe, "")
         if bl_text:
             for tag, patterns in _COMPILED_TAXONOMY:
@@ -980,9 +1042,14 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
                     if pat.search(bl_text):
                         insert_buf.append((pe, None, tag, "keyword", 0.9, pe_src_json))
                         break
+            for tag, patterns in _COMPILED_TAXONOMY_TIER2:
+                for pat in patterns:
+                    if pat.search(bl_text):
+                        insert_buf.append((pe, None, tag, "keyword", 0.7, pe_src_json))
+                        break
 
         # 3c: keyword tags from PDF narrative text (PE-level)
-        # LION-105: confidence=0.8 (narrative context, more noise)
+        # LION-105: confidence=0.8 tier-1, 0.65 tier-2 (narrative context, more noise)
         combined_desc = " ".join(desc_texts.get(pe, []))
         desc_src_json = json.dumps(desc_sources.get(pe, []))
         if combined_desc:
@@ -990,6 +1057,11 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
                 for pat in patterns:
                     if pat.search(combined_desc):
                         insert_buf.append((pe, None, tag, "keyword", 0.8, desc_src_json))
+                        break
+            for tag, patterns in _COMPILED_TAXONOMY_TIER2:
+                for pat in patterns:
+                    if pat.search(combined_desc):
+                        insert_buf.append((pe, None, tag, "keyword", 0.65, desc_src_json))
                         break
 
         # HAWK-2: 3e: project-level keyword tags from project_descriptions
@@ -1000,6 +1072,11 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
                 for pat in patterns:
                     if pat.search(proj_text):
                         insert_buf.append((pe, proj_num, tag, "keyword", 0.85, desc_src_json))
+                        break
+            for tag, patterns in _COMPILED_TAXONOMY_TIER2:
+                for pat in patterns:
+                    if pat.search(proj_text):
+                        insert_buf.append((pe, proj_num, tag, "keyword", 0.65, desc_src_json))
                         break
 
     # Flush structured + keyword tags

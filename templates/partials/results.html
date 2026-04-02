@@ -19,7 +19,7 @@
 {% if filters is defined %}
 {% set active = [] %}
 {% if filters.q %}{% set _ = active.append(("q", "Keyword", filters.q)) %}{% endif %}
-{% for fy in filters.fiscal_year %}{% set _ = active.append(("fiscal_year", "FY", fy)) %}{% endfor %}
+{% for fy in filters.fiscal_year %}{% set _ = active.append(("fiscal_year", "Fiscal Year", fy)) %}{% endfor %}
 {% for svc in filters.service %}{% set _ = active.append(("service", "Service", svc)) %}{% endfor %}
 {% for et in filters.exhibit_type %}{% set _ = active.append(("exhibit_type", "Exhibit", et)) %}{% endfor %}
 {% for bt in filters.budget_type %}{% set _ = active.append(("budget_type", "Budget Type", bt)) %}{% endfor %}
