@@ -188,7 +188,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 - All testing tasks (1.C1-1.C3) complete with 1,248+ tests across 63+ test files
 - Parsing, normalization, and validation fully functional
 - Network audits completed (OH-MY-001 through OH-MY-006, 2026-02-19)
-- Remaining: retry-failures CLI (1.A6 partial), data source doc update (1.A5 minor)
+- Remaining: data source doc update (1.A5 minor)
 
 **Phase 2 (Database Design & Population):** ✅ **COMPLETE**
 - All schema design tasks (2.A1-2.A5) implemented in `schema_design.py`
@@ -241,61 +241,25 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 
 **Code TODOs (8 items):** ✅ **ALL COMPLETE** — TODO-H1, H2, M1, L1-L5 resolved
 
-**Data quality issues from [`NOTICED_ISSUES.md`](NOTICED_ISSUES.md) — 20 open items:**
+**Data quality issues:** See [`docs/NOTICED_ISSUES.md`](NOTICED_ISSUES.md) for full issue catalog with root cause analysis and resolution status.
 
-| Category | Issues | Description |
-|----------|--------|-------------|
-| **Reference tables / dropdowns** | #1, #2, #4 | Empty fiscal year, appropriation, exhibit type dropdowns |
-| **Organization normalization** | #3, #20, #38 | Duplicate service entries (ARMY/A, NAVY/N, AF/F) |
-| **Appropriation data gaps** | #5, #21, #57 | 7.4% NULL `appropriation_code` → "Unknown" in charts |
-| **FY attribution errors** | #10, #25 | FY derived from file path, not document content |
-| **PE number coverage** | #8, #53 | 67% of rows lack PE numbers (structural — exhibit-type limitation) |
-| **Enrichment quality** | #27, #39, #55 | Over-tagging, 12 PEs without descriptions |
-| **FY coverage gaps** | #56 | Some PEs missing historical FY data |
-| **Cascading / verification** | #6, #7, #9, #12, #15 | May already be fixed in Round 4/5 — need verification |
-| **Gradual refactor** | #49 | Inline styles in templates (ongoing) |
+**Actionable work groups:** See [`docs/TODO_PLAN.md`](TODO_PLAN.md) for executable task assignments. Summary:
 
-**Pipeline/CLI TODOs (1 item):**
-
-| ID | Task | Status |
-|----|------|--------|
-| 1.A6 | `--retry-failures` CLI flag for downloader | Stub exists, CLI not implemented |
-
-**Group G — Deploy & Launch (6 items, requires user infrastructure decisions):**
-
-| Sub-task | Task | Blocker |
-|----------|------|---------|
-| G1 (OH-MY-007) | Choose hosting platform | Cloud account setup |
-| G2 (OH-MY-008) | Configure CD deployment | Depends on G1 + secrets |
-| G3 (OH-MY-009) | Domain + TLS | Domain registration + G1 |
-| G4 (OH-MY-010) | Accessibility audit | Running UI (G1 or localhost) |
-| G5 (OH-MY-011) | Soft launch + feedback | Deployed app (G2 + G3) |
-| G6 (OH-MY-012) | Public launch | Depends on G5 |
-
-See [`docs/TODO_PLAN.md`](TODO_PLAN.md) for full plan with sub-agent assignments.
-See [REMAINING_TODOS.md](archive/implementation-logs/REMAINING_TODOS.md) for historical context.
+| Group | Focus | Status |
+|-------|-------|--------|
+| **A–C** | DB verification (prior fixes, reference tables, org normalization) | Code complete — needs DB verification |
+| **D** | FY attribution correction | Partial — mismatch detection exists, auto-correction missing |
+| **E** | Tag quality + description gaps | Partial — confidence scores exist, API filtering missing |
+| **F** | Download retry CLI | ✅ Complete |
+| **G** | Deploy & launch | Blocked on user infrastructure decisions |
 
 ---
 
-## Active TODOs — Groups A–F
+## Active TODOs — Groups A–G
 
-All code TODOs (H1, H2, M1, L1–L5) are **resolved**. Remaining work is database/pipeline
-data quality fixes organized into 6 groups. Full specifications with SQL queries, file
-lists, and step-by-step instructions are in **[`docs/TODO_PLAN.md`](TODO_PLAN.md)**.
-
-To execute: _"Clean up TODO groups A–G from `docs/TODO_PLAN.md`"_
-
-| Group | Branch | Focus | Issues | Needs DB? |
-|-------|--------|-------|--------|-----------|
-| **A** | `fix/verify-round5-fixes` | Verify prior Round 4/5 fixes | #6, #7, #9, #12, #15, #18, #26, #52 | Yes |
-| **B** | `fix/reference-tables` | Populate reference tables & dropdowns | #1, #2, #4, #5, #21, #57 | Yes |
-| **C** | `fix/org-normalization` | Normalize organization names | #3, #20, #38 | Yes |
-| **D** | `fix/fy-attribution` | Fix fiscal year attribution | #10, #25, #56 | Yes |
-| **E** | `fix/enrichment-quality` | Tune tags, fill missing descriptions | #27, #39, #55 | Yes |
-| **F** | `fix/retry-failures-cli` | Implement download retry CLI | ROADMAP 1.A6 | No |
-| **G** | `infra/deploy-and-launch` | Hosting, domain, CD, accessibility, launch | OH-MY-007–012 | No (needs credentials) |
-
-**Parallelism:** A first (verification), then B–E in parallel. F independent (no DB). G requires user infrastructure decisions.
+All code TODOs (H1, H2, M1, L1–L5) are **resolved**. Remaining work is organized into
+groups A–G. Full specifications in **[`docs/TODO_PLAN.md`](TODO_PLAN.md)** — the single
+source of truth for task execution.
 
 ## Recent Improvements
 

@@ -14,53 +14,75 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
 
 ### Search Page (/)
 
-1. **[OPEN]** **Fiscal Year dropdown — empty** (0 options, won't open)
-2. **[OPEN]** **Appropriation dropdown — empty** (0 options, won't open)
-3. **[OPEN]** **Service/Agency — duplicates** (AF/Air Force, ARMY/Army, NAVY/Navy — 57 total entries)
-4. **[OPEN]** **Exhibit Type — bad labels** (showing `c1 — c1` instead of readable names like "C-1")
+1. **[CODE COMPLETE — needs DB verification]** **Fiscal Year dropdown — empty** (0 options, won't open)
+   _Fix: FY dropdown queries `budget_lines` directly with validation. See `api/routes/frontend.py:182-213`._
+2. **[CODE COMPLETE — needs DB verification]** **Appropriation dropdown — empty** (0 options, won't open)
+   _Fix: Endpoint queries distinct appropriation_code from budget_lines. See `api/routes/reference.py:87-104`._
+3. **[CODE COMPLETE — needs DB verification]** **Service/Agency — duplicates** (AF/Air Force, ARMY/Army, NAVY/Navy — 57 total entries)
+   _Fix: 94-variant normalization mapping in `utils/normalization.py`, applied at ingestion and via `repair_database.py:step_3`._
+4. **[CODE COMPLETE — needs DB verification]** **Exhibit Type — bad labels** (showing `c1 — c1` instead of readable names like "C-1")
+   _Fix: `_clean_display()` fallback in `api/routes/frontend.py:147-179` uses static map when display_name is NULL or same as code._
 5. **[OPEN]** **"By Appropriation Type" donut chart — all "Unknown"** (single $6B slice)
 6. **[OPEN]** **"Budget by Service" bar chart — large "Unknown" bucket** ($665M)
 7. **[OPEN]** **Duplicate/repetitive search results** — programs appear multiple times instead of consolidated
-8. **[OPEN]** **Missing PE numbers** — those same programs should have PE#s but show "—"
+8. **[STRUCTURAL — documented in PRD §9]** **Missing PE numbers** — those same programs should have PE#s but show "—"
+   _Note: 67% of rows lack PE numbers; this is inherent to O-1/M-1/P-1 exhibit types._
 
 ### Detail View (from search results)
 
-9. **[OPEN]** **Detail tab is very slow** to load when clicking a search result
-10. **[OPEN]** **Detail tab data errors (CPS example):**
+9. **[CODE COMPLETE — needs DB verification]** **Detail tab is very slow** to load when clicking a search result
+   _Fix: Composite indexes added in `pipeline/builder.py` and `repair_database.py:step_5`. Table reduced from 644K to 47K rows._
+10. **[OPEN — partial]** **Detail tab data errors (CPS example):**
     - Shows FY 1998 — incorrect, program didn't exist then
     - Appropriation shows "- -" (meaningless)
     - Source file path says "FY1998\PB\Defense_wide..." — wrong
     - Related Fiscal Years shows "FYFY 1998" — duplicated prefix typo
+    _Note: FY mismatch detection exists (`pipeline/builder.py:1213-1222`) but only logs warning, doesn't auto-correct._
 
 ### Dashboard (/dashboard)
 
-11. **[OPEN]** **Dashboard page — extremely slow to load**
-12. **[OPEN]** **Summary cards show "— —"** for FY2026 Total Request, FY2025 Enacted, and YOY Change
-13. **[OPEN]** **"By Appropriation" — "No appropriation data available"**
-14. **[OPEN]** **"Budget by Service" chart** — bars near zero ($0-$1M range), "Unknown" is top entry
-15. **[OPEN]** **"Top 10 Programs by FY2026 Request" — completely empty**
+11. **[CODE COMPLETE — needs DB verification]** **Dashboard page — extremely slow to load**
+    _Fix: Indexes, cache warmup (`api/routes/aggregations.py`), and 47K-row table make this fast._
+12. **[CODE COMPLETE — needs DB verification]** **Summary cards show "— —"** for FY2026 Total Request, FY2025 Enacted, and YOY Change
+    _Fix: Dynamic FY column detection + budget_type backfill should resolve. Cascading fix from #5, #6, #7._
+13. **[CODE COMPLETE — needs DB verification]** **"By Appropriation" — "No appropriation data available"**
+    _Fix: Appropriation backfill reduced NULLs from 17.5% to 7.4%. Dashboard uses BUDGET_TYPE_CASE_EXPR._
+14. **[RESOLVED in Round 5]** **"Budget by Service" chart** — bars near zero ($0-$1M range), "Unknown" is top entry
+15. **[CODE COMPLETE — needs DB verification]** **"Top 10 Programs by FY2026 Request" — completely empty**
+    _Fix: Cascading fix from deduplication and index addition._
 
 ### Charts (/charts)
 
-16. **[OPEN]** **YOY chart confirms data gap** — bars only at FY 1998 and FY 2025-2026, nothing for FY 2000-2024
+16. **[STRUCTURAL — documented in PRD §9]** **YOY chart confirms data gap** — bars only at FY 1998 and FY 2025-2026, nothing for FY 2000-2024
+    _Note: FY2000-2009 documents not publicly available._
 17. **[OPEN]** **Top 10 has duplicates** — "Classified Programs" x4, "Private Sector Care" x2, "Ship Depot Maintenance" x2
-18. **[OPEN]** **Defaults to FY 1998** — should probably default to most recent year
-19. **[OPEN]** **Selecting FY 2012 shows blank** (no data for that year)
-20. **[OPEN]** **Service dropdown has same duplicates** (ARMY/Army, AF/Air Force, NAVY/Navy)
-21. **[OPEN]** **Appropriation Breakdown donut is 100% "Unknown"**
+18. **[CODE COMPLETE — needs DB verification]** **Defaults to FY 1998** — should probably default to most recent year
+    _Fix: `api/routes/frontend.py:540-541` reverses FY list so newest is first._
+19. **[STRUCTURAL — documented in PRD §9]** **Selecting FY 2012 shows blank** (no data for that year)
+    _Note: FY2000-2009 documents not publicly available._
+20. **[CODE COMPLETE — needs DB verification]** **Service dropdown has same duplicates** (ARMY/Army, AF/Air Force, NAVY/Navy)
+    _Fix: Same fix as #3 — org normalization in `utils/normalization.py`._
+21. **[CODE COMPLETE — needs DB verification]** **Appropriation Breakdown donut is 100% "Unknown"**
+    _Fix: Same fix as #5 — appropriation backfill._
 
 ### Programs (/programs)
 
-22. **[OPEN]** **Duplicate FY entries** — e.g., FY 2012 appears 8 times for B-52 Squadrons
-23. **[OPEN]** **Missing FY columns** — no columns for FY 1998-2023
-24. **[OPEN]** **FY 2000-2011 have zero entries** despite data supposedly existing
-25. **[OPEN]** **FY24 Actual data incorrectly attributed** to FY 1998 source
-26. **[OPEN]** **Tags dropdown is mispositioned** — overlaps onto the program cards
-27. **[OPEN]** **Tag counts look inflated** — rdte: 1539/1579, communications: 1502, aviation: 1438 (nearly every program tagged with nearly everything)
+22. **[RESOLVED in Round 5]** **Duplicate FY entries** — e.g., FY 2012 appears 8 times for B-52 Squadrons
+23. **[STRUCTURAL — documented in PRD §9]** **Missing FY columns** — no columns for FY 1998-2023
+    _Note: FY2000-2009 gap is a data coverage limitation._
+24. **[STRUCTURAL — documented in PRD §9]** **FY 2000-2011 have zero entries** despite data supposedly existing
+    _Note: FY2000-2009 gap is a data coverage limitation._
+25. **[OPEN — partial]** **FY24 Actual data incorrectly attributed** to FY 1998 source
+    _Note: Same root cause as #10 — FY mismatch detection exists but no auto-correction._
+26. **[CODE COMPLETE — needs DB verification]** **Tags dropdown is mispositioned** — overlaps onto the program cards
+    _Fix: CSS z-index fix in `static/css/main.css:1698`. Issue #26 explicitly referenced in comment._
+27. **[OPEN — partial]** **Tag counts look inflated** — rdte: 1539/1579, communications: 1502, aviation: 1438 (nearly every program tagged with nearly everything)
+    _Note: Confidence scoring exists in enricher but API endpoint doesn't filter by confidence or coverage threshold._
 
 ### Footer (all pages)
 
-28. **[OPEN]** **Data sources FY gap** — shows FY 1998, 1999, then jumps to 2010-2026 (missing FY 2000-2009)
+28. **[STRUCTURAL — documented in PRD §9]** **Data sources FY gap** — shows FY 1998, 1999, then jumps to 2010-2026 (missing FY 2000-2009)
+    _Note: FY2000-2009 documents not publicly available._
 
 ### Round 1 Root Cause Analysis
 
@@ -186,22 +208,24 @@ Removed the hero version (`name="hero_source"`) radio buttons. The sidebar versi
 
 ---
 
-### 38. Service/Agency Dropdown — Potentially Dozens of Entries **[OPEN]**
+### 38. Service/Agency Dropdown — Potentially Dozens of Entries **[CODE COMPLETE — needs DB verification]**
 
 **Root cause:** Database-level issue. Organization names need normalization
 (collapse ARMY/A → Army, etc.). This requires pipeline/DB changes, not just frontend fixes.
 
-**Suggested fix:** Add a normalization step in the pipeline or a mapping table.
+**Fix applied:** Same fix as #3 — org normalization in `utils/normalization.py`.
 
 ---
 
-### 39. Tags Dropdown — Up to 30 Options, Potentially Meaningless **[OPEN]**
+### 39. Tags Dropdown — Up to 30 Options, Potentially Meaningless **[OPEN — partial]**
 
 **Root cause:** Enrichment pipeline over-tags (issue #27). Fixing the tag quality
 requires pipeline changes, not frontend changes.
 
 **Suggested fix:** Fix enrichment selectivity, then consider filtering tags by
 coverage threshold (< 50%) in the dropdown.
+
+_Note: Confidence column exists in pe_tags but `list_tags()` in `api/routes/pe.py` doesn't filter._
 
 ---
 
@@ -354,7 +378,7 @@ GROUP BY appropriation_code ORDER BY COUNT(*) DESC;
 
 ---
 
-#### 53. 67% of budget_lines Have No PE Number **[OPEN — DB]**
+#### 53. 67% of budget_lines Have No PE Number **[STRUCTURAL — documented in PRD §9]**
 
 83,497 of 124,670 rows (67%) have NULL `pe_number`. These rows cannot be enriched,
 tagged, or linked to PE-centric views (Programs, Consolidated).
@@ -664,17 +688,13 @@ are rows without enough context to infer an appropriation code.
 
 | Status | Count | Issues |
 |--------|-------|--------|
-| **Round 5 RESOLVED** | 5 | #5, #6/14, #7/17/22, #57, #63 |
-| **Round 4 RESOLVED** | 3 | #52, #58, #59 |
-| **Round 4 DOCUMENTED** | 1 | #62 (tag assessment) |
-| **Round 3 RESOLVED (Data)** | 2 | #51 (project boundary detection), #54 (taxonomy expansion) |
-| **Round 3 OPEN (Data)** | 3 | #53, #55, #56 (pipeline/DB data quality) |
-| **Round 3 RESOLVED (Perf)** | 2 | #60 (FTS scan limit), #61 (aggregation warmup + dynamic cols) |
-| **Round 3 OPEN (Perf)** | 0 | — |
-| **Round 2 RESOLVED** | 20 | #29-37, #40-48, #50 |
-| **Round 2 OPEN** | 2 | #38 (service normalization — DB), #39 (tag quality — pipeline) |
-| **Round 2 GRADUAL** | 1 | #49 (inline styles — ongoing) |
-| **Round 1 OPEN** | 28 | #1-28 (mostly DB/pipeline root causes) |
+| **RESOLVED** | 32 | #5, #6/14, #7/17/22, #29-37, #40-48, #50-52, #54, #57-61, #63 |
+| **CODE COMPLETE — needs DB verification** | 15 | #1, #2, #3, #4, #9, #11, #12, #13, #15, #18, #20, #21, #26, #38 |
+| **STRUCTURAL — documented in PRD §9** | 7 | #8, #16, #19, #23, #24, #28, #53 (data coverage limitations) |
+| **OPEN — partial** | 4 | #10, #25 (FY mismatch — detection only), #27, #39 (tag filtering not wired up) |
+| **OPEN** | 2 | #55 (12 PEs without descriptions), #56 (FY gaps in PE funding) |
+| **DOCUMENTED** | 1 | #62 (tag coverage assessment) |
+| **GRADUAL** | 1 | #49 (inline styles — ongoing refactor) |
 
 ### Infrastructure Added to Prevent Regression
 
