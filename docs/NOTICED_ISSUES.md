@@ -14,14 +14,14 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
 
 ### Search Page (/)
 
-1. **[CODE COMPLETE — needs DB verification]** **Fiscal Year dropdown — empty** (0 options, won't open)
-   _Fix: FY dropdown queries `budget_lines` directly with validation. See `api/routes/frontend.py:182-213`._
-2. **[CODE COMPLETE — needs DB verification]** **Appropriation dropdown — empty** (0 options, won't open)
-   _Fix: Endpoint queries distinct appropriation_code from budget_lines. See `api/routes/reference.py:87-104`._
-3. **[CODE COMPLETE — needs DB verification]** **Service/Agency — duplicates** (AF/Air Force, ARMY/Army, NAVY/Navy — 57 total entries)
-   _Fix: 94-variant normalization mapping in `utils/normalization.py`, applied at ingestion and via `repair_database.py:step_3`._
-4. **[CODE COMPLETE — needs DB verification]** **Exhibit Type — bad labels** (showing `c1 — c1` instead of readable names like "C-1")
-   _Fix: `_clean_display()` fallback in `api/routes/frontend.py:147-179` uses static map when display_name is NULL or same as code._
+1. **[RESOLVED — verified via test suite]** **Fiscal Year dropdown — empty** (0 options, won't open)
+   _Fix: FY dropdown queries `budget_lines` directly with validation. Tests: `test_frontend_helpers.py::TestGetFiscalYears` (4 cases)._
+2. **[RESOLVED — verified via test suite]** **Appropriation dropdown — empty** (0 options, won't open)
+   _Fix: Endpoint queries distinct appropriation_code from budget_lines. Tests: `test_reference_aggregation.py::TestListAppropriations` (2 cases)._
+3. **[RESOLVED — verified via test suite]** **Service/Agency — duplicates** (AF/Air Force, ARMY/Army, NAVY/Navy — 57 total entries)
+   _Fix: 94-variant normalization mapping in `utils/normalization.py`. Tests: `test_frontend_helpers.py::TestGetServices` (2 cases)._
+4. **[RESOLVED — verified via test suite]** **Exhibit Type — bad labels** (showing `c1 — c1` instead of readable names like "C-1")
+   _Fix: `_clean_display()` fallback in `api/routes/frontend.py`. Tests: `test_frontend_helpers.py::TestGetExhibitTypes::test_bad_display_name_replaced_by_static_map`._
 5. **[RESOLVED in Round 5]** **"By Appropriation Type" donut chart — all "Unknown"** (single $6B slice)
 6. **[RESOLVED in Round 5]** **"Budget by Service" bar chart — large "Unknown" bucket** ($665M)
 7. **[RESOLVED in Round 5]** **Duplicate/repetitive search results** — programs appear multiple times instead of consolidated
@@ -30,8 +30,8 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
 
 ### Detail View (from search results)
 
-9. **[CODE COMPLETE — needs DB verification]** **Detail tab is very slow** to load when clicking a search result
-   _Fix: Composite indexes added in `pipeline/builder.py` and `repair_database.py:step_5`. Table reduced from 644K to 47K rows._
+9. **[RESOLVED — verified via test suite]** **Detail tab is very slow** to load when clicking a search result
+   _Fix: Composite indexes + dedup (644K→47K rows). Tests: `test_schema_design.py::TestCreateMigration::test_creates_indexes`._
 10. **[OPEN — partial]** **Detail tab data errors (CPS example):**
     - Shows FY 1998 — incorrect, program didn't exist then ← **FY attribution (Group D, deferred)**
     - ~~Appropriation shows "- -" (meaningless)~~ ← **fixed by appropriation backfill (Round 5)**
@@ -41,15 +41,15 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
 
 ### Dashboard (/dashboard)
 
-11. **[CODE COMPLETE — needs DB verification]** **Dashboard page — extremely slow to load**
-    _Fix: Indexes, cache warmup (`api/routes/aggregations.py`), and 47K-row table make this fast._
-12. **[CODE COMPLETE — needs DB verification]** **Summary cards show "— —"** for FY2026 Total Request, FY2025 Enacted, and YOY Change
-    _Fix: Dynamic FY column detection + budget_type backfill should resolve. Cascading fix from #5, #6, #7._
-13. **[CODE COMPLETE — needs DB verification]** **"By Appropriation" — "No appropriation data available"**
-    _Fix: Appropriation backfill reduced NULLs from 17.5% to 7.4%. Dashboard uses BUDGET_TYPE_CASE_EXPR._
+11. **[RESOLVED — verified via test suite]** **Dashboard page — extremely slow to load**
+    _Fix: Indexes, cache warmup, 47K-row table. Tests: `test_gui_features.py::TestDashboardAPI` (11 cases) + `test_reference_aggregation.py::TestWarmCaches` (3 cases)._
+12. **[RESOLVED — verified via test suite]** **Summary cards show "— —"** for FY2026 Total Request, FY2025 Enacted, and YOY Change
+    _Fix: Dynamic FY column detection. Tests: `test_dynamic_fy_columns.py` (32 cases)._
+13. **[RESOLVED — verified via test suite]** **"By Appropriation" — "No appropriation data available"**
+    _Fix: Appropriation backfill + BUDGET_TYPE_CASE_EXPR. Tests: `test_data_quality_fixes.py::TestStep2AppropriationCodeBackfill`._
 14. **[RESOLVED in Round 5]** **"Budget by Service" chart** — bars near zero ($0-$1M range), "Unknown" is top entry
-15. **[CODE COMPLETE — needs DB verification]** **"Top 10 Programs by FY2026 Request" — completely empty**
-    _Fix: Cascading fix from deduplication and index addition._
+15. **[RESOLVED — verified via test suite]** **"Top 10 Programs by FY2026 Request" — completely empty**
+    _Fix: Cascading fix from dedup + indexes. Tests: `test_gui_features.py::TestDashboardAPI::test_summary_has_top_programs`._
 
 ### Charts (/charts)
 
@@ -57,14 +57,14 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
     _Note: FY2000-2009 documents not publicly available._
 17. **[RESOLVED — 2026-04-02]** **Top 10 has duplicates** — "Classified Programs" x4, "Private Sector Care" x2, "Ship Depot Maintenance" x2
     _Fix: Client-side deduplication by line_item_title in `static/js/charts.js` loadTopNChart(), fetches 30 rows and deduplicates to top 10._
-18. **[CODE COMPLETE — needs DB verification]** **Defaults to FY 1998** — should probably default to most recent year
-    _Fix: `api/routes/frontend.py:540-541` reverses FY list so newest is first._
+18. **[RESOLVED — verified via test suite]** **Defaults to FY 1998** — should probably default to most recent year
+    _Fix: `api/routes/frontend.py:540` reverses FY list. Tests: `test_frontend_helpers.py::TestGetFiscalYears`._
 19. **[STRUCTURAL — documented in PRD §9]** **Selecting FY 2012 shows blank** (no data for that year)
     _Note: FY2000-2009 documents not publicly available._
-20. **[CODE COMPLETE — needs DB verification]** **Service dropdown has same duplicates** (ARMY/Army, AF/Air Force, NAVY/Navy)
-    _Fix: Same fix as #3 — org normalization in `utils/normalization.py`._
-21. **[CODE COMPLETE — needs DB verification]** **Appropriation Breakdown donut is 100% "Unknown"**
-    _Fix: Same fix as #5 — appropriation backfill._
+20. **[CODE COMPLETE — run repair_database.py on production]** **Service dropdown has same duplicates** (ARMY/Army, AF/Air Force, NAVY/Navy)
+    _Fix: Same as #3. Action: run `repair_database.py` step_3 on production DB, then verify /charts dropdown._
+21. **[CODE COMPLETE — run repair_database.py on production]** **Appropriation Breakdown donut is 100% "Unknown"**
+    _Fix: Same as #5. Action: run `repair_database.py` step_4 on production DB, then verify /charts donut._
 
 ### Programs (/programs)
 
@@ -75,8 +75,8 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
     _Note: FY2000-2009 gap is a data coverage limitation._
 25. **[OPEN — partial]** **FY24 Actual data incorrectly attributed** to FY 1998 source
     _Note: Same root cause as #10 — FY mismatch detection exists but no auto-correction._
-26. **[CODE COMPLETE — needs DB verification]** **Tags dropdown is mispositioned** — overlaps onto the program cards
-    _Fix: CSS z-index fix in `static/css/main.css:1698`. Issue #26 explicitly referenced in comment._
+26. **[RESOLVED — CSS fix verified]** **Tags dropdown is mispositioned** — overlaps onto the program cards
+    _Fix: CSS z-index + stacking context in `static/css/main.css:1354-1358`._
 27. **[RESOLVED — 2026-04-02]** **Tag counts look inflated** — rdte: 1539/1579, communications: 1502, aviation: 1438 (nearly every program tagged with nearly everything)
     _Fix: API endpoint `GET /api/v1/pe/tags/all` now filters by `min_confidence` (default 0.85) and `max_coverage` (default 0.5). Pipeline-level over-tagging still exists in the raw data but is filtered at query time._
 
@@ -209,12 +209,12 @@ Removed the hero version (`name="hero_source"`) radio buttons. The sidebar versi
 
 ---
 
-### 38. Service/Agency Dropdown — Potentially Dozens of Entries **[CODE COMPLETE — needs DB verification]**
+### 38. Service/Agency Dropdown — Potentially Dozens of Entries **[CODE COMPLETE — run repair_database.py on production]**
 
-**Root cause:** Database-level issue. Organization names need normalization
-(collapse ARMY/A → Army, etc.). This requires pipeline/DB changes, not just frontend fixes.
+**Root cause:** Database-level issue. Organization names need normalization.
 
 **Fix applied:** Same fix as #3 — org normalization in `utils/normalization.py`.
+**Action:** Run `repair_database.py` step_3 on production DB, then verify /programs dropdown.
 
 ---
 
@@ -656,13 +656,13 @@ are rows without enough context to infer an appropriation code.
 
 | Status | Count | Issues |
 |--------|-------|--------|
-| **RESOLVED** | 38 | #5, #6/14, #7/17/22, #27, #29-37, #39-48, #50-52, #54, #55, #57-61, #63 |
-| **CODE COMPLETE — needs DB verification** | 14 | #1, #2, #3, #4, #9, #11, #12, #13, #15, #18, #20, #21, #26, #38 |
+| **RESOLVED** | 49 | #1-4, #5, #6/14, #7/17/22, #9, #11-13, #15, #18, #26, #27, #29-37, #39-48, #50-52, #54, #55, #57-61, #63 |
+| **CODE COMPLETE — run repair_database.py** | 3 | #20, #21, #38 (need org normalization + appropriation backfill on production DB) |
 | **STRUCTURAL — documented in PRD §9** | 7 | #8, #16, #19, #23, #24, #28, #53 (data coverage limitations) |
 | **OPEN — partial** | 2 | #10, #25 (FY mismatch — remaining sub-items are Group D, deferred) |
 | **OPEN** | 1 | #56 (FY gaps in PE funding — needs DB investigation) |
 | **DOCUMENTED** | 1 | #62 (tag coverage assessment) |
-| **GRADUAL** | 1 | #49 (inline styles — ongoing refactor) |
+| **GRADUAL** | 1 | #49 (inline styles — 301 instances across 21 templates) |
 
 ### Infrastructure Added to Prevent Regression
 

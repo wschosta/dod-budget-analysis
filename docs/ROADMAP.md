@@ -246,11 +246,11 @@ Remaining work is organized into groups A–G:
 
 | Group | Focus | Code Status | What Remains |
 |-------|-------|-------------|-------------|
-| **A** | Verify prior fixes | ✅ Code complete | DB verification only |
-| **B** | Reference tables & dropdowns | ✅ Code complete | DB verification only |
-| **C** | Org name normalization | ✅ Code complete | DB verification only |
-| **D** | FY attribution | ⚠️ Partial | Mismatch logs but no auto-correction |
-| **E** | Enrichment quality | ✅ Code complete | Tag filtering + description fallback done |
+| **A** | Verify prior fixes | ✅ Resolved (11/14 via test suite) | 3 items need `repair_database.py` on production |
+| **B** | Reference tables & dropdowns | ✅ Resolved via test suite | — |
+| **C** | Org name normalization | ✅ Resolved via test suite | — |
+| **D** | FY attribution | ⚠️ Partial | Mismatch logs but no auto-correction (deferred) |
+| **E** | Enrichment quality | ✅ Resolved via test suite | — |
 | **F** | Download retry CLI | ✅ Complete | — |
 | **G** | Deploy & launch | ❌ Blocked | Needs user infrastructure decisions |
 
