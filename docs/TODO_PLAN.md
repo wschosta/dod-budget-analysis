@@ -14,7 +14,7 @@
 | **B** | Reference tables & dropdowns | ✅ Code complete | DB verification only |
 | **C** | Org name normalization | ✅ Code complete | DB verification only |
 | **D** | FY attribution | ⚠️ Partial | Mismatch logs but no auto-correction |
-| **E** | Enrichment quality | ⚠️ Partial | Tag filtering done; description gap-fill needs DB |
+| **E** | Enrichment quality | ✅ Code complete | Tag filtering + description fallback done; #27 pipeline-level deferred |
 | **F** | Download retry CLI | ✅ Complete | Done (2026-04-02) |
 | **G** | Deploy & launch | ❌ Blocked | Needs user infrastructure decisions |
 
@@ -34,44 +34,39 @@ These groups have all fixes implemented in code. They only need someone to run t
 verification queries against `dod_budget.sqlite` and update `docs/NOTICED_ISSUES.md`.
 
 ### Group A: Verify Prior Fixes
-**NOTICED_ISSUES refs:** #6, #7, #9, #18, #26, #52
+**NOTICED_ISSUES refs:** ~~#6~~, ~~#7~~, #9, #18, #26, ~~#52~~
 
-All fixes are in the codebase:
+All fixes are in the codebase. Issues #6, #7, #52 were resolved in Rounds 4-5 and
+confirmed with ingestion-time fixes (2026-04-02). Remaining items (#9, #18, #26) are
+code-verified but need DB confirmation.
+
 - Org normalization: `utils/normalization.py` (94 mappings), `repair_database.py:step_3`
 - Deduplication: `pipeline/builder.py` (PARTITION BY 7 cols + unique index)
 - Composite indexes: `pipeline/builder.py`, `repair_database.py:step_5`
 - Charts FY sort: `api/routes/frontend.py:540` (reversed list)
-- Z-index fix: `static/css/main.css:1698` (Issue #26 stacking context)
-- budget_type backfill: `pipeline/builder.py`, `scripts/fix_budget_types.py`
+- Z-index fix: `static/css/main.css` (Issue #26 stacking context)
+- budget_type backfill: `pipeline/builder.py` (ingestion-time) + `scripts/fix_budget_types.py` (migration)
 
 **Verification queries** (run against dod_budget.sqlite):
 ```sql
--- #6: Org normalization applied
-SELECT COUNT(*) FROM budget_lines WHERE organization_name IS NULL OR organization_name = '';
--- expect 0
-
--- #7: Deduplication complete
-SELECT COUNT(*) FROM budget_lines;
--- expect ~47K
-
 -- #9: Indexes exist
 SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_bl_%';
 
 -- #18: FY sort (code check only — verified in api/routes/frontend.py:540)
 
--- #26: Z-index (CSS check only — verified in static/css/main.css:1698)
+-- #26: Z-index (CSS check only — verified in static/css/main.css)
 
--- #52: budget_type NULLs
+-- budget_type NULLs (should be even fewer after ingestion fix)
 SELECT COUNT(*) FROM budget_lines WHERE budget_type IS NULL;
 -- expect ≤116
 ```
 
-**After verification:** Update `docs/NOTICED_ISSUES.md` — change `[OPEN]` to `[RESOLVED — verified YYYY-MM-DD]`.
+**After verification:** Update `docs/NOTICED_ISSUES.md` — change `[CODE COMPLETE]` to `[RESOLVED — verified YYYY-MM-DD]`.
 
 ---
 
 ### Group B: Reference Tables & Dropdowns
-**NOTICED_ISSUES refs:** #1, #2, #4, #5, #21, #57
+**NOTICED_ISSUES refs:** #1, #2, #4, ~~#5~~, #21, ~~#57~~
 
 All fixes implemented:
 - Reference table DDL + seed data: `pipeline/schema.py` (22 services, 7 appropriations, 11 exhibits, 5 budget cycles)
@@ -113,6 +108,28 @@ GROUP BY organization_name ORDER BY 2 DESC;
 
 ---
 
+### Group E: Enrichment Quality ✅
+**NOTICED_ISSUES refs:** ~~#27~~ (mitigated), ~~#39~~, ~~#55~~
+
+**All code fixes applied (2026-04-02):**
+- ~~Tag filtering in API~~ ✅ `min_confidence` (0.85) and `max_coverage` (0.5) params in `api/routes/pe.py`
+- ~~Description gap-fill~~ ✅ Phase 2 fallback in `pipeline/enricher.py` synthesizes descriptions from budget_lines
+- **#27 (pipeline over-tagging):** Mitigated at API level by confidence/coverage filtering. Further pipeline-level taxonomy tightening deferred — low priority since API filtering is effective
+
+**Verification queries** (run against dod_budget.sqlite):
+```sql
+-- Confirm tag filtering works (should exclude broad tags)
+SELECT tag, COUNT(*) c FROM pe_tags WHERE confidence >= 0.85
+GROUP BY tag ORDER BY c DESC LIMIT 20;
+
+-- Confirm no PEs without descriptions
+SELECT COUNT(*) FROM pe_index
+WHERE pe_number NOT IN (SELECT DISTINCT pe_number FROM pe_descriptions);
+-- expect 0
+```
+
+---
+
 ## Partially Implemented Groups
 
 ### Group D: Fiscal Year Attribution
@@ -144,43 +161,6 @@ GROUP BY 1, 2 ORDER BY 1, 2;
 **Tests:**
 ```bash
 python -m pytest tests/ -k "fiscal_year or builder" -v
-```
-
----
-
-### Group E: Enrichment Quality
-**NOTICED_ISSUES refs:** #27, #39, #55
-
-**What exists:**
-- Confidence-based tagging: `pipeline/enricher.py:1046-1184` (6 levels: 1.0->0.65)
-- PE descriptions table + Phase 2 extraction: `pipeline/enricher.py:379-826`
-- Tier-2 taxonomy with lower confidence: `pipeline/enricher.py:126-156`
-
-**What's missing:**
-- ~~**Tag filtering in API**: `api/routes/pe.py` `list_tags()` has no confidence threshold or coverage cap~~ ✅ Fixed 2026-04-02: Added `min_confidence` (default 0.85) and `max_coverage` (default 0.5) query parameters
-- **Gap-fill for 12 PEs** without descriptions (#55) — needs DB access to identify them
-
-**Files to modify:**
-- `api/routes/pe.py` (add tag filtering)
-- `pipeline/enricher.py` (if keyword rules need tightening)
-- `docs/NOTICED_ISSUES.md` (update #27, #39, #55)
-
-**Needs DB:** Yes — for description gap investigation; tag filtering is a code-only fix
-
-**Verification queries:**
-```sql
--- Check tag coverage
-SELECT tag, COUNT(*) c FROM pe_tags GROUP BY tag ORDER BY c DESC LIMIT 20;
-SELECT COUNT(DISTINCT pe_number) FROM pe_index;
-
--- Find PEs without descriptions
-SELECT pe_number, display_title FROM pe_index
-WHERE pe_number NOT IN (SELECT DISTINCT pe_number FROM pe_descriptions);
-```
-
-**Tests:**
-```bash
-python -m pytest tests/ -k "enricher or tag" -v
 ```
 
 ---

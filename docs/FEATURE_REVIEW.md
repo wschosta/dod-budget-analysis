@@ -101,12 +101,15 @@ No further code work should happen here until those decisions are made.
 
 Based on the codebase maturity and remaining gaps, here are prioritized recommendations:
 
-### P0 — Fix Now (< 1 hour each)
+### P0 — Fix Now (< 1 hour each) — ALL DONE
 
-| Feature | Rationale | Files |
-|---------|-----------|-------|
-| **Tag confidence filtering** | 5-line fix, immediately improves PE tag quality | `api/routes/pe.py` |
-| **ROADMAP 4.B2 correction** | Documentation accuracy | `docs/ROADMAP.md` |
+| Feature | Status | Files |
+|---------|--------|-------|
+| ~~Tag confidence filtering~~ | ✅ Done 2026-04-02 | `api/routes/pe.py` |
+| ~~ROADMAP 4.B2 correction~~ | ✅ Done 2026-04-02 | `docs/ROADMAP.md` |
+| ~~Top-N chart deduplication~~ | ✅ Done 2026-04-02 | `static/js/charts.js` |
+| ~~budget_type ingestion fix~~ | ✅ Done 2026-04-02 | `pipeline/builder.py` |
+| ~~PE description fallback~~ | ✅ Done 2026-04-02 | `pipeline/enricher.py` |
 
 ### P1 — Do Before Launch
 
@@ -121,7 +124,6 @@ Based on the codebase maturity and remaining gaps, here are prioritized recommen
 | Feature | Rationale | Files |
 |---------|-----------|-------|
 | **FY auto-correction** (Group D) | Only if user reports show FY attribution errors | `pipeline/builder.py` |
-| **PE description gap-fill** (Group E, item 3) | 12 PEs missing descriptions — minor completeness issue | `pipeline/enricher.py` |
 | **Additional DoD sources** (DLA, MDA, SOCOM) | Expand coverage beyond 6 current sources | `downloader/` |
 | **FY2000-2009 historical data** | Documents not publicly available in structured format — may not be feasible | Research task |
 
@@ -138,13 +140,9 @@ Based on the codebase maturity and remaining gaps, here are prioritized recommen
 
 ## 4. Summary
 
-The `claude/review-todos-docs-mThIH` branch did excellent work consolidating the
-project state. The codebase is **mature and feature-complete** for its stated goals.
-The two immediate actions are:
+The codebase is **mature and feature-complete** for its stated goals. All P0 items
+have been resolved. The remaining work falls into three categories:
 
-1. **Fix the tag confidence filtering** in `api/routes/pe.py` (5 minutes of code)
-2. **Correct the ROADMAP** to reflect the feedback feature is complete
-
-Everything else is either blocked on infrastructure decisions (Group G) or requires
-the production database (Groups A-D verification). No major new feature development
-is recommended before deployment.
+1. **Pre-launch (P1):** Accessibility audit, data source docs, DB verification — no new features
+2. **Blocked (Group G):** Deployment requires infrastructure decisions from the project owner
+3. **Post-launch (P2):** FY auto-correction and additional data sources — only if users request them

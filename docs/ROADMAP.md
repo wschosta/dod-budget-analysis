@@ -250,7 +250,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 |-------|-------|--------|
 | **A–C** | DB verification (prior fixes, reference tables, org normalization) | Code complete — needs DB verification |
 | **D** | FY attribution correction | Partial — mismatch detection exists, auto-correction missing |
-| **E** | Tag quality + description gaps | Partial — confidence scores exist, API filtering missing |
+| **E** | Tag quality + description gaps | ✅ Code complete — API filtering + description fallback done |
 | **F** | Download retry CLI | ✅ Complete |
 | **G** | Deploy & launch | Blocked on user infrastructure decisions |
 
