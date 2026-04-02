@@ -244,7 +244,7 @@ async function loadTopNChart(fy) {
     var services = getSelectedServices();
     var sortCol = 'amount_fy' + fy.replace(/\D/g, '') + '_request';
     // 3.3: exclude_summary=true to avoid double-counting from summary exhibits
-    var url = CHARTS_API + '/budget-lines?sort_by=' + sortCol + '&sort_dir=desc&limit=10&fiscal_year=' + fy + '&exclude_summary=true';
+    var url = CHARTS_API + '/budget-lines?sort_by=' + sortCol + '&sort_dir=desc&limit=30&fiscal_year=' + fy + '&exclude_summary=true';
     services.forEach(function(s) { url += '&service=' + encodeURIComponent(s); });
 
     var resp = await fetch(url);
@@ -260,13 +260,27 @@ async function loadTopNChart(fy) {
     var amtKeys = Object.keys(sampleItem).filter(function(k) { return k.startsWith('amount_') && k.includes('request'); });
     var amtCol = amtKeys.find(function(k) { return k.includes(fy.replace(/\D/g, '')); }) || amtKeys[0] || sortCol;
 
-    var topLabels = data.items.map(function(r) {
+    // Deduplicate by line_item_title — take the row with the highest amount per title
+    var seen = {};
+    var deduped = [];
+    data.items.forEach(function(r) {
+      var key = (r.line_item_title || r.account_title || 'Unknown');
+      var amt = r[amtCol] || 0;
+      if (!seen[key] || amt > (seen[key][amtCol] || 0)) {
+        seen[key] = r;
+      }
+    });
+    Object.keys(seen).forEach(function(k) { deduped.push(seen[k]); });
+    deduped.sort(function(a, b) { return (b[amtCol] || 0) - (a[amtCol] || 0); });
+    deduped = deduped.slice(0, 10);
+
+    var topLabels = deduped.map(function(r) {
       var title = r.line_item_title || r.account_title || 'Unknown';
       var org   = r.organization_name ? ' (' + r.organization_name + ')' : '';
       return title.length > 40 ? title.slice(0, 38) + '\u2026' + org : title + org;
     });
-    var topAmts = data.items.map(function(r) { return (r[amtCol] || 0) / 1000; });
-    var topItems = data.items;
+    var topAmts = deduped.map(function(r) { return (r[amtCol] || 0) / 1000; });
+    var topItems = deduped;
 
     if (chartTopN) chartTopN.destroy();
     chartTopN = new Chart(document.getElementById('chart-topn'), {

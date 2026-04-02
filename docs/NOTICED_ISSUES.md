@@ -22,9 +22,9 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
    _Fix: 94-variant normalization mapping in `utils/normalization.py`, applied at ingestion and via `repair_database.py:step_3`._
 4. **[CODE COMPLETE — needs DB verification]** **Exhibit Type — bad labels** (showing `c1 — c1` instead of readable names like "C-1")
    _Fix: `_clean_display()` fallback in `api/routes/frontend.py:147-179` uses static map when display_name is NULL or same as code._
-5. **[OPEN]** **"By Appropriation Type" donut chart — all "Unknown"** (single $6B slice)
-6. **[OPEN]** **"Budget by Service" bar chart — large "Unknown" bucket** ($665M)
-7. **[OPEN]** **Duplicate/repetitive search results** — programs appear multiple times instead of consolidated
+5. **[RESOLVED in Round 5]** **"By Appropriation Type" donut chart — all "Unknown"** (single $6B slice)
+6. **[RESOLVED in Round 5]** **"Budget by Service" bar chart — large "Unknown" bucket** ($665M)
+7. **[RESOLVED in Round 5]** **Duplicate/repetitive search results** — programs appear multiple times instead of consolidated
 8. **[STRUCTURAL — documented in PRD §9]** **Missing PE numbers** — those same programs should have PE#s but show "—"
    _Note: 67% of rows lack PE numbers; this is inherent to O-1/M-1/P-1 exhibit types._
 
@@ -55,7 +55,8 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
 
 16. **[STRUCTURAL — documented in PRD §9]** **YOY chart confirms data gap** — bars only at FY 1998 and FY 2025-2026, nothing for FY 2000-2024
     _Note: FY2000-2009 documents not publicly available._
-17. **[OPEN]** **Top 10 has duplicates** — "Classified Programs" x4, "Private Sector Care" x2, "Ship Depot Maintenance" x2
+17. **[RESOLVED — 2026-04-02]** **Top 10 has duplicates** — "Classified Programs" x4, "Private Sector Care" x2, "Ship Depot Maintenance" x2
+    _Fix: Client-side deduplication by line_item_title in `static/js/charts.js` loadTopNChart(), fetches 30 rows and deduplicates to top 10._
 18. **[CODE COMPLETE — needs DB verification]** **Defaults to FY 1998** — should probably default to most recent year
     _Fix: `api/routes/frontend.py:540-541` reverses FY list so newest is first._
 19. **[STRUCTURAL — documented in PRD §9]** **Selecting FY 2012 shows blank** (no data for that year)
@@ -353,24 +354,11 @@ produce project-level `pe_tags` rows on the next pipeline run.
 
 ---
 
-#### 52. Detail Rows Have NULL budget_type Despite Valid appropriation_code **[OPEN — DB]**
+#### ~~52. Detail Rows Have NULL budget_type Despite Valid appropriation_code~~ **[RESOLVED — Round 4 + 2026-04-02]**
 
-2,161 rows in `budget_lines` have `appropriation_code` populated but `budget_type`
-is NULL. These are detail exhibit rows (r2, p5, amendment, ogsi). Summary rows
-(p1, r1) have `budget_type` populated.
-
-**Workaround applied:** Dashboard and aggregation endpoints now use a shared
-`BUDGET_TYPE_CASE_EXPR` (`utils/database.py`) to derive budget type from
-appropriation code at query time.
-
-**Permanent fix:** Populate `budget_type` during ingestion for all rows, not just
-summary exhibits.
-
-```sql
-SELECT appropriation_code, COUNT(*) FROM budget_lines
-WHERE budget_type IS NULL AND appropriation_code IS NOT NULL
-GROUP BY appropriation_code ORDER BY COUNT(*) DESC;
-```
+_Resolved in Round 4 via `scripts/fix_budget_types.py` migration. Additionally fixed
+at ingestion time (2026-04-02): `pipeline/builder.py` now derives budget_type from
+`_APPROP_TO_BUDGET_TYPE` when exhibit type mapping is missing. See Round 4 entry below._
 
 ---
 
@@ -410,16 +398,12 @@ project-level tagging also uses both.
 
 ---
 
-#### 55. 12 PEs Without Mission Descriptions **[OPEN — Pipeline]**
+#### ~~55. 12 PEs Without Mission Descriptions~~ **[RESOLVED — 2026-04-02]**
 
-```sql
-SELECT pe_number FROM pe_index
-WHERE pe_number NOT IN (SELECT DISTINCT pe_number FROM pe_descriptions);
--- Returns 12 PEs
-```
-
-These PEs get no keyword tags from narrative text. They rely solely on structured
-tags from budget_lines fields.
+Added fallback in `pipeline/enricher.py` Phase 2: PEs with no PDF-derived descriptions
+now get descriptions synthesized from their budget_lines data (line_item_title,
+budget_activity_title, appropriation_title). Stored with `section_header='Budget Line Title'`
+and `source_file='budget_lines'` to distinguish from PDF-sourced descriptions.
 
 ---
 
@@ -437,37 +421,25 @@ GROUP BY li.pe_number HAVING fy_count < 3 ORDER BY fy_count;
 
 ---
 
-#### 57. appropriation_code NULL Rows **[OPEN — DB]**
+#### ~~57. appropriation_code NULL Rows~~ **[RESOLVED — Round 5 Partial]**
 
-Rows where `appropriation_code` is NULL fall through the CASE mapping and appear
-as "Unknown" in budget type breakdowns.
-
-```sql
-SELECT COUNT(*) FROM budget_lines WHERE appropriation_code IS NULL;
-```
+_Resolved in Round 5 via `repair_database.py` enhanced keyword matching. NULL
+appropriation_code reduced from 21,831 (17.5%) to 3,531 (7.4%). Remaining NULLs
+lack sufficient context to infer. See Round 5 entry below._
 
 ---
 
 ### Performance Issues
 
-#### 58. Missing Composite Database Indexes **[OPEN — Perf]**
+#### ~~58. Missing Composite Database Indexes~~ **[RESOLVED — Round 4]**
 
-No composite index on commonly co-filtered columns:
-- `(pe_number, fiscal_year)` — used by PE detail, funding matrix, aggregations
-- `(organization_name, fiscal_year)` — used by service-filtered queries
-
-```sql
-CREATE INDEX IF NOT EXISTS idx_bl_pe_fy ON budget_lines(pe_number, fiscal_year);
-CREATE INDEX IF NOT EXISTS idx_bl_org_fy ON budget_lines(organization_name, fiscal_year);
-```
+_Resolved in Round 4: 4 composite indexes added. See Round 4 entry below._
 
 ---
 
-#### 59. TTL Cache Too Short for Production (300s) **[OPEN — Perf]**
+#### ~~59. TTL Cache Too Short for Production (300s)~~ **[RESOLVED — Round 4]**
 
-Dashboard and aggregation caches use 300-second TTL. Data rarely changes between
-database rebuilds. Consider increasing to 3600s for production or invalidating on
-rebuild via webhook/signal.
+_Resolved in Round 4: Dashboard cache 300→900s, aggregation 300→600s. See Round 4 entry below._
 
 ---
 
@@ -684,11 +656,11 @@ are rows without enough context to infer an appropriation code.
 
 | Status | Count | Issues |
 |--------|-------|--------|
-| **RESOLVED** | 32 | #5, #6/14, #7/17/22, #29-37, #40-48, #50-52, #54, #57-61, #63 |
-| **CODE COMPLETE — needs DB verification** | 15 | #1, #2, #3, #4, #9, #11, #12, #13, #15, #18, #20, #21, #26, #38 |
+| **RESOLVED** | 37 | #5, #6/14, #7/17/22, #29-37, #39-48, #50-52, #54, #55, #57-61, #63 |
+| **CODE COMPLETE — needs DB verification** | 14 | #1, #2, #3, #4, #9, #11, #12, #13, #15, #18, #20, #21, #26, #38 |
 | **STRUCTURAL — documented in PRD §9** | 7 | #8, #16, #19, #23, #24, #28, #53 (data coverage limitations) |
-| **OPEN — partial** | 3 | #10, #25 (FY mismatch — detection only), #27 (enrichment over-tagging at pipeline level) |
-| **OPEN** | 2 | #55 (12 PEs without descriptions), #56 (FY gaps in PE funding) |
+| **OPEN — partial** | 2 | #10, #25 (FY mismatch — detection only, auto-correction deferred) |
+| **OPEN** | 1 | #56 (FY gaps in PE funding — needs DB investigation) |
 | **DOCUMENTED** | 1 | #62 (tag coverage assessment) |
 | **GRADUAL** | 1 | #49 (inline styles — ongoing refactor) |
 

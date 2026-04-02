@@ -895,6 +895,19 @@ _EXHIBIT_BUDGET_TYPE: dict[str, str] = {
     "c1": "Construction",
 }
 
+# Issue #52: Fallback mapping from appropriation_code to budget_type for detail exhibits
+_APPROP_TO_BUDGET_TYPE: dict[str, str] = {
+    "RDTE": "RDT&E",
+    "OPROC": "Procurement", "PROC": "Procurement", "APAF": "Procurement",
+    "MPAF": "Procurement", "WPN": "Procurement", "SCN": "Procurement",
+    "NGRE": "Procurement", "DPA": "Procurement", "CHEM": "Procurement",
+    "AMMO": "Procurement",
+    "O&M": "O&M", "ER": "O&M", "DRUG": "O&M", "DHP": "O&M",
+    "MILCON": "Construction", "FHSG": "Construction",
+    "MILPERS": "MilPers",
+    "RFUND": "Revolving",
+}
+
 # 1.B3-c: Amount type describes what kind of budget authority the amounts represent.
 # C-1 (MilCon) uses Congressional authorization; other exhibits use enacted BA or
 # the President's budget request (both classified as "budget_authority" for simplicity).
@@ -1257,6 +1270,7 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
         unit_multiplier = 1000.0 if amount_unit == "millions" else 1.0
 
         # Derive budget_type from exhibit type (Step 1.B3-d)
+        # Falls back to appropriation_code mapping for detail exhibits (r2, p5, etc.)
         budget_type = _EXHIBIT_BUDGET_TYPE.get(exhibit_type)
 
         # Derive amount_type from exhibit type (Step 1.B3-c)
@@ -1320,6 +1334,12 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
             # Split appropriation code and title from account_title (Step 1.B4-c implementation)
             approp_code, approp_title = _parse_appropriation(acct_title_val)
 
+            # Issue #52: Derive budget_type from appropriation_code when exhibit type
+            # doesn't provide one (detail exhibits like r2, p5, amendment, ogsi)
+            row_budget_type = budget_type
+            if not row_budget_type and approp_code:
+                row_budget_type = _APPROP_TO_BUDGET_TYPE.get(approp_code)
+
             def _amt(field):
                 """Read a float amount and apply the unit multiplier (1.B3-c)."""
                 v = _safe_float(get_val(row, field))
@@ -1361,7 +1381,7 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
                 approp_code,   # Step 1.B4-c: appropriation code from account title
                 approp_title,  # Step 1.B4-c: appropriation title from account title
                 amount_unit,   # Step 1.B3-b: normalised to "thousands"
-                budget_type,   # Step 1.B3-d: budget category from exhibit type
+                row_budget_type,  # Step 1.B3-d: from exhibit type or appropriation code
                 amount_type,   # Step 1.B3-c: type of amounts (BA, authorization, etc.)
             ))
 
@@ -1548,6 +1568,12 @@ def _extract_excel_rows(args: tuple) -> dict:
             additional_pes = all_pes[1:]
             approp_code, approp_title = _parse_appropriation(acct_title_val)
 
+            # Issue #52: Derive budget_type from appropriation_code when exhibit
+            # type doesn't provide one (detail exhibits)
+            row_budget_type = budget_type
+            if not row_budget_type and approp_code:
+                row_budget_type = _APPROP_TO_BUDGET_TYPE.get(approp_code)
+
             fy_dict: dict[str, float | None] = {}
             for fc in _fy_cols_in_map:
                 if fc.startswith("amount_"):
@@ -1572,7 +1598,7 @@ def _extract_excel_rows(args: tuple) -> dict:
                 # LION-102: additional PEs in extra_fields
                 json.dumps({"additional_pe_numbers": additional_pes}) if additional_pes else None,
                 pe_number, currency_year, approp_code, approp_title,
-                amount_unit, budget_type, amount_type,
+                amount_unit, row_budget_type, amount_type,
             )
             _raw_rows.append((fixed, fy_dict, tail))
 
