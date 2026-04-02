@@ -1121,22 +1121,36 @@ def list_pes(
 def list_tags(
     tag_source: str | None = Query(None,
         description="Filter by source: structured, keyword, taxonomy, llm"),
+    min_confidence: float = 0.85,
+    max_coverage: float = 0.5,
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
-    """Return all distinct tags and how many PEs each applies to."""
+    """Return all distinct tags and how many PEs each applies to.
+
+    Filters out low-confidence tags and tags that apply to too many PEs
+    (which are too broad to be useful).
+    """
     params: list[Any] = []
-    src_clause = ""
+    clauses: list[str] = ["confidence >= ?"]
+    params.append(min_confidence)
     if tag_source:
-        src_clause = "WHERE tag_source = ?"
+        clauses.append("tag_source = ?")
         params.append(tag_source)
+
+    where = "WHERE " + " AND ".join(clauses)
+
+    # Get total PE count for coverage cap
+    total_pes = conn.execute("SELECT COUNT(*) FROM pe_index").fetchone()[0] or 1
+    max_pe_count = int(total_pes * max_coverage)
 
     rows = conn.execute(f"""
         SELECT tag, tag_source, COUNT(DISTINCT pe_number) AS pe_count
         FROM pe_tags
-        {src_clause}
+        {where}
         GROUP BY tag, tag_source
+        HAVING COUNT(DISTINCT pe_number) <= ?
         ORDER BY pe_count DESC, tag
-    """, params).fetchall()
+    """, params + [max_pe_count]).fetchall()
 
     return {"total": len(rows), "tags": [_row_dict(r) for r in rows]}
 

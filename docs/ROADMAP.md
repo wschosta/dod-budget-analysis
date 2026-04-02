@@ -159,7 +159,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | ID | Task | Details | Status |
 |----|------|---------|--------|
 | **4.B1** | Soft launch to a small group | Share the tool with a small set of known users (analysts, researchers, journalists) and collect structured feedback. | ⚠️ Not started — requires deployed application |
-| **4.B2** | Create a feedback mechanism | Add a "Feedback" button or form in the UI that lets users report bugs, request features, or note data issues. Route submissions to GitHub Issues. | ⚠️ Not started — requires secrets/deployment |
+| **4.B2** | Create a feedback mechanism | Add a "Feedback" button or form in the UI that lets users report bugs, request features, or note data issues. Route submissions to GitHub Issues. | ✅ **Complete** — POST `/api/v1/feedback` endpoint, modal form in base template, 16 tests; stores to local `feedback.json` (GitHub Issues integration optional future work) |
 | **4.B3** | Write a launch announcement | Draft a blog post or README update explaining what the tool does, who it's for, and how to use it. | ⚠️ Not started |
 | **4.B4** | Public launch | Announce on relevant forums, social media, and communities (defense policy, open data, civic tech). | ⚠️ Not started — `docker-compose.staging.yml` ready for staging deployment |
 
