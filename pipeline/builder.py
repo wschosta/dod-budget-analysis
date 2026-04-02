@@ -874,7 +874,7 @@ def _detect_amount_unit(rows: list, header_idx: int) -> str:
     return "thousands"  # Default per DoD convention
 
 
-# Map exhibit type → budget_type label stored in budget_lines (TODO 1.B3-d)
+# Map exhibit type → budget_type label stored in budget_lines (DONE: 1.B3-d)
 _EXHIBIT_BUDGET_TYPE: dict[str, str] = {
     "m1": "MilPers",
     "o1": "O&M",
@@ -1241,7 +1241,7 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
             if _gen_key in col_map and _fy_key:
                 col_map.setdefault(_fy_key, col_map.pop(_gen_key))
 
-        # Detect currency year for this sheet (TODO 1.B3-b)
+        # Detect currency year for this sheet (DONE: 1.B3-b)
         currency_year = _detect_currency_year(sheet_name, file_path.name)
 
         # Detect source unit and compute normalisation multiplier (Step 1.B3-a/c)

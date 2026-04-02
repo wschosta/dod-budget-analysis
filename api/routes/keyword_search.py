@@ -144,6 +144,7 @@ def collect_matching_pe_numbers_split(
     bl_matched: set[str] = set()
 
     # (a0) Direct PE number match — detect keywords that look like PE numbers
+    # TODO [TODO-M1]: Verify this works on /explorer; add pe_index fallback for PDF-only PEs.
     pe_pattern = re.compile(rf"^\d{{7}}{PE_SUFFIX_PATTERN}$", re.IGNORECASE)
     pe_keywords = [kw for kw in keywords if pe_pattern.match(kw.strip())]
     if pe_keywords:
@@ -890,6 +891,9 @@ def build_cache_table(
                 desc = stub_desc_map.get(pe)
                 if _is_garbage_description(desc):
                     desc = None
+                # TODO [TODO-H1]: title falls back to raw PE number for PDF-only PEs.
+                # Extract real R-1 title from pdf_pages using PE regex pattern.
+                # See docs/TODO_PLAN.md for full specification.
                 vals = [
                     pe, org, "r1", title or pe,
                     None, None, None, None, None, "RDT&E",
@@ -1030,6 +1034,10 @@ def build_cache_table(
     # 6c. Detect and annotate cross-PE program lineages
     if pdf_count:
         annotate_cross_pe_lineages(conn, cache_table)
+
+    # TODO [TODO-H2]: Aggregate R-2 sub-element funding into R-1 stub rows for
+    # PDF-only PEs (D8Z Defense-Wide). Without this, R-1 rows show NULL amounts.
+    # See docs/TODO_PLAN.md for full specification.
 
     # 7. Create indexes for fast filtering
     # Use short hash suffix to avoid name collisions across cache tables

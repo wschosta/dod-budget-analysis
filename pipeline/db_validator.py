@@ -12,15 +12,6 @@ Usage:
     python validate_budget_db.py --html > report.html # HTML report (TIGER-007)
     python validate_budget_db.py --threshold warning  # Exit non-zero on warnings+
 
----
-TODOs for this file
----
-
-DONE LION-108-val: Validation checks for LION schema changes.
-    (a) check_pdf_pages_fiscal_year — warns if >5% of pdf_pages have NULL fiscal_year
-    (b) check_pdf_pe_numbers_populated — warns if junction table is empty/missing
-    (c) check_pe_tags_source_files — warns if pe_tags.source_files has NULLs
-
 """
 
 import argparse

@@ -15,22 +15,6 @@ Usage:
     python enrich_budget_db.py --rebuild                # drop and rebuild enrichment tables
     python enrich_budget_db.py --db path/to/db.sqlite   # custom DB path
 
-──────────────────────────────────────────────────────────────────────────────
-LION TODOs — Enrichment Alignment & Tag Quality
-──────────────────────────────────────────────────────────────────────────────
-
-LION-104 [DONE]: Include budget_lines text fields in keyword tagging.
-    run_phase3() concatenates line_item_title, budget_activity_title, and
-    account_title from budget_lines into the keyword matching text.
-
-LION-105 [DONE]: Differentiate confidence scoring by tag source.
-    Confidence levels: 1.0 (structured), 0.9 (budget_lines keywords),
-    0.8 (PDF narrative keywords), 0.7 (LLM-generated tags).
-
-LION-106 [DONE]: Add source_files tracking to pe_tags table.
-    source_files TEXT column (JSON array) tracks provenance from both
-    structured and keyword tagging sources.
-
 """
 
 from __future__ import annotations
@@ -45,6 +29,11 @@ import sys
 import threading
 import time
 from pathlib import Path
+
+# TODO [TODO-L1]: Add uniform progress reporting to all 5 enrichment phases.
+# TODO [TODO-L3]: Consolidate anthropic import to single top-level _HAS_ANTHROPIC flag.
+# TODO [TODO-L4]: Debug rule-based tagger in Phase 3 — currently produces 0 rows.
+# See docs/TODO_PLAN.md for full specifications.
 
 from utils import get_connection
 from utils.patterns import PE_NUMBER, FISCAL_YEAR

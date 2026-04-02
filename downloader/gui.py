@@ -39,7 +39,7 @@ class GuiProgressTracker:
         self._file_start = 0.0
         self._log_lines: list[str] = []
         self._failure_lines: list[str] = []
-        # Structured failure records for --retry-failures (TODO 1.A6-a)
+        # Structured failure records for --retry-failures (TODO 1.A6-a — stub exists, CLI flag not yet implemented)
         self._failed_files: list[dict] = []
 
         self._closed = False

@@ -6,10 +6,6 @@ Provides reusable functions for:
 - Organizing constants and known values
 - Configuration validation
 
-──────────────────────────────────────────────────────────────────────────────
-TODOs for this file
-──────────────────────────────────────────────────────────────────────────────
-
 """
 
 from pathlib import Path

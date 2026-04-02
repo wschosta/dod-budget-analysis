@@ -296,9 +296,9 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 2. **PDF extraction accuracy** — Varies by document layout; some tables extract poorly from complex PDFs
 3. **Appropriation codes** — Not fully parsed for all exhibit types
 4. **Classified programs** — Excluded per DoD public release policy; budget totals will not match classified-inclusive figures
-5. **Tag over-indexing** — Enrichment pipeline assigns overly broad tags for some categories (tuning needed)
+5. **Tag over-indexing** — Enrichment pipeline assigns overly broad tags for some categories; rule-based Phase 3 tagger currently produces 0 rows (see TODO-L4). LLM tagger has import consolidation issue (see TODO-L3).
 6. **Dollar rounding** — Service/program totals computed from parsed line items may not match official totals exactly due to rounding and coverage gaps
-7. **PDF-only PEs lack R-1 totals** — D8Z Defense-Wide PEs that exist only in PDFs (not in Excel `budget_lines`) have R-2 sub-element funding from PDF mining but their R-1 stub rows show NULL amounts. R-1 title extraction from PDFs is planned (see ROADMAP TODO-H1/H2).
+7. **PDF-only PEs lack R-1 totals** — D8Z Defense-Wide PEs that exist only in PDFs (not in Excel `budget_lines`) have R-2 sub-element funding from PDF mining but their R-1 stub rows show NULL amounts and raw PE numbers as titles. R-1 title extraction (TODO-H1) and funding aggregation from R-2 sub-elements (TODO-H2) are the highest-priority open items. See `docs/TODO_PLAN.md`.
 8. **Description quality varies** — R-1 descriptions may contain page headers or artifacts; `_is_garbage_description()` filters the worst cases but some noise may remain. R-2 descriptions are cleaned via `clean_narrative()` but multi-page artifacts can still slip through.
 
 ---

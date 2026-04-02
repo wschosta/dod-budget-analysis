@@ -38,20 +38,20 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 
 | ID | Task | Details | Status |
 |----|------|---------|--------|
-| **1.A1** | Audit existing downloader coverage | Catalog every source the current `dod_budget_downloader.py` supports (Comptroller, Defense-Wide, Army, Navy/USMC, Air Force/Space Force). Identify gaps — e.g., Defense Logistics Agency, MDA standalone exhibits, or SOCOM. | ✅ Partially Complete — 5 main sources implemented; additional sources identified but not added. Remaining: network audit needed (TODO 1.A1-a/b/c) |
-| **1.A2** | Expand fiscal-year coverage | Ensure the downloader can discover and retrieve documents for all publicly available fiscal years (currently dynamic discovery works for recent years; verify historical reach back to at least FY2017). | 🔄 In Progress — FY2025-2026 confirmed; historical reach needs network verification (TODO 1.A2-a/b/c) |
+| **1.A1** | Audit existing downloader coverage | Catalog every source the current `dod_budget_downloader.py` supports (Comptroller, Defense-Wide, Army, Navy/USMC, Air Force/Space Force). Identify gaps — e.g., Defense Logistics Agency, MDA standalone exhibits, or SOCOM. | ✅ **Complete** — 5 main sources implemented; network audit completed (OH-MY-001/002/003 done 2026-02-19). Additional DoD component sources (DLA, MDA, SOCOM) identified but not yet added. |
+| **1.A2** | Expand fiscal-year coverage | Ensure the downloader can discover and retrieve documents for all publicly available fiscal years (currently dynamic discovery works for recent years; verify historical reach back to at least FY2017). | ✅ **Complete** — FY2025-2026 confirmed; historical reach tested (OH-MY-004/005 done 2026-02-19). FY2000-2009 gap remains (documents not publicly available in structured format). |
 | **1.A3** | Harden download reliability | Improve retry logic, handle WAF/CAPTCHA changes on government sites, add checksum or size verification for downloaded files, and implement a manifest of expected vs. actual downloads. | ✅ Partially Complete — Smart file skipping, 3-attempt retry with exponential backoff, WAF/bot detection helper; hash verification stub remaining |
 | **1.A4** | Automate download scheduling | Create a repeatable, scriptable download pipeline (CLI-only, no GUI dependency) that can be run via cron or CI to keep data current when new fiscal-year documents are published. | ✅ **Complete** — CLI `--no-gui` mode, `scripts/scheduled_download.py` orchestrator with dry-run support |
 | **1.A5** | Document all data sources | Create a data sources reference listing every URL pattern, document type, file format, and fiscal-year availability for each service and agency. | 🔄 In Progress — `docs/user-guide/data-sources.md` exists; coverage matrix needs live audit (depends on 1.A1) |
-| **1.A6** | Retry failed downloads | Write a structured failure log (`failed_downloads.json`) with URL, dest path, and browser flag for each failed file. Add a `--retry-failures` CLI flag that reads the log and re-attempts only those files. Update the GUI completion dialog to show failure URLs and a copy-retry-command button. | ⚠️ Not started |
+| **1.A6** | Retry failed downloads | Write a structured failure log (`failed_downloads.json`) with URL, dest path, and browser flag for each failed file. Add a `--retry-failures` CLI flag that reads the log and re-attempts only those files. Update the GUI completion dialog to show failure URLs and a copy-retry-command button. | 🔄 Partially Started — `_failed_files` list stub exists in `downloader/gui.py`; CLI flag and JSON log not yet implemented |
 
 ### 1.B — Parsing & Normalization
 
 | ID | Task | Details | Status |
 |----|------|---------|--------|
-| **1.B1** | Catalog all exhibit types | Enumerate every exhibit type encountered (P-1, R-1, O-1, M-1, C-1, P-5, R-2, R-3, R-4, etc.) and document the column layout and semantics for each. | ✅ Mostly Complete — `exhibit_catalog.py` (429 lines) defines column layouts for P-1, P-5, R-1, R-2, O-1, M-1, C-1, P-1R, RF-1 with `ExhibitCatalog` class; `scripts/exhibit_audit.py` scans corpus; remaining: inventory against downloaded files (needs corpus) |
+| **1.B1** | Catalog all exhibit types | Enumerate every exhibit type encountered (P-1, R-1, O-1, M-1, C-1, P-5, R-2, R-3, R-4, etc.) and document the column layout and semantics for each. | ✅ **Complete** — `exhibit_catalog.py` (429 lines) defines column layouts for P-1, P-5, R-1, R-2, O-1, M-1, C-1, P-1R, RF-1 with `ExhibitCatalog` class; `scripts/exhibit_audit.py` scans corpus; cross-validated against corpus (OH-MY-006 done 2026-02-19) |
 | **1.B2** | Standardize column mappings | Extend `build_budget_db.py` column-mapping logic to handle all known exhibit formats consistently; add unit tests for each exhibit type with sample data. | ✅ Mostly Complete — Data-driven catalog approach implemented in `exhibit_catalog.py`; `_map_columns()`, `_merge_header_rows()`, catalog-driven detection all tested; multi-row header handling implemented |
-| **1.B3** | Normalize monetary values | Ensure all dollar amounts use a consistent unit (thousands of dollars), currency-year label, and handle the distinction between Budget Authority (BA), Appropriations, and Outlays. | 🔄 In Progress — FY2024-2026 columns supported with `_safe_float()` normalization; `amount_type` field tracks BA vs appropriation; full currency-year labeling TODO |
+| **1.B3** | Normalize monetary values | Ensure all dollar amounts use a consistent unit (thousands of dollars), currency-year label, and handle the distinction between Budget Authority (BA), Appropriations, and Outlays. | ✅ Mostly Complete — FY2024-2026 columns with `_safe_float()` normalization; `amount_type` field tracks BA vs appropriation; currency-year detection implemented (`_detect_currency_year`, DONE 1.B3-b); exhibit→budget_type mapping implemented (`_EXHIBIT_BUDGET_TYPE`, DONE 1.B3-d); amount-unit detection and normalization (DONE 1.B3-a/c) |
 | **1.B4** | Extract and normalize program element (PE) and line-item metadata | Parse PE numbers, line-item numbers, budget activity codes, appropriation titles, and sub-activity groups into dedicated, queryable fields. | ✅ Mostly Complete — `pe_number`, `line_item`, `budget_activity_title`, `sub_activity_title`, `appropriation_code`, `appropriation_title` all extracted; regex patterns validated in `utils/patterns.py` |
 | **1.B5** | PDF text extraction quality audit | Review `pdfplumber` output for the most common PDF layouts; identify tables that extract poorly and implement targeted extraction improvements or fallback strategies. | ✅ Mostly Complete — `scripts/pdf_quality_audit.py` (312 lines) implements automated audit; `utils/pdf_sections.py` handles R-2/R-3 narrative sections; remaining: targeted improvements for identified poor extractions |
 | **1.B6** | Build validation suite | Create automated checks that flag anomalies: missing fiscal years for a service, duplicate rows, zero-sum line items, column misalignment, and unexpected exhibit formats. | ✅ **Complete** — `validate_budget_db.py` (522 lines) + `utils/validation.py` (255 lines) with `ValidationRegistry`, 10+ checks, and cross-service/cross-exhibit reconciliation in `scripts/reconcile_budget_data.py` |
@@ -184,10 +184,11 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 - Wiki skeleton created with performance optimizations documented (3-6x speedup achieved)
 - ROADMAP established with 57 tasks across 4 phases
 
-**Phase 1 (Data Extraction & Normalization):** ✅ **~90% COMPLETE**
-- All testing tasks (1.C1-1.C3) complete with 1183 tests across 63 test files
+**Phase 1 (Data Extraction & Normalization):** ✅ **~95% COMPLETE**
+- All testing tasks (1.C1-1.C3) complete with 1,248+ tests across 63+ test files
 - Parsing, normalization, and validation fully functional
-- Remaining items require network access / downloaded corpus (see Remaining TODOs below)
+- Network audits completed (OH-MY-001 through OH-MY-006, 2026-02-19)
+- Remaining: retry-failures CLI (1.A6 partial), data source doc update (1.A5 minor)
 
 **Phase 2 (Database Design & Population):** ✅ **COMPLETE**
 - All schema design tasks (2.A1-2.A5) implemented in `schema_design.py`
@@ -234,29 +235,36 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | **Containerization** | `Dockerfile*`, `docker-compose*.yml` | — | ✅ Complete — production, multistage, dev, staging configurations |
 | **Backup & monitoring** | `scripts/backup_db.py`, `api/app.py` | — | ✅ Complete — automated backups, /health/detailed, structured logging |
 
-### Remaining TODOs (45 new + 12 OH MY)
+### Remaining TODOs (as of 2026-04-02)
 
-**New autonomous agent tasks (45 items):**
+**LION / TIGER / BEAR agent groups:** ✅ **ALL COMPLETE** (33/33 tasks done)
 
-| Group | Focus | Count | Est. Tokens | Instruction File |
-|-------|-------|-------|-------------|------------------|
-| **LION** | Frontend polish, UX, documentation | 10 | ~17,000 | `docs/archive/instructions/LION_INSTRUCTIONS.md` |
-| **TIGER** | Data quality validation, API enhancements | 11 | ~20,500 | `docs/archive/instructions/TIGER_INSTRUCTIONS.md` |
-| **BEAR** | Test suites, CI/CD, infrastructure | 12 | ~26,000 | `docs/archive/instructions/BEAR_INSTRUCTIONS.md` |
+**Active work items (11 items) — see [`docs/TODO_PLAN.md`](TODO_PLAN.md) for full specifications:**
 
-**Items requiring external resources (12 items):**
+| Priority | ID | Task | Files |
+|----------|----|------|-------|
+| **HIGH** | TODO-H1 | Fix R-1 title for PDF-only PEs | `api/routes/keyword_search.py` |
+| **HIGH** | TODO-H2 | Fix R-1 funding for D8Z PEs | `api/routes/keyword_search.py` |
+| **MEDIUM** | TODO-M1 | Verify Explorer PE number search | `api/routes/keyword_search.py` |
+| **LOW** | TODO-L1 | Enricher progress reporting | `pipeline/enricher.py` |
+| **LOW** | TODO-L2 | Fix RuntimeWarning on enricher | `pipeline/__init__.py` |
+| **LOW** | TODO-L3 | Fix `--with-llm` Phase 3 | `pipeline/enricher.py` |
+| **LOW** | TODO-L4 | Fix non-LLM tagging (0 rows) | `pipeline/enricher.py` |
+| **LOW** | TODO-L5 | Rebuild Cache button on Hypersonics | `templates/hypersonics.html` |
 
-| Category | Count | Blocker |
-|----------|-------|---------|
-| Data Source Auditing (1.A) | 5 | Network access to DoD websites |
-| Exhibit Inventory (1.B) | 1 | Downloaded document corpus |
-| Hosting & Deployment (4.A) | 3 | Cloud account + domain + secrets |
-| Accessibility Audit (3.A) | 1 | Running UI + Lighthouse/axe-core |
-| Launch & Feedback (4.B) | 2 | Deployed application + community |
-| **Total** | **12** | See `docs/archive/instructions/OH_MY_INSTRUCTIONS.md` |
+**Deferred items requiring external resources (6 items):**
 
-See [REMAINING_TODOS.md](archive/implementation-logs/REMAINING_TODOS.md) for detailed descriptions.
-Each LION/TIGER/BEAR instruction file is prompt-ready: open a new branch and run `execute the LION instructions`.
+| ID | Task | Blocker |
+|----|------|---------|
+| OH-MY-007 | Choose hosting platform | Cloud account setup |
+| OH-MY-008 | Configure CD deployment | Depends on OH-MY-007 + secrets |
+| OH-MY-009 | Domain + TLS | Domain registration |
+| OH-MY-010 | Accessibility audit | Running UI instance |
+| OH-MY-011 | Soft launch | Deployed application |
+| OH-MY-012 | Public launch | Depends on OH-MY-011 |
+
+See [REMAINING_TODOS.md](archive/implementation-logs/REMAINING_TODOS.md) for historical context.
+See [`docs/TODO_PLAN.md`](TODO_PLAN.md) for sub-agent execution plan.
 
 ---
 
