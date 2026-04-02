@@ -15,7 +15,7 @@
 | **C** | `fix/org-normalization` | Normalize organization names | #3, #20, #38 | Yes |
 | **D** | `fix/fy-attribution` | Fix fiscal year attribution | #10, #25, #56 | Yes |
 | **E** | `fix/enrichment-quality` | Tune tags, fill missing descriptions | #27, #39, #55 | Yes |
-| **F** | `fix/retry-failures-cli` | Implement download retry CLI | ROADMAP 1.A6 | No |
+| **F** | `fix/retry-failures-cli` | ✅ Complete (2026-04-02) — Download retry CLI | ROADMAP 1.A6 | No |
 | **G** | `infra/deploy-and-launch` | Hosting, domain, CD, accessibility, launch | OH-MY-007–012 | No (needs credentials) |
 
 **Parallelism:** A runs first (verification). B–F can run in parallel after A confirms the current DB state. F is independent (no DB). G requires user infrastructure decisions before an agent can execute.
@@ -279,6 +279,13 @@ python -m pytest tests/ -k "enricher or tag" -v
 ```bash
 python -m pytest tests/ -k "download" -v
 ```
+
+### Resolution
+**Status: ✅ Complete (2026-04-02)** — Upon review, all Group F functionality was already implemented:
+- `--retry-failures` CLI flag in `downloader/core.py`
+- Structured `failed_downloads.json` log with URL, dest, error, browser flag, and timestamp
+- GUI completion dialog shows failure count and "Copy retry command" button (`downloader/gui.py`)
+- ROADMAP 1.A6 updated to reflect completion.
 
 ---
 

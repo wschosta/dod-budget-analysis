@@ -37,6 +37,8 @@ Downloads budget justification documents from official DoD sources.
 - **Parallel discovery and download** with configurable worker count and per-domain rate limiting
 - **Smart file skipping** using hash-based change detection and file manifest tracking
 - **Retry with exponential backoff** (3 attempts per file, configurable timeouts)
+- **`--retry-failures` CLI flag** re-attempts only previously failed downloads from a structured `failed_downloads.json` log (records URL, destination, error, browser flag, and timestamp)
+- **GUI completion dialog** shows failure count and a "Copy retry command" button for easy CLI retry
 - **CLI and GUI modes** (`--no-gui` for automation/cron)
 - **File formats downloaded:** Excel (.xlsx), PDF, CSV, ZIP
 - **Output directory:** `DoD_Budget_Documents/` organized by fiscal year and source
@@ -227,7 +229,7 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 | Tool | Description |
 |------|-------------|
 | `run_pipeline.py` | Full 5-step pipeline orchestrator with skip/only flags per step |
-| `dod_budget_downloader.py` | Multi-source document downloader (CLI + GUI) |
+| `dod_budget_downloader.py` | Multi-source document downloader (CLI + GUI) with `--retry-failures` support |
 | `build_budget_db.py` | Database builder (CLI + GUI via `build_budget_gui.py`) |
 | `repair_database.py` | Database repair/normalization |
 | `validate_budget_data.py` | Data quality validation with JSON report output |

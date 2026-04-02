@@ -39,7 +39,7 @@ class GuiProgressTracker:
         self._file_start = 0.0
         self._log_lines: list[str] = []
         self._failure_lines: list[str] = []
-        # Structured failure records for --retry-failures (TODO 1.A6-a — stub exists, CLI flag not yet implemented)
+        # Structured failure records for --retry-failures
         self._failed_files: list[dict] = []
 
         self._closed = False
@@ -270,7 +270,7 @@ class GuiProgressTracker:
 
     def file_failed(self, url: str, dest: str, filename: str, error: str,
                     use_browser: bool = False) -> None:
-        """Record a structured failure entry and update counters (TODO 1.A6-a)."""
+        """Record a structured failure entry and update counters."""
         self._failed_files.append({
             "url": url,
             "dest": dest,
@@ -281,7 +281,7 @@ class GuiProgressTracker:
             "use_browser": use_browser,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
-        # Also append URL info to failure_lines for the GUI dialog (1.A6-c)
+        # Also append URL info to failure_lines for the GUI dialog
         self._failure_lines.append(f"[FAIL] {filename}\n       URL: {url}")
         self.file_done(filename, 0, "fail")
 
@@ -304,7 +304,7 @@ class GuiProgressTracker:
         # Destroy the old progress window
         self.close()
 
-        # Build completion dialog (1.A6-c)
+        # Build completion dialog
         dlg = tk.Tk()
         dlg.title("Download Complete")
         dlg.geometry("460x220")
