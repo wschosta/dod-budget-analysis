@@ -1,7 +1,7 @@
 # Program Requirements Document (PRD)
 
-> **Version:** 1.2
-> **Last Updated:** 2026-04-01
+> **Version:** 1.3
+> **Last Updated:** 2026-04-02
 > **Update Policy:** This document must be updated whenever features are added, changed, or removed. It is the canonical description of what the system does. Reference this document before implementing new features to avoid duplicating or overwriting existing functionality.
 
 ---
@@ -48,7 +48,7 @@ Downloads budget justification documents from official DoD sources.
 Parses downloaded documents into a normalized SQLite database.
 
 - **Excel parsing:** 15+ exhibit types including P-1, P-5, R-1, R-2, R-3, R-4, O-1, M-1, C-1, RF-1, P-1R, plus OCO, OGSI, supplemental, amendment, ENL, TOA variants
-- **Column mapping:** Data-driven catalog (`exhibit_catalog.py`) maps exhibit-specific column layouts to canonical field names
+- **Column mapping:** Data-driven catalog (`pipeline/exhibit_catalog.py`) maps exhibit-specific column layouts to canonical field names
 - **PDF extraction:** Text and table extraction via pdfplumber, stored page-by-page. PE numbers extracted from PDF text into `pdf_pe_numbers` table using shared `PE_NUMBER` regex from `utils/patterns.py`.
 - **PE number format support:** Standard suffixes (1-2 letters, e.g., `0602702E`) and Defense-Wide D8Z suffixes (letter-digit-letter, e.g., `0603183D8Z`). All PE regex patterns derive from `PE_SUFFIX_PATTERN` in `utils/patterns.py`.
 - **Incremental and full-rebuild modes** with checkpoint/resume for interrupted builds
@@ -56,7 +56,7 @@ Parses downloaded documents into a normalized SQLite database.
 - **FTS5 full-text search index** creation with content-sync triggers
 - **Deduplication** of identical rows across exhibit sources
 - **`_display` file exclusion** to prevent duplicate data from Comptroller display variants
-- **GUI mode** via `build_budget_gui.py` with progress tracking and ETA
+- **GUI mode** via `pipeline/gui.py` with progress tracking and ETA
 
 ### 2.3 Repair
 
@@ -105,16 +105,28 @@ FastAPI application serving the database through versioned endpoints (`/api/v1`)
 | `/api/v1/download` | GET | Streaming CSV/NDJSON export with same filters as budget-lines |
 | `/api/v1/reference/{type}` | GET | Reference data: services, exhibit types, fiscal years, appropriations |
 | `/api/v1/metadata` | GET | Database statistics and dataset metadata |
+| `/api/v1/pe/top-changes` | GET | PEs with largest year-over-year funding changes |
+| `/api/v1/pe/compare` | GET | Side-by-side funding comparison of multiple PEs |
+| `/api/v1/pe/spruill` | GET | Spruill-chart data for a single PE |
+| `/api/v1/pe/tags/all` | GET | All tags with PE counts (filterable by source, confidence, coverage) |
 | `/api/v1/pe/{pe_number}` | GET | Program element detail with funding history |
-| `/api/v1/pe/{pe_number}/funding` | GET | PE funding data across fiscal years |
-| `/api/v1/pe/{pe_number}/sub-elements` | GET | PE sub-element breakdown |
+| `/api/v1/pe/{pe_number}/years` | GET | PE funding data across fiscal years |
+| `/api/v1/pe/{pe_number}/changes` | GET | PE year-over-year funding changes |
+| `/api/v1/pe/{pe_number}/subelements` | GET | PE sub-element breakdown |
+| `/api/v1/pe/{pe_number}/descriptions` | GET | PE narrative descriptions |
+| `/api/v1/pe/{pe_number}/pdf-pages` | GET | PDF pages mentioning this PE |
+| `/api/v1/pe/{pe_number}/related` | GET | Related PEs by similarity |
+| `/api/v1/pe/{pe_number}/export/table` | GET | Export Spruill-style funding table as CSV |
+| `/api/v1/pe/export/pages` | GET | Export PDF pages for a set of PEs as ZIP |
+| `/api/v1/metadata/enrichment` | GET | Enrichment pipeline statistics |
 | `/api/v1/dashboard/summary` | GET | Dashboard summary statistics |
-| `/api/v1/dashboard/top-programs` | GET | Top programs by funding amount |
 | `/api/v1/facets` | GET | Faceted filter counts with cross-filtering per dimension |
 | `/api/v1/hypersonics` | GET | Pivoted hypersonics PE lines: one row per sub-element, columns for FY2015–FY2026. Filters: service, exhibit, fy_from, fy_to. Includes 25 forced-inclusion PEs via `_EXTRA_PES` (including 9 D8Z Defense-Wide programs). |
 | `/api/v1/hypersonics/download` | GET | CSV download of the pivoted hypersonics table (same filters). |
-| `/api/v1/hypersonics/download/xlsx` | GET | XLSX download with per-FY description columns (`Desc FY{yr}`) sourced from `pe_descriptions` table, priority-ordered by section_header (Mission Description > Accomplishments > Acquisition Strategy). |
+| `/api/v1/hypersonics/download/xlsx` | POST | XLSX download with per-FY description columns (`Desc FY{yr}`) sourced from `pe_descriptions` table, priority-ordered by section_header (Mission Description > Accomplishments > Acquisition Strategy). |
 | `/api/v1/hypersonics/rebuild` | POST | Rebuild the hypersonics cache table from budget_lines + PDF mining. |
+| `/api/v1/hypersonics/desc/{pe_number}` | GET | Description text for a PE or R-2 project. |
+| `/api/v1/hypersonics/debug` | GET | Pre-flight data quality checks for the hypersonics view. |
 | `/api/v1/explorer/build` | POST | Start async cache build for user-supplied keywords. Returns keyword_set_id. |
 | `/api/v1/explorer/status` | GET | Poll cache build progress (state, progress text, PE count). |
 | `/api/v1/explorer` | GET | PE-level summary + available download columns for a built keyword set. |
@@ -151,6 +163,8 @@ Server-side rendered HTML using Jinja2 templates with HTMX for dynamic updates.
 | **Dashboard** | `/dashboard` | Summary cards (FY totals, YOY change), budget-by-service bar chart, Top-10 programs, appropriation breakdown. Not in primary nav; accessible via direct URL. |
 | **Programs** | `/programs` | Program element browsing with tag filters, search, and funding history table. Not in primary nav; accessible via direct URL. |
 | **Program Detail** | `/programs/{pe}` | Individual PE detail: funding breakdown by FY, narrative descriptions, related exhibits, source documents. |
+| **Spruill** | `/spruill` | Spruill-chart view for individual PE funding analysis. Not in primary nav. |
+| **Consolidated** | `/consolidated` | Consolidated PE-level budget view with drill-down detail. Not in primary nav. |
 | **About** | `/about` | Project description, data coverage summary, methodology overview. |
 
 ### 4.2 HTMX Partials
@@ -162,6 +176,12 @@ Server-side rendered HTML using Jinja2 templates with HTMX for dynamic updates.
 - `glossary.html` — Budget glossary terms
 - `program-list.html` — Program list for Programs page
 - `program-descriptions.html` — PE description panel
+- `program-changes.html` — PE year-over-year funding changes
+- `program-pdf-pages.html` — PDF pages referencing a PE
+- `program-projects.html` — Project-level details within a PE
+- `program-related.html` — Related PEs panel
+- `spruill-table.html` — Spruill-style funding table
+- `top-changes.html` — Top funding changes summary
 - `toast.html` — Toast notification component
 
 ### 4.3 UI Features
@@ -185,7 +205,7 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 ### 5.1 Core Tables
 
 - **`budget_lines`** — Flat fact table (29+ columns): organization, fiscal_year, exhibit_type, pe_number, line_item, budget_activity_title, appropriation_code/title, amount columns per FY (actual, enacted, request, supplemental, reconciliation, total), quantity columns, category, source_file
-- **`pdf_pages`** — Page-level PDF content: source_file, page_number, page_text, has_tables, source_category
+- **`pdf_pages`** — Page-level PDF content: source_file, page_number, page_text, table_data, source_category
 - **`ingested_files`** — File manifest: path, type, size, modified_time, status, exhibit_type, budget_cycle, download_timestamp, service_org
 
 ### 5.2 Search Tables
@@ -219,7 +239,7 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 ### 5.6 Schema Management
 
 - Versioned via `schema_version` table
-- Incremental `migrate()` function in `schema_design.py`
+- Incremental `migrate()` function in `pipeline/schema.py`
 - Reference table seeding via migrations
 
 ---
@@ -229,16 +249,16 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 | Tool | Description |
 |------|-------------|
 | `run_pipeline.py` | Full 5-step pipeline orchestrator with skip/only flags per step |
-| `dod_budget_downloader.py` | Multi-source document downloader (CLI + GUI) with `--retry-failures` support |
-| `build_budget_db.py` | Database builder (CLI + GUI via `build_budget_gui.py`) |
-| `repair_database.py` | Database repair/normalization |
-| `validate_budget_data.py` | Data quality validation with JSON report output |
-| `validate_budget_db.py` | Database-level validation suite |
-| `enrich_budget_db.py` | PE enrichment pipeline |
-| `search_budget.py` | CLI full-text search with filters, export (CSV/JSON), interactive REPL mode |
-| `refresh_data.py` | Scheduled data refresh with automatic rollback, dry-run, webhook notifications |
+| `repair_database.py` | Database repair/normalization (7-step process) |
 | `stage_budget_data.py` | Optional Parquet staging layer (parse to Parquet, then load to SQLite) |
-| `backfill_reference_tables.py` | Populate reference tables from existing flat data |
+| `pipeline/builder.py` | Database builder (Excel/PDF parsing, incremental/full-rebuild modes) |
+| `pipeline/gui.py` | tkinter GUI for database build with progress/ETA |
+| `pipeline/enricher.py` | PE enrichment pipeline (tags, descriptions, lineage) |
+| `pipeline/db_validator.py` | Data quality validation with JSON report output |
+| `pipeline/search.py` | CLI full-text search with filters, export (CSV/JSON) |
+| `pipeline/refresh.py` | Scheduled data refresh with automatic rollback, dry-run, webhook notifications |
+| `downloader/core.py` | Multi-source document downloader (CLI) with `--retry-failures` support |
+| `downloader/gui.py` | Document downloader GUI |
 
 ---
 
@@ -271,8 +291,10 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 |----------|---------|-------------|
 | `APP_DB_PATH` | `dod_budget.sqlite` | Database file path |
 | `APP_PORT` | `8000` | API server port |
+| `APP_HOST` | `127.0.0.1` | API server bind address |
 | `APP_LOG_FORMAT` | `text` | Logging format (`text` or `json`) |
 | `APP_CORS_ORIGINS` | `*` | CORS allowed origins |
+| `APP_DB_POOL_SIZE` | `10` | Max DB connections in pool |
 | `RATE_LIMIT_SEARCH` | `60` | Search rate limit (req/min/IP) |
 | `RATE_LIMIT_DOWNLOAD` | `10` | Download rate limit (req/min/IP) |
 | `RATE_LIMIT_DEFAULT` | `120` | Default rate limit (req/min/IP) |
@@ -298,7 +320,7 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 2. **PDF extraction accuracy** — Varies by document layout; some tables extract poorly from complex PDFs
 3. **Appropriation codes** — Not fully parsed for all exhibit types
 4. **Classified programs** — Excluded per DoD public release policy; budget totals will not match classified-inclusive figures
-5. **Tag over-indexing** — Enrichment pipeline assigns overly broad tags for some categories (e.g., `rdte` on 97% of PEs). Tags covering >60% of programs are too broad for meaningful filtering. See TODO Group E in `docs/TODO_PLAN.md`.
+5. **Tag over-indexing** — Enrichment pipeline assigns overly broad tags for some categories (e.g., `rdte` on 97% of PEs). Mitigated by `min_confidence` (default 0.85) and `max_coverage` (default 0.5) filters on the `/api/v1/pe/tags/all` endpoint (fixed 2026-04-02). Raw tag data in the database still contains broad tags.
 6. **Dollar rounding** — Service/program totals computed from parsed line items may not match official totals exactly due to rounding and coverage gaps
 7. **PDF-only PE handling** — D8Z Defense-Wide PEs that exist only in PDFs now have R-1 titles extracted from PDF pages and R-1 funding aggregated from R-2 sub-elements (fixed 2026-04-02). Some edge cases may remain for PEs with unusual PDF layouts.
 8. **Description quality varies** — R-1 descriptions may contain page headers or artifacts; `_is_garbage_description()` filters the worst cases but some noise may remain. R-2 descriptions are cleaned via `clean_narrative()` but multi-page artifacts can still slip through.

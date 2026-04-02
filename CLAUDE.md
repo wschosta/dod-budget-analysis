@@ -72,19 +72,26 @@ dod-budget-analysis/
 │       ├── reference.py     # GET /api/v1/reference/{type}
 │       └── search.py        # GET /api/v1/search (FTS5)
 ├── utils/                   # Shared utility library (19 modules)
-├── pipeline/                # Data pipeline modules
-├── downloader/              # Document downloader modules
+├── pipeline/                # Data pipeline modules (15 modules)
+│   ├── builder.py           # Database builder (Excel/PDF parsing)
+│   ├── schema.py            # DB schema, migrations, reference table seeding
+│   ├── enricher.py          # PE enrichment (tags, descriptions, lineage)
+│   ├── db_validator.py      # Data quality validation
+│   ├── validator.py         # Validation rules
+│   ├── exhibit_catalog.py   # Exhibit type column layouts
+│   ├── search.py            # CLI full-text search
+│   ├── gui.py               # tkinter build interface
+│   ├── refresh.py           # Data refresh workflow
+│   └── ...                  # backfill, staging, logging, run_ledger
+├── downloader/              # Document downloader modules (6 modules)
 ├── templates/               # Jinja2 HTML templates + partials/
 ├── static/                  # CSS + JS assets
 ├── tests/                   # pytest test suite (104 files)
 ├── scripts/                 # Operational scripts
 ├── docs/                    # PRD, ROADMAP, NOTICED_ISSUES, archive/
 ├── run_pipeline.py          # 5-step pipeline orchestrator
-├── build_budget_db.py       # Database builder
-├── enrich_budget_db.py      # PE enrichment
-├── validate_budget_data.py  # Data quality validation
-├── search_budget.py         # CLI search
-└── schema_design.py         # DB schema and migrations
+├── repair_database.py       # Data quality repair (7-step process)
+└── stage_budget_data.py     # Data staging utility
 ```
 
 ## Architecture Decisions
@@ -140,10 +147,14 @@ docs/<short-description>
 |----------|---------|-------------|
 | `APP_DB_PATH` | `dod_budget.sqlite` | Database path |
 | `APP_PORT` | `8000` | Server port |
+| `APP_HOST` | `127.0.0.1` | Server bind address |
+| `APP_LOG_FORMAT` | `text` | Logging format (`text` or `json`) |
 | `APP_CORS_ORIGINS` | `*` | CORS origins |
+| `APP_DB_POOL_SIZE` | `10` | Max DB connections in pool |
 | `RATE_LIMIT_SEARCH` | `60` | Search req/min/IP |
 | `RATE_LIMIT_DOWNLOAD` | `10` | Download req/min/IP |
 | `RATE_LIMIT_DEFAULT` | `120` | Default req/min/IP |
+| `TRUSTED_PROXIES` | *(empty)* | Comma-separated proxy IPs for forwarded headers |
 
 ## Common Tasks
 
@@ -167,9 +178,9 @@ docs/<short-description>
 
 ### Modifying the Database Schema
 
-1. Update DDL in `schema_design.py`
+1. Update DDL in `pipeline/schema.py`
 2. Add migration to `migrate()` with incremented version
-3. Test with `tests/test_schema_design.py`
+3. Test with `tests/test_pipeline_group/test_bear_migration.py`
 4. **Update `docs/PRD.md` section 5 (Database Schema)**
 
 ### Adding a New Utility Module

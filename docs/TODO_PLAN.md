@@ -14,7 +14,7 @@
 | **B** | Reference tables & dropdowns | ✅ Code complete | DB verification only |
 | **C** | Org name normalization | ✅ Code complete | DB verification only |
 | **D** | FY attribution | ⚠️ Partial | Mismatch logs but no auto-correction |
-| **E** | Enrichment quality | ⚠️ Partial | API tag filtering not implemented |
+| **E** | Enrichment quality | ⚠️ Partial | Tag filtering done; description gap-fill needs DB |
 | **F** | Download retry CLI | ✅ Complete | Done (2026-04-02) |
 | **G** | Deploy & launch | ❌ Blocked | Needs user infrastructure decisions |
 
@@ -157,8 +157,7 @@ python -m pytest tests/ -k "fiscal_year or builder" -v
 - Tier-2 taxonomy with lower confidence: `pipeline/enricher.py:126-156`
 
 **What's missing:**
-- **Tag filtering in API**: `api/routes/pe.py` `list_tags()` has no confidence threshold or coverage cap
-  - Fix: Add `WHERE confidence >= 0.85` or `HAVING COUNT(*) < (SELECT COUNT(*) * 0.5 FROM pe_index)`
+- ~~**Tag filtering in API**: `api/routes/pe.py` `list_tags()` has no confidence threshold or coverage cap~~ ✅ Fixed 2026-04-02: Added `min_confidence` (default 0.85) and `max_coverage` (default 0.5) query parameters
 - **Gap-fill for 12 PEs** without descriptions (#55) — needs DB access to identify them
 
 **Files to modify:**
