@@ -246,11 +246,11 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | **HIGH** | TODO-H1 | Fix R-1 title for PDF-only PEs | `api/routes/keyword_search.py` |
 | **HIGH** | TODO-H2 | Fix R-1 funding for D8Z PEs | `api/routes/keyword_search.py` |
 | **MEDIUM** | TODO-M1 | Verify Explorer PE number search | `api/routes/keyword_search.py` |
-| **LOW** | TODO-L1 | Enricher progress reporting | `pipeline/enricher.py` |
+| ~~**LOW**~~ | ~~TODO-L1~~ | ~~Enricher progress reporting~~ | ~~`pipeline/enricher.py`~~ | **DONE** |
 | **LOW** | TODO-L2 | Fix RuntimeWarning on enricher | `pipeline/__init__.py` |
 | **LOW** | TODO-L3 | Fix `--with-llm` Phase 3 | `pipeline/enricher.py` |
 | **LOW** | TODO-L4 | Fix non-LLM tagging (0 rows) | `pipeline/enricher.py` |
-| **LOW** | TODO-L5 | Rebuild Cache button on Hypersonics | `templates/hypersonics.html` |
+| ~~**LOW**~~ | ~~TODO-L5~~ | ~~Rebuild Cache button on Hypersonics~~ | ~~`templates/hypersonics.html`~~ | **DONE** |
 
 **Deferred items requiring external resources (6 items):**
 

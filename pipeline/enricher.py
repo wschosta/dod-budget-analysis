@@ -30,7 +30,6 @@ import threading
 import time
 from pathlib import Path
 
-# TODO [TODO-L1]: Add uniform progress reporting to all 5 enrichment phases.
 # TODO [TODO-L3]: Consolidate anthropic import to single top-level _HAS_ANTHROPIC flag.
 # TODO [TODO-L4]: Debug rule-based tagger in Phase 3 — currently produces 0 rows.
 # See docs/TODO_PLAN.md for full specifications.
@@ -312,6 +311,42 @@ def _ensure_pe_index_source_column(conn: sqlite3.Connection) -> None:
         )
         conn.commit()
         logger.info("  Added 'source' column to pe_index (upgrade).")
+
+
+def _log_progress(
+    phase_name: str,
+    completed: int,
+    total: int,
+    start_time: float,
+) -> None:
+    """Log a uniform progress line for an enrichment phase.
+
+    Format:
+        Phase X: {completed}/{total} ({pct:.1f}%) | Elapsed: {elapsed} | ETA: {eta} | {rate:.0f} items/s
+    """
+    if total <= 0:
+        return
+    elapsed = time.monotonic() - start_time
+    pct = completed / total * 100
+    rate = completed / elapsed if elapsed > 0 else 0
+    eta_s = (total - completed) / rate if rate > 0 else 0
+
+    def _fmt_time(s: float) -> str:
+        if s < 60:
+            return f"{s:.0f}s"
+        m, s = divmod(s, 60)
+        return f"{int(m)}m{int(s)}s"
+
+    logger.info(
+        "%s: %s/%s (%.1f%%) | Elapsed: %s | ETA: %s | %.0f items/s",
+        phase_name,
+        f"{completed:,}",
+        f"{total:,}",
+        pct,
+        _fmt_time(elapsed),
+        _fmt_time(eta_s),
+        rate,
+    )
 
 
 def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
@@ -600,7 +635,8 @@ def run_phase1(conn: sqlite3.Connection, stop_event: threading.Event | None = No
 
         # ── Build insert buffer from pre-fetched data ─────────────────────
         insert_buf: list[tuple] = []
-        for pe in pe_list:
+        t0_pass2 = time.monotonic()
+        for pass2_idx, pe in enumerate(pe_list):
             title = None
             for text in pe_texts[pe]:
                 title = _extract_pe_title_from_text(pe, text)
@@ -623,6 +659,9 @@ def run_phase1(conn: sqlite3.Connection, stop_event: threading.Event | None = No
                 pe, title, org_name, budget_type,
                 fiscal_years_json, exhibit_types_json,
             ))
+
+            if (pass2_idx + 1) % 200 == 0 or pass2_idx + 1 == len(pe_list):
+                _log_progress("Phase 1 Pass 2", pass2_idx + 1, len(pe_list), t0_pass2)
 
         if insert_buf:
             conn.executemany("""
@@ -676,7 +715,7 @@ def run_phase2(conn: sqlite3.Connection, stop_event: threading.Event | None = No
     logger.info("Processing %d PDF file(s)...", len(pdf_files))
     total_desc = 0
     insert_buf: list[tuple] = []
-    t0 = time.time()
+    t0_mono = time.monotonic()
 
     errors: list[str] = []
     for i, source_file in enumerate(pdf_files, 1):
@@ -748,14 +787,7 @@ def run_phase2(conn: sqlite3.Connection, stop_event: threading.Event | None = No
             conn.commit()
             total_desc += len(insert_buf)
             insert_buf = []
-            elapsed = time.time() - t0
-            pct = i / len(pdf_files) * 100
-            rate = i / elapsed if elapsed > 0 else 0
-            eta = (len(pdf_files) - i) / rate if rate > 0 else 0
-            logger.info(
-                "  [Phase 2] %d / %d files (%.1f%%) — %d descriptions — %.0f files/s — ETA %.0fs",
-                i, len(pdf_files), pct, total_desc, rate, eta,
-            )
+            _log_progress("Phase 2", i, len(pdf_files), t0_mono)
 
     if insert_buf:
         conn.executemany("""
@@ -981,7 +1013,7 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
     except sqlite3.OperationalError:
         pass  # project_descriptions table may not exist yet
 
-    t0 = time.time()
+    t0_mono = time.monotonic()
     for tag_idx, pe in enumerate(to_tag):
         if stop_event and stop_event.is_set():
             logger.info("  Phase 3 stopped at PE %d/%d.", tag_idx, len(to_tag))
@@ -989,11 +1021,7 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
 
         # Progress every 100 PEs
         if tag_idx > 0 and tag_idx % 100 == 0:
-            elapsed = time.time() - t0
-            logger.info(
-                "  [Phase 3] %d / %d PEs tagged (%.1f%%) — %.1fs elapsed",
-                tag_idx, len(to_tag), tag_idx / len(to_tag) * 100, elapsed,
-            )
+            _log_progress("Phase 3", tag_idx, len(to_tag), t0_mono)
 
         # LION-106: Source files for this PE's structured tags
         pe_src_json = json.dumps(structured_sources.get(pe, []))
@@ -1237,7 +1265,7 @@ def run_phase4(conn: sqlite3.Connection, stop_event: threading.Event | None = No
     rows_processed = 0
     skipped = 0
     chunk_max_rowid = checkpoint_rowid
-    t0 = time.time()
+    t0_mono = time.monotonic()
     while True:
         if stop_event and stop_event.is_set():
             logger.info("  Phase 4 stopped at row %s.", f"{rows_processed:,}")
@@ -1339,16 +1367,8 @@ def run_phase4(conn: sqlite3.Connection, stop_event: threading.Event | None = No
 
         # Progress every 10,000 rows
         if rows_processed % 10_000 < CHUNK:
-            elapsed = time.time() - t0
-            pct = rows_processed / desc_remaining * 100 if desc_remaining else 0
-            rate = rows_processed / elapsed if elapsed > 0 else 0
-            eta = (desc_remaining - rows_processed) / rate if rate > 0 else 0
-            logger.info(
-                "  [Phase 4] %s / %s rows (%.1f%%) — %d links found — %.0f rows/s — ETA %.0fs",
-                f"{rows_processed:,}", f"{desc_remaining:,}", pct, total, rate, eta,
-            )
+            _log_progress("Phase 4", rows_processed, desc_remaining, t0_mono)
 
-    elapsed = time.time() - t0
     if skipped:
         logger.info("Skipped %s already-processed (PE, file) pairs.", f"{skipped:,}")
 
@@ -1486,7 +1506,7 @@ def run_phase5(conn: sqlite3.Connection, stop_event: threading.Event | None = No
     pe_level_fallback = 0
     rows_processed = 0
     chunk_max_rowid = checkpoint_rowid
-    t0 = time.time()
+    t0_mono = time.monotonic()
 
     while True:
         if stop_event and stop_event.is_set():
@@ -1579,14 +1599,7 @@ def run_phase5(conn: sqlite3.Connection, stop_event: threading.Event | None = No
 
         # Progress every 10,000 rows
         if rows_processed % 10_000 < CHUNK and desc_remaining > 0:
-            elapsed = time.time() - t0
-            pct = rows_processed / desc_remaining * 100
-            rate = rows_processed / elapsed if elapsed > 0 else 0
-            eta = (desc_remaining - rows_processed) / rate if rate > 0 else 0
-            logger.info(
-                "  [Phase 5] %s / %s rows (%.1f%%) — %d project rows — %.0f rows/s — ETA %.0fs",
-                f"{rows_processed:,}", f"{desc_remaining:,}", pct, total_rows, rate, eta,
-            )
+            _log_progress("Phase 5", rows_processed, desc_remaining, t0_mono)
 
     if insert_buf:
         conn.executemany("""
