@@ -239,18 +239,27 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 
 **LION / TIGER / BEAR agent groups:** ✅ **ALL COMPLETE** (33/33 tasks done)
 
-**Active work items (11 items) — see [`docs/TODO_PLAN.md`](TODO_PLAN.md) for full specifications:**
+**Code TODOs (8 items):** ✅ **ALL COMPLETE** — TODO-H1, H2, M1, L1-L5 resolved
 
-| Priority | ID | Task | Files |
-|----------|----|------|-------|
-| **HIGH** | TODO-H1 | Fix R-1 title for PDF-only PEs | `api/routes/keyword_search.py` |
-| **HIGH** | TODO-H2 | Fix R-1 funding for D8Z PEs | `api/routes/keyword_search.py` |
-| **MEDIUM** | TODO-M1 | Verify Explorer PE number search | `api/routes/keyword_search.py` |
-| ~~**LOW**~~ | ~~TODO-L1~~ | ~~Enricher progress reporting~~ | ~~`pipeline/enricher.py`~~ | **DONE** |
-| **LOW** | TODO-L2 | Fix RuntimeWarning on enricher | `pipeline/__init__.py` |
-| **LOW** | TODO-L3 | Fix `--with-llm` Phase 3 | `pipeline/enricher.py` |
-| **LOW** | TODO-L4 | Fix non-LLM tagging (0 rows) | `pipeline/enricher.py` |
-| ~~**LOW**~~ | ~~TODO-L5~~ | ~~Rebuild Cache button on Hypersonics~~ | ~~`templates/hypersonics.html`~~ | **DONE** |
+**Data quality issues from [`NOTICED_ISSUES.md`](NOTICED_ISSUES.md) — 20 open items:**
+
+| Category | Issues | Description |
+|----------|--------|-------------|
+| **Reference tables / dropdowns** | #1, #2, #4 | Empty fiscal year, appropriation, exhibit type dropdowns |
+| **Organization normalization** | #3, #20, #38 | Duplicate service entries (ARMY/A, NAVY/N, AF/F) |
+| **Appropriation data gaps** | #5, #21, #57 | 7.4% NULL `appropriation_code` → "Unknown" in charts |
+| **FY attribution errors** | #10, #25 | FY derived from file path, not document content |
+| **PE number coverage** | #8, #53 | 67% of rows lack PE numbers (structural — exhibit-type limitation) |
+| **Enrichment quality** | #27, #39, #55 | Over-tagging, 12 PEs without descriptions |
+| **FY coverage gaps** | #56 | Some PEs missing historical FY data |
+| **Cascading / verification** | #6, #7, #9, #12, #15 | May already be fixed in Round 4/5 — need verification |
+| **Gradual refactor** | #49 | Inline styles in templates (ongoing) |
+
+**Pipeline/CLI TODOs (1 item):**
+
+| ID | Task | Status |
+|----|------|--------|
+| 1.A6 | `--retry-failures` CLI flag for downloader | Stub exists, CLI not implemented |
 
 **Deferred items requiring external resources (6 items):**
 
@@ -263,8 +272,8 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | OH-MY-011 | Soft launch | Deployed application |
 | OH-MY-012 | Public launch | Depends on OH-MY-011 |
 
+See [`docs/TODO_PLAN.md`](TODO_PLAN.md) for full plan with sub-agent assignments.
 See [REMAINING_TODOS.md](archive/implementation-logs/REMAINING_TODOS.md) for historical context.
-See [`docs/TODO_PLAN.md`](TODO_PLAN.md) for sub-agent execution plan.
 
 ---
 

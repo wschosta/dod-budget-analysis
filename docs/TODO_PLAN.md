@@ -1,7 +1,7 @@
 # Open TODO Plan — DoD Budget Analysis
 
-> **Generated:** 2026-04-02
-> **Purpose:** Comprehensive inventory of all remaining work items, organized for parallel sub-agent execution.
+> **Generated:** 2026-04-02 (updated after comprehensive audit)
+> **Purpose:** Complete inventory of all remaining work items, organized for parallel sub-agent execution.
 
 ---
 
@@ -9,90 +9,122 @@
 
 | Priority | Count | Description |
 |----------|-------|-------------|
-| **HIGH** | 2 | Data correctness — PDF-only PE titles and R-1 funding rows |
-| **MEDIUM** | 1 | Feature verification — Explorer PE number search |
-| **LOW** | 5 (3 done) | Pipeline fixes and UI polish |
+| **HIGH — Data Quality (DB)** | 10 | Round 1 open issues requiring pipeline/DB fixes |
+| **HIGH — Code TODOs** | 2 (DONE) | PDF-only PE titles and R-1 funding rows |
+| **MEDIUM — Data Quality** | 5 | Pipeline gaps: PE numbers, descriptions, FY coverage |
+| **MEDIUM — Code TODOs** | 1 (DONE) | Explorer PE number search fallback |
+| **LOW — Code TODOs** | 5 (3 DONE) | Pipeline fixes and UI polish |
+| **LOW — UX/Frontend** | 3 | Service normalization, tag quality, inline styles |
 | **DEFERRED** | 6 | Require external resources (hosting, domain, launch) |
-| **CLEANUP** | 3 | Inline code TODOs (partially implemented stubs) |
-| **Total** | **17** | |
+| **Total** | **32** | 6 code TODOs done, 20 open, 6 deferred |
 
 ---
 
-## 1. HIGH Priority — Data Quality & Correctness
+## 1. NOTICED ISSUES — Open Database & Pipeline Issues
 
-These directly affect data accuracy on the hypersonics and explorer pages.
+These are from `docs/NOTICED_ISSUES.md` — issues observed against the live database
+that require pipeline re-runs, migrations, or data fixes. **Many share root causes.**
 
-### TODO-H1: Fix R-1 title/description for PDF-only PEs
+### 1a. Round 1 — Open (Root Cause: DB/Pipeline)
 
-- **Problem:** PEs existing only in PDFs get stub R-1 rows with raw PE number as title (e.g., `0603183D8Z`) instead of the real R-1 title (e.g., "Joint Hypersonic Technology Development").
-- **Root cause:** `build_cache_table()` in `api/routes/keyword_search.py` (~line 885) inserts stubs without extracting titles from R-1 PDF pages.
-- **Fix:** After stub insertion, scan `pdf_pages` for R-1 pages (via `pdf_pe_numbers`), extract title using `PE\s+(\d{7}PE_SUFFIX_PATTERN)\s*[/:]\s*(.+)` regex, and UPDATE the stub row's `line_item_title`.
-- **Files:** `api/routes/keyword_search.py`, `utils/patterns.py`
-- **Validation:** `SELECT pe_number, line_item_title FROM hypersonics_cache WHERE pe_number LIKE '%D8Z' AND exhibit_type='r1'` should show real titles.
-- **Estimated effort:** Medium (~2h)
+Most of these were catalogued against the pre-Round-5 database (124K rows). Round 5
+dedup reduced to 47K rows and fixed several. The issues below are **still marked [OPEN]**
+in NOTICED_ISSUES.md and need verification against the current database.
 
-### TODO-H2: Fix missing R-1 funding for Defense-Wide D8Z PEs
+| Issue # | Problem | Root Cause | Needs DB? |
+|---------|---------|------------|-----------|
+| **#1** | Fiscal Year dropdown — empty | Reference tables missing or not populated | Yes — run `backfill_reference_tables.py` or verify `budget_cycles` table |
+| **#2** | Appropriation dropdown — empty | Reference tables missing | Yes — verify `appropriation_titles` table populated |
+| **#3, #20** | Service/Agency duplicates (ARMY/A, NAVY/N, AF/F) | Inconsistent `organization_name` | Yes — **#38 same issue**. Run org normalization in `repair_database.py` |
+| **#4** | Exhibit Type showing "c1 — c1" | Fallback when `exhibit_types` reference table missing | Yes — verify `exhibit_types` table has display_name values |
+| **#5, #21** | Appropriation donut 100% "Unknown" | `appropriation_code` empty/null | Partially fixed in Round 5 (17.5%→7.4% NULL). Remaining 7.4% need investigation |
+| **#6, #14** | Budget by Service large "Unknown" | Blank organization rows | Fixed in Round 5 (311→0 empty). **Verify resolved.** |
+| **#7, #17, #22** | Duplicate/repetitive results | Cross-file duplicates | Fixed in Round 5 (124K→47K). **Verify resolved.** |
+| **#8** | 73% of rows missing PE numbers | PE numbers only in certain exhibit types | **#53 same issue.** Structural — PE numbers only in R-2/P-5 exhibits. Document as known limitation. |
+| **#9, #11** | Slow detail/dashboard | No indexes on filter columns | Fixed in Round 4 (#58 composites). **Verify resolved.** |
+| **#10, #25** | Wrong FY attribution (FY1998) | FY derived from source file path | Needs pipeline fix — derive FY from document content, not filepath |
+| **#12, #15** | Dashboard empty/broken | Cascading from missing data | **Verify after fixing #1-#6.** |
+| **#16, #19** | FY data gap 2000-2009 | Data never downloaded | Known limitation — documents not available. Already in PRD §9. |
+| **#18** | Charts defaults to FY 1998 | Sort order bug | Fixed (PR #18). **Verify resolved.** |
+| **#23-#24** | Missing FY columns, FY 2000-2011 zero entries | Same root cause as #16 | Known limitation |
+| **#26** | Tags dropdown mispositioned | CSS z-index | Fixed (PR #26). **Verify resolved.** |
+| **#27** | Tag counts inflated (rdte on 1539/1579) | Over-tagging in enrichment | **#39 same issue.** Pipeline tuning needed. |
+| **#28** | Footer FY gap | Data gap display | Known limitation (cosmetic) |
 
-- **Problem:** D8Z PE stub R-1 rows have NULL funding amounts because they don't exist in `budget_lines`.
-- **Fix:** After R-2 PDF mining, aggregate sub-element funding into the R-1 stub: `UPDATE {cache_table} SET fy20XX = (SELECT SUM(fy20XX) FROM {cache_table} WHERE pe_number=? AND exhibit_type='r2') WHERE pe_number=? AND exhibit_type='r1'`.
-- **Files:** `api/routes/keyword_search.py` (~line 993, before index creation)
-- **Validation:** `SELECT pe_number, fy2024, fy2025, fy2026 FROM hypersonics_cache WHERE pe_number='0603183D8Z' AND exhibit_type='r1'` should show non-NULL totals.
-- **Estimated effort:** Medium (~1.5h)
-- **Dependency:** Best done after TODO-H1.
+### 1b. Round 3 — Open Data Quality Issues
+
+| Issue # | Problem | Root Cause | Needs DB? |
+|---------|---------|------------|-----------|
+| **#52** | 2,161 rows NULL `budget_type` despite valid `appropriation_code` | Detail exhibits not backfilled | Fixed in Round 4 (→116 NULL). **Verify resolved.** |
+| **#53** | 67% of `budget_lines` have no PE number | Structural — O-1/M-1/P-1 exhibits don't carry PE at line level | Document as known limitation |
+| **#55** | 12 PEs without mission descriptions | Pipeline gap — PDFs not parsed for these PEs | Yes — re-run Phase 2 enrichment or investigate missing PDFs |
+| **#56** | FY gaps in PE funding matrices | Historical data not linked | Yes — investigate `budget_lines` coverage per PE |
+| **#57** | `appropriation_code` NULL rows → "Unknown" | Incomplete parsing | Partially fixed in Round 5 (→7.4%). Further improvement possible |
+
+### 1c. Round 2 — Open UX Issues
+
+| Issue # | Problem | Root Cause | Needs DB? |
+|---------|---------|------------|-----------|
+| **#38** | Service dropdown — dozens of duplicate entries | `organization_name` not normalized | Yes — same as #3/#20 |
+| **#39** | Tags dropdown — 30 options, many meaningless | Enrichment over-tagging | Pipeline Phase 3 tuning |
+| **#49** | Excessive inline styles in templates | Ongoing gradual refactor | No — CSS cleanup as files are touched |
 
 ---
 
-## 2. MEDIUM Priority — Feature Parity & UX
+## 2. Code TODOs — Status
 
-### TODO-M1: Verify Explorer page PE number search
+### ~~TODO-H1: Fix R-1 title/description for PDF-only PEs~~ DONE
 
-- **Problem:** Entering a PE number (e.g., `0604030N`) as a keyword on `/explorer` may not return that PE in results.
-- **Current state:** `collect_matching_pe_numbers_split()` (~line 143) already has PE detection. May already work.
-- **Action:** Verify behavior; if broken, ensure `kw.strip()` before regex match and add `pe_index` fallback for PDF-only PEs.
-- **Files:** `api/routes/keyword_search.py` (~line 143-160), `api/routes/explorer.py`
-- **Estimated effort:** Low (~1h, mostly verification)
+- **Fix:** `_extract_r1_titles_for_stubs()` added to `api/routes/keyword_search.py`
 
----
+### ~~TODO-H2: Fix missing R-1 funding for Defense-Wide D8Z PEs~~ DONE
 
-## 3. LOW Priority — Pipeline & Infrastructure
+- **Fix:** `_aggregate_r2_funding_into_r1_stubs()` added to `api/routes/keyword_search.py`
 
-### TODO-L1: Pipeline enricher progress reporting
+### ~~TODO-M1: Explorer PE number search~~ DONE
 
-- **Problem:** Inconsistent progress messages across enricher's 5 phases.
-- **Fix:** Add uniform progress reporter to each phase's main loop: `Phase X: {completed}/{total} ({pct:.1f}%) | Elapsed: {elapsed} | ETA: {eta}`.
-- **Files:** `pipeline/enricher.py` (phases 1-5)
-- **Estimated effort:** Low (~1h)
+- **Fix:** Added `pe_index` fallback for PDF-only PEs + 8 tests
 
-### ~~TODO-L2: Fix RuntimeWarning on `python -m pipeline.enricher`~~ DONE
+### ~~TODO-L1: Pipeline enricher progress reporting~~ DONE
 
-- **Problem:** `RuntimeWarning: 'pipeline.enricher' found in sys.modules` due to eager import in `pipeline/__init__.py`.
-- **Fix:** Replaced eager imports in `pipeline/__init__.py` with lazy `__getattr__`-based imports. `__all__` still exports correctly.
-- **Files:** `pipeline/__init__.py`
+- **Fix:** `_log_progress()` helper integrated into all 5 phases
+
+### ~~TODO-L2: Fix RuntimeWarning~~ DONE
+
+- **Fix:** Lazy `__getattr__` imports in `pipeline/__init__.py`
 
 ### ~~TODO-L3: Fix `--with-llm` in Phase 3~~ DONE
 
-- **Problem:** `anthropic package not installed` error partway through LLM tagging despite some batches succeeding.
-- **Fix:** Consolidated to single top-of-file `_HAS_ANTHROPIC` flag; check once at `run_phase3()` entry, falls back to rule-based tagging with a warning.
-- **Files:** `pipeline/enricher.py`
+- **Fix:** Single `_HAS_ANTHROPIC` flag, checked once at phase entry
 
-### ~~TODO-L4: Fix Phase 3 non-LLM tagging (0 rows)~~ DONE
+### ~~TODO-L4: Fix Phase 3 non-LLM tagging~~ DONE
 
-- **Problem:** Rule-based tagger in Phase 3 produces 0 tag rows for 85 PEs.
-- **Fix:** `bl_texts` query now concatenates `line_item_title`, `budget_activity_title`, and `account_title` (was only using `line_item_title`). Added diagnostic logging: summary stats after rule-based pass and per-PE `logger.debug()` showing matched tags.
-- **Files:** `pipeline/enricher.py`
+- **Fix:** Expanded text sources + diagnostic logging
 
-### TODO-L5: Add Rebuild Cache button to Hypersonics page
+### ~~TODO-L5: Rebuild Cache button~~ DONE
 
-- **Problem:** No UI way to trigger cache rebuild; only via API or script.
-- **Fix:** Add button + JS `rebuildCache()` calling `POST /api/v1/hypersonics/rebuild`. Endpoint may already exist.
-- **Files:** `templates/hypersonics.html`, `api/routes/hypersonics.py`
-- **Estimated effort:** Low (~30min)
+- **Fix:** Button + JS in `templates/hypersonics.html`
+
+### TODO-1.A6: Retry failed downloads (partial)
+
+- **Status:** `_failed_files` list stub in `downloader/gui.py`; CLI `--retry-failures` flag not implemented
+- **Files:** `downloader/gui.py`, `dod_budget_downloader.py`
+
+---
+
+## 3. Infrastructure TODOs
+
+### `.github/workflows/deploy.yml` — 4 placeholder TODOs
+
+All marked `[OH MY]` — require cloud platform credentials:
+- Line 9: Fill in deployment secrets
+- Line 71: Set GHCR_TOKEN or PAT
+- Line 151: Update `needs` for chosen deploy job
+- Line 160: Replace with actual deployment URL
 
 ---
 
 ## 4. DEFERRED — Require External Resources
-
-These are blocked on hosting/domain/deployment decisions and cannot be completed by code-only agents.
 
 | ID | Task | Blocker |
 |----|------|---------|
@@ -105,70 +137,55 @@ These are blocked on hosting/domain/deployment decisions and cannot be completed
 
 ---
 
-## 5. CLEANUP — Inline Code TODOs (Stubs Already Implemented)
+## 5. Sub-Agent Execution Plan (Phase 2)
 
-These are partial implementations referenced by inline comments. They represent incremental improvements, not bugs.
+Now that the code TODOs are resolved, the next wave of work is **database verification
+and data quality fixes**. These require a live database to test against.
 
-| Location | Reference | Status | Action |
-|----------|-----------|--------|--------|
-| `pipeline/builder.py:877` | TODO 1.B3-d | Implemented — `_EXHIBIT_BUDGET_TYPE` mapping exists | Mark as done |
-| `pipeline/builder.py:1244` | TODO 1.B3-b | Implemented — `_detect_currency_year()` call exists | Mark as done |
-| `downloader/gui.py:42` | TODO 1.A6-a | Stub exists — `_failed_files` list populated | Tied to ROADMAP 1.A6 (retry-failures CLI flag) |
+### Agent A: `fix/verify-round5-fixes` (Verification)
+Verify that Round 4/5 fixes actually resolved the issues they claimed to:
+- **Issues to verify:** #6/14 (org Unknown), #7/17/22 (duplicates), #9/11 (slow queries),
+  #18 (FY default), #26 (z-index), #52 (budget_type NULLs)
+- **Method:** Run SQL queries from NOTICED_ISSUES.md against the current DB
+- **Action:** Mark verified issues as [RESOLVED] in NOTICED_ISSUES.md, or re-open with updated details
 
----
+### Agent B: `fix/reference-tables-and-dropdowns` (Issues #1, #2, #4)
+- Verify `budget_cycles`, `appropriation_titles`, `services_agencies`, `exhibit_types` tables exist and are populated
+- If empty, run `backfill_reference_tables.py` or add migration
+- Verify frontend dropdowns populate correctly
+- **Files:** `backfill_reference_tables.py`, `schema_design.py`, `api/routes/frontend.py`
 
-## 6. Stale TODO Blocks to Remove
+### Agent C: `fix/organization-normalization` (Issues #3, #20, #38)
+- Normalize `organization_name` in `budget_lines`: collapse ARMY/A→Army, NAVY/N→Navy, AF/F→Air Force
+- Add normalization to `repair_database.py` or `pipeline/builder.py` ingestion
+- Update `services_agencies` reference table
+- **Files:** `repair_database.py`, `pipeline/builder.py`
 
-These files have empty "TODOs for this file" headers with no active items:
+### Agent D: `fix/fy-attribution` (Issues #10, #25)
+- Fix FY derived from source file path instead of document content
+- Investigate `fiscal_year` column population in `pipeline/builder.py`
+- **Files:** `pipeline/builder.py`
 
-| File | Action |
-|------|--------|
-| `utils/validation.py` (lines 8-12) | Remove empty TODO block |
-| `utils/database.py` (lines 8-13) | Remove empty TODO block (only DONE item) |
-| `utils/formatting.py` (lines 8-12) | Remove empty TODO block |
-| `utils/config.py` (lines 8-12) | Remove empty TODO block |
-| `pipeline/db_validator.py` (lines 14-22) | Remove empty TODO block (only DONE items) |
-| `pipeline/enricher.py` (lines 17-32) | Remove completed LION TODO block |
+### Agent E: `fix/enrichment-quality` (Issues #27, #39, #55)
+- Tune tag confidence thresholds to reduce over-tagging
+- Investigate 12 PEs without mission descriptions
+- **Files:** `pipeline/enricher.py`
 
----
+### Agent F: `fix/retry-failures-cli` (TODO 1.A6)
+- Implement `--retry-failures` CLI flag for `dod_budget_downloader.py`
+- Write `failed_downloads.json` structured log
+- **Files:** `dod_budget_downloader.py`, `downloader/gui.py`
 
-## Sub-Agent Execution Plan
-
-Recommended parallel agent assignments:
-
-### Agent 1: `fix/hypersonics-pdf-pe-titles` (TODO-H1 + TODO-H2)
-- Both items modify `api/routes/keyword_search.py` in the cache-build flow
-- H1 must land before H2 (title extraction before funding aggregation)
-- Run tests: `pytest tests/ -k "hypersonics or keyword" -v`
-
-### Agent 2: `fix/enricher-pipeline-bugs` (TODO-L2 + TODO-L3 + TODO-L4)
-- All three modify `pipeline/enricher.py` or `pipeline/__init__.py`
-- L2 is a quick fix; L3 and L4 require investigation
-- Run tests: `pytest tests/ -k "enricher or pipeline" -v`
-
-### Agent 3: `feat/enricher-progress-and-ui` (TODO-L1 + TODO-L5)
-- Independent from agents 1 and 2
-- L1: `pipeline/enricher.py` progress reporting
-- L5: `templates/hypersonics.html` + verify API endpoint
-- Run tests: `pytest tests/ -k "hypersonics or frontend" -v`
-
-### Agent 4: `verify/explorer-pe-search` (TODO-M1)
-- Verification-first task — may require no code changes
-- Independent from all other agents
-- Run tests: `pytest tests/ -k "explorer" -v`
-
-### Sequential (user-driven): Deferred items (OH-MY-007 through OH-MY-012)
-- Require hosting platform decision and credentials
-- Cannot be parallelized with code agents
+### Prerequisite: Database availability
+Agents A-E need a populated SQLite database. Either:
+1. Use the test fixtures (`test_db`, `test_db_excel_only` from `conftest.py`) for structural checks
+2. Or have access to a real `dod_budget.sqlite` for data quality verification
 
 ---
 
-## ROADMAP Status Corrections
+## Future Directions (from NOTICED_ISSUES.md)
 
-Items in ROADMAP.md that need status updates:
-
-| Item | Current Status | Correct Status |
-|------|---------------|----------------|
-| 1.A6 (Retry failed downloads) | "⚠️ Not started" | Partially started — `_failed_files` stub in `downloader/gui.py` |
-| 1.B3 (Normalize monetary values) | "🔄 In Progress" | Mostly Complete — currency-year detection implemented (TODO 1.B3-b done), budget_type mapping done (TODO 1.B3-d done) |
-| Test suite count | "1,248 tests" | Needs verification (may have grown) |
+These are documented enhancement ideas, not bugs:
+- **Weapon system grouping** — `program_groups` + `pe_group_membership` tables for Spruill charts
+- **Timeline view** — Sparkline funding bars in search results
+- **Sub-PE tag browsing** — Expand PE cards to show matched sub-projects
