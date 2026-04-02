@@ -61,17 +61,16 @@ Not actionable without it.
 
 ### Group E: Enrichment Quality (LOW EFFORT, HIGH VALUE)
 
-**Current state:**
+**Current state (after fix):**
 - Confidence scoring system works (6 levels: 1.0 to 0.65)
-- `api/routes/pe.py` `list_tags()` returns all tags without filtering
-- Inflated tags like `rdte: 1539/1579 PEs` (97% coverage) are meaningless noise
+- ~~`api/routes/pe.py` `list_tags()` returns all tags without filtering~~ **Fixed:** `min_confidence` (default 0.85) and `max_coverage` (default 0.5) parameters now filter out low-quality and over-applied tags
 
-**What's proposed:**
-1. Add confidence threshold (`WHERE confidence >= 0.85`) to tag API
-2. Add coverage cap (`HAVING pe_count < total_pes * 0.5`) to exclude over-applied tags
-3. Gap-fill 12 PEs missing descriptions
+**What was proposed and resolved:**
+1. ~~Add confidence threshold (`WHERE confidence >= 0.85`) to tag API~~ **Done**
+2. ~~Add coverage cap (`HAVING pe_count < total_pes * 0.5`) to exclude over-applied tags~~ **Done**
+3. Gap-fill 12 PEs missing descriptions — **Deferred** (needs production DB)
 
-**Review opinion:** **Do item 1 (confidence threshold) now.** This is a ~5-line code
+**Review opinion:** Items 1 and 2 were implemented in this review. This is a ~5-line code
 change in `api/routes/pe.py` that immediately improves tag quality. The coverage cap
 (item 2) is also worth adding. Item 3 (gap-fill descriptions) requires the production
 database and can wait.

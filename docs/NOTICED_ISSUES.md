@@ -217,15 +217,11 @@ Removed the hero version (`name="hero_source"`) radio buttons. The sidebar versi
 
 ---
 
-### 39. Tags Dropdown — Up to 30 Options, Potentially Meaningless **[OPEN — partial]**
+### ~~39. Tags Dropdown — Up to 30 Options, Potentially Meaningless~~ **[RESOLVED — 2026-04-02]**
 
-**Root cause:** Enrichment pipeline over-tags (issue #27). Fixing the tag quality
-requires pipeline changes, not frontend changes.
+**Root cause:** Enrichment pipeline over-tags (issue #27).
 
-**Suggested fix:** Fix enrichment selectivity, then consider filtering tags by
-coverage threshold (< 50%) in the dropdown.
-
-_Note: Confidence column exists in pe_tags but `list_tags()` in `api/routes/pe.py` doesn't filter._
+**Fix applied:** Added `min_confidence` (default 0.85) and `max_coverage` (default 0.5) query parameters to `list_tags()` in `api/routes/pe.py`. Tags with low confidence or covering >50% of PEs are now filtered out by default. Parameters are adjustable per request.
 
 ---
 
@@ -691,7 +687,7 @@ are rows without enough context to infer an appropriation code.
 | **RESOLVED** | 32 | #5, #6/14, #7/17/22, #29-37, #40-48, #50-52, #54, #57-61, #63 |
 | **CODE COMPLETE — needs DB verification** | 15 | #1, #2, #3, #4, #9, #11, #12, #13, #15, #18, #20, #21, #26, #38 |
 | **STRUCTURAL — documented in PRD §9** | 7 | #8, #16, #19, #23, #24, #28, #53 (data coverage limitations) |
-| **OPEN — partial** | 4 | #10, #25 (FY mismatch — detection only), #27, #39 (tag filtering not wired up) |
+| **OPEN — partial** | 3 | #10, #25 (FY mismatch — detection only), #27 (enrichment over-tagging at pipeline level) |
 | **OPEN** | 2 | #55 (12 PEs without descriptions), #56 (FY gaps in PE funding) |
 | **DOCUMENTED** | 1 | #62 (tag coverage assessment) |
 | **GRADUAL** | 1 | #49 (inline styles — ongoing refactor) |
