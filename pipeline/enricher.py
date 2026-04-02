@@ -916,7 +916,7 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
     """
     logger.info("[Phase 3] Generating tags (LLM=%s)...", "yes" if with_llm else "no")
 
-    # Check anthropic availability once at phase entry (TODO-L3)
+    # Check anthropic availability once at phase entry
     if with_llm and not _HAS_ANTHROPIC:
         logger.warning("--with-llm requested but anthropic package is not installed.")
         logger.warning("Install with: pip install anthropic")
@@ -1040,6 +1040,7 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
             _log_progress("Phase 3", tag_idx, len(to_tag), t0_mono)
 
         # LION-106: Source files for this PE's structured tags
+        buf_start = len(insert_buf)
         pe_src_json = json.dumps(structured_sources.get(pe, []))
 
         # 3a: structured field tags — LION-105: confidence=1.0 (direct match)
@@ -1112,13 +1113,12 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
                         insert_buf.append((pe, proj_num, tag, "keyword", 0.65, desc_src_json))
                         break
 
-        # TODO-L4: Per-PE debug logging for rule-based tagger diagnostics
-        pe_tags_in_buf = [t for t in insert_buf if t[0] == pe]
-        if pe_tags_in_buf:
-            tag_names = [t[2] for t in pe_tags_in_buf]
-            logger.debug("Rule-based tagger: PE %s matched tags %s", pe, tag_names)
+        # Per-PE debug logging for rule-based tagger diagnostics
+        pe_tags = insert_buf[buf_start:]
+        if pe_tags:
+            logger.debug("Rule-based tagger: PE %s matched tags %s", pe, [t[2] for t in pe_tags])
 
-    # Debug logging for rule-based tagger (TODO-L4)
+    # Debug logging for rule-based tagger
     if insert_buf:
         # Count unique PEs with tags for diagnostic
         tagged_pes = {row[0] for row in insert_buf}

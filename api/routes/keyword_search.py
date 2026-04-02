@@ -29,6 +29,11 @@ SEARCH_COLS = ["line_item_title", "account_title", "budget_activity_title"]
 FY_START = 2015
 FY_END = 2026
 
+# Regex to extract PE number and title from PDF exhibit header lines
+_PE_TITLE_RE = re.compile(
+    rf"PE\s+(\d{{7}}{PE_SUFFIX_PATTERN})\s*[/:]\s*(.+?)(?:\s+\d|$)"
+)
+
 # RDT&E BA categories (BA 01-07) — canonical titles
 BA_CANONICAL: dict[str, str] = {
     "01": "BA 1: Basic Research",
@@ -311,9 +316,7 @@ def parse_r2_cost_block(
     pe_number = None
     pe_title = None
     for line in lines[:10]:
-        m = re.search(
-            rf"PE\s+(\d{{7}}{PE_SUFFIX_PATTERN})\s*[/:]\s*(.+?)(?:\s+\d|$)", line
-        )
+        m = _PE_TITLE_RE.search(line)
         if m:
             pe_number = m.group(1)
             pe_title = m.group(2).strip()
@@ -769,10 +772,6 @@ def _extract_r1_titles_for_stubs(
     If the PE already has a non-PE-number title (e.g. from pe_index), and
     the PDF title differs, log the mismatch but don't overwrite.
     """
-    pe_title_re = re.compile(
-        rf"PE\s+(\d{{7}}{PE_SUFFIX_PATTERN})\s*[/:]\s*(.+?)(?:\s+\d|$)"
-    )
-
     sorted_pes = sorted(pdf_only_pes)
     placeholders = ", ".join("?" for _ in sorted_pes)
 
@@ -810,7 +809,7 @@ def _extract_r1_titles_for_stubs(
         pdf_title = None
         for page_text in pages:
             for line in page_text.split("\n")[:10]:
-                m = pe_title_re.search(line)
+                m = _PE_TITLE_RE.search(line)
                 if m and m.group(1) == pe:
                     pdf_title = m.group(2).strip()
                     break
@@ -850,20 +849,19 @@ def _aggregate_r2_funding_into_r1_stubs(
     fy_cols = [f"fy{yr}" for yr in year_range]
     null_check = " AND ".join(f"stub.{col} IS NULL" for col in fy_cols)
 
-    # Single correlated UPDATE: set each FY column to the SUM of R-2 rows
-    set_parts = [
-        f"{col} = (SELECT SUM(r2.{col}) FROM {cache_table} r2 "
-        f"WHERE r2.pe_number = stub.pe_number AND r2.exhibit_type = 'r2')"
-        for col in fy_cols
-    ]
-    set_sql = ", ".join(set_parts)
+    # Aggregate all FY columns in one pass via CTE, then UPDATE-FROM
+    sum_cols = ", ".join(f"SUM({col}) AS {col}" for col in fy_cols)
+    set_sql = ", ".join(f"{col} = sums.{col}" for col in fy_cols)
 
-    # Only update stubs that have at least one R-2 row (EXISTS guard)
     result = conn.execute(
+        f"WITH sums AS ("
+        f"  SELECT pe_number, {sum_cols} FROM {cache_table} "
+        f"  WHERE exhibit_type = 'r2' GROUP BY pe_number"
+        f") "
         f"UPDATE {cache_table} AS stub SET {set_sql} "
-        f"WHERE stub.exhibit_type = 'r1' AND ({null_check}) "
-        f"AND EXISTS (SELECT 1 FROM {cache_table} r2 "
-        f"WHERE r2.pe_number = stub.pe_number AND r2.exhibit_type = 'r2')"
+        f"FROM sums "
+        f"WHERE stub.pe_number = sums.pe_number "
+        f"AND stub.exhibit_type = 'r1' AND ({null_check})"
     )
 
     if result.rowcount:
