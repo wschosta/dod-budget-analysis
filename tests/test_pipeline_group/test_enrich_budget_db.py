@@ -857,6 +857,85 @@ class TestHelpers:
         tag_names = [t[1] for t in tags]
         assert "submarine" in tag_names
 
+    # ── Tier-2 taxonomy tests (issue #54) ─────────────────────────────────────
+
+    def test_tags_from_keywords_tier2_jadc2(self):
+        tags = _tags_from_keywords("0602120A", "JADC2 architecture for joint all-domain command")
+        tag_names = [t[1] for t in tags]
+        assert "jadc2" in tag_names
+
+    def test_tags_from_keywords_tier2_sigint(self):
+        tags = _tags_from_keywords("0602120A", "SIGINT collection and ELINT analysis")
+        tag_names = [t[1] for t in tags]
+        assert "sigint" in tag_names
+
+    def test_tags_from_keywords_tier2_geoint(self):
+        tags = _tags_from_keywords("0602120A", "GEOINT and geospatial intelligence analysis")
+        tag_names = [t[1] for t in tags]
+        assert "geoint" in tag_names
+
+    def test_tags_from_keywords_tier2_pnt(self):
+        tags = _tags_from_keywords("0602120A", "GPS anti-jamming PNT resilience program")
+        tag_names = [t[1] for t in tags]
+        assert "pnt" in tag_names
+
+    def test_tags_from_keywords_tier2_iads(self):
+        tags = _tags_from_keywords("0602120A", "integrated air defense IADS network")
+        tag_names = [t[1] for t in tags]
+        assert "iads" in tag_names
+
+    def test_tags_from_keywords_tier2_information_warfare(self):
+        tags = _tags_from_keywords("0602120A", "information warfare and influence operations")
+        tag_names = [t[1] for t in tags]
+        assert "information-warfare" in tag_names
+
+    def test_tags_from_keywords_tier2_strategic_mobility(self):
+        tags = _tags_from_keywords("0602120A", "strategic airlift and aerial refueling tanker")
+        tag_names = [t[1] for t in tags]
+        assert "strategic-mobility" in tag_names
+
+    def test_tags_from_keywords_tier2_amphibious(self):
+        tags = _tags_from_keywords("0602120A", "amphibious assault operations LHA LPD")
+        tag_names = [t[1] for t in tags]
+        assert "amphibious" in tag_names
+
+    def test_tags_from_keywords_tier2_force_protection(self):
+        tags = _tags_from_keywords("0602120A", "force protection and ATFP anti-terrorism")
+        tag_names = [t[1] for t in tags]
+        assert "force-protection" in tag_names
+
+    def test_tags_from_keywords_tier2_readiness(self):
+        tags = _tags_from_keywords("0602120A", "operational readiness and mission capable rate")
+        tag_names = [t[1] for t in tags]
+        assert "readiness" in tag_names
+
+    def test_tags_from_keywords_tier2_emp(self):
+        tags = _tags_from_keywords("0602120A", "EMP hardening and electromagnetic pulse protection")
+        tag_names = [t[1] for t in tags]
+        assert "emp" in tag_names
+
+    def test_tags_from_keywords_tier2_cbrn(self):
+        tags = _tags_from_keywords("0602120A", "CBRNE defense and decontamination systems")
+        tag_names = [t[1] for t in tags]
+        assert "cbrn" in tag_names
+
+    def test_tags_from_keywords_tier2_counter_intelligence(self):
+        tags = _tags_from_keywords("0602120A", "counterintelligence program and insider threat")
+        tag_names = [t[1] for t in tags]
+        assert "counter-intelligence" in tag_names
+
+    def test_tags_from_keywords_tier2_kill_chain(self):
+        tags = _tags_from_keywords("0602120A", "kill chain sensor-to-shooter time-sensitive targeting")
+        tag_names = [t[1] for t in tags]
+        assert "kill-chain" in tag_names
+
+    def test_tags_from_keywords_tier2_confidence_lower_than_tier1(self):
+        """Tier-2 tags have confidence 0.7, tier-1 have 0.9."""
+        tags = _tags_from_keywords("0602120A", "hypersonic JADC2 program")
+        conf_by_tag = {t[1]: t[3] for t in tags}
+        assert conf_by_tag.get("hypersonic") == 0.9   # tier-1
+        assert conf_by_tag.get("jadc2") == 0.7         # tier-2
+
     def test_extract_pe_title_colon(self):
         text = "PE 0602702F: Advanced Radar Technology Development\nMore text here."
         title = _extract_pe_title_from_text("0602702F", text)

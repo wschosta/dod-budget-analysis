@@ -367,19 +367,22 @@ FROM budget_lines GROUP BY exhibit_type ORDER BY cnt DESC;
 
 ---
 
-#### 54. Keyword Taxonomy May Be Too Restrictive (41 terms) **[OPEN — Pipeline]**
+#### ~~54. Keyword Taxonomy May Be Too Restrictive (41 terms)~~ **[RESOLVED — Pipeline]**
 
-The domain taxonomy in `enricher.py:64-127` has 41 keyword patterns. Current tag
-distribution: 39,059 keyword tags + 4,140 structured tags across 3,357 PEs (~12.9
-tags/PE average).
+Added `_TAXONOMY_TIER2` in `pipeline/enricher.py` with 14 new domain tags at
+lower confidence (0.7 budget_lines / 0.65 PDF narrative):
 
-**Potential expansion terms:** JADC2, kill-chain, integrated-air-defense, SIGINT,
-ELINT, COMINT, GEOINT, PNT, GPS, EMP, CBRNE, force-protection, readiness,
-mobility, airlift, tanker, refueling, amphibious, counter-intelligence,
-information-warfare, cyber-operations, unmanned-systems.
+`jadc2`, `sigint` (SIGINT/ELINT/COMINT/MASINT), `geoint`, `pnt` (GPS/GNSS),
+`iads`, `information-warfare`, `strategic-mobility` (airlift/tanker/refueling),
+`amphibious`, `force-protection`, `readiness`, `emp`, `cbrn` (CBRNE),
+`counter-intelligence`, `kill-chain`.
 
-**Suggested fix:** Add a second tier of tags with confidence 0.6-0.7. Consider
-running LLM-based tagging (Phase 3 optional) for broader coverage.
+Tier-1 taxonomy confidence unchanged (0.9/0.8). Tier-2 tags use 0.7/0.65 to
+reflect broader, lower-signal patterns. `run_phase3()` loops over both tiers;
+project-level tagging also uses both.
+
+**Files changed:** `pipeline/enricher.py`
+**Test coverage:** `tests/test_pipeline_group/test_enrich_budget_db.py::TestHelpers` (15 new cases including confidence-level assertion)
 
 ---
 
@@ -640,7 +643,8 @@ are rows without enough context to infer an appropriation code.
 | **Round 5 RESOLVED** | 5 | #5, #6/14, #7/17/22, #57, #63 |
 | **Round 4 RESOLVED** | 3 | #52, #58, #59 |
 | **Round 4 DOCUMENTED** | 1 | #62 (tag assessment) |
-| **Round 3 OPEN (Data)** | 5 | #51, 53-56 (pipeline/DB data quality) |
+| **Round 3 RESOLVED (Data)** | 1 | #54 (taxonomy expansion) |
+| **Round 3 OPEN (Data)** | 4 | #51, 53, 55-56 (pipeline/DB data quality) |
 | **Round 3 RESOLVED (Perf)** | 1 | #60 (FTS scan limit) |
 | **Round 3 OPEN (Perf)** | 1 | #61 (aggregation full table scans) |
 | **Round 2 RESOLVED** | 20 | #29-37, #40-48, #50 |
