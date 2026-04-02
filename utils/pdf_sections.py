@@ -109,6 +109,29 @@ _PROJECT_BOUNDARY_PATTERNS: list[re.Pattern[str]] = [
         r"(?:\s*[—\-–]\s*(.+?))?[ \t]*$",
         re.MULTILINE | re.IGNORECASE,
     ),
+    # R-2A DoD format: "671810 / B-52 AEHF INTEGRATION"
+    # Project number (4-7 digits) followed by " / " and an UPPERCASE title.
+    # Matches the standard DoD R-2A "Accomplishments/Planned Programs" table
+    # where each project appears as "NNNNNN / PROJECT TITLE" on its own line.
+    # Title must start with an uppercase letter to exclude numeric ratios
+    # like "2024 / 2025" or monetary amounts.
+    re.compile(
+        r"^[ \t]*(\d{4,7})\s*/\s*([A-Z][A-Z0-9 \-&,()/.]{3,})[ \t]*$",
+        re.MULTILINE,
+    ),
+    # R-2A page-header format: "PE XXXXXXX / PE Title  NNNNNN / Project Title"
+    # (appears as page-break artifact in pe_descriptions before cleanup).
+    # Captures the project number that trails the PE identifier on this header line.
+    re.compile(
+        r"PE\s+\w+\s*/\s*[^\n]+?\s+(\d{4,7})\s*/\s*([^\n]+?)[ \t]*$",
+        re.MULTILINE | re.IGNORECASE,
+    ),
+    # Older DoD format: "NNNNNN: Project Title" (pre-2012 R-2A exhibits)
+    # e.g. "675144: Global Hawk"
+    re.compile(
+        r"^[ \t]*(\d{4,7})\s*:\s*([A-Z][A-Z0-9 \-&,()/.]{3,})[ \t]*$",
+        re.MULTILINE,
+    ),
 ]
 
 
@@ -164,11 +187,14 @@ def detect_project_boundaries(page_text: str) -> list[dict[str, str]]:
     """Detect project number/title boundaries within R-2 narrative text.
 
     R-2 exhibits often contain project-level breakdowns within a PE.  These
-    appear as lines like::
+    appear as lines in several formats::
 
-        Project: 1234 — Advanced Targeting System
+        Project: 1234 — Advanced Targeting System      (R-2 explicit keyword)
         Project 1234: Advanced Targeting System
         Project Number: 1234   Project Title: Advanced Targeting System
+        671810 / B-52 AEHF INTEGRATION                 (R-2A numeric format, modern)
+        675144: Global Hawk                             (R-2A numeric format, older)
+        PE 0101113F / B-52 Squadrons  671810 / B-52    (R-2A page-header artifact)
 
     Returns a list of dicts with keys ``project_number``, ``project_title``,
     and ``text`` (the narrative text belonging to that project section).  If no

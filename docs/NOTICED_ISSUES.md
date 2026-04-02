@@ -305,27 +305,31 @@ future sprints.
 
 ### Data Quality Issues
 
-#### 51. Project-Level Tags Are Empty (0 tags) **[OPEN — Pipeline]**
+#### ~~51. Project-Level Tags Are Empty (0 tags)~~ **[RESOLVED — Pipeline]**
 
-Despite 412,071 `project_descriptions` records, the `pe_tags` table has **zero**
-rows where `project_number IS NOT NULL`. The enricher's project-level keyword
-matching (`enricher.py:985-993`) either isn't running or the taxonomy patterns
-find no hits in project description text.
+Root cause identified and fixed: `detect_project_boundaries()` in
+`utils/pdf_sections.py` only handled explicit `"Project: 1234"` / `"Project Number:
+1234"` markers, but actual DoD R-2A exhibits use numeric project codes like:
 
-**Impact:** Consolidated view sub-project panels show no tags. Users see tags at
-PE level but not at sub-project level.
+- `671810 / B-52 AEHF INTEGRATION` — modern R-2A format (project number / TITLE)
+- `675144: GLOBAL HAWK` — older R-2A format (project number: TITLE)
+- `PE 0101113F / B-52 Squadrons  671810 / B-52 AEHF INTEGRATION` — page-header
+  artifact containing the project number
 
-```sql
-SELECT COUNT(*) FROM pe_tags WHERE project_number IS NOT NULL;
--- Result: 0
-SELECT COUNT(*) FROM project_descriptions;
--- Result: 412,071
-```
+Three new patterns were added to `_PROJECT_BOUNDARY_PATTERNS`:
+1. `r"^(\d{4,7})\s*/\s*([A-Z][A-Z0-9 \-&,()/.]{3,})$"` — R-2A slash format
+2. `r"PE\s+\w+\s*/\s*[^\n]+?\s+(\d{4,7})\s*/\s*([^\n]+?)"` — page-header artifact
+3. `r"^(\d{4,7})\s*:\s*([A-Z][A-Z0-9 \-&,()/.]{3,})$"` — older colon format
 
-**Suggested fix:** Debug the enricher Phase 3 project-level tagging loop. The
-keyword regex patterns may not match the shorter, more technical project titles.
-Consider adding a broader second-tier taxonomy or running LLM tagging on project
-descriptions.
+The uppercase-title constraint on patterns 1 and 3 prevents false positives on
+numeric ratios like "2024 / 2025" or monetary amounts.
+
+With these patterns in place, Phase 5 will now correctly populate
+`project_descriptions.project_number` for R-2A exhibit text, and Phase 3 will
+produce project-level `pe_tags` rows on the next pipeline run.
+
+**Files changed:** `utils/pdf_sections.py`
+**Test coverage:** `tests/test_pipeline_group/test_project_decomposition.py::TestDetectProjectBoundariesR2A` (6 cases)
 
 ---
 
@@ -663,8 +667,8 @@ are rows without enough context to infer an appropriation code.
 | **Round 5 RESOLVED** | 5 | #5, #6/14, #7/17/22, #57, #63 |
 | **Round 4 RESOLVED** | 3 | #52, #58, #59 |
 | **Round 4 DOCUMENTED** | 1 | #62 (tag assessment) |
-| **Round 3 RESOLVED (Data)** | 1 | #54 (taxonomy expansion) |
-| **Round 3 OPEN (Data)** | 4 | #51, 53, 55-56 (pipeline/DB data quality) |
+| **Round 3 RESOLVED (Data)** | 2 | #51 (project boundary detection), #54 (taxonomy expansion) |
+| **Round 3 OPEN (Data)** | 3 | #53, #55, #56 (pipeline/DB data quality) |
 | **Round 3 RESOLVED (Perf)** | 2 | #60 (FTS scan limit), #61 (aggregation warmup + dynamic cols) |
 | **Round 3 OPEN (Perf)** | 0 | — |
 | **Round 2 RESOLVED** | 20 | #29-37, #40-48, #50 |
