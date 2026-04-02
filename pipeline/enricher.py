@@ -32,18 +32,18 @@ from pathlib import Path
 
 # TODO [TODO-L1]: Add uniform progress reporting to all 5 enrichment phases.
 
+from utils import get_connection
+from utils.patterns import PE_NUMBER, FISCAL_YEAR
+from utils.pdf_sections import parse_narrative_sections, detect_project_boundaries
+
 # Single top-of-file anthropic import (TODO-L3).
 # Check _HAS_ANTHROPIC once at Phase 3 entry rather than per-batch.
 _HAS_ANTHROPIC = False
 try:
-    import anthropic  # noqa: F401
+    import anthropic  # noqa: F401, E402
     _HAS_ANTHROPIC = True
 except ImportError:
     anthropic = None  # type: ignore[assignment]
-
-from utils import get_connection
-from utils.patterns import PE_NUMBER, FISCAL_YEAR
-from utils.pdf_sections import parse_narrative_sections, detect_project_boundaries
 
 logger = logging.getLogger(__name__)
 
