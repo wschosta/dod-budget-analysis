@@ -117,17 +117,18 @@ def app_client(tmp_path_factory):
             (source_file, exhibit_type, fiscal_year, organization_name,
              account_title, line_item_title, pe_number,
              appropriation_code, appropriation_title,
-             amount_fy2024_actual, amount_fy2025_enacted, amount_fy2026_request)
+             amount_fy2024_actual, amount_fy2025_enacted, amount_fy2026_request,
+             amount_fy2026_total)
         VALUES
             ('army_p5.xlsx', 'p5', '2026', 'Army',
              'Aircraft Procurement', 'Apache AH-64', '0604131A',
-             'PROC', 'Procurement', 120000.0, 140000.0, 150000.0),
+             'PROC', 'Procurement', 120000.0, 140000.0, 150000.0, 150000.0),
             ('navy_r2.xlsx', 'r2', '2026', 'Navy',
              'RDT&E Budget', 'F-35 Development', '0603292N',
-             'RDTE', 'RDT&E', 200000.0, 230000.0, 250000.0),
+             'RDTE', 'RDT&E', 200000.0, 230000.0, 250000.0, 250000.0),
             ('af_p5.xlsx', 'p5', '2025', 'Air Force',
              'Aircraft Procurement', 'F-22A', '0604800F',
-             'PROC', 'Procurement', 80000.0, 90000.0, 100000.0);
+             'PROC', 'Procurement', 80000.0, 90000.0, 100000.0, 100000.0);
 
         INSERT INTO budget_lines_fts(rowid, account_title, line_item_title,
             budget_activity_title)
