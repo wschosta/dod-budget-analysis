@@ -200,7 +200,7 @@ class TestFiscalYearGlobFix:
 
     def test_all_fy_formats_appear_in_dropdown(self, fy_format_client):
         """All valid FY formats should appear: 'FY 2026', 'FY 2025', '2024', 'FY2023'."""
-        resp = fy_format_client.get("/")
+        resp = fy_format_client.get("/home")
         assert resp.status_code == 200
         # "FY YYYY" (with space) must match
         assert "FY 2026" in resp.text

@@ -145,7 +145,7 @@ def reset_rate_counters():
 
 @pytest.fixture(scope="module")
 def index_html(a11y_client):
-    resp = a11y_client.get("/")
+    resp = a11y_client.get("/home")
     assert resp.status_code == 200
     return resp.text
 
