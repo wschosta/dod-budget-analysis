@@ -38,7 +38,7 @@
 {# ── Funding table ────────────────────────────────────────────────────────── #}
 {% if pe_data.funding %}
 <section class="pe-section" aria-label="Funding history">
-  <div class="d-flex items-center flex-wrap gap-sm" style="justify-content:space-between">
+  <div class="d-flex items-center flex-wrap gap-sm justify-between">
     <h3 style="border-bottom:none;padding-bottom:0;margin-bottom:0">Funding History ($K)</h3>
     <button type="button" id="qty-toggle" class="btn btn-secondary btn-sm" aria-pressed="false">Show Quantities</button>
   </div>
@@ -105,7 +105,7 @@
 <section class="pe-section" aria-label="Funding changes">
   <h3>Funding Changes (Year-over-Year)
     {% if pe_data.summary.funding_rows > 0 %}
-    <span class="badge" style="font-size:.7rem;vertical-align:middle">YoY</span>
+    <span class="badge icon-indicator">YoY</span>
     {% endif %}
   </h3>
   <div id="pe-changes"
@@ -130,7 +130,7 @@
 <section class="pe-section" aria-label="Related programs">
   <h3>Related Programs
     {% if pe_data.summary.related_count > 0 %}
-    <span class="badge" style="font-size:.7rem;vertical-align:middle">{{ pe_data.summary.related_count }}</span>
+    <span class="badge icon-indicator">{{ pe_data.summary.related_count }}</span>
     {% endif %}
   </h3>
   <div id="pe-related"
@@ -160,7 +160,7 @@
 {% if pe_data.summary.pdf_page_count > 0 %}
 <section class="pe-section" aria-label="PDF source pages">
   <h3>PDF Source Pages
-    <span class="badge" style="font-size:.7rem;vertical-align:middle">{{ pe_data.summary.pdf_page_count }}</span>
+    <span class="badge icon-indicator">{{ pe_data.summary.pdf_page_count }}</span>
   </h3>
   <div id="pe-pdf-pages"
        hx-get="/partials/program-pdf-pages/{{ pe_data.pe_number }}"
@@ -176,7 +176,7 @@
 {# ── Tags (with confidence and provenance) ─────────────────────────────── #}
 {% if pe_data.tags %}
 <section class="pe-section" aria-label="Tags">
-  <h3>Tags <span class="badge" style="font-size:.7rem;vertical-align:middle">{{ pe_data.tags | length }}</span></h3>
+  <h3>Tags <span class="badge icon-indicator">{{ pe_data.tags | length }}</span></h3>
   <div class="pe-card-tags">
     {% for t in pe_data.tags %}
     <a href="/programs?tag={{ t.tag }}" class="filter-chip tag-chip"
@@ -195,7 +195,7 @@
 {% if pe_data.has_project_data %}
 <section class="pe-section" aria-label="Project descriptions">
   <h3>Projects
-    <span class="badge" style="font-size:.7rem;vertical-align:middle">{{ pe_data.summary.project_count }}</span>
+    <span class="badge icon-indicator">{{ pe_data.summary.project_count }}</span>
   </h3>
   <div id="pe-projects"
        hx-get="/partials/program-projects/{{ pe_data.pe_number }}"

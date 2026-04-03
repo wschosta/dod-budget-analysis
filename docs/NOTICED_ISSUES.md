@@ -26,7 +26,7 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
 6. **[RESOLVED in Round 5]** **"Budget by Service" bar chart — large "Unknown" bucket** ($665M)
 7. **[RESOLVED in Round 5]** **Duplicate/repetitive search results** — programs appear multiple times instead of consolidated
 8. **[STRUCTURAL — documented in PRD §9]** **Missing PE numbers** — those same programs should have PE#s but show "—"
-   _Note: 67% of rows lack PE numbers; this is inherent to O-1/M-1/P-1 exhibit types._
+   _Note: 68.6% of rows (35,021 of 51,053) lack PE numbers; inherent to O-1/M-1/P-1 exhibit types. Cross-reference backfill (`repair_database.py` step 9) recovered 1,533 rows by matching line_item_title + organization_name + fiscal_year to R-1/R-2 rows with known PEs. PE coverage improved from 28.4% to 31.4%._
 
 ### Detail View (from search results)
 
@@ -53,14 +53,14 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
 
 ### Charts (/charts)
 
-16. **[STRUCTURAL — documented in PRD §9]** **YOY chart confirms data gap** — bars only at FY 1998 and FY 2025-2026, nothing for FY 2000-2024
-    _Note: FY2000-2009 documents not publicly available._
+16. **[STRUCTURAL — documented in PRD §9]** **YOY chart data gap** — FY 2000-2009 show no bars (documents not publicly available). FY 2010-2026 now populated.
+    _Note: Original description said "bars only at FY 1998 and FY 2025-2026" — this was accurate before FY2012+ display-file fix (bd2e4b5). Current gap is FY 2000-2009 only._
 17. **[RESOLVED — 2026-04-02]** **Top 10 has duplicates** — "Classified Programs" x4, "Private Sector Care" x2, "Ship Depot Maintenance" x2
     _Fix: Client-side deduplication by line_item_title in `static/js/charts.js` loadTopNChart(), fetches 30 rows and deduplicates to top 10._
 18. **[RESOLVED — verified via test suite]** **Defaults to FY 1998** — should probably default to most recent year
     _Fix: `api/routes/frontend.py:540` reverses FY list. Tests: `test_frontend_helpers.py::TestGetFiscalYears`._
-19. **[STRUCTURAL — documented in PRD §9]** **Selecting FY 2012 shows blank** (no data for that year)
-    _Note: FY2000-2009 documents not publicly available._
+~~19. Selecting FY 2012 shows blank~~ **[RESOLVED — 2026-04-02]**
+    _Fix: Commit bd2e4b5 changed display-file exclusion logic to retain `_display.xlsx` files when no base file exists. FY2012 now has 2,997 rows. See #56._
 20. **[RESOLVED — verified 2026-04-02]** **Service dropdown has same duplicates** (ARMY/Army, AF/Air Force, NAVY/Navy)
     _Fix: Same as #3. Verified: `repair_database.py` run on production DB; org normalization confirmed 0 rows needing fix (already normalized)._
 21. **[RESOLVED — verified 2026-04-02]** **Appropriation Breakdown donut is 100% "Unknown"**
@@ -69,10 +69,10 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
 ### Programs (/programs)
 
 22. **[RESOLVED in Round 5]** **Duplicate FY entries** — e.g., FY 2012 appears 8 times for B-52 Squadrons
-23. **[STRUCTURAL — documented in PRD §9]** **Missing FY columns** — no columns for FY 1998-2023
-    _Note: FY2000-2009 gap is a data coverage limitation._
-24. **[STRUCTURAL — documented in PRD §9]** **FY 2000-2011 have zero entries** despite data supposedly existing
-    _Note: FY2000-2009 gap is a data coverage limitation._
+~~23. Missing FY columns~~ **[RESOLVED in Round 2]**
+    _Fix: `get_amount_columns(conn)` dynamically discovers all `amount_fy*` columns from DB schema. See #29 (Round 2). Column display is no longer hardcoded._
+24. **[STRUCTURAL — documented in PRD §9]** **FY 2000-2009 have zero entries** (documents not publicly available). FY 2010-2011 have minimal data (2-5 rows). FY 2012+ fully populated after display-file fix (bd2e4b5).
+    _Note: Original description said "FY 2000-2011 have zero entries" — overstated. FY2010 has 2 rows, FY2011 has 5, FY2012 has 2,997._
 25. **[RESOLVED — 2026-04-02]** **FY24 Actual data incorrectly attributed** to FY 1998 source
     _Fix: Same as #10 — `source_fiscal_year` column now separates data FY from source document FY._
 26. **[RESOLVED — CSS fix verified]** **Tags dropdown is mispositioned** — overlaps onto the program cards
@@ -82,8 +82,8 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
 
 ### Footer (all pages)
 
-28. **[STRUCTURAL — documented in PRD §9]** **Data sources FY gap** — shows FY 1998, 1999, then jumps to 2010-2026 (missing FY 2000-2009)
-    _Note: FY2000-2009 documents not publicly available._
+28. **[STRUCTURAL — documented in PRD §9]** **Data sources FY gap** — FY 2000-2009 missing (documents not publicly available). FY 1998-1999 and FY 2010-2026 are populated.
+    _Note: FY2010 has 2 rows, FY2011 has 5, FY2012+ fully populated._
 
 ### Round 1 Root Cause Analysis
 
@@ -97,7 +97,7 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
 | #6, #14 (service "Unknown") | **Blank organization rows** | 5,955 rows with empty organization + inconsistent naming inflates "Unknown". |
 | #7, #17, #22 (duplicate results) | **644K rows, many duplicated per program/FY** | Same programs parsed from multiple exhibits or sources without deduplication. |
 | #8 (missing PE numbers) | **73% of rows (472K of 644K) have no PE number** | PE numbers only populated for ~27% of budget lines. |
-| #16, #19, #28 (FY data gap 2000-2009) | **Data never ingested** | Only FY 1998-1999 and FY 2010-2026 exist. FY 2000-2009 was never downloaded or parsed. |
+| #16, ~~#19~~, #28 (FY data gap 2000-2009) | **Data never ingested** | FY 2000-2009 was never downloaded or parsed. FY 1998-1999 and FY 2010-2026 exist. #19 resolved — FY2012 now populated (bd2e4b5). |
 | #10, #25 (wrong FY attribution) | **FY derived from source file path** | Data associated with whichever FY folder the source file was in, not the actual program fiscal year. |
 | #12, #15 (dashboard empty/broken) | **Cascading effect** | Missing appropriation data + slow queries on 644K unindexed rows. |
 | #27 (inflated tag counts) | **Enrichment over-tagging** | Pipeline assigns too many tags — rdte on 1539/1579 programs means tags are nearly meaningless. |
@@ -307,9 +307,9 @@ Added `<select name="amount_column">` dropdown that iterates
 ### 49. Excessive Inline Styles Throughout Templates **[RESOLVED — 2026-04-02]**
 
 Added 60+ utility CSS classes to `static/css/main.css` and converted inline styles
-across all 21 template files. Inline style count reduced from **301 to 161** (47% reduction).
-Remaining 161 use properties without utility matches (table borders, sticky positioning,
-custom widths, dynamic Jinja values, JS-toggled display).
+across all 21 template files. Inline style count reduced from **301 to 125** (58% reduction across two passes: 301->169->125).
+Remaining 125 are JS-toggled display states, Jinja conditionals, sticky positioning,
+table borders, and multi-property component-specific styles.
 
 ---
 
@@ -365,9 +365,10 @@ at ingestion time (2026-04-02): `pipeline/builder.py` now derives budget_type fr
 
 ---
 
-#### 53. 67% of budget_lines Have No PE Number **[STRUCTURAL — documented in PRD §9]**
+#### 53. 68.6% of budget_lines Have No PE Number **[STRUCTURAL — documented in PRD §9]**
 
-83,497 of 124,670 rows (67%) have NULL `pe_number`. These rows cannot be enriched,
+35,021 of 51,053 rows (68.6%) have NULL `pe_number`. Cross-reference backfill recovered 1,533 rows
+(was 36,554 post-dedup, 83,497 of 124,670 pre-dedup). Remaining rows cannot be enriched,
 tagged, or linked to PE-centric views (Programs, Consolidated).
 
 **Root cause:** PE numbers only appear in certain exhibit types (R-2, P-5). Summary
@@ -561,7 +562,7 @@ Assessment of PE-level tagging quality (2026-02-26):
 | Structured tags | 4,140 (across 1,498 PEs, 12 unique tags) |
 | Classification tags (rdte, procurement, etc.) | 1,477 (3.4% of total) |
 | Discovery tags (keyword/domain) | 41,722 (96.6%) |
-| Project-level tags | **0** (unchanged from #51) |
+| Project-level tags | **1,355** (fixed 2026-04-02 via Phase 6) |
 | Average tags per PE | ~12.6 |
 
 **Tag quality assessment:**
@@ -573,7 +574,7 @@ Assessment of PE-level tagging quality (2026-02-26):
   budget context — most programs involve some communications component.
 - Lower-coverage tags are more selective: autonomy (987, 29%), directed-energy (814,
   24%), special-operations (761, 22%), hypersonics (506, 15%).
-- **Project-level tags remain at 0** — this is the main gap. See #51 for details.
+- **Project-level tags: 1,355** — fixed via enricher Phase 6 (2026-04-02). Phase 3 ran before Phase 5 could populate `project_descriptions`, so project-level tagging never executed. Phase 6 now runs after Phase 5 and applies taxonomy to project-level text.
 
 **Related programs (PE lineage):**
 - Total links: 783,845
@@ -662,10 +663,10 @@ are rows without enough context to infer an appropriation code.
 
 | Status | Count | Issues |
 |--------|-------|--------|
-| **RESOLVED** | 55 | #1-4, #5, #6/14, #7/17/22, #9-13, #15, #18, #20, #21, #25-27, #29-48, #50-52, #54-61, #63 |
-| **STRUCTURAL — documented in PRD §9** | 7 | #8, #16, #19, #23, #24, #28, #53 (data coverage limitations) |
+| **RESOLVED** | 57 | #1-4, #5, #6/14, #7/17/22, #9-13, #15, #18-21, #23, #25-27, #29-48, #50-52, #54-61, #63 |
+| **STRUCTURAL — documented in PRD §9** | 5 | #8, #16, #24, #28, #53 (data coverage limitations) |
 | **DOCUMENTED** | 1 | #62 (tag coverage assessment) |
-| **RESOLVED (partial)** | 1 | #49 (inline styles — 301→161, 47% reduction; remainder has no utility match) |
+| **RESOLVED (partial)** | 1 | #49 (inline styles — 301→125, 58% reduction; remainder is JS-toggled/Jinja/structural) |
 
 ### Infrastructure Added to Prevent Regression
 

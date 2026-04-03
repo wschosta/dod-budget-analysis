@@ -66,10 +66,10 @@
         {% endif %}
       </span>
       {% if rel.mention_count and rel.mention_count > 1 %}
-      <span style="font-size:.7rem;color:var(--text-secondary)">{{ rel.mention_count }} mentions</span>
+      <span class="meta-2xs">{{ rel.mention_count }} mentions</span>
       {% endif %}
       {% if rel.sample_snippet %}
-      <span class="meta-sm text-italic d-block mt-xs text-ellipsis" style="line-height:1.4"
+      <span class="meta-sm text-italic d-block mt-xs text-ellipsis lh-snug"
             title="{{ rel.sample_snippet }}">&ldquo;{{ rel.sample_snippet[:120] }}{% if rel.sample_snippet|length > 120 %}&hellip;{% endif %}&rdquo;</span>
       {% endif %}
     </a>
@@ -109,10 +109,10 @@
         {% endif %}
       </span>
       {% if rel.mention_count and rel.mention_count > 1 %}
-      <span style="font-size:.7rem;color:var(--text-secondary)">{{ rel.mention_count }} mentions</span>
+      <span class="meta-2xs">{{ rel.mention_count }} mentions</span>
       {% endif %}
       {% if rel.sample_snippet %}
-      <span class="meta-sm text-italic d-block mt-xs text-ellipsis" style="line-height:1.4"
+      <span class="meta-sm text-italic d-block mt-xs text-ellipsis lh-snug"
             title="{{ rel.sample_snippet }}">&ldquo;{{ rel.sample_snippet[:120] }}{% if rel.sample_snippet|length > 120 %}&hellip;{% endif %}&rdquo;</span>
       {% endif %}
     </a>
@@ -149,10 +149,10 @@
         {% endif %}
       </span>
       {% if rel.mention_count and rel.mention_count > 1 %}
-      <span style="font-size:.7rem;color:var(--text-secondary)">{{ rel.mention_count }} mentions</span>
+      <span class="meta-2xs">{{ rel.mention_count }} mentions</span>
       {% endif %}
       {% if rel.sample_snippet %}
-      <span class="meta-sm text-italic d-block mt-xs text-ellipsis" style="line-height:1.4"
+      <span class="meta-sm text-italic d-block mt-xs text-ellipsis lh-snug"
             title="{{ rel.sample_snippet }}">&ldquo;{{ rel.sample_snippet[:120] }}{% if rel.sample_snippet|length > 120 %}&hellip;{% endif %}&rdquo;</span>
       {% endif %}
     </a>
@@ -163,7 +163,7 @@
 
 {# Pagination #}
 {% if total > related | length %}
-<div class="mt-md" style="text-align:center">
+<div class="mt-md text-center">
   <button class="btn btn-secondary btn-sm"
           hx-get="/partials/program-related/{{ pe_number }}?limit={{ limit + 20 }}{% if min_confidence %}&min_confidence={{ min_confidence }}{% endif %}"
           hx-target="#pe-related"

@@ -72,7 +72,7 @@
 {# ── PE Mission Description (tabbed by FY, expandable) ───────────────────── #}
 {% if pe_descriptions %}
 <section id="pe-desc-section" class="card-surface mb-xl" style="padding:1rem">
-  <h3 class="text-secondary mb-md" style="font-size:.9rem">Mission Description</h3>
+  <h3 class="text-secondary mb-md text-1x">Mission Description</h3>
   {# Tab bar — oldest FY on left, newest on right (active) #}
   <div id="pe-desc-tabs" class="d-flex mb-md" style="gap:0;border-bottom:2px solid var(--border-color)">
     {% for desc in pe_descriptions %}
@@ -153,7 +153,7 @@ function togglePeDescExpand(idx) {
 {# ── Funding Matrix (transposed: FYs as columns, PE + projects as rows) ── #}
 {% if matrix_fys %}
 <section class="mb-xl">
-  <h3 class="mb-md" style="font-size:1rem">Funding Matrix</h3>
+  <h3 class="mb-md text-xl">Funding Matrix</h3>
   <p class="meta-std mb-sm">
     Best available amount per fiscal year ($K). PE total from golden time series; sub-project amounts from R-2A exhibits.
     Click a sub-project row to view narrative text.
@@ -182,7 +182,7 @@ function togglePeDescExpand(idx) {
         </tr>
         {# Sub-project rows — clickable #}
         {% for row in project_rows %}
-        <tr data-project="{{ row.project_number }}" style="cursor:pointer"
+        <tr data-project="{{ row.project_number }}" class="cursor-pointer"
             onclick="toggleInlinePanel('{{ row.project_number }}', this)"
             onmouseover="this.style.background='color-mix(in srgb, var(--clr-blue) 6%, transparent)'"
             onmouseout="if(!this.classList.contains('proj-selected'))this.style.background=''">
@@ -281,7 +281,7 @@ function togglePeDescExpand(idx) {
 
     var html = '<div style="background:var(--bg-surface);border-left:3px solid var(--clr-blue);padding:.75rem 1rem;margin:0">';
     /* Header */
-    html += '<div class="d-flex items-center mb-sm" style="justify-content:space-between">';
+    html += '<div class="d-flex items-center mb-sm justify-between">';
     html += '<span style="font-size:.82rem;font-weight:600"><span class="badge text-sm text-mono" style="margin-right:.4rem">' + _escHtml(projNum) + '</span>' + _escHtml(title) + '</span>';
     html += '<button onclick="closeInlinePanel(\'' + projNum + '\')" class="text-secondary" style="background:none;border:none;font-size:1.1rem;cursor:pointer;padding:.15rem .4rem;line-height:1" aria-label="Close">&times;</button>';
     html += '</div>';
@@ -301,13 +301,13 @@ function togglePeDescExpand(idx) {
     }
 
     if (!data || !data.submissions.length) {
-      html += '<p class="meta-std text-italic" style="margin:0">No narrative text available for this project.</p>';
+      html += '<p class="meta-std text-italic m-0">No narrative text available for this project.</p>';
     } else {
       /* Filter to submissions that have text, reverse so oldest FY is on the left */
       var subs = data.submissions.filter(function(s) { return !!s.text; }).reverse();
       var defaultIdx = subs.length - 1; /* newest FY = last tab = active by default */
       if (subs.length === 0) {
-        html += '<p class="meta-std text-italic" style="margin:0">No narrative text available for this project.</p>';
+        html += '<p class="meta-std text-italic m-0">No narrative text available for this project.</p>';
       } else {
         /* Tab bar — oldest left, newest right (active) */
         var tabId = 'tabs-' + projNum.replace(/[^a-zA-Z0-9]/g, '_');
@@ -381,7 +381,7 @@ function togglePeDescExpand(idx) {
   <details>
     <summary style="font-size:1rem;font-weight:700;cursor:pointer;padding:.5rem 0">
       Submission Archive
-      <span class="meta-std" style="font-weight:400">({{ sub_count }} document{{ "s" if sub_count != 1 }})</span>
+      <span class="meta-std fw-normal">({{ sub_count }} document{{ "s" if sub_count != 1 }})</span>
     </summary>
     <p class="meta-std" style="margin:.5rem 0">
       Raw data from each budget submission document, grouped by fiscal year.
@@ -391,7 +391,7 @@ function togglePeDescExpand(idx) {
     <details class="card-surface mb-sm">
       <summary class="text-lg" style="padding:.75rem 1rem;cursor:pointer;font-weight:600">
         FY{{ fy }} Submissions
-        <span class="text-md text-secondary" style="font-weight:400">({{ subs | length }})</span>
+        <span class="text-md text-secondary fw-normal">({{ subs | length }})</span>
       </summary>
       <div style="padding:0 1rem .75rem">
         {% for sub in subs %}
@@ -435,7 +435,7 @@ function togglePeDescExpand(idx) {
 
 {# ── Related Programs (HTMX lazy-loaded) ────────────────────────────────── #}
 <section class="mb-xl">
-  <h3 class="mb-md" style="font-size:1rem">Related Programs</h3>
+  <h3 class="mb-md text-xl">Related Programs</h3>
   <div id="pe-related"
        hx-get="/partials/program-related/{{ item.pe_number }}?min_confidence=0.8&limit=20"
        hx-trigger="load"
@@ -447,7 +447,7 @@ function togglePeDescExpand(idx) {
 <div class="mt-lg">
   <a href="/consolidated" class="btn btn-secondary btn-sm">&larr; Back to list</a>
   {% if item.pe_number %}
-  <a href="/programs/{{ item.pe_number }}" class="btn btn-secondary btn-sm" style="margin-left:.5rem">View in Program Explorer</a>
+  <a href="/programs/{{ item.pe_number }}" class="btn btn-secondary btn-sm ml-sm">View in Program Explorer</a>
   {% endif %}
 </div>
 {% endblock %}

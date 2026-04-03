@@ -1709,6 +1709,125 @@ def run_phase5(conn: sqlite3.Connection, stop_event: threading.Event | None = No
     return total_rows
 
 
+# ── Phase 6: Project-Level Tagging ─────────────────────────────────────────────
+
+# Junk project_number values produced by noisy boundary detection.
+_JUNK_PROJECT_NUMBERS = frozenset({
+    "TITLE", "SUBTITLE", "NUMBER", "ELEMENT", "DESCRIPTION",
+    "NAME", "CODE", "NONE", "N/A",
+    "funds", "supports", "are",
+})
+
+
+def run_phase6(conn: sqlite3.Connection, stop_event: threading.Event | None = None) -> int:
+    """Apply taxonomy tags at the project level using project_descriptions.
+
+    Phase 3 generates PE-level tags (project_number=NULL) but cannot produce
+    project-level tags because Phase 5 — which populates project_descriptions
+    — runs after it.  This phase fills that gap by reading project_descriptions
+    rows that have a valid project_number and applying the same keyword taxonomy.
+
+    Uses INSERT OR IGNORE so it is safe to re-run.
+    """
+    logger.info("[Phase 6] Generating project-level tags...")
+
+    # Verify prerequisite tables exist
+    tables = {
+        r[0]
+        for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    if "project_descriptions" not in tables or "pe_tags" not in tables:
+        logger.info("project_descriptions or pe_tags missing — run Phases 3 & 5 first.")
+        return 0
+
+    # ── Clean junk project_numbers from project_descriptions ──────────
+    junk_labels = ", ".join(f"'{w}'" for w in sorted(_JUNK_PROJECT_NUMBERS))
+    deleted = conn.execute(f"""
+        DELETE FROM project_descriptions
+        WHERE project_number IS NOT NULL
+          AND (length(project_number) <= 2
+               OR UPPER(project_number) IN ({junk_labels})
+               OR project_number GLOB '[a-z]*')
+    """).rowcount
+    if deleted:
+        conn.commit()
+        logger.info("  Cleaned %d junk project_description rows.", deleted)
+
+    # Count existing project-level tags to detect if already done
+    existing = conn.execute(
+        "SELECT COUNT(*) FROM pe_tags WHERE project_number IS NOT NULL"
+    ).fetchone()[0]
+    if existing > 0:
+        logger.info("Already %d project-level tags — nothing to do.", existing)
+        return 0
+
+    # Load all project_descriptions with valid project_number
+    rows = conn.execute("""
+        SELECT pe_number, project_number, description_text, source_file
+        FROM project_descriptions
+        WHERE project_number IS NOT NULL
+          AND description_text IS NOT NULL
+          AND length(project_number) >= 3
+    """).fetchall()
+
+    if not rows:
+        logger.info("No valid project_descriptions found — nothing to tag.")
+        return 0
+
+    # Filter out junk project_numbers and single-digit numerics
+    valid_rows = [
+        r for r in rows
+        if r[1] not in _JUNK_PROJECT_NUMBERS and not r[1].isdigit()
+    ]
+    logger.info(
+        "  %d project_description rows (%d filtered as junk).",
+        len(valid_rows), len(rows) - len(valid_rows),
+    )
+
+    # Group text by (pe_number, project_number) for dedup
+    proj_texts: dict[tuple[str, str], tuple[str, list[str]]] = {}
+    for pe, proj, text, src in valid_rows:
+        key = (pe, proj)
+        if key not in proj_texts:
+            proj_texts[key] = (text, [src] if src else [])
+        else:
+            existing_text, srcs = proj_texts[key]
+            proj_texts[key] = (existing_text + " " + text, srcs)
+            if src and src not in srcs:
+                srcs.append(src)
+
+    insert_buf: list[tuple] = []
+    for (pe, proj_num), (proj_text, src_files) in proj_texts.items():
+        if stop_event and stop_event.is_set():
+            logger.info("  Phase 6 stopped.")
+            break
+
+        src_json = json.dumps(src_files)
+        for tag, patterns in _COMPILED_TAXONOMY:
+            for pat in patterns:
+                if pat.search(proj_text):
+                    insert_buf.append((pe, proj_num, tag, "keyword", 0.85, src_json))
+                    break
+        for tag, patterns in _COMPILED_TAXONOMY_TIER2:
+            for pat in patterns:
+                if pat.search(proj_text):
+                    insert_buf.append((pe, proj_num, tag, "keyword", 0.65, src_json))
+                    break
+
+    if insert_buf:
+        conn.executemany("""
+            INSERT OR IGNORE INTO pe_tags
+                (pe_number, project_number, tag, tag_source, confidence, source_files)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, insert_buf)
+        conn.commit()
+
+    logger.info("Done. %d project-level tag rows inserted.", len(insert_buf))
+    return len(insert_buf)
+
+
 # ── Orchestrator ──────────────────────────────────────────────────────────────
 
 def enrich(
@@ -1757,6 +1876,7 @@ def enrich(
         3: lambda: run_phase3(conn, with_llm=with_llm, stop_event=stop_event),
         4: lambda: run_phase4(conn, stop_event=stop_event),
         5: lambda: run_phase5(conn, stop_event=stop_event),
+        6: lambda: run_phase6(conn, stop_event=stop_event),
     }
 
     for phase_num in sorted(_phase_runners):
@@ -1820,8 +1940,8 @@ def main() -> None:
                         help="Path to SQLite database (default: dod_budget.sqlite)")
     parser.add_argument("--with-llm", action="store_true",
                         help="Enable LLM-based tagging (requires ANTHROPIC_API_KEY)")
-    parser.add_argument("--phases", default="1,2,3,4,5",
-                        help="Comma-separated phases to run (default: 1,2,3,4,5)")
+    parser.add_argument("--phases", default="1,2,3,4,5,6",
+                        help="Comma-separated phases to run (default: 1,2,3,4,5,6)")
     parser.add_argument("--rebuild", action="store_true",
                         help="Drop and rebuild all enrichment tables")
     args = parser.parse_args()

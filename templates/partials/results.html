@@ -230,7 +230,7 @@
   <div class="empty-state">
     <div class="empty-state-icon" aria-hidden="true">&#128269;</div>
     <p><strong>No data found for the selected filters.</strong></p>
-    <p class="text-lg" style="max-width:480px;margin:0 auto">
+    <p class="text-lg block-center">
       {% if filters is defined and (filters.q or filters.fiscal_year or filters.service or filters.exhibit_type or filters.budget_type or filters.min_amount or filters.max_amount) %}
       Your current filters returned no results. Try broadening your search or removing some filters.
       {% else %}

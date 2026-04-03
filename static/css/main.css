@@ -2057,3 +2057,55 @@ tr:focus-within td {
 
 /* Width */
 .w-half         { width: 50%; }
+.w-full         { width: 100%; }
+
+/* Cursor */
+.cursor-pointer { cursor: pointer; }
+
+/* Text alignment */
+.text-center    { text-align: center; }
+.text-left      { text-align: left; }
+
+/* Font weight */
+.fw-normal      { font-weight: 400; }
+.fw-semibold    { font-weight: 600; }
+.fw-bold        { font-weight: 700; }
+
+/* Line height */
+.lh-snug        { line-height: 1.4; }
+
+/* Margin inline */
+.ml-xs          { margin-left: .25rem; }
+.ml-sm          { margin-left: .5rem; }
+.mr-xs          { margin-right: .25rem; }
+.mr-sm          { margin-right: .5rem; }
+.mx-auto        { margin-left: auto; margin-right: auto; }
+.m-0            { margin: 0; }
+
+/* Justify */
+.justify-between { justify-content: space-between; }
+
+/* Padding */
+.p-0            { padding: 0; }
+.pl-md          { padding-left: 1rem; }
+
+/* Font sizes not yet covered */
+.text-2xs       { font-size: .6rem; }
+.text-base      { font-size: .82rem; }
+.text-1x        { font-size: .9rem; }
+.text-xl        { font-size: 1rem; }
+
+/* Vertical align */
+.align-middle   { vertical-align: middle; }
+
+/* Compound: small icon indicator */
+.icon-indicator { font-size: .7rem; vertical-align: middle; }
+
+/* Compound: muted small text */
+.meta-2xs       { font-size: .7rem; color: var(--text-secondary); }
+
+/* Table utility */
+.table-collapse { border-collapse: collapse; }
+
+/* Centered block */
+.block-center   { max-width: 480px; margin: 0 auto; }

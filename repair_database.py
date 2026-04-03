@@ -9,6 +9,7 @@ Fixes data quality issues identified during UI review (see docs/NOTICED_ISSUES.m
   4. Parses and backfills appropriation_code from account_title
   5. Adds missing performance indexes
   6. Runs reference table backfill from normalized data
+  9. Backfills pe_number via cross-exhibit line_item_title matching
 
 Safe to run multiple times (idempotent). Works on existing databases.
 
@@ -315,6 +316,97 @@ def step_8_rebuild_fts(conn: sqlite3.Connection) -> None:
     logger.info("  ✓ FTS5 rebuild complete")
 
 
+def step_9_backfill_pe_numbers(conn: sqlite3.Connection, dry_run: bool = False) -> int:
+    """Backfill pe_number on rows missing it by cross-referencing other exhibit types.
+
+    Joins NULL-PE rows to rows that have PE numbers using
+    (line_item_title, organization_name, fiscal_year).  Only applies
+    when the match is unambiguous (exactly one distinct PE for that combo).
+    """
+    logger.info("Step 9: Backfilling PE numbers via cross-reference...")
+
+    # Find unambiguous PE mappings
+    before_null = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines WHERE pe_number IS NULL"
+    ).fetchone()[0]
+
+    if dry_run:
+        count = conn.execute("""
+            WITH pe_source AS (
+                SELECT line_item_title, organization_name, fiscal_year,
+                       MIN(pe_number) as pe, COUNT(DISTINCT pe_number) as pe_count
+                FROM budget_lines
+                WHERE pe_number IS NOT NULL
+                  AND line_item_title IS NOT NULL
+                GROUP BY line_item_title, organization_name, fiscal_year
+                HAVING pe_count = 1
+            )
+            SELECT COUNT(*) FROM budget_lines bl
+            JOIN pe_source ps
+              ON bl.line_item_title = ps.line_item_title
+              AND bl.organization_name = ps.organization_name
+              AND bl.fiscal_year = ps.fiscal_year
+            WHERE bl.pe_number IS NULL
+        """).fetchone()[0]
+        logger.info(f"  DRY RUN: would backfill {count} of {before_null} NULL-PE rows")
+        return count
+
+    # Build a temp table of unambiguous PE mappings
+    conn.execute("""
+        CREATE TEMP TABLE _pe_backfill AS
+        SELECT line_item_title, organization_name, fiscal_year,
+               MIN(pe_number) as pe
+        FROM budget_lines
+        WHERE pe_number IS NOT NULL
+          AND line_item_title IS NOT NULL
+        GROUP BY line_item_title, organization_name, fiscal_year
+        HAVING COUNT(DISTINCT pe_number) = 1
+    """)
+
+    # Update only rows that won't violate the dedup UNIQUE index
+    conn.execute("""
+        UPDATE budget_lines
+        SET pe_number = (
+            SELECT pb.pe FROM _pe_backfill pb
+            WHERE pb.line_item_title = budget_lines.line_item_title
+              AND pb.organization_name = budget_lines.organization_name
+              AND pb.fiscal_year = budget_lines.fiscal_year
+        )
+        WHERE pe_number IS NULL
+          AND line_item_title IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM _pe_backfill pb
+            WHERE pb.line_item_title = budget_lines.line_item_title
+              AND pb.organization_name = budget_lines.organization_name
+              AND pb.fiscal_year = budget_lines.fiscal_year
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM budget_lines existing
+            JOIN _pe_backfill pb
+              ON pb.line_item_title = budget_lines.line_item_title
+              AND pb.organization_name = budget_lines.organization_name
+              AND pb.fiscal_year = budget_lines.fiscal_year
+            WHERE existing.source_file = budget_lines.source_file
+              AND existing.fiscal_year = budget_lines.fiscal_year
+              AND existing.pe_number = pb.pe
+              AND existing.line_item_title = budget_lines.line_item_title
+              AND existing.organization_name = budget_lines.organization_name
+              AND existing.exhibit_type = budget_lines.exhibit_type
+              AND existing.amount_type = budget_lines.amount_type
+          )
+    """)
+
+    conn.execute("DROP TABLE IF EXISTS _pe_backfill")
+    updated = conn.execute("SELECT changes()").fetchone()[0]
+    conn.commit()
+
+    after_null = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines WHERE pe_number IS NULL"
+    ).fetchone()[0]
+    logger.info(f"  Backfilled {updated} rows (NULL PE: {before_null} -> {after_null})")
+    return updated
+
+
 def repair(db_path: Path, dry_run: bool = False) -> dict:
     """Run all repair steps on the database.
 
@@ -345,6 +437,7 @@ def repair(db_path: Path, dry_run: bool = False) -> dict:
         step_5_add_indexes(conn)
         summary["reference"] = step_6_backfill_reference_data(conn, dry_run)
         summary["source_fy_backfilled"] = step_7_backfill_source_fiscal_year(conn, dry_run)
+        summary["pe_backfilled"] = step_9_backfill_pe_numbers(conn, dry_run)
         if not dry_run:
             step_8_rebuild_fts(conn)
     finally:

@@ -201,6 +201,68 @@ class TestDetectProjectBoundariesR2A:
         assert "671810" in proj_nums
 
 
+class TestRejectsJunkProjectNumbers:
+    """Verify that junk project_number values are filtered out."""
+
+    def test_rejects_project_title_header(self):
+        """'PROJECT TITLE: COSSI' is a document label, not a project boundary."""
+        text = (
+            "PROJECT TITLE: COSSI\n"
+            "BUDGET ACTIVITY: 5 PROGRAM ELEMENT: 0604805N\n"
+            "PROGRAM ELEMENT TITLE: Advanced Technology Development\n"
+        )
+        projects = detect_project_boundaries(text)
+        proj_nums = {p["project_number"] for p in projects}
+        assert "TITLE" not in proj_nums
+
+    def test_rejects_single_digit_list_items(self):
+        """'Project 1: DoD Tech' is list numbering, not a real project ID."""
+        text = (
+            "Project 1: DoD Technology Analysis Office (DTAO)\n"
+            "This project supports the analysis of technology.\n"
+            "Project 2: Other Analysis\n"
+            "This project does something else.\n"
+        )
+        projects = detect_project_boundaries(text)
+        proj_nums = {p["project_number"] for p in projects}
+        assert "1" not in proj_nums
+        assert "2" not in proj_nums
+
+    def test_rejects_lowercase_words(self):
+        """'project are:' is a sentence fragment, not a boundary."""
+        text = "project are: (1) Drastically improve survivability of aircraft.\n"
+        projects = detect_project_boundaries(text)
+        proj_nums = {p["project_number"] for p in projects}
+        assert "are" not in proj_nums
+
+    def test_rejects_element_label(self):
+        """'Project ELEMENT: 0604805N' is a document label."""
+        text = "Project ELEMENT: 0604805N\nSome description text here.\n"
+        projects = detect_project_boundaries(text)
+        proj_nums = {p["project_number"] for p in projects}
+        assert "ELEMENT" not in proj_nums
+
+    def test_accepts_valid_alphanumeric_project(self):
+        """'Project S2458: COSSI' should still match as a valid project."""
+        text = (
+            "Project S2458: COSSI\n"
+            "This project develops commercial operations.\n"
+        )
+        projects = detect_project_boundaries(text)
+        assert len(projects) == 1
+        assert projects[0]["project_number"] == "S2458"
+
+    def test_accepts_valid_4digit_project(self):
+        """'Project 1234: Title' with 4+ digit number should still match."""
+        text = (
+            "Project 1234: Advanced Targeting System\n"
+            "This project develops targeting.\n"
+        )
+        projects = detect_project_boundaries(text)
+        assert len(projects) == 1
+        assert projects[0]["project_number"] == "1234"
+
+
 # ── Phase 5 integration tests ───────────────────────────────────────────────
 
 
