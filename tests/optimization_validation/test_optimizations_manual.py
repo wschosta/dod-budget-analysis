@@ -121,14 +121,17 @@ def test_map_columns_c1_exhibit():
 
     mapping = _map_columns(headers, "c1")
 
-    # C-1 exhibits use construction project instead of line item
+    # C-1 exhibits use construction project instead of line item.
+    # Non-FY-prefixed amount headers map to generic names (amount_authorization,
+    # amount_appropriation, amount_total_obligation).  FY-specific names like
+    # amount_fy2026_request only appear when headers include "FY2026 Authorization Amount".
     expected_fields = [
         ("account", 0),
         ("line_item", 2),  # Construction Project maps to line_item
         ("line_item_title", 3),  # Construction Project Title
-        ("amount_fy2026_request", 4),  # Authorization Amount
-        ("amount_fy2025_enacted", 5),  # Appropriation Amount
-        ("amount_fy2026_total", 6),  # Total Obligation Authority
+        ("amount_authorization", 4),  # Authorization Amount (no FY prefix)
+        ("amount_appropriation", 5),  # Appropriation Amount (no FY prefix)
+        ("amount_total_obligation", 6),  # Total Obligation Authority (no FY prefix)
     ]
 
     success = True
