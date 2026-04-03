@@ -32,6 +32,7 @@ from utils.normalization import (
     ORG_NORMALIZE as _ORG_NORMALIZE,
     TITLE_TO_CODE as _TITLE_TO_CODE,
 )
+from utils.patterns import PE_NUMBER as _PE_RE
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
@@ -362,6 +363,9 @@ def step_9_backfill_pe_numbers(conn: sqlite3.Connection, dry_run: bool = False) 
         GROUP BY line_item_title, organization_name, fiscal_year
         HAVING COUNT(DISTINCT pe_number) = 1
     """)
+    conn.execute("""
+        CREATE INDEX _pb_idx ON _pe_backfill(line_item_title, organization_name, fiscal_year)
+    """)
 
     # Update only rows that won't violate the dedup UNIQUE index
     conn.execute("""
@@ -408,7 +412,6 @@ def step_9_backfill_pe_numbers(conn: sqlite3.Connection, dry_run: bool = False) 
     # 9b: Extract PE numbers directly from line_item field for rows still missing PE.
     # Some exhibit rows (especially Comptroller summary R-1) have PE numbers in
     # line_item (e.g. "0603648D8Z") but pe_number was never populated at ingestion.
-    from utils.patterns import PE_NUMBER as _pe_re
     remaining = conn.execute("""
         SELECT id, line_item FROM budget_lines
         WHERE pe_number IS NULL AND line_item IS NOT NULL
@@ -416,7 +419,7 @@ def step_9_backfill_pe_numbers(conn: sqlite3.Connection, dry_run: bool = False) 
 
     extract_buf: list[tuple[str, int]] = []
     for row_id, line_item in remaining:
-        m = _pe_re.search(str(line_item))
+        m = _PE_RE.search(str(line_item))
         if m:
             extract_buf.append((m.group(), row_id))
 

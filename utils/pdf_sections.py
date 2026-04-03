@@ -135,13 +135,13 @@ _PROJECT_BOUNDARY_PATTERNS: list[re.Pattern[str]] = [
 ]
 
 # Document label words that Pattern 3 incorrectly captures as project numbers.
-_JUNK_PROJECT_LABELS = frozenset({
+JUNK_PROJECT_LABELS = frozenset({
     "TITLE", "SUBTITLE", "NUMBER", "ELEMENT", "DESCRIPTION",
     "NAME", "CODE", "NONE", "N/A",
 })
 
 
-def _is_valid_project_number(proj_num: str) -> bool:
+def is_valid_project_number(proj_num: str) -> bool:
     """Return True if *proj_num* looks like a real DoD project identifier.
 
     Rejects common false positives from Pattern 3:
@@ -152,7 +152,7 @@ def _is_valid_project_number(proj_num: str) -> bool:
     """
     if len(proj_num) < 2:
         return False
-    if proj_num.upper() in _JUNK_PROJECT_LABELS:
+    if proj_num.upper() in JUNK_PROJECT_LABELS:
         return False
     if proj_num.isdigit() and len(proj_num) <= 2:
         return False
@@ -245,7 +245,7 @@ def detect_project_boundaries(page_text: str) -> list[dict[str, str]]:
 
     # Filter out junk project numbers before dedup/sorting
     boundaries = [(pos, num, title) for pos, num, title in boundaries
-                  if _is_valid_project_number(num)]
+                  if is_valid_project_number(num)]
 
     if not boundaries:
         return []

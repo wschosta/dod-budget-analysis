@@ -562,7 +562,7 @@ Assessment of PE-level tagging quality (2026-02-26):
 | Structured tags | 4,140 (across 1,498 PEs, 12 unique tags) |
 | Classification tags (rdte, procurement, etc.) | 1,477 (3.4% of total) |
 | Discovery tags (keyword/domain) | 41,722 (96.6%) |
-| Project-level tags | **1,355** (fixed 2026-04-02 via Phase 6) |
+| Project-level tags | **25,149** (fixed 2026-04-02 via Phase 6) |
 | Average tags per PE | ~12.6 |
 
 **Tag quality assessment:**
@@ -574,7 +574,7 @@ Assessment of PE-level tagging quality (2026-02-26):
   budget context — most programs involve some communications component.
 - Lower-coverage tags are more selective: autonomy (987, 29%), directed-energy (814,
   24%), special-operations (761, 22%), hypersonics (506, 15%).
-- **Project-level tags: 1,355** — fixed via enricher Phase 6 (2026-04-02). Phase 3 ran before Phase 5 could populate `project_descriptions`, so project-level tagging never executed. Phase 6 now runs after Phase 5 and applies taxonomy to project-level text.
+- **Project-level tags: 25,149** — fixed via enricher Phase 6 (2026-04-02). Phase 3 ran before Phase 5 could populate `project_descriptions`, so project-level tagging never executed. Phase 6 now runs after Phase 5 and applies taxonomy to project-level text (including 23,877 tags on numeric R-2A project numbers).
 
 **Related programs (PE lineage):**
 - Total links: 783,845

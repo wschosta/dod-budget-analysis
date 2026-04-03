@@ -1711,13 +1711,6 @@ def run_phase5(conn: sqlite3.Connection, stop_event: threading.Event | None = No
 
 # ── Phase 6: Project-Level Tagging ─────────────────────────────────────────────
 
-# Junk project_number values produced by noisy boundary detection.
-_JUNK_PROJECT_NUMBERS = frozenset({
-    "TITLE", "SUBTITLE", "NUMBER", "ELEMENT", "DESCRIPTION",
-    "NAME", "CODE", "NONE", "N/A",
-    "funds", "supports", "are",
-})
-
 
 def run_phase6(conn: sqlite3.Connection, stop_event: threading.Event | None = None) -> int:
     """Apply taxonomy tags at the project level using project_descriptions.
@@ -1729,6 +1722,8 @@ def run_phase6(conn: sqlite3.Connection, stop_event: threading.Event | None = No
 
     Uses INSERT OR IGNORE so it is safe to re-run.
     """
+    from utils.pdf_sections import JUNK_PROJECT_LABELS, is_valid_project_number
+
     logger.info("[Phase 6] Generating project-level tags...")
 
     # Verify prerequisite tables exist
@@ -1742,20 +1737,7 @@ def run_phase6(conn: sqlite3.Connection, stop_event: threading.Event | None = No
         logger.info("project_descriptions or pe_tags missing — run Phases 3 & 5 first.")
         return 0
 
-    # ── Clean junk project_numbers from project_descriptions ──────────
-    junk_labels = ", ".join(f"'{w}'" for w in sorted(_JUNK_PROJECT_NUMBERS))
-    deleted = conn.execute(f"""
-        DELETE FROM project_descriptions
-        WHERE project_number IS NOT NULL
-          AND (length(project_number) <= 2
-               OR UPPER(project_number) IN ({junk_labels})
-               OR project_number GLOB '[a-z]*')
-    """).rowcount
-    if deleted:
-        conn.commit()
-        logger.info("  Cleaned %d junk project_description rows.", deleted)
-
-    # Count existing project-level tags to detect if already done
+    # Idempotency: skip if project-level tags already exist
     existing = conn.execute(
         "SELECT COUNT(*) FROM pe_tags WHERE project_number IS NOT NULL"
     ).fetchone()[0]
@@ -1763,40 +1745,48 @@ def run_phase6(conn: sqlite3.Connection, stop_event: threading.Event | None = No
         logger.info("Already %d project-level tags — nothing to do.", existing)
         return 0
 
-    # Load all project_descriptions with valid project_number
+    # Clean junk project_numbers that slipped past boundary detection
+    junk_labels = ", ".join(f"'{w}'" for w in sorted(JUNK_PROJECT_LABELS))
+    deleted = conn.execute(f"""
+        DELETE FROM project_descriptions
+        WHERE project_number IS NOT NULL
+          AND (length(project_number) < 2
+               OR UPPER(project_number) IN ({junk_labels})
+               OR project_number GLOB '[a-z]*')
+    """).rowcount
+    if deleted:
+        conn.commit()
+        logger.info("  Cleaned %d junk project_description rows.", deleted)
+
+    # Load project_descriptions, filter with the shared validator
     rows = conn.execute("""
         SELECT pe_number, project_number, description_text, source_file
         FROM project_descriptions
         WHERE project_number IS NOT NULL
           AND description_text IS NOT NULL
-          AND length(project_number) >= 3
     """).fetchall()
 
-    if not rows:
+    valid_rows = [r for r in rows if is_valid_project_number(r[1])]
+    if not valid_rows:
         logger.info("No valid project_descriptions found — nothing to tag.")
         return 0
 
-    # Filter out junk project_numbers and single-digit numerics
-    valid_rows = [
-        r for r in rows
-        if r[1] not in _JUNK_PROJECT_NUMBERS and not r[1].isdigit()
-    ]
     logger.info(
-        "  %d project_description rows (%d filtered as junk).",
+        "  %d project_description rows (%d filtered).",
         len(valid_rows), len(rows) - len(valid_rows),
     )
 
-    # Group text by (pe_number, project_number) for dedup
-    proj_texts: dict[tuple[str, str], tuple[str, list[str]]] = {}
+    # Group text by (pe_number, project_number)
+    proj_texts: dict[tuple[str, str], tuple[str, set[str]]] = {}
     for pe, proj, text, src in valid_rows:
         key = (pe, proj)
         if key not in proj_texts:
-            proj_texts[key] = (text, [src] if src else [])
+            proj_texts[key] = (text, {src} if src else set())
         else:
             existing_text, srcs = proj_texts[key]
             proj_texts[key] = (existing_text + " " + text, srcs)
-            if src and src not in srcs:
-                srcs.append(src)
+            if src:
+                srcs.add(src)
 
     insert_buf: list[tuple] = []
     for (pe, proj_num), (proj_text, src_files) in proj_texts.items():
@@ -1804,7 +1794,7 @@ def run_phase6(conn: sqlite3.Connection, stop_event: threading.Event | None = No
             logger.info("  Phase 6 stopped.")
             break
 
-        src_json = json.dumps(src_files)
+        src_json = json.dumps(sorted(src_files))
         for tag, patterns in _COMPILED_TAXONOMY:
             for pat in patterns:
                 if pat.search(proj_text):
