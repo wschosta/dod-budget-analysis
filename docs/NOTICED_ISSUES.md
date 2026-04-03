@@ -32,12 +32,12 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
 
 9. **[RESOLVED — verified via test suite]** **Detail tab is very slow** to load when clicking a search result
    _Fix: Composite indexes + dedup (644K→47K rows). Tests: `test_schema_design.py::TestCreateMigration::test_creates_indexes`._
-10. **[OPEN — partial]** **Detail tab data errors (CPS example):**
-    - Shows FY 1998 — incorrect, program didn't exist then ← **FY attribution (Group D, deferred)**
+10. **[RESOLVED — 2026-04-02]** **Detail tab data errors (CPS example):**
+    - ~~Shows FY 1998 — incorrect, program didn't exist then~~ ← **fixed: `source_fiscal_year` column distinguishes data FY from source document FY**
     - ~~Appropriation shows "- -" (meaningless)~~ ← **fixed by appropriation backfill (Round 5)**
-    - Source file path says "FY1998\PB\Defense_wide..." — wrong ← **FY attribution (Group D, deferred)**
+    - ~~Source file path says "FY1998\PB\Defense_wide..." — wrong~~ ← **fixed: detail view now shows "Budget Submission" FY separately when it differs from data FY**
     - ~~Related Fiscal Years shows "FYFY 1998" — duplicated prefix typo~~ ← **fixed by `format_fy` filter**
-    _Remaining: FY mismatch detection exists (`pipeline/builder.py:1213-1222`) but only logs warning, doesn't auto-correct. See Group D in ROADMAP._
+    _Fix: Added `source_fiscal_year` column to `budget_lines` (extracted from directory path). Detail template shows "Data Fiscal Year" and "Budget Submission" FY when they differ. 3,296 of 51,053 rows (6.5%) have a mismatch._
 
 ### Dashboard (/dashboard)
 
@@ -73,8 +73,8 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
     _Note: FY2000-2009 gap is a data coverage limitation._
 24. **[STRUCTURAL — documented in PRD §9]** **FY 2000-2011 have zero entries** despite data supposedly existing
     _Note: FY2000-2009 gap is a data coverage limitation._
-25. **[OPEN — partial]** **FY24 Actual data incorrectly attributed** to FY 1998 source
-    _Note: Same root cause as #10 — FY mismatch detection exists but no auto-correction._
+25. **[RESOLVED — 2026-04-02]** **FY24 Actual data incorrectly attributed** to FY 1998 source
+    _Fix: Same as #10 — `source_fiscal_year` column now separates data FY from source document FY._
 26. **[RESOLVED — CSS fix verified]** **Tags dropdown is mispositioned** — overlaps onto the program cards
     _Fix: CSS z-index + stacking context in `static/css/main.css:1354-1358`._
 27. **[RESOLVED — 2026-04-02]** **Tag counts look inflated** — rdte: 1539/1579, communications: 1502, aviation: 1438 (nearly every program tagged with nearly everything)
@@ -662,9 +662,8 @@ are rows without enough context to infer an appropriation code.
 
 | Status | Count | Issues |
 |--------|-------|--------|
-| **RESOLVED** | 53 | #1-4, #5, #6/14, #7/17/22, #9, #11-13, #15, #18, #20, #21, #26, #27, #29-48, #50-52, #54-61, #63 |
+| **RESOLVED** | 55 | #1-4, #5, #6/14, #7/17/22, #9-13, #15, #18, #20, #21, #25-27, #29-48, #50-52, #54-61, #63 |
 | **STRUCTURAL — documented in PRD §9** | 7 | #8, #16, #19, #23, #24, #28, #53 (data coverage limitations) |
-| **OPEN — partial** | 2 | #10, #25 (FY mismatch — remaining sub-items are Group D, deferred) |
 | **DOCUMENTED** | 1 | #62 (tag coverage assessment) |
 | **RESOLVED (partial)** | 1 | #49 (inline styles — 301→161, 47% reduction; remainder has no utility match) |
 

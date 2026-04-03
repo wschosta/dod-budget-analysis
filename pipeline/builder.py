@@ -382,6 +382,7 @@ def create_database(db_path: Path) -> sqlite3.Connection:
         CREATE TABLE IF NOT EXISTS budget_lines (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             source_file TEXT NOT NULL,
+            source_fiscal_year TEXT,
             exhibit_type TEXT,
             sheet_name TEXT,
             fiscal_year TEXT,
@@ -1339,8 +1340,11 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
                 else:
                     fy_values.append(_safe_float(get_val(row, fc)))
 
+            # Normalize dir_fy to bare 4-digit year for source_fiscal_year
+            _source_fy = _normalize_fy_value(dir_fy) if dir_fy else None
             batch.append((
                 str(file_path.relative_to(_docs_dir)),
+                _source_fy,
                 exhibit_type,
                 sheet_name,
                 fiscal_year,
@@ -1373,7 +1377,7 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
         if batch:
             # BUILD-002: Use dynamic column list so new FY columns are included
             _fixed_cols = (
-                "source_file, exhibit_type, sheet_name, fiscal_year, "
+                "source_file, source_fiscal_year, exhibit_type, sheet_name, fiscal_year, "
                 "account, account_title, organization, organization_name, "
                 "budget_activity, budget_activity_title, "
                 "sub_activity, sub_activity_title, "
@@ -1563,8 +1567,10 @@ def _extract_excel_rows(args: tuple) -> dict:
                     v = row[idx] if idx is not None and idx < len(row) else None
                     fy_dict[fc] = safe_float(v)
 
+            # Normalize dir_fy to bare 4-digit year for source_fiscal_year
+            _source_fy = _normalize_fy_value(dir_fy) if dir_fy else None
             fixed = (
-                rel_path_str, exhibit_type, sheet_name, fiscal_year,
+                rel_path_str, _source_fy, exhibit_type, sheet_name, fiscal_year,
                 account_val, acct_title_val, org_code, org_name,
                 _get_str(row, "budget_activity"), _get_str(row, "budget_activity_title"),
                 _get_str(row, "sub_activity"), _get_str(row, "sub_activity_title"),
@@ -2681,7 +2687,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 if rows:
                     # Reconstruct the INSERT dynamically based on extracted columns
                     _fixed_c = (
-                        "source_file, exhibit_type, sheet_name, fiscal_year, "
+                        "source_file, source_fiscal_year, exhibit_type, sheet_name, fiscal_year, "
                         "account, account_title, organization, organization_name, "
                         "budget_activity, budget_activity_title, "
                         "sub_activity, sub_activity_title, "

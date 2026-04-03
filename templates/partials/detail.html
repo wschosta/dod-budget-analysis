@@ -13,7 +13,7 @@
       <span>{{ item.organization_name or "—" }}</span>
     </div>
     <div class="detail-field">
-      <label>Fiscal Year</label>
+      <label>Data Fiscal Year</label>
       <span>{{ item.fiscal_year or "—" }}</span>
     </div>
     <div class="detail-field">
@@ -75,6 +75,14 @@
   <div class="detail-source-info mt-lg p-md card-surface">
     <h4 class="meta-std mb-sm" style="margin-top:0">Data Source</h4>
     <div class="detail-grid">
+      {% if item.source_fiscal_year and item.source_fiscal_year != item.fiscal_year %}
+      <div class="detail-field">
+        <label>Budget Submission</label>
+        <span>FY {{ item.source_fiscal_year }}
+          <span class="meta-sm" data-tooltip="The fiscal year of the budget document this data was extracted from. The data itself covers FY {{ item.fiscal_year }}.">(differs from data FY)</span>
+        </span>
+      </div>
+      {% endif %}
       <div class="detail-field">
         <label>Source File</label>
         <span style="word-break:break-all"><code>{{ item.source_file or "—" }}</code></span>

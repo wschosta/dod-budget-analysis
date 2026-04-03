@@ -253,9 +253,57 @@ def step_6_backfill_reference_data(conn: sqlite3.Connection, dry_run: bool = Fal
     return summary
 
 
-def step_7_rebuild_fts(conn: sqlite3.Connection) -> None:
+def step_7_backfill_source_fiscal_year(conn: sqlite3.Connection, dry_run: bool = False) -> int:
+    """Add source_fiscal_year column and backfill from source_file path."""
+    logger.info("Step 7: Backfilling source_fiscal_year...")
+
+    # Ensure column exists (always add, even on dry run, so we can count)
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(budget_lines)").fetchall()}
+    if "source_fiscal_year" not in existing:
+        conn.execute("ALTER TABLE budget_lines ADD COLUMN source_fiscal_year TEXT")
+        conn.commit()
+        logger.info("  Added source_fiscal_year column")
+
+    # Count rows needing backfill
+    count_row = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines WHERE source_fiscal_year IS NULL"
+    ).fetchone()
+    need_backfill = count_row[0] if count_row else 0
+
+    if need_backfill == 0:
+        logger.info("  No rows need source_fiscal_year backfill")
+        return 0
+
+    if dry_run:
+        logger.info(f"  Would backfill {need_backfill:,} rows")
+        return need_backfill
+
+    # Extract FY from source_file path (e.g., "FY2025\PB\..." -> "2025")
+    import re
+    rows = conn.execute(
+        "SELECT id, source_file FROM budget_lines WHERE source_fiscal_year IS NULL"
+    ).fetchall()
+
+    updates: list[tuple[str, int]] = []
+    for row in rows:
+        m = re.search(r"FY\s*(\d{4})", row[1] or "", re.IGNORECASE)
+        if m:
+            updates.append((m.group(1), row[0]))
+
+    if updates:
+        conn.executemany(
+            "UPDATE budget_lines SET source_fiscal_year = ? WHERE id = ?",
+            updates,
+        )
+        conn.commit()
+
+    logger.info(f"  Backfilled {len(updates):,} of {need_backfill:,} rows")
+    return len(updates)
+
+
+def step_8_rebuild_fts(conn: sqlite3.Connection) -> None:
     """Rebuild FTS5 indexes to ensure consistency after data changes."""
-    logger.info("Step 7: Rebuilding FTS5 indexes...")
+    logger.info("Step 8: Rebuilding FTS5 indexes...")
     for table in ["budget_lines_fts", "pdf_pages_fts"]:
         try:
             conn.execute(f"INSERT INTO {table}({table}) VALUES('rebuild')")
@@ -296,8 +344,9 @@ def repair(db_path: Path, dry_run: bool = False) -> dict:
         summary["approp_backfilled"] = step_4_backfill_appropriation_codes(conn, dry_run)
         step_5_add_indexes(conn)
         summary["reference"] = step_6_backfill_reference_data(conn, dry_run)
+        summary["source_fy_backfilled"] = step_7_backfill_source_fiscal_year(conn, dry_run)
         if not dry_run:
-            step_7_rebuild_fts(conn)
+            step_8_rebuild_fts(conn)
     finally:
         conn.close()
 
