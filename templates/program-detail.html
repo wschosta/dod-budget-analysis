@@ -183,7 +183,7 @@
        title="Source: {{ t.tag_source }} | Confidence: {{ '%.0f' | format((t.confidence or 0) * 100) }}%"
        style="text-decoration:none;color:inherit;{% if t.confidence and t.confidence >= 0.9 %}border-color:var(--primary);{% elif t.confidence and t.confidence >= 0.7 %}border-color:var(--text-secondary);{% else %}border-color:var(--border);opacity:.8;{% endif %}">
       {{ t.tag }}
-      <span class="meta-xs" style="font-size:.65rem;margin-left:.25rem"
+      <span class="meta-xs text-xs ml-xs"
             >{{ t.tag_source }}{% if t.confidence %} {{ '%.0f' | format(t.confidence * 100) }}%{% endif %}</span>
     </a>
     {% endfor %}

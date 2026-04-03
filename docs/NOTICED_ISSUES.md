@@ -311,9 +311,10 @@ Added `<select name="amount_column">` dropdown that iterates
 ### 49. Excessive Inline Styles Throughout Templates **[RESOLVED — 2026-04-02]**
 
 Added 60+ utility CSS classes to `static/css/main.css` and converted inline styles
-across all 21 template files. Inline style count reduced from **301 to 125** (58% reduction across two passes: 301->169->125).
-Remaining 125 are JS-toggled display states, Jinja conditionals, sticky positioning,
-table borders, and multi-property component-specific styles.
+across all 21 template files. Inline style count reduced from **301 to 87** (71% reduction across three passes: 301->169->125->87).
+Remaining 87 are JS-toggled display states (24), Jinja conditionals (7), and
+component-specific combos that resist extraction (absolute positioning, conditional
+colors, non-standard margin combos).
 
 ---
 
@@ -688,7 +689,7 @@ are rows without enough context to infer an appropriation code.
 | **RESOLVED** | 57 | #1-4, #5, #6/14, #7/17/22, #9-13, #15, #18-21, #23, #25-27, #29-48, #50-52, #54-61, #63 |
 | **STRUCTURAL — documented in PRD §9** | 5 | #8, #16, #24, #28, #53 (data coverage limitations) |
 | **DOCUMENTED** | 1 | #62 (tag coverage assessment) |
-| **RESOLVED (partial)** | 1 | #49 (inline styles — 301→125, 58% reduction; remainder is JS-toggled/Jinja/structural) |
+| **RESOLVED (partial)** | 1 | #49 (inline styles — 301→87, 71% reduction; remainder is JS-toggled/Jinja/structural) |
 
 ### Infrastructure Added to Prevent Regression
 

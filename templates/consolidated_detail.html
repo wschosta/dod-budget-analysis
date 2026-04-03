@@ -9,7 +9,7 @@
 
 {# ── Header ──────────────────────────────────────────────────────────────── #}
 <h2>{{ item.line_item_title or item.pe_number }}</h2>
-<div class="pe-meta d-flex flex-wrap items-center" style="gap:.5rem;margin:.75rem 0 1.25rem">
+<div class="pe-meta d-flex flex-wrap items-center gap-sm" style="margin:.75rem 0 1.25rem">
   <span class="badge text-lg">{{ item.pe_number }}</span>
   {% if item.organization_name %}
   <span>{{ item.organization_name }}</span>
@@ -55,7 +55,7 @@
 
 {# ── PE-level Tags ────────────────────────────────────────────────────────── #}
 {% if pe_tags %}
-<div class="d-flex flex-wrap gap-sm" style="margin-bottom:1.25rem">
+<div class="d-flex flex-wrap gap-sm mb-5">
   {% for t in pe_tags %}
   <a href="/programs?tag={{ t.tag }}" class="filter-chip tag-chip"
      title="Source: {{ t.tag_source }} | Confidence: {{ '%.0f' | format((t.confidence or 0) * 100) }}%"
@@ -71,10 +71,10 @@
 
 {# ── PE Mission Description (tabbed by FY, expandable) ───────────────────── #}
 {% if pe_descriptions %}
-<section id="pe-desc-section" class="card-surface mb-xl" style="padding:1rem">
+<section id="pe-desc-section" class="card-surface mb-xl p-1">
   <h3 class="text-secondary mb-md text-1x">Mission Description</h3>
   {# Tab bar — oldest FY on left, newest on right (active) #}
-  <div id="pe-desc-tabs" class="d-flex mb-md" style="gap:0;border-bottom:2px solid var(--border-color)">
+  <div id="pe-desc-tabs" class="d-flex mb-md tab-bar">
     {% for desc in pe_descriptions %}
     <button class="pe-desc-tab text-base-sm" data-idx="{{ loop.index0 }}"
             onclick="switchPeDescTab({{ loop.index0 }})"
@@ -90,9 +90,9 @@
   {# Tab content panes #}
   {% for desc in pe_descriptions %}
   <div class="pe-desc-pane" data-idx="{{ loop.index0 }}" style="display:{% if loop.last %}block{% else %}none{% endif %}">
-    <div id="pe-desc-text-{{ loop.index0 }}" style="font-size:.82rem;line-height:1.6;white-space:pre-line;max-height:6em;overflow:hidden;position:relative;transition:max-height .3s ease">{{ desc.text }}</div>
+    <div id="pe-desc-text-{{ loop.index0 }}" class="text-base lh-loose expandable-text" style="position:relative">{{ desc.text }}</div>
     <button id="pe-desc-toggle-{{ loop.index0 }}" onclick="togglePeDescExpand({{ loop.index0 }})"
-            class="d-none text-md mt-xs" style="background:none;border:none;color:var(--clr-blue);cursor:pointer;padding:.25rem 0">
+            class="d-none text-md mt-xs btn-ghost text-accent" style="padding:.25rem 0">
       Show more &darr;
     </button>
   </div>
@@ -159,23 +159,23 @@ function togglePeDescExpand(idx) {
     Click a sub-project row to view narrative text.
   </p>
   <div class="table-wrapper">
-    <table id="matrix-table" class="text-base-sm text-nowrap" style="border-collapse:collapse;width:100%">
+    <table id="matrix-table" class="text-base-sm text-nowrap table-full">
       <thead>
         <tr>
-          <th class="text-sm text-upper text-secondary" style="text-align:left;padding:.4rem .5rem;border-bottom:2px solid var(--border-color);position:sticky;left:0;background:var(--bg-surface);z-index:1;min-width:180px">Program</th>
+          <th class="text-sm text-upper text-secondary table-cell sticky-col" style="text-align:left;border-bottom-width:2px;min-width:180px">Program</th>
           {% for fy in matrix_fys %}
-          <th class="text-right text-mono meta-sm" style="padding:.4rem .5rem;border-bottom:2px solid var(--border-color);min-width:70px">FY{{ fy }}</th>
+          <th class="text-right text-mono meta-sm table-cell" style="border-bottom-width:2px;min-width:70px">FY{{ fy }}</th>
           {% endfor %}
         </tr>
       </thead>
       <tbody>
         {# PE Total row — highlighted #}
-        <tr style="background:color-mix(in srgb, var(--clr-blue) 8%, transparent);font-weight:600">
-          <td style="padding:.4rem .5rem;border-bottom:1px solid var(--border-color);position:sticky;left:0;background:color-mix(in srgb, var(--clr-blue) 8%, var(--bg-surface));z-index:1">
+        <tr class="row-highlight">
+          <td class="table-cell sticky-col" style="background:color-mix(in srgb, var(--clr-blue) 8%, var(--bg-surface))">
             {{ pe_row.label }}
           </td>
           {% for fy in matrix_fys %}
-          <td class="text-right text-mono" style="padding:.4rem .5rem;border-bottom:1px solid var(--border-color)">
+          <td class="text-right text-mono table-cell">
             {% if pe_row.fy_vals.get(fy) is not none %}${{ "{:,.0f}".format(pe_row.fy_vals[fy]) }}{% else %}—{% endif %}
           </td>
           {% endfor %}
@@ -186,13 +186,13 @@ function togglePeDescExpand(idx) {
             onclick="toggleInlinePanel('{{ row.project_number }}', this)"
             onmouseover="this.style.background='color-mix(in srgb, var(--clr-blue) 6%, transparent)'"
             onmouseout="if(!this.classList.contains('proj-selected'))this.style.background=''">
-          <td style="padding:.4rem .5rem;border-bottom:1px solid var(--border-color);position:sticky;left:0;background:inherit;z-index:1;max-width:280px" title="{{ row.project_number }} — {{ row.label }}">
+          <td class="table-cell sticky-col" style="background:inherit;max-width:280px" title="{{ row.project_number }} — {{ row.label }}">
             <div class="text-ellipsis">
-              <span class="text-mono" style="font-size:.7rem;color:var(--clr-blue);margin-right:.35rem">{{ row.project_number }}</span>{{ row.label }}
+              <span class="text-mono text-accent" style="font-size:.7rem;margin-right:.35rem">{{ row.project_number }}</span>{{ row.label }}
             </div>
             {# 4.2: Show project-level tags as small badge chips #}
             {% if project_tags and project_tags.get(row.project_number) %}
-            <div class="d-flex flex-wrap" style="gap:.15rem;margin-top:.2rem">
+            <div class="d-flex flex-wrap gap-2xs mt-2xs">
               {% for t in project_tags[row.project_number][:5] %}
               <span style="display:inline-block;padding:0 .35rem;border-radius:.6rem;font-size:.6rem;
                            border:1px solid {% if t.confidence >= 0.9 %}var(--clr-blue){% else %}var(--border-color){% endif %};
@@ -203,7 +203,7 @@ function togglePeDescExpand(idx) {
             {% endif %}
           </td>
           {% for fy in matrix_fys %}
-          <td class="text-right text-mono text-secondary" style="padding:.4rem .5rem;border-bottom:1px solid var(--border-color)">
+          <td class="text-right text-mono text-secondary table-cell">
             {% if row.fy_vals.get(fy) is not none %}{% if row.fy_vals[fy] == 0.0 %}—{% else %}${{ "{:,.0f}".format(row.fy_vals[fy]) }}{% endif %}{% else %}{% endif %}
           </td>
           {% endfor %}
@@ -212,11 +212,11 @@ function togglePeDescExpand(idx) {
         {# "Not accounted for" difference row #}
         {% if diff_row %}
         <tr class="text-italic text-secondary text-sm" style="border-top:2px solid var(--border-color)">
-          <td style="padding:.4rem .5rem;border-bottom:1px solid var(--border-color);position:sticky;left:0;background:var(--bg-surface);z-index:1">
+          <td class="table-cell sticky-col">
             {{ diff_row.label }}
           </td>
           {% for fy in matrix_fys %}
-          <td class="text-right text-mono" style="padding:.4rem .5rem;border-bottom:1px solid var(--border-color)">
+          <td class="text-right text-mono table-cell">
             {% if diff_row.fy_vals.get(fy) is not none %}{% set v = diff_row.fy_vals[fy] %}{% if v > 0 %}+${{ "{:,.0f}".format(v) }}{% elif v < 0 %}-${{ "{:,.0f}".format(v | abs) }}{% else %}—{% endif %}{% else %}{% endif %}
           </td>
           {% endfor %}
@@ -279,11 +279,11 @@ function togglePeDescExpand(idx) {
     td.colSpan = _colCount;
     td.style.cssText = 'padding:0;border-bottom:1px solid var(--border-color)';
 
-    var html = '<div style="background:var(--bg-surface);border-left:3px solid var(--clr-blue);padding:.75rem 1rem;margin:0">';
+    var html = '<div class="callout-box m-0">';
     /* Header */
     html += '<div class="d-flex items-center mb-sm justify-between">';
-    html += '<span style="font-size:.82rem;font-weight:600"><span class="badge text-sm text-mono" style="margin-right:.4rem">' + _escHtml(projNum) + '</span>' + _escHtml(title) + '</span>';
-    html += '<button onclick="closeInlinePanel(\'' + projNum + '\')" class="text-secondary" style="background:none;border:none;font-size:1.1rem;cursor:pointer;padding:.15rem .4rem;line-height:1" aria-label="Close">&times;</button>';
+    html += '<span class="text-base" style="font-weight:600"><span class="badge text-sm text-mono" style="margin-right:.4rem">' + _escHtml(projNum) + '</span>' + _escHtml(title) + '</span>';
+    html += '<button onclick="closeInlinePanel(\'' + projNum + '\')" class="text-secondary btn-ghost" style="font-size:1.1rem;padding:.15rem .4rem;line-height:1" aria-label="Close">&times;</button>';
     html += '</div>';
 
     /* Project-level tags */
@@ -311,7 +311,7 @@ function togglePeDescExpand(idx) {
       } else {
         /* Tab bar — oldest left, newest right (active) */
         var tabId = 'tabs-' + projNum.replace(/[^a-zA-Z0-9]/g, '_');
-        html += '<div class="d-flex mb-sm" style="gap:0;border-bottom:2px solid var(--border-color)">';
+        html += '<div class="d-flex mb-sm tab-bar">';
         subs.forEach(function(sub, i) {
           var active = (i === defaultIdx);
           html += '<button class="proj-tab text-base-sm" data-tabgroup="' + tabId + '" data-idx="' + i + '"'
@@ -328,7 +328,7 @@ function togglePeDescExpand(idx) {
         subs.forEach(function(sub, i) {
           html += '<div class="proj-tab-pane" data-tabgroup="' + tabId + '" data-idx="' + i + '"'
             + ' style="display:' + (i === defaultIdx ? 'block' : 'none') + '">'
-            + '<pre class="text-base-sm p-md" style="line-height:1.5;white-space:pre-wrap;word-break:break-word;background:var(--bg-body);border:1px solid var(--border-color);border-radius:var(--radius);max-height:350px;overflow-y:auto;margin:0">'
+            + '<pre class="text-base-sm p-md m-0 lh-relaxed" style="white-space:pre-wrap;word-break:break-word;background:var(--bg-body);border:1px solid var(--border-color);border-radius:var(--radius);max-height:350px;overflow-y:auto">'
             + _escHtml(sub.text) + '</pre></div>';
         });
       }
@@ -379,7 +379,7 @@ function togglePeDescExpand(idx) {
 {% if sub_groups %}
 <section class="mb-xl">
   <details>
-    <summary style="font-size:1rem;font-weight:700;cursor:pointer;padding:.5rem 0">
+    <summary class="text-xl cursor-pointer" style="font-weight:700;padding:.5rem 0">
       Submission Archive
       <span class="meta-std fw-normal">({{ sub_count }} document{{ "s" if sub_count != 1 }})</span>
     </summary>
@@ -389,31 +389,31 @@ function togglePeDescExpand(idx) {
 
     {% for fy, subs in sub_groups.items() | sort(attribute='0', reverse=True) %}
     <details class="card-surface mb-sm">
-      <summary class="text-lg" style="padding:.75rem 1rem;cursor:pointer;font-weight:600">
+      <summary class="text-lg cursor-pointer" style="padding:.75rem 1rem;font-weight:600">
         FY{{ fy }} Submissions
         <span class="text-md text-secondary fw-normal">({{ subs | length }})</span>
       </summary>
       <div style="padding:0 1rem .75rem">
         {% for sub in subs %}
         <div style="border-top:1px solid var(--border-color);padding:.75rem 0{% if loop.first %};border-top:none{% endif %}">
-          <div class="text-md text-secondary text-ellipsis" style="margin-bottom:.35rem"
+          <div class="text-md text-secondary text-ellipsis mb-3"
                title="{{ sub.source_file or '' }}">
             {{ sub.source_file or "unknown source" }}
           </div>
           {% if sub.amounts %}
           <div class="table-wrapper mt-xs">
-            <table class="text-md" style="width:100%;border-collapse:collapse">
+            <table class="text-md table-full">
               <thead>
                 <tr>
-                  <th class="text-sm text-upper text-secondary" style="text-align:left;padding:.25rem .5rem;border-bottom:1px solid var(--border-color)">Column</th>
-                  <th class="text-sm text-upper text-secondary text-right" style="padding:.25rem .5rem;border-bottom:1px solid var(--border-color)">Value ($K)</th>
+                  <th class="text-sm text-upper text-secondary table-cell-sm" style="text-align:left">Column</th>
+                  <th class="text-sm text-upper text-secondary text-right table-cell-sm">Value ($K)</th>
                 </tr>
               </thead>
               <tbody>
                 {% for col, val in sub.amounts.items() | sort %}
                 <tr>
-                  <td class="text-md" style="padding:.2rem .5rem">{{ col.replace("amount_", "").replace("_", " ").title() }}</td>
-                  <td class="text-md text-right text-mono" style="padding:.2rem .5rem">
+                  <td class="text-md table-cell-xs">{{ col.replace("amount_", "").replace("_", " ").title() }}</td>
+                  <td class="text-md text-right text-mono table-cell-xs">
                     {% if val is not none %}${{ "{:,.0f}".format(val) }}{% else %}—{% endif %}
                   </td>
                 </tr>

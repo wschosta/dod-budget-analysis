@@ -25,7 +25,7 @@
       <tr class="{% if row.is_subtotal %}spruill-subtotal{% else %}spruill-detail{% endif %}">
         <td>
           {% if row.is_subtotal %}
-          <a href="/programs/{{ row.pe_number }}" class="badge" style="text-decoration:none">{{ row.pe_number }}</a>
+          <a href="/programs/{{ row.pe_number }}" class="badge no-decoration">{{ row.pe_number }}</a>
           {% else %}
           <span class="meta-std pl-md">{{ row.pe_number }}</span>
           {% endif %}

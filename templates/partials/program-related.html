@@ -2,10 +2,10 @@
 {% if related %}
 
 {# Confidence filter controls #}
-<div class="d-flex items-center flex-wrap mb-md" style="gap:.5rem">
+<div class="d-flex items-center flex-wrap mb-md gap-sm">
   <label for="confidence-filter" class="meta-std">Min confidence:</label>
   <select id="confidence-filter"
-          style="font-size:.8rem;padding:.2rem .4rem;border-radius:4px;border:1px solid var(--border-color);background:var(--bg-surface);color:var(--text-primary)"
+          class="input-filter"
           hx-get="/partials/program-related/{{ pe_number }}"
           hx-target="#pe-related"
           hx-include="this"

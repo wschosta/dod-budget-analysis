@@ -8,7 +8,7 @@
 <div class="d-flex flex-wrap items-center gap-md mb-lg">
   {# FY selector #}
   <label class="text-lg">Fiscal Year:
-    <select id="chart-fy" onchange="loadCharts()" style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid var(--border-color)">
+    <select id="chart-fy" class="input-filter ml-xs" onchange="loadCharts()">
       {% for fy in fiscal_years %}
       <option value="{{ fy.fiscal_year }}" {% if loop.last %}selected{% endif %}>{{ fy.fiscal_year }}</option>
       {% endfor %}
@@ -17,8 +17,8 @@
 
   {# VIZ-003: Service filter #}
   <label class="text-lg">Service:
-    <select id="chart-service-filter" multiple
-            style="margin-left:.25rem;padding:.3rem .5rem;border-radius:4px;border:1px solid var(--border-color);min-height:2.5rem;max-height:150px"
+    <select id="chart-service-filter" class="input-filter ml-xs" multiple
+            style="min-height:2.5rem;max-height:150px"
             onchange="loadCharts()">
     </select>
   </label>
@@ -67,12 +67,10 @@
   <div class="chart-card col-full" id="card-compare">
     <h3>Budget Comparison (Multi-Entity)</h3>
     <div id="compare-entities" class="d-flex flex-wrap items-center gap-md mb-md">
-      <select class="compare-entity-select" onchange="loadComparison()"
-              style="padding:.3rem .5rem;border-radius:4px;border:1px solid var(--border-color)">
+      <select class="compare-entity-select input-filter" onchange="loadComparison()"
         <option value="">-- Select service --</option>
       </select>
-      <select class="compare-entity-select" onchange="loadComparison()"
-              style="padding:.3rem .5rem;border-radius:4px;border:1px solid var(--border-color)">
+      <select class="compare-entity-select input-filter" onchange="loadComparison()"
         <option value="">-- Select service --</option>
       </select>
       <button class="btn btn-secondary btn-sm" onclick="addCompareEntity()" title="Add another entity (max 6)">+ Add Entity</button>

@@ -93,20 +93,20 @@
         <div class="meta-md mt-xs">{{ item.budget_type }}</div>
         {% endif %}
         {% if item.appropriation_name %}
-        <div class="meta-md text-ellipsis" style="margin-top:.15rem"
+        <div class="meta-md text-ellipsis mt-2xs"
              title="{{ item.appropriation_name }}">{{ item.appropriation_name }}</div>
         {% endif %}
-        <div class="d-flex text-md mt-sm" style="justify-content:space-between;align-items:baseline">
+        <div class="d-flex text-md mt-sm justify-between" style="align-items:baseline">
           {% if item.fy_min and item.fy_max %}
           <span class="text-secondary">FY{{ item.fy_min }}–{{ item.fy_max }}{% if item.fy_count %} ({{ item.fy_count }} FYs){% endif %}</span>
           {% endif %}
           {% if item.total_program_value is not none and item.total_program_value %}
-          <span class="text-mono" style="color:var(--clr-blue)" title="Total program value across all fiscal years">
+          <span class="text-mono text-accent" title="Total program value across all fiscal years">
             ${{ "{:,.0f}".format(item.total_program_value) }}K
             <span class="meta-sm" style="font-size:.7rem">(total)</span>
           </span>
           {% elif item.best_amount is not none %}
-          <span class="text-mono" style="color:var(--clr-blue)">
+          <span class="text-mono text-accent">
             ${{ "{:,.0f}".format(item.best_amount) }}K
             {% if item.best_label %}
             <span class="meta-sm" style="font-size:.7rem">({{ item.best_label }})</span>
@@ -115,7 +115,7 @@
           {% endif %}
         </div>
         {% if item.submission_count %}
-        <div class="meta-sm" style="margin-top:.35rem">
+        <div class="meta-sm mt-3">
           {{ item.submission_count }} submission{{ "s" if item.submission_count != 1 }}
         </div>
         {% endif %}
@@ -125,7 +125,7 @@
 
     {# Pagination #}
     {% if total_pages > 1 %}
-    <div class="pagination" style="margin-top:1.25rem">
+    <div class="pagination mt-5">
       {% if page > 1 %}
       <a href="/consolidated?page={{ page - 1 }}{% if q %}&q={{ q }}{% endif %}{% if service %}&service={{ service }}{% endif %}{% if budget_type %}&budget_type={{ budget_type }}{% endif %}{% if sort_by and sort_by != 'pe_number' %}&sort_by={{ sort_by }}{% endif %}"
          class="page-btn">&#8249; Prev</a>

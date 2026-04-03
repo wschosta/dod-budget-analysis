@@ -284,7 +284,7 @@
     <span class="row-count" id="visible-count">{{ row_count }} sub-element{{ 's' if row_count != 1 else '' }}</span>
   </div>
 
-  <p class="mb-sm" style="color:var(--color-text-muted);font-size:0.82rem;">
+  <p class="mb-sm text-base text-secondary">
     All PE lines and sub-programs matching hypersonics keywords in budget lines
     and program descriptions, FY{{ active_years[0] if active_years else 2015 }}
     onward. Grouped by PE number; click a PE row to expand/collapse sub-elements.
@@ -292,7 +292,7 @@
   </p>
 
   <div class="kw-pills">
-    <span class="text-sm" style="color:var(--color-text-muted);align-self:center;">Keywords:</span>
+    <span class="text-sm text-secondary" style="align-self:center;">Keywords:</span>
     {% for kw in keywords %}<span class="kw-pill" data-kw="{{ kw }}" onclick="toggleKeyword(this)">{{ kw }}{% if keyword_counts and keyword_counts.get(kw, 0) > 0 %} <span class="kw-count">({{ keyword_counts[kw] }})</span>{% endif %}</span>{% endfor %}
   </div>
 

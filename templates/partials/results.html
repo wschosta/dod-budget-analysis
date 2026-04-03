@@ -156,7 +156,7 @@
             <div class="meta-md">{{ item.budget_activity_title }}</div>
             {% endif %}
             {% if item._pe_total %}
-            <div class="meta-sm" style="margin-top:.15rem">
+            <div class="meta-sm mt-2xs">
               Total Program Value: <strong style="color:var(--text-primary)">{{ item._pe_total.total_value | fmt_dollars }}</strong>
               <span class="text-xs">(FY{{ item._pe_total.fy_min }}–FY{{ item._pe_total.fy_max }})</span>
             </div>
@@ -188,8 +188,8 @@
     <label class="d-flex items-center gap-xs meta-std">
       Rows:
       <select id="page-size-select"
+              class="input-filter"
               onchange="setPageSize(this.value)"
-              style="padding:.2rem .4rem;border-radius:4px;border:1px solid var(--clr-gray-200);font-size:.8rem">
         {% for ps in [10, 25, 50, 100] %}
         <option value="{{ ps }}" {% if ps == page_size %}selected{% endif %}>{{ ps }}</option>
         {% endfor %}
