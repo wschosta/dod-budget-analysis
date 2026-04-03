@@ -26,7 +26,7 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
 6. **[RESOLVED in Round 5]** **"Budget by Service" bar chart — large "Unknown" bucket** ($665M)
 7. **[RESOLVED in Round 5]** **Duplicate/repetitive search results** — programs appear multiple times instead of consolidated
 8. **[STRUCTURAL — documented in PRD §9]** **Missing PE numbers** — those same programs should have PE#s but show "—"
-   _Note: 68.6% of rows (35,021 of 51,053) lack PE numbers; inherent to O-1/M-1/P-1 exhibit types. Cross-reference backfill (`repair_database.py` step 9) recovered 1,533 rows by matching line_item_title + organization_name + fiscal_year to R-1/R-2 rows with known PEs. PE coverage improved from 28.4% to 31.4%._
+   _Note: 66.3% of rows (33,854 of 51,053) lack PE numbers; inherent to O-1/M-1/P-1 exhibit types. `repair_database.py` step 9 recovered 2,700 rows via two methods: (a) cross-exhibit matching by line_item_title + org + FY (1,533 rows), (b) direct PE extraction from line_item field (1,167 rows, mostly Comptroller summary R-1). PE coverage improved from 28.4% to 33.7%._
 
 ### Detail View (from search results)
 
@@ -365,9 +365,9 @@ at ingestion time (2026-04-02): `pipeline/builder.py` now derives budget_type fr
 
 ---
 
-#### 53. 68.6% of budget_lines Have No PE Number **[STRUCTURAL — documented in PRD §9]**
+#### 53. 66.3% of budget_lines Have No PE Number **[STRUCTURAL — documented in PRD §9]**
 
-35,021 of 51,053 rows (68.6%) have NULL `pe_number`. Cross-reference backfill recovered 1,533 rows
+33,854 of 51,053 rows (66.3%) have NULL `pe_number`. Two backfill passes recovered 2,700 rows total
 (was 36,554 post-dedup, 83,497 of 124,670 pre-dedup). Remaining rows cannot be enriched,
 tagged, or linked to PE-centric views (Programs, Consolidated).
 

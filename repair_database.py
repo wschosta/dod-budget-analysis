@@ -397,14 +397,46 @@ def step_9_backfill_pe_numbers(conn: sqlite3.Connection, dry_run: bool = False) 
     """)
 
     conn.execute("DROP TABLE IF EXISTS _pe_backfill")
-    updated = conn.execute("SELECT changes()").fetchone()[0]
+    xref_updated = conn.execute("SELECT changes()").fetchone()[0]
     conn.commit()
+
+    mid_null = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines WHERE pe_number IS NULL"
+    ).fetchone()[0]
+    logger.info(f"  Cross-reference: {xref_updated} rows (NULL PE: {before_null} -> {mid_null})")
+
+    # 9b: Extract PE numbers directly from line_item field for rows still missing PE.
+    # Some exhibit rows (especially Comptroller summary R-1) have PE numbers in
+    # line_item (e.g. "0603648D8Z") but pe_number was never populated at ingestion.
+    from utils.patterns import PE_NUMBER as _pe_re
+    remaining = conn.execute("""
+        SELECT id, line_item FROM budget_lines
+        WHERE pe_number IS NULL AND line_item IS NOT NULL
+    """).fetchall()
+
+    extract_buf: list[tuple[str, int]] = []
+    for row_id, line_item in remaining:
+        m = _pe_re.search(str(line_item))
+        if m:
+            extract_buf.append((m.group(), row_id))
+
+    extract_count = 0
+    if extract_buf and not dry_run:
+        conn.executemany(
+            "UPDATE budget_lines SET pe_number = ? WHERE id = ?",
+            extract_buf,
+        )
+        extract_count = len(extract_buf)
+        conn.commit()
+    elif dry_run and extract_buf:
+        extract_count = len(extract_buf)
 
     after_null = conn.execute(
         "SELECT COUNT(*) FROM budget_lines WHERE pe_number IS NULL"
     ).fetchone()[0]
-    logger.info(f"  Backfilled {updated} rows (NULL PE: {before_null} -> {after_null})")
-    return updated
+    logger.info(f"  Direct extraction: {extract_count} rows (NULL PE: {mid_null} -> {after_null})")
+    logger.info(f"  Total backfilled: {xref_updated + extract_count} rows")
+    return xref_updated + extract_count
 
 
 def repair(db_path: Path, dry_run: bool = False) -> dict:
