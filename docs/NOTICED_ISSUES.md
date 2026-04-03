@@ -26,7 +26,11 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
 6. **[RESOLVED in Round 5]** **"Budget by Service" bar chart — large "Unknown" bucket** ($665M)
 7. **[RESOLVED in Round 5]** **Duplicate/repetitive search results** — programs appear multiple times instead of consolidated
 8. **[STRUCTURAL — documented in PRD §9]** **Missing PE numbers** — those same programs should have PE#s but show "—"
-   _Note: 66.3% of rows (33,854 of 51,053) lack PE numbers; inherent to O-1/M-1/P-1 exhibit types. `repair_database.py` step 9 recovered 2,700 rows via two methods: (a) cross-exhibit matching by line_item_title + org + FY (1,533 rows), (b) direct PE extraction from line_item field (1,167 rows, mostly Comptroller summary R-1). PE coverage improved from 28.4% to 33.7%._
+   _Note: 33,854 of 51,053 rows (66.3%) lack PE numbers. However, this is **three distinct populations**, not one problem:_
+   - _**R-1 (RDT&E):** 98.3% PE coverage (280 remaining are classified programs, footnotes, or non-standard suffixes like BTA/OTE). Essentially solved._
+   - _**P-1/P-1R (Procurement):** 2.1% PE coverage (18,260 rows). These use **Budget Line Items (BLIs)**, a fundamentally different identifier system from Program Elements. Only ~120 rows can be mapped via title+org matching against pe_index. The rest (ammunition, equipment, modifications) have no PE equivalent in DoD's budget structure. **Future work:** build a parallel BLI-based enrichment/tagging system analogous to the PE pipeline._
+   - _**O-1/M-1/C-1/RF-1 (O&M, MilPers, MilCon, Revolving):** 0% PE coverage (13,559 rows, 26.6%). These exhibit types structurally do not use PE numbers._
+   - _**Amendment/OGSI:** 31%/24% coverage (2,549 rows). Partially recoverable via cross-reference._
 
 ### Detail View (from search results)
 
@@ -367,19 +371,37 @@ at ingestion time (2026-04-02): `pipeline/builder.py` now derives budget_type fr
 
 #### 53. 66.3% of budget_lines Have No PE Number **[STRUCTURAL — documented in PRD §9]**
 
-33,854 of 51,053 rows (66.3%) have NULL `pe_number`. Two backfill passes recovered 2,700 rows total
-(was 36,554 post-dedup, 83,497 of 124,670 pre-dedup). Remaining rows cannot be enriched,
-tagged, or linked to PE-centric views (Programs, Consolidated).
+33,854 of 51,053 rows (66.3%) have NULL `pe_number`. Two backfill passes recovered 2,700 rows
+(was 36,554 post-dedup, 83,497 of 124,670 pre-dedup).
 
-**Root cause:** PE numbers only appear in certain exhibit types (R-2, P-5). Summary
-exhibits (R-1, P-1, O-1) and many O&M/MilPers exhibits don't include PE numbers
-at the line level.
+**Detailed breakdown by exhibit type (2026-04-02):**
 
-```sql
-SELECT exhibit_type, COUNT(*) as cnt,
-       SUM(CASE WHEN pe_number IS NULL THEN 1 ELSE 0 END) as null_pe
-FROM budget_lines GROUP BY exhibit_type ORDER BY cnt DESC;
-```
+| Exhibit | Total | Has PE | % | Status |
+|---------|-------|--------|---|--------|
+| R-1 (RDT&E) | 16,286 | 16,006 | 98.3% | Solved. 280 remaining: classified (9999999999), footnotes, non-standard suffixes (BTA, OTE). |
+| P-1 (Procurement) | 14,720 | 348 | 2.4% | **Uses BLIs, not PEs.** Only ~120 recoverable via title+org match against pe_index. See below. |
+| C-1 (MilCon) | 8,659 | 18 | 0.2% | Structural — no PE in source documents. |
+| O-1 (O&M) | 4,447 | 3 | 0.1% | Structural — no PE in source documents. |
+| P-1R (Reserve Proc) | 3,939 | 51 | 1.3% | Same as P-1 — uses BLIs. |
+| Amendment | 2,082 | 662 | 31.8% | Partial — cross-reference recovers some. |
+| OGSI | 467 | 111 | 23.8% | Partial — cross-reference recovers some. |
+| RF-1 (Revolving) | 383 | 0 | 0.0% | Structural — no PE in source documents. |
+| M-1 (MilPers) | 70 | 0 | 0.0% | Structural — no PE in source documents. |
+
+**Why P-1 procurement rows lack PEs — the BLI/PE identifier mismatch:**
+
+Procurement exhibits (P-1, P-1R) use **Budget Line Items (BLIs)** — a separate identifier
+system from the **Program Elements (PEs)** used in RDT&E. BLIs identify specific
+procurement items (e.g., "CTG, 5.56mm, All Types", "AN/TPS-80 G/ATOR") while PEs
+identify research programs. The DoD maps BLIs to PEs in P-5 detail exhibits, but:
+- 720 P-5 PDF files exist in the corpus but contain no structured Excel data
+- Only 10 distinct PEs were extracted from P-5 PDF text
+- 1,702 distinct P-1 titles have no PE match (ammunition, equipment, modifications)
+
+**Future work:** Build a BLI-based enrichment/tagging pipeline parallel to the PE
+system. This would allow procurement items to be tagged and explored without requiring
+a PE number. The P-5 PDF text could also be parsed more aggressively to extract
+BLI→PE mappings from the structured header text that appears on each page.
 
 ---
 
