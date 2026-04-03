@@ -28,7 +28,7 @@ and should not be re-attempted. Items marked **[OPEN]** still need attention.
 8. **[STRUCTURAL — documented in PRD §9]** **Missing PE numbers** — those same programs should have PE#s but show "—"
    _Note: 33,854 of 51,053 rows (66.3%) lack PE numbers. However, this is **three distinct populations**, not one problem:_
    - _**R-1 (RDT&E):** 98.3% PE coverage (280 remaining are classified programs, footnotes, or non-standard suffixes like BTA/OTE). Essentially solved._
-   - _**P-1/P-1R (Procurement):** 2.1% PE coverage (18,260 rows). These use **Budget Line Items (BLIs)**, a fundamentally different identifier system from Program Elements. Only ~120 rows can be mapped via title+org matching against pe_index. The rest (ammunition, equipment, modifications) have no PE equivalent in DoD's budget structure. **Future work:** build a parallel BLI-based enrichment/tagging system analogous to the PE pipeline._
+   - _**P-1/P-1R (Procurement):** 2.1% PE coverage (18,260 rows). These use **Budget Line Items (BLIs)**, a fundamentally different identifier system. BLI enrichment pipeline now built: `bli_index` (1,841 entries) + `bli_tags` (4,930 tags, 98.1% coverage). Procurement items are now taggable/explorable independent of PEs. **Future work:** API endpoints + frontend pages for BLI exploration._
    - _**O-1/M-1/C-1/RF-1 (O&M, MilPers, MilCon, Revolving):** 0% PE coverage (13,559 rows, 26.6%). These exhibit types structurally do not use PE numbers._
    - _**Amendment/OGSI:** 31%/24% coverage (2,549 rows). Partially recoverable via cross-reference._
 

@@ -360,7 +360,8 @@ def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
     # Drop FTS5 table first (depends on pe_descriptions content table)
     conn.execute("DROP TABLE IF EXISTS pe_descriptions_fts")
     conn.execute("DROP TABLE IF EXISTS _enrichment_checkpoints")
-    for table in ("project_descriptions", "pe_lineage", "pe_tags", "pe_descriptions", "pe_index"):
+    for table in ("project_descriptions", "pe_lineage", "pe_tags", "pe_descriptions", "pe_index",
+                   "bli_tags", "bli_index"):
         conn.execute(f"DROP TABLE IF EXISTS {table}")
     conn.commit()
     # Recreate the tables so enrichment phases can INSERT into them.
@@ -471,6 +472,35 @@ def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_proj_desc_pe ON project_descriptions(pe_number);
         CREATE INDEX IF NOT EXISTS idx_proj_desc_proj ON project_descriptions(project_number);
         CREATE INDEX IF NOT EXISTS idx_proj_desc_fy ON project_descriptions(fiscal_year);
+
+        -- BLI (Budget Line Item) enrichment tables — parallel to PE system
+        -- for procurement exhibits (P-1, P-1R) that use BLIs instead of PEs.
+        CREATE TABLE IF NOT EXISTS bli_index (
+            bli_key             TEXT PRIMARY KEY,
+            account             TEXT NOT NULL,
+            line_item           TEXT,
+            display_title       TEXT,
+            organization_name   TEXT,
+            budget_type         TEXT,
+            budget_activity_title TEXT,
+            appropriation_code  TEXT,
+            appropriation_title TEXT,
+            fiscal_years        TEXT,
+            exhibit_types       TEXT,
+            row_count           INTEGER,
+            updated_at          TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS bli_tags (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            bli_key        TEXT NOT NULL,
+            tag            TEXT NOT NULL,
+            tag_source     TEXT NOT NULL,
+            confidence     REAL DEFAULT 1.0,
+            UNIQUE(bli_key, tag, tag_source),
+            FOREIGN KEY (bli_key) REFERENCES bli_index(bli_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_bli_tags_key ON bli_tags(bli_key);
+        CREATE INDEX IF NOT EXISTS idx_bli_tags_tag ON bli_tags(tag);
     """)
     logger.info("Dropped enrichment tables.")
 
@@ -1818,6 +1848,209 @@ def run_phase6(conn: sqlite3.Connection, stop_event: threading.Event | None = No
     return len(insert_buf)
 
 
+# ── Phase 7: Build BLI Index ───────────────────────────────────────────────────
+
+
+def run_phase7(conn: sqlite3.Connection, stop_event: threading.Event | None = None) -> int:
+    """Build bli_index from procurement budget_lines (P-1, P-1R).
+
+    Aggregates Budget Line Items by (account, line_item) composite key,
+    collecting the most common title, organization, fiscal years, and
+    row counts.  Parallel to Phase 1 (pe_index) but for procurement data.
+    """
+    logger.info("[Phase 7] Building BLI index from procurement exhibits...")
+
+    # Ensure table exists (may not if --rebuild was not used)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS bli_index (
+            bli_key             TEXT PRIMARY KEY,
+            account             TEXT NOT NULL,
+            line_item           TEXT,
+            display_title       TEXT,
+            organization_name   TEXT,
+            budget_type         TEXT,
+            budget_activity_title TEXT,
+            appropriation_code  TEXT,
+            appropriation_title TEXT,
+            fiscal_years        TEXT,
+            exhibit_types       TEXT,
+            row_count           INTEGER,
+            updated_at          TEXT DEFAULT (datetime('now'))
+        );
+    """)
+
+    existing = conn.execute("SELECT COUNT(*) FROM bli_index").fetchone()[0]
+    if existing > 0:
+        logger.info("Already %d BLI entries — nothing to do.", existing)
+        return 0
+
+    # Aggregate from P-1/P-1R budget_lines
+    rows = conn.execute("""
+        SELECT
+            account || ':' || COALESCE(line_item, '') AS bli_key,
+            account,
+            line_item,
+            -- Most common title for this BLI
+            (SELECT b2.line_item_title FROM budget_lines b2
+             WHERE b2.exhibit_type IN ('p1','p1r')
+               AND b2.account = bl.account
+               AND COALESCE(b2.line_item, '') = COALESCE(bl.line_item, '')
+               AND b2.line_item_title IS NOT NULL
+             GROUP BY b2.line_item_title ORDER BY COUNT(*) DESC LIMIT 1
+            ) AS display_title,
+            -- Most common org
+            (SELECT b3.organization_name FROM budget_lines b3
+             WHERE b3.exhibit_type IN ('p1','p1r')
+               AND b3.account = bl.account
+               AND COALESCE(b3.line_item, '') = COALESCE(bl.line_item, '')
+               AND b3.organization_name IS NOT NULL
+             GROUP BY b3.organization_name ORDER BY COUNT(*) DESC LIMIT 1
+            ) AS org_name,
+            MAX(budget_type) AS budget_type,
+            MAX(budget_activity_title) AS ba_title,
+            MAX(appropriation_code) AS approp_code,
+            MAX(appropriation_title) AS approp_title,
+            json_group_array(DISTINCT fiscal_year) AS fiscal_years,
+            json_group_array(DISTINCT exhibit_type) AS exhibit_types,
+            COUNT(*) AS row_count
+        FROM budget_lines bl
+        WHERE exhibit_type IN ('p1', 'p1r')
+          AND account IS NOT NULL
+        GROUP BY account, COALESCE(line_item, '')
+    """).fetchall()
+
+    if not rows:
+        logger.info("No P-1/P-1R rows found — nothing to index.")
+        return 0
+
+    conn.executemany("""
+        INSERT OR REPLACE INTO bli_index
+            (bli_key, account, line_item, display_title, organization_name,
+             budget_type, budget_activity_title, appropriation_code,
+             appropriation_title, fiscal_years, exhibit_types, row_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, rows)
+    conn.commit()
+
+    logger.info("Done. %d BLI entries indexed.", len(rows))
+    return len(rows)
+
+
+# ── Phase 8: Tag BLIs ─────────────────────────────────────────────────────────
+
+
+def run_phase8(conn: sqlite3.Connection, stop_event: threading.Event | None = None) -> int:
+    """Generate tags for BLIs using the same taxonomy as PE tagging.
+
+    Applies structured tags (from budget_activity_title, appropriation_title,
+    organization_name) and keyword tags (from line_item_title text) to each
+    BLI in bli_index.  Parallel to Phase 3 but for procurement items.
+    """
+    logger.info("[Phase 8] Generating BLI tags...")
+
+    # Ensure table exists
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS bli_tags (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            bli_key        TEXT NOT NULL,
+            tag            TEXT NOT NULL,
+            tag_source     TEXT NOT NULL,
+            confidence     REAL DEFAULT 1.0,
+            UNIQUE(bli_key, tag, tag_source),
+            FOREIGN KEY (bli_key) REFERENCES bli_index(bli_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_bli_tags_key ON bli_tags(bli_key);
+        CREATE INDEX IF NOT EXISTS idx_bli_tags_tag ON bli_tags(tag);
+    """)
+
+    existing = conn.execute("SELECT COUNT(*) FROM bli_tags").fetchone()[0]
+    if existing > 0:
+        logger.info("Already %d BLI tags — nothing to do.", existing)
+        return 0
+
+    bli_rows = conn.execute("""
+        SELECT bli_key, display_title, budget_activity_title,
+               appropriation_title, organization_name
+        FROM bli_index
+    """).fetchall()
+
+    if not bli_rows:
+        logger.info("bli_index is empty — run Phase 7 first.")
+        return 0
+
+    # Also pre-load concatenated text from budget_lines for keyword matching
+    bli_texts: dict[str, str] = {}
+    for row in conn.execute("""
+        SELECT bli_key, GROUP_CONCAT(combined_text, ' ') FROM (
+            SELECT DISTINCT
+                account || ':' || COALESCE(line_item, '') AS bli_key,
+                COALESCE(line_item_title, '') || ' ' ||
+                COALESCE(budget_activity_title, '') || ' ' ||
+                COALESCE(account_title, '') AS combined_text
+            FROM budget_lines
+            WHERE exhibit_type IN ('p1', 'p1r') AND account IS NOT NULL
+              AND (line_item_title IS NOT NULL
+                   OR budget_activity_title IS NOT NULL
+                   OR account_title IS NOT NULL)
+        )
+        GROUP BY bli_key
+    """).fetchall():
+        bli_texts[row[0]] = row[1] or ""
+
+    insert_buf: list[tuple] = []
+    for bli_key, title, ba_title, approp_title, org_name in bli_rows:
+        if stop_event and stop_event.is_set():
+            logger.info("  Phase 8 stopped.")
+            break
+
+        # 8a: Structured tags from budget_activity_title
+        if ba_title:
+            for pattern, tag in _BUDGET_ACTIVITY_TAGS:
+                if pattern.search(ba_title):
+                    insert_buf.append((bli_key, tag, "structured", 1.0))
+                    break
+
+        # 8b: Structured tags from appropriation_title
+        if approp_title:
+            low = approp_title.lower()
+            for key, tag in _APPROP_TAGS.items():
+                if key in low:
+                    insert_buf.append((bli_key, tag, "structured", 1.0))
+                    break
+
+        # 8c: Structured tags from organization_name
+        if org_name:
+            low = org_name.lower()
+            for key, tag in _ORG_TAGS.items():
+                if key in low:
+                    insert_buf.append((bli_key, tag, "structured", 1.0))
+                    break
+
+        # 8d: Keyword tags from budget_lines text
+        bl_text = bli_texts.get(bli_key, "")
+        if bl_text:
+            for tag, patterns in _COMPILED_TAXONOMY:
+                for pat in patterns:
+                    if pat.search(bl_text):
+                        insert_buf.append((bli_key, tag, "keyword", 0.9))
+                        break
+            for tag, patterns in _COMPILED_TAXONOMY_TIER2:
+                for pat in patterns:
+                    if pat.search(bl_text):
+                        insert_buf.append((bli_key, tag, "keyword", 0.7))
+                        break
+
+    if insert_buf:
+        conn.executemany("""
+            INSERT OR IGNORE INTO bli_tags (bli_key, tag, tag_source, confidence)
+            VALUES (?, ?, ?, ?)
+        """, insert_buf)
+        conn.commit()
+
+    logger.info("Done. %d BLI tag rows inserted.", len(insert_buf))
+    return len(insert_buf)
+
+
 # ── Orchestrator ──────────────────────────────────────────────────────────────
 
 def enrich(
@@ -1867,6 +2100,8 @@ def enrich(
         4: lambda: run_phase4(conn, stop_event=stop_event),
         5: lambda: run_phase5(conn, stop_event=stop_event),
         6: lambda: run_phase6(conn, stop_event=stop_event),
+        7: lambda: run_phase7(conn, stop_event=stop_event),
+        8: lambda: run_phase8(conn, stop_event=stop_event),
     }
 
     for phase_num in sorted(_phase_runners):
@@ -1900,7 +2135,8 @@ def enrich(
 
     # Summary counts
     table_counts: dict[str, int] = {}
-    for table in ("pe_index", "pe_descriptions", "pe_tags", "pe_lineage", "project_descriptions"):
+    for table in ("pe_index", "pe_descriptions", "pe_tags", "pe_lineage", "project_descriptions",
+                   "bli_index", "bli_tags"):
         try:
             n = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             logger.info("  %s: %s rows", table, f"{n:,}")
@@ -1930,8 +2166,8 @@ def main() -> None:
                         help="Path to SQLite database (default: dod_budget.sqlite)")
     parser.add_argument("--with-llm", action="store_true",
                         help="Enable LLM-based tagging (requires ANTHROPIC_API_KEY)")
-    parser.add_argument("--phases", default="1,2,3,4,5,6",
-                        help="Comma-separated phases to run (default: 1,2,3,4,5,6)")
+    parser.add_argument("--phases", default="1,2,3,4,5,6,7,8",
+                        help="Comma-separated phases to run (default: 1,2,3,4,5,6,7,8)")
     parser.add_argument("--rebuild", action="store_true",
                         help="Drop and rebuild all enrichment tables")
     args = parser.parse_args()
