@@ -10,9 +10,9 @@ import sqlite3
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from fastapi import Query as FQuery
 
 from api.database import get_db
+from api.models import FilterParams
 from utils.cache import TTLCache
 from utils.query import _add_in_condition
 
@@ -47,14 +47,7 @@ def _build_conditions(
 
 @router.get("", summary="Faceted counts for filter dropdowns")
 def get_facets(
-    fiscal_year: list[str] | None = FQuery(
-        None, description="Current fiscal year filter(s)"),
-    service: list[str] | None = FQuery(
-        None, description="Current service filter(s)"),
-    exhibit_type: list[str] | None = FQuery(
-        None, description="Current exhibit type filter(s)"),
-    budget_type: list[str] | None = FQuery(
-        None, description="Current budget type filter(s)"),
+    filters: FilterParams = Depends(),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
     """Return per-dimension facet counts with cross-filtering.
@@ -65,10 +58,10 @@ def get_facets(
     """
     cache_key = (
         "facets",
-        tuple(sorted(fiscal_year or [])),
-        tuple(sorted(service or [])),
-        tuple(sorted(exhibit_type or [])),
-        tuple(sorted(budget_type or [])),
+        tuple(sorted(filters.fiscal_year or [])),
+        tuple(sorted(filters.service or [])),
+        tuple(sorted(filters.exhibit_type or [])),
+        tuple(sorted(filters.budget_type or [])),
     )
     cached = _facets_cache.get(cache_key)
     if cached is not None:
@@ -76,93 +69,65 @@ def get_facets(
 
     result: dict[str, list[dict]] = {}
 
-    # Fiscal year facet (excludes fiscal_year from its own filter)
-    where_fy, params_fy = _build_conditions(
-        fiscal_year, service, exhibit_type, budget_type,
-        exclude_dim="fiscal_year",
-    )
-    fy_clause = where_fy if where_fy else ""
-    extra_cond = "fiscal_year IS NOT NULL"
-    if fy_clause:
-        fy_clause = fy_clause + " AND " + extra_cond
-    else:
-        fy_clause = "WHERE " + extra_cond
-    fy_rows = conn.execute(
-        f"SELECT fiscal_year AS value, COUNT(*) AS count "
-        f"FROM budget_lines {fy_clause} "
-        f"GROUP BY fiscal_year ORDER BY fiscal_year DESC",
-        params_fy,
-    ).fetchall()
-    result["fiscal_year"] = [
-        {"value": r["value"], "count": r["count"]} for r in fy_rows
+    # Facet definitions: (result_key, exclude_dim, column, not_null_cond, order, extra_sql)
+    _FACET_DEFS: list[tuple[str, str, str, str, str, str, str]] = [
+        # (key, dim, select_cols, from_clause, not_null, group_col, order)
+        (
+            "fiscal_year",
+            "fiscal_year",
+            "fiscal_year AS value, COUNT(*) AS count",
+            "budget_lines",
+            "fiscal_year IS NOT NULL",
+            "fiscal_year",
+            "fiscal_year DESC",
+        ),
+        (
+            "service",
+            "service",
+            "organization_name AS value, COUNT(*) AS count",
+            "budget_lines",
+            "organization_name IS NOT NULL AND organization_name != ''",
+            "organization_name",
+            "COUNT(*) DESC",
+        ),
+        (
+            "exhibit_type",
+            "exhibit_type",
+            "b.exhibit_type AS value, COALESCE(et.display_name, b.exhibit_type) AS display_name, COUNT(*) AS count",
+            "budget_lines b LEFT JOIN exhibit_types et ON et.code = b.exhibit_type",
+            "exhibit_type IS NOT NULL",
+            "b.exhibit_type",
+            "COUNT(*) DESC",
+        ),
+        (
+            "budget_type",
+            "budget_type",
+            "budget_type AS value, COUNT(*) AS count",
+            "budget_lines",
+            "budget_type IS NOT NULL AND budget_type != ''",
+            "budget_type",
+            "COUNT(*) DESC",
+        ),
     ]
 
-    # Service facet
-    where_svc, params_svc = _build_conditions(
-        fiscal_year, service, exhibit_type, budget_type,
-        exclude_dim="service",
-    )
-    extra_cond = "organization_name IS NOT NULL AND organization_name != ''"
-    if where_svc:
-        svc_clause = where_svc + " AND " + extra_cond
-    else:
-        svc_clause = "WHERE " + extra_cond
-    svc_rows = conn.execute(
-        f"SELECT organization_name AS value, COUNT(*) AS count "
-        f"FROM budget_lines {svc_clause} "
-        f"GROUP BY organization_name ORDER BY COUNT(*) DESC",
-        params_svc,
-    ).fetchall()
-    result["service"] = [
-        {"value": r["value"], "count": r["count"]} for r in svc_rows
-    ]
-
-    # Exhibit type facet
-    where_et, params_et = _build_conditions(
-        fiscal_year, service, exhibit_type, budget_type,
-        exclude_dim="exhibit_type",
-    )
-    extra_cond = "exhibit_type IS NOT NULL"
-    if where_et:
-        et_clause = where_et + " AND " + extra_cond
-    else:
-        et_clause = "WHERE " + extra_cond
-    # Join with exhibit_types reference for display names
-    et_rows = conn.execute(
-        f"SELECT b.exhibit_type AS value, "
-        f"COALESCE(et.display_name, b.exhibit_type) AS display_name, "
-        f"COUNT(*) AS count "
-        f"FROM budget_lines b "
-        f"LEFT JOIN exhibit_types et ON et.code = b.exhibit_type "
-        f"{et_clause} "
-        f"GROUP BY b.exhibit_type ORDER BY COUNT(*) DESC",
-        params_et,
-    ).fetchall()
-    result["exhibit_type"] = [
-        {"value": r["value"], "display_name": r["display_name"],
-         "count": r["count"]}
-        for r in et_rows
-    ]
-
-    # Budget type facet
-    where_bt, params_bt = _build_conditions(
-        fiscal_year, service, exhibit_type, budget_type,
-        exclude_dim="budget_type",
-    )
-    extra_cond = "budget_type IS NOT NULL AND budget_type != ''"
-    if where_bt:
-        bt_clause = where_bt + " AND " + extra_cond
-    else:
-        bt_clause = "WHERE " + extra_cond
-    bt_rows = conn.execute(
-        f"SELECT budget_type AS value, COUNT(*) AS count "
-        f"FROM budget_lines {bt_clause} "
-        f"GROUP BY budget_type ORDER BY COUNT(*) DESC",
-        params_bt,
-    ).fetchall()
-    result["budget_type"] = [
-        {"value": r["value"], "count": r["count"]} for r in bt_rows
-    ]
+    for key, dim, select_cols, from_clause, not_null, group_col, order in _FACET_DEFS:
+        where, params = _build_conditions(
+            filters.fiscal_year,
+            filters.service,
+            filters.exhibit_type,
+            filters.budget_type,
+            exclude_dim=dim,
+        )
+        if where:
+            clause = f"{where} AND {not_null}"
+        else:
+            clause = f"WHERE {not_null}"
+        rows = conn.execute(
+            f"SELECT {select_cols} FROM {from_clause} {clause} "
+            f"GROUP BY {group_col} ORDER BY {order}",
+            params,
+        ).fetchall()
+        result[key] = [dict(r) for r in rows]
 
     _facets_cache.set(cache_key, result)
     return result

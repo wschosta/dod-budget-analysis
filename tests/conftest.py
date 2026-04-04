@@ -91,9 +91,9 @@ import pytest
 # prevents other test files' setdefault stubs from shadowing the real package.
 try:
     import pdfplumber  # noqa: F401
-except (ImportError, Exception):
+except BaseException:
     # Catch ImportError (missing package) and any native-extension crash
-    # (e.g. pyo3 PanicException when cffi/_cffi_backend is absent).
+    # (e.g. pyo3 PanicException inherits BaseException, not Exception).
     # Fall back to a stub so PDF-free tests still run.
     sys.modules.setdefault("pdfplumber", types.ModuleType("pdfplumber"))
 
@@ -103,6 +103,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _create_exhibit_xlsx(path: Path, exhibit_type: str, rows: list[tuple]) -> Path:
     """Create a minimal .xlsx fixture for a given exhibit type.
@@ -125,72 +126,119 @@ def _create_exhibit_xlsx(path: Path, exhibit_type: str, rows: list[tuple]) -> Pa
 
     if exhibit_type in ("p1", "p1r"):
         headers = [
-            "Account", "Account Title", "Organization",
-            "Budget Activity", "Budget Activity Title",
-            "Budget Line Item", "Budget Line Item (BLI) Title",
-            "FY2024 Actual\nAmount", "FY2025 Enacted\nAmount",
+            "Account",
+            "Account Title",
+            "Organization",
+            "Budget Activity",
+            "Budget Activity Title",
+            "Budget Line Item",
+            "Budget Line Item (BLI) Title",
+            "FY2024 Actual\nAmount",
+            "FY2025 Enacted\nAmount",
             "FY2026 Request\nAmount",
         ]
     elif exhibit_type == "r1":
         headers = [
-            "Account", "Account Title", "Organization",
-            "Budget Activity", "Budget Activity Title",
-            "PE/BLI", "Program Element/Budget Line Item (BLI) Title",
-            "FY2024 Actual\nAmount", "FY2025 Enacted\nAmount",
+            "Account",
+            "Account Title",
+            "Organization",
+            "Budget Activity",
+            "Budget Activity Title",
+            "PE/BLI",
+            "Program Element/Budget Line Item (BLI) Title",
+            "FY2024 Actual\nAmount",
+            "FY2025 Enacted\nAmount",
             "FY2026 Request\nAmount",
         ]
     elif exhibit_type == "o1":
         headers = [
-            "Account", "Account Title", "Organization",
-            "Budget Activity", "Budget Activity Title",
-            "BSA", "Budget SubActivity Title",
-            "FY2024 Actual\nAmount", "FY2025 Enacted\nAmount",
+            "Account",
+            "Account Title",
+            "Organization",
+            "Budget Activity",
+            "Budget Activity Title",
+            "BSA",
+            "Budget SubActivity Title",
+            "FY2024 Actual\nAmount",
+            "FY2025 Enacted\nAmount",
             "FY2026 Request\nAmount",
         ]
     elif exhibit_type == "m1":
         headers = [
-            "Account", "Account Title", "Organization",
-            "Budget Activity", "Budget Activity Title",
-            "BSA", "Budget SubActivity Title",
-            "FY2024 Actual\nAmount", "FY2025 Enacted\nAmount",
+            "Account",
+            "Account Title",
+            "Organization",
+            "Budget Activity",
+            "Budget Activity Title",
+            "BSA",
+            "Budget SubActivity Title",
+            "FY2024 Actual\nAmount",
+            "FY2025 Enacted\nAmount",
             "FY2026 Request\nAmount",
         ]
     elif exhibit_type == "c1":
         headers = [
-            "Account", "Account Title", "Organization",
-            "Budget Activity", "Budget Activity Title",
-            "Construction Project", "Construction Project Title",
-            "Authorization Amount", "Appropriation Amount",
+            "Account",
+            "Account Title",
+            "Organization",
+            "Budget Activity",
+            "Budget Activity Title",
+            "Construction Project",
+            "Construction Project Title",
+            "Authorization Amount",
+            "Appropriation Amount",
         ]
     elif exhibit_type == "rf1":
         headers = [
-            "Account", "Account Title", "Organization",
-            "Budget Activity", "Budget Activity Title",
-            "Budget Line Item", "Budget Line Item (BLI) Title",
-            "FY2024 Actual\nAmount", "FY2025 Enacted\nAmount",
+            "Account",
+            "Account Title",
+            "Organization",
+            "Budget Activity",
+            "Budget Activity Title",
+            "Budget Line Item",
+            "Budget Line Item (BLI) Title",
+            "FY2024 Actual\nAmount",
+            "FY2025 Enacted\nAmount",
             "FY2026 Request\nAmount",
         ]
     elif exhibit_type == "p5":
         # P-5 Procurement Detail: line items with quantities and unit costs
         headers = [
-            "Account", "Program Element", "Line Item", "Item Title",
+            "Account",
+            "Program Element",
+            "Line Item",
+            "Item Title",
             "Unit of Measure",
-            "Prior Year Quantity", "Current Year Quantity", "Estimate Quantity",
-            "Prior Year Unit Cost", "Current Year Unit Cost", "Estimate Unit Cost",
+            "Prior Year Quantity",
+            "Current Year Quantity",
+            "Estimate Quantity",
+            "Prior Year Unit Cost",
+            "Current Year Unit Cost",
+            "Estimate Unit Cost",
             "Justification",
         ]
     elif exhibit_type == "r2":
         # R-2 RDT&E Detail Schedule
         headers = [
-            "Account", "PE", "Sub-Element", "Title",
-            "Prior Year", "Current Year", "Estimate",
-            "Metric", "Planned Achievement",
+            "Account",
+            "PE",
+            "Sub-Element",
+            "Title",
+            "Prior Year",
+            "Current Year",
+            "Estimate",
+            "Metric",
+            "Planned Achievement",
         ]
     else:
         headers = [
-            "Account", "Account Title", "Organization",
-            "Budget Activity", "Budget Activity Title",
-            "FY2024 Actual\nAmount", "FY2026 Request\nAmount",
+            "Account",
+            "Account Title",
+            "Organization",
+            "Budget Activity",
+            "Budget Activity Title",
+            "FY2024 Actual\nAmount",
+            "FY2026 Request\nAmount",
         ]
 
     ws.append(headers)
@@ -202,8 +250,9 @@ def _create_exhibit_xlsx(path: Path, exhibit_type: str, rows: list[tuple]) -> Pa
     return path
 
 
-def _create_sample_pdf(path: Path, title: str = "Test Budget Document",
-                        include_table: bool = False) -> Path:
+def _create_sample_pdf(
+    path: Path, title: str = "Test Budget Document", include_table: bool = False
+) -> Path:
     """Create a minimal PDF fixture using fpdf2.
 
     Generates a PDF with extractable text and optionally a simple table
@@ -233,7 +282,8 @@ def _create_sample_pdf(path: Path, title: str = "Test Budget Document",
     pdf.ln(6)
     pdf.set_font("Helvetica", size=10)
     pdf.multi_cell(
-        0, 6,
+        0,
+        6,
         "This document contains budget line items for demonstration purposes. "
         "Program elements are identified by codes such as 0602702E and 0305116BB. "
         "Amounts are presented in thousands of then-year dollars.",
@@ -266,48 +316,143 @@ def _create_sample_pdf(path: Path, title: str = "Test Budget Document",
 # ── Session-scoped fixtures ───────────────────────────────────────────────────
 
 _P1_ROWS = [
-    ("2035", "2035 Aircraft Procurement, Army", "A", "01", "Air Operations",
-     "0205231A", "AH-64 Apache Block III", 12_345.0, 13_456.0, 14_000.0),
-    ("2035", "2035 Aircraft Procurement, Army", "A", "01", "Air Operations",
-     "0205231B", "UH-60 Blackhawk", 8_900.0, 9_100.0, 9_500.0),
-    ("2035", "2035 Aircraft Procurement, Army", "A", "02", "Missile Programs",
-     "0205231C", "AIM-120 AMRAAM", 6_700.0, 7_000.0, 7_200.0),
+    (
+        "2035",
+        "2035 Aircraft Procurement, Army",
+        "A",
+        "01",
+        "Air Operations",
+        "0205231A",
+        "AH-64 Apache Block III",
+        12_345.0,
+        13_456.0,
+        14_000.0,
+    ),
+    (
+        "2035",
+        "2035 Aircraft Procurement, Army",
+        "A",
+        "01",
+        "Air Operations",
+        "0205231B",
+        "UH-60 Blackhawk",
+        8_900.0,
+        9_100.0,
+        9_500.0,
+    ),
+    (
+        "2035",
+        "2035 Aircraft Procurement, Army",
+        "A",
+        "02",
+        "Missile Programs",
+        "0205231C",
+        "AIM-120 AMRAAM",
+        6_700.0,
+        7_000.0,
+        7_200.0,
+    ),
 ]
 
 _R1_ROWS = [
-    ("1300", "RDT&E, Army", "A", "06", "RDT&E",
-     "0602702E", "Advanced Research Program", 55_000.0, 57_000.0, 59_000.0),
-    ("1300", "RDT&E, Army", "A", "07", "Operational Systems Dev",
-     "0305116BB", "Counter-ISR", 22_000.0, 23_000.0, 24_000.0),
+    (
+        "1300",
+        "RDT&E, Army",
+        "A",
+        "06",
+        "RDT&E",
+        "0602702E",
+        "Advanced Research Program",
+        55_000.0,
+        57_000.0,
+        59_000.0,
+    ),
+    (
+        "1300",
+        "RDT&E, Army",
+        "A",
+        "07",
+        "Operational Systems Dev",
+        "0305116BB",
+        "Counter-ISR",
+        22_000.0,
+        23_000.0,
+        24_000.0,
+    ),
 ]
 
 _C1_ROWS = [
-    ("2100", "Military Construction, Army", "A", "01", "MilCon",
-     "P-2345", "Barracks Replacement, Fort Bragg", 45_000.0, 30_000.0),
+    (
+        "2100",
+        "Military Construction, Army",
+        "A",
+        "01",
+        "MilCon",
+        "P-2345",
+        "Barracks Replacement, Fort Bragg",
+        45_000.0,
+        30_000.0,
+    ),
 ]
 
-# DONE TEST-001: P-5 Procurement Detail fixtures (columns match p5 header above)
 _P5_ROWS = [
     # account, pe, line_item, title, unit, py_qty, cy_qty, est_qty,
     # py_unit_cost, cy_unit_cost, est_unit_cost, justification
-    ("2035", "0205231A", "LIN-001", "AH-64 Apache Block III",
-     "Each", 12, 14, 15,
-     55_000.0, 56_500.0, 58_000.0, "Full-rate production continues."),
-    ("2035", "0205231B", "LIN-002", "UH-60 Blackhawk M-Model",
-     "Each", 8, 10, 11,
-     18_000.0, 18_500.0, 19_000.0, "Replaces aging L-model fleet."),
+    (
+        "2035",
+        "0205231A",
+        "LIN-001",
+        "AH-64 Apache Block III",
+        "Each",
+        12,
+        14,
+        15,
+        55_000.0,
+        56_500.0,
+        58_000.0,
+        "Full-rate production continues.",
+    ),
+    (
+        "2035",
+        "0205231B",
+        "LIN-002",
+        "UH-60 Blackhawk M-Model",
+        "Each",
+        8,
+        10,
+        11,
+        18_000.0,
+        18_500.0,
+        19_000.0,
+        "Replaces aging L-model fleet.",
+    ),
 ]
 
-# DONE TEST-001: R-2 RDT&E Detail Schedule fixtures
 _R2_ROWS = [
     # account, pe, sub_element, title, prior_year, current_year, estimate,
     # metric, planned_achievement
-    ("1300", "0602702E", "A", "Advanced Materials Research",
-     12_000.0, 13_500.0, 14_000.0,
-     "TRL Level", "Achieve TRL-4 for candidate materials"),
-    ("1300", "0602702E", "B", "Computational Modeling",
-     5_000.0, 5_500.0, 5_800.0,
-     "Simulation Fidelity", "High-fidelity model validated vs. test data"),
+    (
+        "1300",
+        "0602702E",
+        "A",
+        "Advanced Materials Research",
+        12_000.0,
+        13_500.0,
+        14_000.0,
+        "TRL Level",
+        "Achieve TRL-4 for candidate materials",
+    ),
+    (
+        "1300",
+        "0602702E",
+        "B",
+        "Computational Modeling",
+        5_000.0,
+        5_500.0,
+        5_800.0,
+        "Simulation Fidelity",
+        "High-fidelity model validated vs. test data",
+    ),
 ]
 
 
@@ -315,12 +460,11 @@ _R2_ROWS = [
 def fixtures_dir(tmp_path_factory):
     """Return a temporary directory populated with deterministic fixture files.
 
-    Creates one .xlsx per summary exhibit type (TODO 1.C1-a) and two PDFs
-    (with and without a table layout) (TODO 1.C1-b).
+    Creates one .xlsx per summary exhibit type and two PDFs
+    (with and without a table layout).
     """
     d = tmp_path_factory.mktemp("budget_fixtures")
 
-    # DONE 1.C1-a: Excel fixtures (summary exhibits)
     # NOTE: filenames must NOT contain "_display" — the builder excludes those
     # as duplicate formatting variants of Comptroller data.
     _create_exhibit_xlsx(d / "p1.xlsx", "p1", _P1_ROWS)
@@ -333,11 +477,12 @@ def fixtures_dir(tmp_path_factory):
     _create_exhibit_xlsx(d / "p5.xlsx", "p5", _P5_ROWS)
     _create_exhibit_xlsx(d / "r2.xlsx", "r2", _R2_ROWS)
 
-    # DONE 1.C1-b: PDF fixtures
-    _create_sample_pdf(d / "text_only.pdf", title="Budget Overview FY2026",
-                       include_table=False)
-    _create_sample_pdf(d / "with_table.pdf", title="RDT&E Justification FY2026",
-                       include_table=True)
+    _create_sample_pdf(
+        d / "text_only.pdf", title="Budget Overview FY2026", include_table=False
+    )
+    _create_sample_pdf(
+        d / "with_table.pdf", title="RDT&E Justification FY2026", include_table=True
+    )
 
     return d
 
@@ -434,12 +579,14 @@ def bad_excel(tmp_path_factory) -> Path:
 
 # ── Cache clearing ────────────────────────────────────────────────────────────
 
+
 @pytest.fixture(autouse=True)
 def _clear_api_caches():
     """Clear server-side caches before each test to prevent cross-test contamination."""
     try:
         from api.routes.aggregations import _agg_cache, _hierarchy_cache
         from api.routes.dashboard import _summary_cache
+
         _agg_cache.clear()
         _hierarchy_cache.clear()
         _summary_cache.clear()
@@ -449,6 +596,7 @@ def _clear_api_caches():
 
 
 # ── Function-scoped helpers ───────────────────────────────────────────────────
+
 
 @pytest.fixture()
 def tmp_db(tmp_path):

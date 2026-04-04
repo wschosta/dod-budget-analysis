@@ -3,6 +3,7 @@ Tests for api/routes/budget_lines.py — list and detail endpoints
 
 Tests list_budget_lines and get_budget_line with in-memory database.
 """
+
 import sqlite3
 import sys
 from pathlib import Path
@@ -11,6 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from api.models import FilterParams
 from api.routes.budget_lines import list_budget_lines, get_budget_line
 from utils.query import ALLOWED_SORT_COLUMNS as _ALLOWED_SORT
 
@@ -55,28 +57,134 @@ def db():
     """)
 
     rows = [
-        (1, "army_p1.xlsx", "p1", "Sheet1", "FY 2026", "3010", "Aircraft", "Army",
-         "Tactical", None, "AH-64", "Apache Helicopter", "0207449A", "budget_authority",
-         "3010", "Aircraft Procurement, Army", "then-year", "thousands",
-         1000, 900, 0, 900, 1100, 0, 1100, 10, 12, 15, 15),
-        (2, "navy_p1.xlsx", "p1", "Sheet1", "FY 2026", "1506", "Ships", "Navy",
-         "Combat", None, "DDG-51", "Destroyer", "0204311N", "budget_authority",
-         "1506", "Shipbuilding, Navy", "then-year", "thousands",
-         5000, 4500, 0, 4500, 5500, 0, 5500, 2, 3, 4, 4),
-        (3, "army_r1.xlsx", "r1", "Sheet1", "FY 2026", "3600", "RDT&E", "Army",
-         "Research", None, None, None, "0602145A", "budget_authority",
-         "3600", "RDT&E, Army", "then-year", "thousands",
-         2000, 1800, 0, 1800, 2200, 0, 2200, None, None, None, None),
-        (4, "army_p1.xlsx", "p1", "Sheet1", "FY 2025", "3010", "Aircraft", "Army",
-         "Tactical", None, "UH-60", "Black Hawk", "0207452A", "budget_authority",
-         "3010", "Aircraft Procurement, Army", "then-year", "thousands",
-         800, 750, 0, 750, 0, 0, 0, 5, 6, 0, 0),
+        (
+            1,
+            "army_p1.xlsx",
+            "p1",
+            "Sheet1",
+            "FY 2026",
+            "3010",
+            "Aircraft",
+            "Army",
+            "Tactical",
+            None,
+            "AH-64",
+            "Apache Helicopter",
+            "0207449A",
+            "budget_authority",
+            "3010",
+            "Aircraft Procurement, Army",
+            "then-year",
+            "thousands",
+            1000,
+            900,
+            0,
+            900,
+            1100,
+            0,
+            1100,
+            10,
+            12,
+            15,
+            15,
+        ),
+        (
+            2,
+            "navy_p1.xlsx",
+            "p1",
+            "Sheet1",
+            "FY 2026",
+            "1506",
+            "Ships",
+            "Navy",
+            "Combat",
+            None,
+            "DDG-51",
+            "Destroyer",
+            "0204311N",
+            "budget_authority",
+            "1506",
+            "Shipbuilding, Navy",
+            "then-year",
+            "thousands",
+            5000,
+            4500,
+            0,
+            4500,
+            5500,
+            0,
+            5500,
+            2,
+            3,
+            4,
+            4,
+        ),
+        (
+            3,
+            "army_r1.xlsx",
+            "r1",
+            "Sheet1",
+            "FY 2026",
+            "3600",
+            "RDT&E",
+            "Army",
+            "Research",
+            None,
+            None,
+            None,
+            "0602145A",
+            "budget_authority",
+            "3600",
+            "RDT&E, Army",
+            "then-year",
+            "thousands",
+            2000,
+            1800,
+            0,
+            1800,
+            2200,
+            0,
+            2200,
+            None,
+            None,
+            None,
+            None,
+        ),
+        (
+            4,
+            "army_p1.xlsx",
+            "p1",
+            "Sheet1",
+            "FY 2025",
+            "3010",
+            "Aircraft",
+            "Army",
+            "Tactical",
+            None,
+            "UH-60",
+            "Black Hawk",
+            "0207452A",
+            "budget_authority",
+            "3010",
+            "Aircraft Procurement, Army",
+            "then-year",
+            "thousands",
+            800,
+            750,
+            0,
+            750,
+            0,
+            0,
+            0,
+            5,
+            6,
+            0,
+            0,
+        ),
     ]
 
     conn.executemany(
-        "INSERT INTO budget_lines VALUES ("
-        + ",".join("?" * 29)
-        + ")",
+        "INSERT INTO budget_lines VALUES (" + ",".join("?" * 29) + ")",
         rows,
     )
 
@@ -102,12 +210,28 @@ def db():
 
 def _list(db, **kwargs):
     """Call list_budget_lines with all required defaults."""
+    filter_keys = {
+        "fiscal_year",
+        "service",
+        "exhibit_type",
+        "pe_number",
+        "appropriation_code",
+        "budget_type",
+        "exclude_summary",
+        "q",
+        "min_amount",
+        "max_amount",
+    }
+    filter_kw = {k: kwargs.pop(k, None) for k in list(kwargs) if k in filter_keys}
+    if "exclude_summary" not in filter_kw:
+        filter_kw["exclude_summary"] = False
     defaults = dict(
-        fiscal_year=None, service=None, exhibit_type=None,
-        pe_number=None, appropriation_code=None, budget_type=None,
-        exclude_summary=False,
-        q=None, min_amount=None, max_amount=None,
-        sort_by="id", sort_dir="asc", limit=25, offset=0, conn=db,
+        filters=FilterParams(**filter_kw),
+        sort_by="id",
+        sort_dir="asc",
+        limit=25,
+        offset=0,
+        conn=db,
     )
     defaults.update(kwargs)
     return list_budget_lines(**defaults)
@@ -159,13 +283,17 @@ class TestListBudgetLines:
 
     def test_invalid_sort_by(self, db):
         from fastapi import HTTPException
+
         with pytest.raises(HTTPException) as exc_info:
             _list(db, sort_by="invalid_column")
         assert exc_info.value.status_code == 400
 
     def test_combined_filters(self, db):
         result = _list(
-            db, fiscal_year=["FY 2026"], service=["Army"], exhibit_type=["p1"],
+            db,
+            fiscal_year=["FY 2026"],
+            service=["Army"],
+            exhibit_type=["p1"],
         )
         assert result.total == 1
         assert result.items[0].line_item_title == "Apache Helicopter"
@@ -238,6 +366,7 @@ class TestGetBudgetLine:
 
     def test_not_found(self, db):
         from fastapi import HTTPException
+
         with pytest.raises(HTTPException) as exc_info:
             get_budget_line(999, conn=db)
         assert exc_info.value.status_code == 404

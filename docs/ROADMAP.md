@@ -343,6 +343,48 @@ Documented in `docs/PRD.md` §9 and `docs/NOTICED_ISSUES.md`:
 - #16, #19, #28: FY2000-2009 data gap (documents not publicly available)
 - #49: Inline styles (ongoing gradual refactor)
 
+### Future Refactoring Notes
+
+Structural improvements identified during codebase review (April 2025). These are
+not bugs — the current code works and is tested — but would reduce maintenance burden
+if the API surface grows.
+
+#### 1. API Route Parameter Sprawl — ✅ RESOLVED
+
+Extracted a shared `FilterParams` dependency class in `api/models.py` with 10 common
+query parameters (fiscal_year, service, exhibit_type, pe_number, appropriation_code,
+budget_type, min_amount, max_amount, q, exclude_summary). All 5 route handlers now use
+`filters: FilterParams = Depends()` instead of duplicated `Query()` definitions. The
+class includes a `where_kwargs()` helper for passing filters to `build_where_clause()`.
+
+Resolved routes:
+- `api/routes/search.py` → `search()`
+- `api/routes/budget_lines.py` → `list_budget_lines()`
+- `api/routes/download.py` → `download()`
+- `api/routes/aggregations.py` → `aggregate()`
+- `api/routes/facets.py` → `get_facets()`
+
+#### 2. Duplicate WHERE Clause Construction
+
+Several routes build SQL WHERE clauses manually instead of using the shared
+`build_where_clause()` helper from `utils/query.py`:
+
+- `api/routes/dashboard.py` (lines 66–80) — manual conditions list
+- `api/routes/aggregations.py` (lines 212–227) — manual conditions list
+- `api/routes/pe.py` (lines 900–975) — manual WHERE with JOIN and LIKE
+- `api/routes/keyword_search.py` (lines 1156–1279) — manual IN clause
+
+`build_where_clause()` already handles the common filter dimensions and is used by
+`budget_lines.py`, `download.py`, and `aggregations.py` (for its main query). Extending
+it to cover JOIN conditions and LIKE patterns would let the remaining routes adopt it.
+
+**Suggested fix:** Extend `build_where_clause()` (or add a `build_where_clause_extended()`)
+to accept optional JOIN-based and LIKE-based filter specs, then migrate the manual
+builders. This would centralize SQL generation and reduce the risk of filter inconsistencies
+across endpoints.
+
+---
+
 ### Completed Code TODOs
 
 | ID | Task | Resolution |

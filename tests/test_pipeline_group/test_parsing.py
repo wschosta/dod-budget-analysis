@@ -526,10 +526,7 @@ def test_detect_currency_year(sheet_name, filename, expected):
 #
 # See docs/TODO_1C2_unit_tests_parsing.md for full specification.
 
-# DONE 1.C2-b-extended: _map_columns tests for R-1, O-1, M-1, RF-1 added at lines 179-243.
-# DONE 1.C2-pe: _extract_pe_number tests at lines 352-373; _parse_appropriation at 492-495.
-# DONE 1.C2-f: sanitize_filename edge case tests at lines 311-346.
-# DONE 1.C2-fy: _normalise_fiscal_year tests at lines 467-477.
+
 
 
 # ── DONE 1.B2-b: Catalog-driven column detection for detail exhibits ──────────

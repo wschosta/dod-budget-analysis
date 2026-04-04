@@ -818,6 +818,7 @@ def _extract_r1_titles_for_stubs(
     ).fetchall()
     current_titles = {r[0]: r[1] for r in cache_rows}
 
+    update_batch: list[tuple[str, str, str]] = []
     for pe in sorted_pes:
         pages = pe_pages.get(pe, [])
         pdf_title = None
@@ -835,11 +836,7 @@ def _extract_r1_titles_for_stubs(
 
         current_title = current_titles.get(pe)
         if current_title == pe:
-            conn.execute(
-                f"UPDATE {cache_table} SET line_item_title = ? "
-                f"WHERE pe_number = ? AND exhibit_type = 'r1' AND line_item_title = ?",
-                [pdf_title, pe, pe],
-            )
+            update_batch.append((pdf_title, pe, pe))
             logger.debug("R-1 title for %s set from PDF: %s", pe, pdf_title)
         elif current_title and current_title != pdf_title:
             logger.info(
@@ -848,6 +845,13 @@ def _extract_r1_titles_for_stubs(
                 current_title,
                 pdf_title,
             )
+
+    if update_batch:
+        conn.executemany(
+            f"UPDATE {cache_table} SET line_item_title = ? "
+            f"WHERE pe_number = ? AND exhibit_type = 'r1' AND line_item_title = ?",
+            update_batch,
+        )
 
 
 def _aggregate_r2_funding_into_r1_stubs(

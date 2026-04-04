@@ -153,7 +153,6 @@ _metrics: dict = {
     "blocked_count": 0,
     "response_times_ms": deque(maxlen=100),
 }
-_RESPONSE_TIME_WINDOW = 100  # number of recent response times to average
 
 
 @asynccontextmanager
@@ -394,7 +393,6 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         response = await call_next(request)
         duration_ms = (time.monotonic() - start) * 1000
 
-        # Track response time (deque auto-caps at _RESPONSE_TIME_WINDOW entries)
         _metrics["response_times_ms"].append(duration_ms)
 
         # Track server errors

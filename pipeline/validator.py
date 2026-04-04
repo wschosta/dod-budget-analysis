@@ -39,6 +39,7 @@ from utils.normalization import normalize_org_loose as _normalize_org
 # Shared utilities: Import from utils package for consistency across codebase
 from utils import get_connection
 from utils.database import _validate_identifier
+from utils.query import make_placeholders
 
 logger = logging.getLogger(__name__)
 
@@ -221,11 +222,10 @@ def check_null_heavy_rows(conn: sqlite3.Connection) -> dict:
 
 def check_unknown_exhibit_types(conn: sqlite3.Connection) -> dict:
     """1.B6-e: Flag exhibit types not in the known set."""
-    placeholders = ",".join("?" for _ in KNOWN_EXHIBIT_TYPES)
     cur = conn.execute(f"""
         SELECT exhibit_type, COUNT(*) as cnt
         FROM budget_lines
-        WHERE exhibit_type NOT IN ({placeholders})
+        WHERE exhibit_type NOT IN ({make_placeholders(KNOWN_EXHIBIT_TYPES)})
         GROUP BY exhibit_type
         ORDER BY cnt DESC
     """, list(KNOWN_EXHIBIT_TYPES))

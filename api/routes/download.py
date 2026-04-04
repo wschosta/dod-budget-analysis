@@ -21,20 +21,39 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
 from api.database import get_db
+from api.models import FilterParams
 from utils import sanitize_fts5_query
 from utils.query import ALLOWED_SORT_COLUMNS, build_where_clause
 
 router = APIRouter(prefix="/download", tags=["download"])
 
 _DOWNLOAD_COLUMNS = [
-    "id", "source_file", "exhibit_type", "sheet_name", "fiscal_year",
-    "account", "account_title", "organization_name",
-    "budget_activity_title", "sub_activity_title",
-    "line_item", "line_item_title", "pe_number",
-    "appropriation_code", "appropriation_title", "budget_type",
-    "amount_fy2024_actual", "amount_fy2025_enacted", "amount_fy2025_supplemental",
-    "amount_fy2025_total", "amount_fy2026_request", "amount_fy2026_reconciliation",
-    "amount_fy2026_total", "amount_type", "amount_unit", "currency_year",
+    "id",
+    "source_file",
+    "exhibit_type",
+    "sheet_name",
+    "fiscal_year",
+    "account",
+    "account_title",
+    "organization_name",
+    "budget_activity_title",
+    "sub_activity_title",
+    "line_item",
+    "line_item_title",
+    "pe_number",
+    "appropriation_code",
+    "appropriation_title",
+    "budget_type",
+    "amount_fy2024_actual",
+    "amount_fy2025_enacted",
+    "amount_fy2025_supplemental",
+    "amount_fy2025_total",
+    "amount_fy2026_request",
+    "amount_fy2026_reconciliation",
+    "amount_fy2026_total",
+    "amount_type",
+    "amount_unit",
+    "currency_year",
 ]
 
 
@@ -49,20 +68,12 @@ def _iter_rows(conn: sqlite3.Connection, sql: str, params: list[Any]):
 
 
 def _build_download_sql(
-    fiscal_year: list[str] | None,
-    service: list[str] | None,
-    exhibit_type: list[str] | None,
-    pe_number: list[str] | None,
-    appropriation_code: list[str] | None,
-    q: str | None,
+    filters: FilterParams,
     conn: sqlite3.Connection,
     limit: int,
     export_cols: list[str],
     sort_by: str = "id",
     sort_dir: str = "asc",
-    min_amount: float | None = None,
-    max_amount: float | None = None,
-    budget_type: list[str] | None = None,
 ) -> tuple[str, list[Any], int]:
     """Build the download SQL with all filters applied.
 
@@ -71,9 +82,9 @@ def _build_download_sql(
     """
     # DL-002: Handle FTS keyword filter
     fts_ids: list[int] | None = None
-    if q and q.strip():
+    if filters.q and filters.q.strip():
         try:
-            safe_q = sanitize_fts5_query(q.strip())
+            safe_q = sanitize_fts5_query(filters.q.strip())
             fts_rows = conn.execute(
                 "SELECT rowid FROM budget_lines_fts WHERE budget_lines_fts MATCH ?",
                 (safe_q,),
@@ -83,17 +94,7 @@ def _build_download_sql(
             fts_ids = []
 
     # OPT-DL-001: Use shared WHERE builder
-    where, params = build_where_clause(
-        fiscal_year=fiscal_year,
-        service=service,
-        exhibit_type=exhibit_type,
-        pe_number=pe_number,
-        appropriation_code=appropriation_code,
-        budget_type=budget_type,
-        min_amount=min_amount,
-        max_amount=max_amount,
-        fts_ids=fts_ids,
-    )
+    where, params = build_where_clause(**filters.where_kwargs(fts_ids=fts_ids))
 
     # DL-003: Count first for X-Total-Count header
     count_sql = f"SELECT COUNT(*) FROM budget_lines {where}"
@@ -102,45 +103,41 @@ def _build_download_sql(
     col_list = ", ".join(export_cols)
     sort_col = sort_by if sort_by in ALLOWED_SORT_COLUMNS else "id"
     direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
-    sql = (f"SELECT {col_list} FROM budget_lines {where} "
-           f"ORDER BY {sort_col} {direction} LIMIT ?")
+    sql = (
+        f"SELECT {col_list} FROM budget_lines {where} "
+        f"ORDER BY {sort_col} {direction} LIMIT ?"
+    )
     params.append(limit)
 
     return sql, params, total
 
 
-
 @router.get("", summary="Download search results as CSV, JSON, or Excel")
 def download(
     request: Request,
+    filters: FilterParams = Depends(),
     fmt: str = Query("csv", pattern="^(csv|json|xlsx)$", description="Output format"),
-    fiscal_year: list[str] | None = Query(None),
-    service: list[str] | None = Query(None),
-    exhibit_type: list[str] | None = Query(None),
-    pe_number: list[str] | None = Query(None),
-    appropriation_code: list[str] | None = Query(None, description="Filter by appropriation code(s)"),
-    budget_type: list[str] | None = Query(None, description="Filter by budget type (RDT&E, Procurement, etc.)"),
-    # DL-002: keyword search filter
-    q: str | None = Query(None, description="Keyword search filter (FTS5)"),
-    min_amount: float | None = Query(None, description="Min FY2026 request amount"),
-    max_amount: float | None = Query(None, description="Max FY2026 request amount"),
     sort_by: str = Query("id", description="Column to sort by"),
     sort_dir: str = Query("asc", pattern="^(asc|desc)$", description="Sort direction"),
     # FIX-017: Download a single item by ID (used by detail panel)
-    item_id: int | None = Query(None, description="Download a specific budget line by ID"),
+    item_id: int | None = Query(
+        None, description="Download a specific budget line by ID"
+    ),
     limit: int = Query(
-        10_000, ge=1, le=100_000,
+        10_000,
+        ge=1,
+        le=100_000,
         description="Max rows to export (default 10,000)",
     ),
-    columns: list[str] | None = Query(None, description="FE-011: Subset of columns to export"),
+    columns: list[str] | None = Query(
+        None, description="FE-011: Subset of columns to export"
+    ),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> StreamingResponse:
     """Stream budget line items as CSV, JSON (newline-delimited), or Excel."""
     # FE-011: filter columns to those requested (and valid)
     export_cols = (
-        [c for c in columns if c in _DOWNLOAD_COLUMNS]
-        if columns
-        else _DOWNLOAD_COLUMNS
+        [c for c in columns if c in _DOWNLOAD_COLUMNS] if columns else _DOWNLOAD_COLUMNS
     ) or _DOWNLOAD_COLUMNS
 
     # FIX-017: If item_id is specified, download just that single row
@@ -151,20 +148,12 @@ def download(
         total_count = 1
     else:
         sql, params, total_count = _build_download_sql(
-            fiscal_year=fiscal_year,
-            service=service,
-            exhibit_type=exhibit_type,
-            pe_number=pe_number,
-            appropriation_code=appropriation_code,
-            q=q,
+            filters=filters,
             conn=conn,
             limit=limit,
             export_cols=export_cols,
             sort_by=sort_by,
             sort_dir=sort_dir,
-            min_amount=min_amount,
-            max_amount=max_amount,
-            budget_type=budget_type,
         )
 
     # DL-003: X-Total-Count header
@@ -175,27 +164,30 @@ def download(
     export_url = str(request.url)
     # Build a human-readable filter summary
     active_filters: list[str] = []
-    if fiscal_year:
-        active_filters.append(f"fiscal_year={','.join(fiscal_year)}")
-    if service:
-        active_filters.append(f"service={','.join(service)}")
-    if exhibit_type:
-        active_filters.append(f"exhibit_type={','.join(exhibit_type)}")
-    if pe_number:
-        active_filters.append(f"pe_number={','.join(pe_number)}")
-    if appropriation_code:
-        active_filters.append(f"appropriation_code={','.join(appropriation_code)}")
-    if budget_type:
-        active_filters.append(f"budget_type={','.join(budget_type)}")
-    if q:
-        active_filters.append(f"q={q}")
-    if min_amount is not None:
-        active_filters.append(f"min_amount={min_amount}")
-    if max_amount is not None:
-        active_filters.append(f"max_amount={max_amount}")
+    if filters.fiscal_year:
+        active_filters.append(f"fiscal_year={','.join(filters.fiscal_year)}")
+    if filters.service:
+        active_filters.append(f"service={','.join(filters.service)}")
+    if filters.exhibit_type:
+        active_filters.append(f"exhibit_type={','.join(filters.exhibit_type)}")
+    if filters.pe_number:
+        active_filters.append(f"pe_number={','.join(filters.pe_number)}")
+    if filters.appropriation_code:
+        active_filters.append(
+            f"appropriation_code={','.join(filters.appropriation_code)}"
+        )
+    if filters.budget_type:
+        active_filters.append(f"budget_type={','.join(filters.budget_type)}")
+    if filters.q:
+        active_filters.append(f"q={filters.q}")
+    if filters.min_amount is not None:
+        active_filters.append(f"min_amount={filters.min_amount}")
+    if filters.max_amount is not None:
+        active_filters.append(f"max_amount={filters.max_amount}")
     filter_summary = "; ".join(active_filters) if active_filters else "none"
 
     if fmt == "csv":
+
         def csv_stream():
             buf = io.StringIO()
             # EAGLE-6: Source attribution header rows

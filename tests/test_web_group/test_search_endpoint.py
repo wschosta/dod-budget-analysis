@@ -3,6 +3,7 @@ Tests for api/routes/search.py — search endpoint
 
 Tests the search() function with FTS5 in-memory database.
 """
+
 import sqlite3
 import sys
 from pathlib import Path
@@ -11,6 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from api.models import FilterParams
 from api.routes.search import search
 
 
@@ -53,19 +55,51 @@ def db():
 
     # Insert test data
     rows = [
-        (1, "army.xlsx", "p1", "S1", "FY 2026", "3010", "Aircraft Procurement",
-         "Army", "Tactical", None, "AH-64", "Apache Helicopter", "0207449A",
-         "budget_authority", 1000, 900, 1100, 1100),
-        (2, "navy.xlsx", "p1", "S1", "FY 2026", "1506", "Shipbuilding",
-         "Navy", "Combat", None, "DDG-51", "Missile Defense Destroyer", "0204311N",
-         "budget_authority", 5000, 4500, 5500, 5500),
+        (
+            1,
+            "army.xlsx",
+            "p1",
+            "S1",
+            "FY 2026",
+            "3010",
+            "Aircraft Procurement",
+            "Army",
+            "Tactical",
+            None,
+            "AH-64",
+            "Apache Helicopter",
+            "0207449A",
+            "budget_authority",
+            1000,
+            900,
+            1100,
+            1100,
+        ),
+        (
+            2,
+            "navy.xlsx",
+            "p1",
+            "S1",
+            "FY 2026",
+            "1506",
+            "Shipbuilding",
+            "Navy",
+            "Combat",
+            None,
+            "DDG-51",
+            "Missile Defense Destroyer",
+            "0204311N",
+            "budget_authority",
+            5000,
+            4500,
+            5500,
+            5500,
+        ),
     ]
 
     for r in rows:
         conn.execute(
-            "INSERT INTO budget_lines VALUES ("
-            + ",".join("?" * len(r))
-            + ")",
+            "INSERT INTO budget_lines VALUES (" + ",".join("?" * len(r)) + ")",
             r,
         )
         # Manually insert into FTS: account_title=r[6], line_item_title=r[11], organization_name=r[7]
@@ -113,7 +147,7 @@ def db():
 
 def _search(db, q, **kwargs):
     """Call search with all required defaults."""
-    defaults = dict(type="both", limit=20, offset=0, conn=db)
+    defaults = dict(filters=FilterParams(), type="both", limit=20, offset=0, conn=db)
     defaults.update(kwargs)
     return search(q=q, **defaults)
 
@@ -147,6 +181,7 @@ class TestSearch:
 
     def test_empty_query_rejected(self, db):
         from fastapi import HTTPException
+
         with pytest.raises(HTTPException) as exc_info:
             _search(db, "AND OR NOT")
         assert exc_info.value.status_code == 400
@@ -154,7 +189,10 @@ class TestSearch:
     def test_snippets_present(self, db):
         result = _search(db, "Apache", type="excel")
         if result.results:
-            assert result.results[0].snippet is not None or result.results[0].data is not None
+            assert (
+                result.results[0].snippet is not None
+                or result.results[0].data is not None
+            )
 
     def test_response_metadata(self, db):
         result = _search(db, "Army", type="excel")
@@ -183,8 +221,9 @@ class TestSearch:
     def test_has_more_true_when_truncated(self, db):
         """has_more is True when results were truncated by limit."""
         # There are 2 budget lines, so limit=1 should set has_more
-        result = _search(db, "Army OR Navy OR Aircraft OR Shipbuilding",
-                         type="excel", limit=1)
+        result = _search(
+            db, "Army OR Navy OR Aircraft OR Shipbuilding", type="excel", limit=1
+        )
         assert result.has_more is True
         assert len(result.results) == 1
 
@@ -270,7 +309,7 @@ class TestFtsScanLimit:
             fiscal_year=None,
             service=None,
             exhibit_type=None,
-            limit=21,   # fetch_limit = limit+1
+            limit=21,  # fetch_limit = limit+1
             offset=0,
         )
         # FTS subquery should contain ORDER BY rank LIMIT 21
