@@ -343,6 +343,51 @@ Documented in `docs/PRD.md` §9 and `docs/NOTICED_ISSUES.md`:
 - #16, #19, #28: FY2000-2009 data gap (documents not publicly available)
 - #49: Inline styles (ongoing gradual refactor)
 
+### Future Refactoring Notes
+
+Structural improvements identified during codebase review (April 2025). These are
+not bugs — the current code works and is tested — but would reduce maintenance burden
+if the API surface grows.
+
+#### 1. API Route Parameter Sprawl
+
+Five route handlers accept 10–15 individual `Query()` parameters for the same set of
+filters (fiscal_year, service, exhibit_type, pe_number, appropriation_code, budget_type,
+min_amount, max_amount, sort_by, sort_dir, etc.):
+
+- `api/routes/search.py` → `search()`
+- `api/routes/budget_lines.py` → `list_budget_lines()`
+- `api/routes/download.py` → `download()`
+- `api/routes/aggregations.py` → `get_aggregations()`
+- `api/routes/facets.py` → `get_facets()`
+
+**Suggested fix:** Extract a shared `FilterParams` Pydantic model in `api/models.py`
+and use `Depends(FilterParams)` in each route. This would:
+- Eliminate ~50 lines of duplicated `Query()` definitions
+- Ensure filter names/types stay consistent across endpoints
+- Make it trivial to add a new filter dimension (one model change vs. 5 route changes)
+
+#### 2. Duplicate WHERE Clause Construction
+
+Several routes build SQL WHERE clauses manually instead of using the shared
+`build_where_clause()` helper from `utils/query.py`:
+
+- `api/routes/dashboard.py` (lines 66–80) — manual conditions list
+- `api/routes/aggregations.py` (lines 212–227) — manual conditions list
+- `api/routes/pe.py` (lines 900–975) — manual WHERE with JOIN and LIKE
+- `api/routes/keyword_search.py` (lines 1156–1279) — manual IN clause
+
+`build_where_clause()` already handles the common filter dimensions and is used by
+`budget_lines.py`, `download.py`, and `aggregations.py` (for its main query). Extending
+it to cover JOIN conditions and LIKE patterns would let the remaining routes adopt it.
+
+**Suggested fix:** Extend `build_where_clause()` (or add a `build_where_clause_extended()`)
+to accept optional JOIN-based and LIKE-based filter specs, then migrate the manual
+builders. This would centralize SQL generation and reduce the risk of filter inconsistencies
+across endpoints.
+
+---
+
 ### Completed Code TODOs
 
 | ID | Task | Resolution |
