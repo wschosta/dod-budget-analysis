@@ -1,15 +1,16 @@
 """
-Tests for api/routes/search.py — _snippet() helper
+Tests for search snippet extraction via utils/formatting.py.
 
 Verifies snippet extraction logic for search result highlighting.
 """
-import sys
-from pathlib import Path
+from utils.formatting import extract_snippet_highlighted
 
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from api.routes.search import _snippet
+def _snippet(text: str | None, query: str | None, max_len: int = 200) -> str | None:
+    """Test helper matching the old api/routes/search._snippet() signature."""
+    if not text or not query:
+        return None
+    return extract_snippet_highlighted(text, query, max_len=max_len, html=False)
 
 
 class TestSnippet:

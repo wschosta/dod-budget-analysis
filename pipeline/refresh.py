@@ -16,27 +16,6 @@ Usage:
     python refresh_data.py --dry-run --years 2026           # Preview without downloading
     python refresh_data.py --schedule daily --at-hour 02:00 # Schedule daily at 2am
     python refresh_data.py --help                           # Show full options
-
-DONE REFRESH-001: Stages 2 (build) and 3 (validate) now call Python functions
-  directly instead of subprocess. Stage 1 (download) still uses subprocess
-  since the downloader has heavy optional deps (Playwright, GUI).
-DONE REFRESH-002: --notify flag added; POSTs summary JSON to webhook URL on
-  completion or failure.
-DONE REFRESH-003: Automatic rollback on failed refresh. DB is backed up before
-  Stage 2; restored on failure unless --no-rollback is specified.
-DONE REFRESH-004: Progress file (refresh_progress.json) written at each stage
-  transition. Deleted on successful completion.
-DONE REFRESH-005: --schedule flag for periodic refresh (daily/weekly/monthly).
-  Uses a sleep loop with configurable --at-hour.
-
-──────────────────────────────────────────────────────────────────────────────
-LION TODOs — Rebuild Orchestration
-──────────────────────────────────────────────────────────────────────────────
-
-LION-107 [DONE]: Add rebuild orchestration with timing and integrity checks.
-    stage_5_enrich() runs enrich_budget_db.enrich() with rebuild=True.
-    Post-enrichment integrity checks verify pe_index, pe_tags, pe_descriptions.
-
 """
 
 import argparse
