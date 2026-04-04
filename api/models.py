@@ -32,6 +32,14 @@ def _norm_float(v: Any) -> float | None:
     return v if isinstance(v, (int, float, type(None))) else None
 
 
+def _norm_str(v: Any) -> str | None:
+    return v if isinstance(v, (str, type(None))) else None
+
+
+def _norm_bool(v: Any) -> bool:
+    return v if isinstance(v, bool) else False
+
+
 class FilterParams:
     """Common query-string filters shared across budget-line endpoints.
 
@@ -79,10 +87,8 @@ class FilterParams:
         self.budget_type = _norm_list(budget_type)
         self.min_amount = _norm_float(min_amount)
         self.max_amount = _norm_float(max_amount)
-        self.q = q if isinstance(q, (str, type(None))) else None
-        self.exclude_summary = (
-            bool(exclude_summary) if isinstance(exclude_summary, bool) else False
-        )
+        self.q = _norm_str(q)
+        self.exclude_summary = _norm_bool(exclude_summary)
 
     def where_kwargs(self, **overrides: Any) -> dict[str, Any]:
         """Return kwargs suitable for :func:`utils.query.build_where_clause`.
