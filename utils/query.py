@@ -111,6 +111,8 @@ def build_where_clause(
     q: str | None = None,
     fts_ids: list[int] | None = None,
     amount_column: str | None = None,
+    exclude_summary: bool = False,
+    extra_conditions: list[str] | None = None,
 ) -> tuple[str, list[Any]]:
     """Build a SQL WHERE clause from filter parameters.
 
@@ -127,6 +129,10 @@ def build_where_clause(
         fts_ids: Row IDs from FTS MATCH query to restrict results.
         amount_column: Which FY amount column to filter on.
             Must be in VALID_AMOUNT_COLUMNS. Defaults to amount_fy2026_request.
+        exclude_summary: If True, exclude summary exhibit types (P-1, R-1,
+            O-1, M-1, C-1, RF-1, P-1R) to avoid double-counting.
+        extra_conditions: Additional raw SQL condition strings to include
+            in the WHERE clause. These are ANDed with other conditions.
 
     Returns:
         Tuple of (where_clause_string, params_list). The where_clause_string
@@ -134,6 +140,12 @@ def build_where_clause(
     """
     conditions: list[str] = []
     params: list[Any] = []
+
+    if exclude_summary:
+        conditions.append(EXCLUDE_SUMMARY_SQL)
+
+    if extra_conditions:
+        conditions.extend(extra_conditions)
 
     _add_in_condition(conditions, params, "fiscal_year", fiscal_year)
     # FIX-002b: exact IN() matching (LIKE was too broad).

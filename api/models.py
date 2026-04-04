@@ -104,6 +104,7 @@ class FilterParams:
             "budget_type": self.budget_type,
             "min_amount": self.min_amount,
             "max_amount": self.max_amount,
+            "exclude_summary": self.exclude_summary,
         }
         kw.update(overrides)
         return kw

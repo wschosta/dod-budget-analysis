@@ -364,24 +364,19 @@ Resolved routes:
 - `api/routes/aggregations.py` → `aggregate()`
 - `api/routes/facets.py` → `get_facets()`
 
-#### 2. Duplicate WHERE Clause Construction
+#### 2. Duplicate WHERE Clause Construction — ✅ PARTIALLY RESOLVED
 
-Several routes build SQL WHERE clauses manually instead of using the shared
-`build_where_clause()` helper from `utils/query.py`:
+`build_where_clause()` now supports `exclude_summary` and `extra_conditions`
+parameters, enabling routes with custom SQL conditions to use the shared builder.
 
-- `api/routes/dashboard.py` (lines 66–80) — manual conditions list
+**Migrated:**
+- `api/routes/dashboard.py` — manual conditions replaced with `build_where_clause(exclude_summary=True, extra_conditions=[...])`
+- `api/routes/budget_lines.py` — manual `EXCLUDE_SUMMARY_SQL` appending removed; handled via `FilterParams.where_kwargs()` which now passes `exclude_summary`
+
+**Remaining (need JOIN/LIKE extensions):**
 - `api/routes/aggregations.py` (lines 212–227) — manual conditions list
 - `api/routes/pe.py` (lines 900–975) — manual WHERE with JOIN and LIKE
 - `api/routes/keyword_search.py` (lines 1156–1279) — manual IN clause
-
-`build_where_clause()` already handles the common filter dimensions and is used by
-`budget_lines.py`, `download.py`, and `aggregations.py` (for its main query). Extending
-it to cover JOIN conditions and LIKE patterns would let the remaining routes adopt it.
-
-**Suggested fix:** Extend `build_where_clause()` (or add a `build_where_clause_extended()`)
-to accept optional JOIN-based and LIKE-based filter specs, then migrate the manual
-builders. This would centralize SQL generation and reduce the risk of filter inconsistencies
-across endpoints.
 
 ---
 
