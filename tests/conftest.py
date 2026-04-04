@@ -91,9 +91,9 @@ import pytest
 # prevents other test files' setdefault stubs from shadowing the real package.
 try:
     import pdfplumber  # noqa: F401
-except (ImportError, Exception):
+except BaseException:
     # Catch ImportError (missing package) and any native-extension crash
-    # (e.g. pyo3 PanicException when cffi/_cffi_backend is absent).
+    # (e.g. pyo3 PanicException inherits BaseException, not Exception).
     # Fall back to a stub so PDF-free tests still run.
     sys.modules.setdefault("pdfplumber", types.ModuleType("pdfplumber"))
 
