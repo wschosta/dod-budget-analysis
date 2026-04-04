@@ -16,7 +16,7 @@ import re
 import sqlite3
 from typing import Any
 
-from scripts.clean_pe_narratives import clean_narrative
+from utils.strings import clean_narrative
 from utils.database import get_amount_columns
 from utils.patterns import PE_NUMBER_STRICT_CI, PE_SUFFIX_PATTERN
 

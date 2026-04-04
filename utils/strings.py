@@ -7,7 +7,50 @@ yields ~10-15% speedup in build_budget_db.py.
 
 import re
 
-from utils.patterns import WHITESPACE, CURRENCY_SYMBOLS, FTS5_SPECIAL_CHARS
+from utils.patterns import WHITESPACE, CURRENCY_SYMBOLS, FTS5_SPECIAL_CHARS, PE_SUFFIX_PATTERN
+
+# ── Narrative cleaning patterns (page-break artifact removal) ─────────────────
+
+# Multi-line block: from "PE XXXXXXX:" header through the
+# "B. Accomplishments/Planned Programs ($ in Millions) FY ..." line
+_ARTIFACT_BLOCK = re.compile(
+    rf"PE\s+\d{{7}}{PE_SUFFIX_PATTERN}?\s*:.*?"
+    r"B\.\s*Accomplishments/Planned\s+Programs\s*"
+    r"\(\$\s*in\s+Millions\)\s*"
+    r"(?:FY\s*\d{4}\s*)+",
+    re.DOTALL | re.IGNORECASE,
+)
+
+# Standalone "UNCLASSIFIED" lines (often appear at page breaks)
+_UNCLASSIFIED = re.compile(r"^\s*UNCLASSIFIED\s*$", re.MULTILINE)
+
+# "Title: Project Name XX.XXX YY.YYY ..." — amounts that got mixed into text
+_TITLE_AMOUNTS = re.compile(
+    r"^Title:\s+.+?\s+\d+\.\d{3}(?:\s+\d+\.\d{3}|\s+[\-0](?:\.\d+)?)+\s*$",
+    re.MULTILINE,
+)
+
+# Exhibit headers that appear mid-text from page breaks
+_EXHIBIT_HEADER = re.compile(
+    r"Exhibit R-2A?,\s*RDT&E\s+Project\s+Justification:.*?(?=\n[A-Z]|\n\n|\Z)",
+    re.DOTALL | re.IGNORECASE,
+)
+
+# Appropriation/Budget Activity header block
+_APPROP_HEADER = re.compile(
+    r"Appropriation/?Budget\s+Activity.*?(?:Project\s*\(Number/Name\)|PROJECT)\s*\n"
+    r".*?(?=\n[A-Z]|\n\n|\Z)",
+    re.DOTALL | re.IGNORECASE,
+)
+
+# Page number markers like "Volume 3 - 355" or "Air Force Page 5 of 70"
+_PAGE_MARKERS = re.compile(
+    r"(?:Volume\s+\d+\s*-\s*\d+|(?:Air Force|Navy|Army|Defense[- ]Wide|MDA)\s+Page \d+ of \d+|R-1 Line #\d+)",
+    re.IGNORECASE,
+)
+
+# Repeated blank lines
+_MULTI_BLANK = re.compile(r"\n{3,}")
 
 # Pre-compiled pattern for fiscal year normalization
 _FY_NORMALIZE_RE = re.compile(
@@ -160,3 +203,23 @@ def normalize_fiscal_year(value: str) -> str | None:
         return str(2000 + short_year)
 
     return None
+
+
+def clean_narrative(text: str) -> str:
+    """Remove page-break artifacts from R-2A narrative text.
+
+    Strips recurring header blocks (PE number lines, exhibit headers,
+    appropriation headers, UNCLASSIFIED markers, page-number markers)
+    that repeat every time the PDF exhibit spans multiple pages.
+    """
+    if not text:
+        return text
+
+    text = _ARTIFACT_BLOCK.sub("", text)
+    text = _EXHIBIT_HEADER.sub("", text)
+    text = _APPROP_HEADER.sub("", text)
+    text = _UNCLASSIFIED.sub("", text)
+    text = _TITLE_AMOUNTS.sub("", text)
+    text = _PAGE_MARKERS.sub("", text)
+    text = _MULTI_BLANK.sub("\n\n", text)
+    return text.strip()
