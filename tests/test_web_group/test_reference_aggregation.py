@@ -3,6 +3,7 @@ Tests for api/routes/reference.py and api/routes/aggregations.py
 
 Tests reference data endpoints and aggregation logic with in-memory databases.
 """
+
 import sqlite3
 import sys
 from pathlib import Path
@@ -12,12 +13,20 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from api.routes.reference import (
-    list_services, list_exhibit_types, list_fiscal_years,
-    list_appropriations, list_budget_types,
+    list_services,
+    list_exhibit_types,
+    list_fiscal_years,
+    list_appropriations,
+    list_budget_types,
 )
+from api.models import FilterParams
 from api.routes.aggregations import (
-    aggregate, hierarchy, warm_caches,
-    _ALLOWED_GROUPS, _agg_cache, _hierarchy_cache,
+    aggregate,
+    hierarchy,
+    warm_caches,
+    _ALLOWED_GROUPS,
+    _agg_cache,
+    _hierarchy_cache,
 )
 
 
@@ -105,6 +114,7 @@ class TestListServices:
         resp = list_services(db_with_ref_tables)
         data = resp.body
         import json
+
         items = json.loads(data)
         assert len(items) == 2
         codes = {r["code"] for r in items}
@@ -114,6 +124,7 @@ class TestListServices:
     def test_fallback_without_ref_table(self, db_no_ref_tables):
         resp = list_services(db_no_ref_tables)
         import json
+
         items = json.loads(resp.body)
         assert len(items) == 2
         codes = {r["code"] for r in items}
@@ -128,6 +139,7 @@ class TestListServices:
 class TestListExhibitTypes:
     def test_with_ref_table(self, db_with_ref_tables):
         import json
+
         resp = list_exhibit_types(db_with_ref_tables)
         items = json.loads(resp.body)
         assert len(items) == 2
@@ -137,12 +149,14 @@ class TestListExhibitTypes:
 
     def test_fallback_without_ref_table(self, db_no_ref_tables):
         import json
+
         resp = list_exhibit_types(db_no_ref_tables)
         items = json.loads(resp.body)
         assert len(items) == 2
 
     def test_has_description_field(self, db_with_ref_tables):
         import json
+
         items = json.loads(list_exhibit_types(db_with_ref_tables).body)
         assert items[0]["description"] is not None
 
@@ -150,6 +164,7 @@ class TestListExhibitTypes:
 class TestListFiscalYears:
     def test_returns_years_with_counts(self, db_with_ref_tables):
         import json
+
         resp = list_fiscal_years(db_with_ref_tables)
         items = json.loads(resp.body)
         assert len(items) == 2  # FY 2025 and FY 2026
@@ -171,6 +186,7 @@ class TestListFiscalYears:
             )
         """)
         import json
+
         resp = list_fiscal_years(conn)
         items = json.loads(resp.body)
         assert items == []
@@ -180,6 +196,7 @@ class TestListFiscalYears:
 class TestListAppropriations:
     def test_returns_codes_with_counts(self, db_with_ref_tables):
         import json
+
         resp = list_appropriations(db_with_ref_tables)
         items = json.loads(resp.body)
         assert len(items) >= 1
@@ -188,6 +205,7 @@ class TestListAppropriations:
 
     def test_has_title(self, db_with_ref_tables):
         import json
+
         resp = list_appropriations(db_with_ref_tables)
         items = json.loads(resp.body)
         assert any(item.get("title") is not None for item in items)
@@ -196,6 +214,7 @@ class TestListAppropriations:
 class TestListBudgetTypes:
     def test_returns_types_with_counts(self, db_with_ref_tables):
         import json
+
         resp = list_budget_types(db_with_ref_tables)
         items = json.loads(resp.body)
         assert len(items) >= 1
@@ -215,55 +234,63 @@ class TestAllowedGroups:
 class TestAggregate:
     def test_group_by_service(self, db_with_ref_tables):
         result = aggregate(
-            group_by="service", fiscal_year=None, service=None,
-            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
+            group_by="service",
+            filters=FilterParams(),
+            conn=db_with_ref_tables,
         )
         assert result.group_by == "service"
         assert len(result.rows) == 2  # Army and Navy
 
     def test_group_by_fiscal_year(self, db_with_ref_tables):
         result = aggregate(
-            group_by="fiscal_year", fiscal_year=None, service=None,
-            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
+            group_by="fiscal_year",
+            filters=FilterParams(),
+            conn=db_with_ref_tables,
         )
         assert len(result.rows) == 2  # FY 2025 and FY 2026
 
     def test_group_by_exhibit_type(self, db_with_ref_tables):
         result = aggregate(
-            group_by="exhibit_type", fiscal_year=None, service=None,
-            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
+            group_by="exhibit_type",
+            filters=FilterParams(),
+            conn=db_with_ref_tables,
         )
         assert len(result.rows) == 2  # p1 and r1
 
     def test_filter_by_fiscal_year(self, db_with_ref_tables):
         result = aggregate(
-            group_by="service", fiscal_year=["FY 2026"], service=None,
-            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
+            group_by="service",
+            filters=FilterParams(fiscal_year=["FY 2026"]),
+            conn=db_with_ref_tables,
         )
         # Only FY 2026 rows: Army (2) and Navy (1)
         assert len(result.rows) == 2
 
     def test_filter_by_service(self, db_with_ref_tables):
         result = aggregate(
-            group_by="exhibit_type", fiscal_year=None, service=["Army"],
-            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
+            group_by="exhibit_type",
+            filters=FilterParams(service=["Army"]),
+            conn=db_with_ref_tables,
         )
         # Army has p1 and r1
         assert len(result.rows) == 2
 
     def test_filter_by_exhibit_type(self, db_with_ref_tables):
         result = aggregate(
-            group_by="service", fiscal_year=None, service=None,
-            exhibit_type=["p1"], appropriation_code=None, conn=db_with_ref_tables,
+            group_by="service",
+            filters=FilterParams(exhibit_type=["p1"]),
+            conn=db_with_ref_tables,
         )
         # p1: Army and Navy
         assert len(result.rows) == 2
 
     def test_combined_filters(self, db_with_ref_tables):
         result = aggregate(
-            group_by="service", fiscal_year=["FY 2026"],
-            service=["Army"], exhibit_type=["p1"],
-            appropriation_code=None, conn=db_with_ref_tables,
+            group_by="service",
+            filters=FilterParams(
+                fiscal_year=["FY 2026"], service=["Army"], exhibit_type=["p1"]
+            ),
+            conn=db_with_ref_tables,
         )
         assert len(result.rows) == 1
         assert result.rows[0].group_value == "Army"
@@ -271,25 +298,29 @@ class TestAggregate:
 
     def test_invalid_group_by(self, db_with_ref_tables):
         from fastapi import HTTPException
+
         with pytest.raises(HTTPException) as exc_info:
             aggregate(
-                group_by="invalid", fiscal_year=None, service=None,
-                exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
+                group_by="invalid",
+                filters=FilterParams(),
+                conn=db_with_ref_tables,
             )
         assert exc_info.value.status_code == 400
 
     def test_empty_result(self, db_with_ref_tables):
         result = aggregate(
-            group_by="service", fiscal_year=["FY 2030"], service=None,
-            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
+            group_by="service",
+            filters=FilterParams(fiscal_year=["FY 2030"]),
+            conn=db_with_ref_tables,
         )
         assert len(result.rows) == 0
 
     def test_rows_with_amount_present(self, db_with_ref_tables):
         """Each aggregation row includes rows_with_amount count."""
         result = aggregate(
-            group_by="service", fiscal_year=None, service=None,
-            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
+            group_by="service",
+            filters=FilterParams(),
+            conn=db_with_ref_tables,
         )
         for row in result.rows:
             assert row.rows_with_amount is not None
@@ -303,8 +334,9 @@ class TestAggregate:
             " 100, 200, NULL, '3010', 'Test Approp', 'Test', 'Procurement')"
         )
         result = aggregate(
-            group_by="service", fiscal_year=None, service=None,
-            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
+            group_by="service",
+            filters=FilterParams(),
+            conn=db_with_ref_tables,
         )
         army_row = next(r for r in result.rows if r.group_value == "Army")
         # Army now has 4 rows (3 original + 1 NULL) but only 3 with amount
@@ -314,8 +346,9 @@ class TestAggregate:
     def test_group_by_budget_type(self, db_with_ref_tables):
         """group_by=budget_type returns groups per budget type."""
         result = aggregate(
-            group_by="budget_type", fiscal_year=None, service=None,
-            exhibit_type=None, appropriation_code=None, conn=db_with_ref_tables,
+            group_by="budget_type",
+            filters=FilterParams(),
+            conn=db_with_ref_tables,
         )
         types = {r.group_value for r in result.rows}
         assert "Procurement" in types
@@ -324,8 +357,8 @@ class TestAggregate:
     def test_filter_by_appropriation_code(self, db_with_ref_tables):
         """appropriation_code filter narrows to matching budget lines."""
         result = aggregate(
-            group_by="service", fiscal_year=None, service=None,
-            exhibit_type=None, appropriation_code=["3010"],
+            group_by="service",
+            filters=FilterParams(appropriation_code=["3010"]),
             conn=db_with_ref_tables,
         )
         # Only rows with appropriation_code=3010 (3 of 4 rows)
@@ -336,6 +369,7 @@ class TestAggregate:
 # ---------------------------------------------------------------------------
 # OPT-AGG-002: Hierarchy endpoint — dynamic latest-column tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def db_hierarchy():
@@ -397,23 +431,26 @@ class TestHierarchyDynamicColumns:
     """OPT-AGG-002: hierarchy endpoint uses latest available FY column."""
 
     def test_returns_items_with_amount(self, db_hierarchy):
-        result = hierarchy(fiscal_year=None, service=None, exhibit_type=None,
-                           conn=db_hierarchy)
+        result = hierarchy(
+            fiscal_year=None, service=None, exhibit_type=None, conn=db_hierarchy
+        )
         assert result["grand_total"] > 0
         assert len(result["items"]) >= 1
 
     def test_excludes_null_amount_rows(self, db_hierarchy):
         """Rows with NULL latest-FY amount are excluded (HAVING > 0)."""
-        result = hierarchy(fiscal_year=None, service=None, exhibit_type=None,
-                           conn=db_hierarchy)
+        result = hierarchy(
+            fiscal_year=None, service=None, exhibit_type=None, conn=db_hierarchy
+        )
         # Program D has NULL amount_fy2026_request — should not appear
         titles = [item["program"] for item in result["items"]]
         assert "Program D" not in titles
 
     def test_uses_latest_column_for_fy2027_db(self, db_hierarchy_fy2027):
         """When only fy2027 column exists, hierarchy uses it instead of fy2026."""
-        result = hierarchy(fiscal_year=None, service=None, exhibit_type=None,
-                           conn=db_hierarchy_fy2027)
+        result = hierarchy(
+            fiscal_year=None, service=None, exhibit_type=None, conn=db_hierarchy_fy2027
+        )
         # Should succeed and return items using amount_fy2027_request
         assert result["grand_total"] > 0
         assert len(result["items"]) == 2
@@ -422,28 +459,33 @@ class TestHierarchyDynamicColumns:
 
     def test_prior_column_used_for_prev_amount(self, db_hierarchy):
         """prev_amount reflects the prior FY column (not NULL)."""
-        result = hierarchy(fiscal_year=None, service=None, exhibit_type=None,
-                           conn=db_hierarchy)
+        result = hierarchy(
+            fiscal_year=None, service=None, exhibit_type=None, conn=db_hierarchy
+        )
         items = {item["program"]: item for item in result["items"]}
         assert items["Program A"]["prev_amount"] == pytest.approx(900.0)
         assert items["Program B"]["prev_amount"] == pytest.approx(400.0)
 
     def test_filter_by_service(self, db_hierarchy):
-        result = hierarchy(fiscal_year=None, service="Army", exhibit_type=None,
-                           conn=db_hierarchy)
+        result = hierarchy(
+            fiscal_year=None, service="Army", exhibit_type=None, conn=db_hierarchy
+        )
         services = {item["service"] for item in result["items"]}
         assert services == {"Army"}
 
     def test_filter_by_fiscal_year(self, db_hierarchy):
-        result = hierarchy(fiscal_year="FY 2026", service=None, exhibit_type=None,
-                           conn=db_hierarchy)
+        result = hierarchy(
+            fiscal_year="FY 2026", service=None, exhibit_type=None, conn=db_hierarchy
+        )
         assert len(result["items"]) >= 1
 
     def test_pct_of_total_sums_to_100(self, db_hierarchy):
-        result = hierarchy(fiscal_year=None, service=None, exhibit_type=None,
-                           conn=db_hierarchy)
+        result = hierarchy(
+            fiscal_year=None, service=None, exhibit_type=None, conn=db_hierarchy
+        )
         total_pct = sum(
-            item["pct_of_total"] for item in result["items"]
+            item["pct_of_total"]
+            for item in result["items"]
             if item["pct_of_total"] is not None
         )
         assert abs(total_pct - 100.0) < 0.1

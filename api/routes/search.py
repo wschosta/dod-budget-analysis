@@ -17,7 +17,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.database import get_db
-from api.models import SearchResponse, SearchResultItem
+from api.models import FilterParams, SearchResponse, SearchResultItem
 from utils import sanitize_fts5_query
 from utils.formatting import extract_snippet_highlighted
 from utils.query import build_where_clause
@@ -25,7 +25,6 @@ from utils.query import build_where_clause
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/search", tags=["search"])
-
 
 
 # ── SEARCH-001: BM25-ranked budget lines query ───────────────────────────────
@@ -146,7 +145,9 @@ def _pdf_select(
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 
     # SEARCH-005: Bound the FTS scan (issue #60).
-    pdf_fts_limit = min(_FTS_SCAN_LIMIT, offset + limit) if not conditions else _FTS_SCAN_LIMIT
+    pdf_fts_limit = (
+        min(_FTS_SCAN_LIMIT, offset + limit) if not conditions else _FTS_SCAN_LIMIT
+    )
 
     sql = f"""
         SELECT p.id, p.source_file, p.source_category, p.page_number,
@@ -185,7 +186,8 @@ def _description_select(
         conn.execute("SELECT 1 FROM pe_descriptions_fts LIMIT 0")
         # SEARCH-005: Bound the FTS scan (issue #60).
         desc_fts_limit = min(_FTS_SCAN_LIMIT, offset + limit)
-        rows = conn.execute(f"""
+        rows = conn.execute(
+            f"""
             SELECT d.id, d.pe_number, d.section_header, d.description_text,
                    d.source_file, d.fiscal_year,
                    bm25(pe_descriptions_fts) AS score
@@ -198,50 +200,61 @@ def _description_select(
             ) fts ON d.id = fts.rowid
             ORDER BY fts.score ASC
             LIMIT ? OFFSET ?
-        """, (fts_query, limit, offset)).fetchall()
+        """,
+            (fts_query, limit, offset),
+        ).fetchall()
         for row in rows:
             d = dict(row)
             score = d.pop("score", None)
             snippet = extract_snippet_highlighted(
                 str(d.get("description_text") or ""), raw_query, html=True, max_len=200
             )
-            results.append({
-                "result_type": "description",
-                "id": d["id"],
-                "source_file": d.get("source_file", ""),
-                "snippet": snippet,
-                "score": score,
-                "data": d,
-            })
+            results.append(
+                {
+                    "result_type": "description",
+                    "id": d["id"],
+                    "source_file": d.get("source_file", ""),
+                    "snippet": snippet,
+                    "score": score,
+                    "data": d,
+                }
+            )
         return results
     except (sqlite3.OperationalError, sqlite3.DatabaseError):
         pass  # FTS5 table doesn't exist, try LIKE fallback
 
     # LIKE fallback on pe_descriptions
     try:
-        rows = conn.execute("""
+        rows = conn.execute(
+            """
             SELECT id, pe_number, section_header, description_text,
                    source_file, fiscal_year
             FROM pe_descriptions
             WHERE description_text LIKE ?
             ORDER BY pe_number, fiscal_year
             LIMIT ? OFFSET ?
-        """, (f"%{raw_query}%", limit, offset)).fetchall()
+        """,
+            (f"%{raw_query}%", limit, offset),
+        ).fetchall()
         for row in rows:
             d = dict(row)
             snippet = extract_snippet_highlighted(
                 str(d.get("description_text") or ""), raw_query, html=True, max_len=200
             )
-            results.append({
-                "result_type": "description",
-                "id": d["id"],
-                "source_file": d.get("source_file", ""),
-                "snippet": snippet,
-                "score": None,
-                "data": d,
-            })
+            results.append(
+                {
+                    "result_type": "description",
+                    "id": d["id"],
+                    "source_file": d.get("source_file", ""),
+                    "snippet": snippet,
+                    "score": None,
+                    "data": d,
+                }
+            )
     except (sqlite3.OperationalError, sqlite3.DatabaseError):
-        logger.warning("pe_descriptions search failed for q=%r", raw_query, exc_info=True)
+        logger.warning(
+            "pe_descriptions search failed for q=%r", raw_query, exc_info=True
+        )
 
     return results
 
@@ -251,13 +264,45 @@ def _description_select(
     response_model=SearchResponse,
     summary="Full-text search",
     responses={
-        400: {"description": "Invalid search parameters", "content": {"application/json": {"example": {"error": "Bad request", "detail": "Invalid sort parameter", "status_code": 400}}}},
-        422: {"description": "Validation error", "content": {"application/json": {"example": {"error": "Validation error", "detail": "q: ensure this value has at least 1 characters", "status_code": 422}}}},
-        429: {"description": "Rate limit exceeded", "content": {"application/json": {"example": {"error": "Too many requests", "status_code": 429}}}},
+        400: {
+            "description": "Invalid search parameters",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "error": "Bad request",
+                        "detail": "Invalid sort parameter",
+                        "status_code": 400,
+                    }
+                }
+            },
+        },
+        422: {
+            "description": "Validation error",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "error": "Validation error",
+                        "detail": "q: ensure this value has at least 1 characters",
+                        "status_code": 422,
+                    }
+                }
+            },
+        },
+        429: {
+            "description": "Rate limit exceeded",
+            "content": {
+                "application/json": {
+                    "example": {"error": "Too many requests", "status_code": 429}
+                }
+            },
+        },
     },
 )
 def search(
-    q: str = Query(..., min_length=1, max_length=500, description="Search query string"),
+    q: str = Query(
+        ..., min_length=1, max_length=500, description="Search query string"
+    ),
+    filters: FilterParams = Depends(),
     type: str = Query(
         "both",
         description="Result type: 'both', 'excel', or 'pdf'",
@@ -272,12 +317,6 @@ def search(
         description="Sort order: 'relevance' (BM25) or 'amount_desc'",
         pattern="^(relevance|amount_desc)$",
     ),
-    # SEARCH-002: structured filters
-    fiscal_year: list[str] | None = Query(None, description="Filter by fiscal year(s)"),
-    service: list[str] | None = Query(None, description="Filter by service/org name"),
-    exhibit_type: list[str] | None = Query(None, description="Filter by exhibit type(s)"),
-    pe_number: list[str] | None = Query(None, description="Filter by PE number(s)"),
-    appropriation_code: list[str] | None = Query(None, description="Filter by appropriation code(s)"),
     limit: int = Query(20, ge=1, le=200, description="Max results per type"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     conn: sqlite3.Connection = Depends(get_db),
@@ -292,25 +331,15 @@ def search(
     - "descriptions": searches pe_descriptions only
     - "both": searches budget_lines/pdf_pages AND pe_descriptions
     """
-    # Guard against FastAPI FieldInfo defaults when called directly from tests
-    if not isinstance(fiscal_year, list):
-        fiscal_year = None
-    if not isinstance(service, list):
-        service = None
-    if not isinstance(exhibit_type, list):
-        exhibit_type = None
-    if not isinstance(pe_number, list):
-        pe_number = None
-    if not isinstance(appropriation_code, list):
-        appropriation_code = None
-
     # Validate source parameter
     if source not in ("budget_lines", "descriptions", "both"):
         source = "budget_lines"
 
     fts_query = sanitize_fts5_query(q)
     if not fts_query:
-        raise HTTPException(status_code=400, detail="Query contains no searchable terms")
+        raise HTTPException(
+            status_code=400, detail="Query contains no searchable terms"
+        )
 
     results: list[SearchResultItem] = []
     # Fetch limit+1 rows per type to detect if more results exist
@@ -326,17 +355,19 @@ def search(
                 sql, params = _budget_select(
                     fts_query=fts_query,
                     sort=sort,
-                    fiscal_year=fiscal_year,
-                    service=service,
-                    exhibit_type=exhibit_type,
+                    fiscal_year=filters.fiscal_year,
+                    service=filters.service,
+                    exhibit_type=filters.exhibit_type,
                     limit=fetch_limit,
                     offset=offset,
-                    pe_number=pe_number,
-                    appropriation_code=appropriation_code,
+                    pe_number=filters.pe_number,
+                    appropriation_code=filters.appropriation_code,
                 )
                 rows = conn.execute(sql, params).fetchall()
             except (sqlite3.OperationalError, sqlite3.DatabaseError):
-                logger.warning("Budget lines FTS query failed for q=%r", q, exc_info=True)
+                logger.warning(
+                    "Budget lines FTS query failed for q=%r", q, exc_info=True
+                )
                 rows = []
             if len(rows) > limit:
                 bl_has_more = True
@@ -350,20 +381,26 @@ def search(
                     q,
                     html=True,
                 )
-                results.append(SearchResultItem(
-                    result_type="budget_line",
-                    id=d["id"],
-                    source_file=d["source_file"],
-                    snippet=snippet,
-                    score=score,
-                    data=d,
-                ))
+                results.append(
+                    SearchResultItem(
+                        result_type="budget_line",
+                        id=d["id"],
+                        source_file=d["source_file"],
+                        snippet=snippet,
+                        score=score,
+                        data=d,
+                    )
+                )
 
         if type in ("both", "pdf"):
             try:
                 sql, params = _pdf_select(
-                    fts_query, fiscal_year, exhibit_type, fetch_limit, offset,
-                    service=service,
+                    fts_query,
+                    filters.fiscal_year,
+                    filters.exhibit_type,
+                    fetch_limit,
+                    offset,
+                    service=filters.service,
                 )
                 rows = conn.execute(sql, params).fetchall()
             except (sqlite3.OperationalError, sqlite3.DatabaseError):
@@ -375,15 +412,19 @@ def search(
             for row in rows:
                 d = dict(row)
                 score = d.pop("score", None)
-                snippet = extract_snippet_highlighted(str(d.get("page_text") or ""), q, html=True)
-                results.append(SearchResultItem(
-                    result_type="pdf_page",
-                    id=d["id"],
-                    source_file=d["source_file"],
-                    snippet=snippet,
-                    score=score,
-                    data=d,
-                ))
+                snippet = extract_snippet_highlighted(
+                    str(d.get("page_text") or ""), q, html=True
+                )
+                results.append(
+                    SearchResultItem(
+                        result_type="pdf_page",
+                        id=d["id"],
+                        source_file=d["source_file"],
+                        snippet=snippet,
+                        score=score,
+                        data=d,
+                    )
+                )
 
     # Search pe_descriptions when source is "descriptions" or "both"
     if source in ("descriptions", "both"):
@@ -392,14 +433,16 @@ def search(
             desc_has_more = True
             desc_results = desc_results[:limit]
         for dr in desc_results:
-            results.append(SearchResultItem(
-                result_type=dr["result_type"],
-                id=dr["id"],
-                source_file=dr["source_file"] or "",
-                snippet=dr["snippet"],
-                score=dr["score"],
-                data=dr["data"],
-            ))
+            results.append(
+                SearchResultItem(
+                    result_type=dr["result_type"],
+                    id=dr["id"],
+                    source_file=dr["source_file"] or "",
+                    snippet=dr["snippet"],
+                    score=dr["score"],
+                    data=dr["data"],
+                )
+            )
 
     bl_count = sum(1 for r in results if r.result_type == "budget_line")
     pdf_count = sum(1 for r in results if r.result_type == "pdf_page")
@@ -417,6 +460,7 @@ def search(
 
 
 # ── SEARCH-004: Search suggestions / autocomplete ────────────────────────────
+
 
 @router.get(
     "/suggest",
@@ -488,8 +532,14 @@ def suggest(
                 "  FROM budget_lines"
                 "  WHERE organization_name LIKE ? AND organization_name IS NOT NULL"
                 ") ORDER BY prio LIMIT ?",
-                (prefix_param, contains_param, prefix_param,
-                 contains_param, contains_param, limit * 3),
+                (
+                    prefix_param,
+                    contains_param,
+                    prefix_param,
+                    contains_param,
+                    contains_param,
+                    limit * 3,
+                ),
             ).fetchall()
             for r in rows:
                 if len(suggestions) >= limit:

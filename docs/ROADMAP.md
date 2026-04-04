@@ -349,23 +349,20 @@ Structural improvements identified during codebase review (April 2025). These ar
 not bugs — the current code works and is tested — but would reduce maintenance burden
 if the API surface grows.
 
-#### 1. API Route Parameter Sprawl
+#### 1. API Route Parameter Sprawl — ✅ RESOLVED
 
-Five route handlers accept 10–15 individual `Query()` parameters for the same set of
-filters (fiscal_year, service, exhibit_type, pe_number, appropriation_code, budget_type,
-min_amount, max_amount, sort_by, sort_dir, etc.):
+Extracted a shared `FilterParams` dependency class in `api/models.py` with 10 common
+query parameters (fiscal_year, service, exhibit_type, pe_number, appropriation_code,
+budget_type, min_amount, max_amount, q, exclude_summary). All 5 route handlers now use
+`filters: FilterParams = Depends()` instead of duplicated `Query()` definitions. The
+class includes a `where_kwargs()` helper for passing filters to `build_where_clause()`.
 
+Resolved routes:
 - `api/routes/search.py` → `search()`
 - `api/routes/budget_lines.py` → `list_budget_lines()`
 - `api/routes/download.py` → `download()`
-- `api/routes/aggregations.py` → `get_aggregations()`
+- `api/routes/aggregations.py` → `aggregate()`
 - `api/routes/facets.py` → `get_facets()`
-
-**Suggested fix:** Extract a shared `FilterParams` Pydantic model in `api/models.py`
-and use `Depends(FilterParams)` in each route. This would:
-- Eliminate ~50 lines of duplicated `Query()` definitions
-- Ensure filter names/types stay consistent across endpoints
-- Make it trivial to add a new filter dimension (one model change vs. 5 route changes)
 
 #### 2. Duplicate WHERE Clause Construction
 

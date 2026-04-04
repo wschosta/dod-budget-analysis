@@ -10,9 +10,9 @@ import sqlite3
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from fastapi import Query as FQuery
 
 from api.database import get_db
+from api.models import FilterParams
 from utils.cache import TTLCache
 from utils.query import _add_in_condition
 
@@ -47,14 +47,7 @@ def _build_conditions(
 
 @router.get("", summary="Faceted counts for filter dropdowns")
 def get_facets(
-    fiscal_year: list[str] | None = FQuery(
-        None, description="Current fiscal year filter(s)"),
-    service: list[str] | None = FQuery(
-        None, description="Current service filter(s)"),
-    exhibit_type: list[str] | None = FQuery(
-        None, description="Current exhibit type filter(s)"),
-    budget_type: list[str] | None = FQuery(
-        None, description="Current budget type filter(s)"),
+    filters: FilterParams = Depends(),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
     """Return per-dimension facet counts with cross-filtering.
@@ -65,10 +58,10 @@ def get_facets(
     """
     cache_key = (
         "facets",
-        tuple(sorted(fiscal_year or [])),
-        tuple(sorted(service or [])),
-        tuple(sorted(exhibit_type or [])),
-        tuple(sorted(budget_type or [])),
+        tuple(sorted(filters.fiscal_year or [])),
+        tuple(sorted(filters.service or [])),
+        tuple(sorted(filters.exhibit_type or [])),
+        tuple(sorted(filters.budget_type or [])),
     )
     cached = _facets_cache.get(cache_key)
     if cached is not None:
@@ -79,31 +72,51 @@ def get_facets(
     # Facet definitions: (result_key, exclude_dim, column, not_null_cond, order, extra_sql)
     _FACET_DEFS: list[tuple[str, str, str, str, str, str, str]] = [
         # (key, dim, select_cols, from_clause, not_null, group_col, order)
-        ("fiscal_year", "fiscal_year",
-         "fiscal_year AS value, COUNT(*) AS count",
-         "budget_lines",
-         "fiscal_year IS NOT NULL",
-         "fiscal_year", "fiscal_year DESC"),
-        ("service", "service",
-         "organization_name AS value, COUNT(*) AS count",
-         "budget_lines",
-         "organization_name IS NOT NULL AND organization_name != ''",
-         "organization_name", "COUNT(*) DESC"),
-        ("exhibit_type", "exhibit_type",
-         "b.exhibit_type AS value, COALESCE(et.display_name, b.exhibit_type) AS display_name, COUNT(*) AS count",
-         "budget_lines b LEFT JOIN exhibit_types et ON et.code = b.exhibit_type",
-         "exhibit_type IS NOT NULL",
-         "b.exhibit_type", "COUNT(*) DESC"),
-        ("budget_type", "budget_type",
-         "budget_type AS value, COUNT(*) AS count",
-         "budget_lines",
-         "budget_type IS NOT NULL AND budget_type != ''",
-         "budget_type", "COUNT(*) DESC"),
+        (
+            "fiscal_year",
+            "fiscal_year",
+            "fiscal_year AS value, COUNT(*) AS count",
+            "budget_lines",
+            "fiscal_year IS NOT NULL",
+            "fiscal_year",
+            "fiscal_year DESC",
+        ),
+        (
+            "service",
+            "service",
+            "organization_name AS value, COUNT(*) AS count",
+            "budget_lines",
+            "organization_name IS NOT NULL AND organization_name != ''",
+            "organization_name",
+            "COUNT(*) DESC",
+        ),
+        (
+            "exhibit_type",
+            "exhibit_type",
+            "b.exhibit_type AS value, COALESCE(et.display_name, b.exhibit_type) AS display_name, COUNT(*) AS count",
+            "budget_lines b LEFT JOIN exhibit_types et ON et.code = b.exhibit_type",
+            "exhibit_type IS NOT NULL",
+            "b.exhibit_type",
+            "COUNT(*) DESC",
+        ),
+        (
+            "budget_type",
+            "budget_type",
+            "budget_type AS value, COUNT(*) AS count",
+            "budget_lines",
+            "budget_type IS NOT NULL AND budget_type != ''",
+            "budget_type",
+            "COUNT(*) DESC",
+        ),
     ]
 
     for key, dim, select_cols, from_clause, not_null, group_col, order in _FACET_DEFS:
         where, params = _build_conditions(
-            fiscal_year, service, exhibit_type, budget_type, exclude_dim=dim,
+            filters.fiscal_year,
+            filters.service,
+            filters.exhibit_type,
+            filters.budget_type,
+            exclude_dim=dim,
         )
         if where:
             clause = f"{where} AND {not_null}"

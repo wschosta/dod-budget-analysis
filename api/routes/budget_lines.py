@@ -11,7 +11,12 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.database import get_db
-from api.models import BudgetLineDetailOut, BudgetLineOut, PaginatedResponse
+from api.models import (
+    BudgetLineDetailOut,
+    BudgetLineOut,
+    FilterParams,
+    PaginatedResponse,
+)
 from utils.query import (
     ALLOWED_SORT_COLUMNS,
     EXCLUDE_SUMMARY_SQL,
@@ -46,16 +51,7 @@ _SELECT_ALL_COLUMNS = """
 
 @router.get("", response_model=PaginatedResponse, summary="List budget lines")
 def list_budget_lines(
-    fiscal_year: list[str] | None = Query(None, description="Filter by fiscal year(s)"),
-    service: list[str] | None = Query(None, description="Filter by service/org name"),
-    exhibit_type: list[str] | None = Query(None, description="Filter by exhibit type(s)"),
-    pe_number: list[str] | None = Query(None, description="Filter by PE number(s)"),
-    appropriation_code: list[str] | None = Query(None, description="Filter by appropriation"),
-    budget_type: list[str] | None = Query(None, description="Filter by budget type (RDT&E, Procurement, etc.)"),
-    exclude_summary: bool = Query(False, description="Exclude summary exhibits (P-1, R-1, etc.) to avoid double-counting"),
-    q: str | None = Query(None, max_length=500, description="Free-text search across account/line-item titles"),
-    min_amount: float | None = Query(None, description="Min FY2026 request amount (thousands)"),
-    max_amount: float | None = Query(None, description="Max FY2026 request amount (thousands)"),
+    filters: FilterParams = Depends(),
     sort_by: str = Query("id", description="Column to sort by"),
     sort_dir: str = Query("asc", pattern="^(asc|desc)$", description="Sort direction"),
     limit: int = Query(25, ge=1, le=500, description="Max items per page"),
@@ -71,8 +67,8 @@ def list_budget_lines(
 
     # FTS5 free-text search: resolve matching row IDs first
     fts_ids: list[int] | None = None
-    if q:
-        safe_q = sanitize_fts5_query(q)
+    if filters.q:
+        safe_q = sanitize_fts5_query(filters.q)
         if safe_q:
             try:
                 fts_rows = conn.execute(
@@ -83,21 +79,11 @@ def list_budget_lines(
             except (sqlite3.OperationalError, sqlite3.DatabaseError):
                 fts_ids = []  # FTS table missing → no matches
 
-    where, params = build_where_clause(
-        fiscal_year=fiscal_year,
-        service=service,
-        exhibit_type=exhibit_type,
-        pe_number=pe_number,
-        appropriation_code=appropriation_code,
-        budget_type=budget_type,
-        min_amount=min_amount,
-        max_amount=max_amount,
-        fts_ids=fts_ids,
-    )
+    where, params = build_where_clause(**filters.where_kwargs(fts_ids=fts_ids))
 
     # Exclude summary exhibits (P-1, R-1, O-1, M-1, C-1, RF-1, P-1R) to avoid
     # double-counting with detail exhibits
-    if exclude_summary:
+    if filters.exclude_summary:
         if where:
             where += f" AND {EXCLUDE_SUMMARY_SQL}"
         else:
@@ -118,8 +104,11 @@ def list_budget_lines(
     pag = compute_pagination(offset, limit, total)
 
     return PaginatedResponse(
-        total=total, limit=limit, offset=offset,
-        items=items, **pag,
+        total=total,
+        limit=limit,
+        offset=offset,
+        items=items,
+        **pag,
     )
 
 
