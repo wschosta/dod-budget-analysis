@@ -393,7 +393,6 @@ def create_app(db_path: Path | None = None) -> FastAPI:
         response = await call_next(request)
         duration_ms = (time.monotonic() - start) * 1000
 
-        # Track response time (deque auto-caps at maxlen)
         _metrics["response_times_ms"].append(duration_ms)
 
         # Track server errors

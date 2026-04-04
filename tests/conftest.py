@@ -286,7 +286,6 @@ _C1_ROWS = [
      "P-2345", "Barracks Replacement, Fort Bragg", 45_000.0, 30_000.0),
 ]
 
-# DONE TEST-001: P-5 Procurement Detail fixtures (columns match p5 header above)
 _P5_ROWS = [
     # account, pe, line_item, title, unit, py_qty, cy_qty, est_qty,
     # py_unit_cost, cy_unit_cost, est_unit_cost, justification
@@ -298,7 +297,6 @@ _P5_ROWS = [
      18_000.0, 18_500.0, 19_000.0, "Replaces aging L-model fleet."),
 ]
 
-# DONE TEST-001: R-2 RDT&E Detail Schedule fixtures
 _R2_ROWS = [
     # account, pe, sub_element, title, prior_year, current_year, estimate,
     # metric, planned_achievement
@@ -315,12 +313,11 @@ _R2_ROWS = [
 def fixtures_dir(tmp_path_factory):
     """Return a temporary directory populated with deterministic fixture files.
 
-    Creates one .xlsx per summary exhibit type (TODO 1.C1-a) and two PDFs
-    (with and without a table layout) (TODO 1.C1-b).
+    Creates one .xlsx per summary exhibit type and two PDFs
+    (with and without a table layout).
     """
     d = tmp_path_factory.mktemp("budget_fixtures")
 
-    # DONE 1.C1-a: Excel fixtures (summary exhibits)
     # NOTE: filenames must NOT contain "_display" — the builder excludes those
     # as duplicate formatting variants of Comptroller data.
     _create_exhibit_xlsx(d / "p1.xlsx", "p1", _P1_ROWS)
@@ -333,7 +330,6 @@ def fixtures_dir(tmp_path_factory):
     _create_exhibit_xlsx(d / "p5.xlsx", "p5", _P5_ROWS)
     _create_exhibit_xlsx(d / "r2.xlsx", "r2", _R2_ROWS)
 
-    # DONE 1.C1-b: PDF fixtures
     _create_sample_pdf(d / "text_only.pdf", title="Budget Overview FY2026",
                        include_table=False)
     _create_sample_pdf(d / "with_table.pdf", title="RDT&E Justification FY2026",

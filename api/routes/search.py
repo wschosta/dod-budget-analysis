@@ -27,21 +27,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/search", tags=["search"])
 
 
-def _snippet(text: str | None, query: str | None, max_len: int = 200) -> str | None:
-    """Extract snippet from text around first matching term.
-
-    OPT-FMT-002: Delegates to shared extract_snippet_highlighted() in utils/formatting.
-    Kept here for backward compatibility with existing tests.
-    """
-    if not text or not query:
-        return None
-    return extract_snippet_highlighted(text, query, max_len=max_len, html=False)
-
 
 # ── SEARCH-001: BM25-ranked budget lines query ───────────────────────────────
-# Use FTS5 bm25() function for relevance scoring.
-# sort=relevance orders by BM25 score (lower magnitude = better rank).
-# sort=amount_desc orders by the current FY request amount.
 
 # SEARCH-005: FTS scan cap (issue #60).
 # Without this, the FTS subquery materialises *all* matching rows before the
@@ -478,60 +465,37 @@ def suggest(
     except sqlite3.OperationalError:
         pass  # pe_index table may not exist
 
-    # line_item_title (prefix match, then contains)
+    # Budget line fields in one query: prefix titles first, then contains
+    # matches for titles, account, and org — ordered by priority.
     if len(suggestions) < limit:
         try:
-            for r in conn.execute(
-                "SELECT DISTINCT line_item_title AS value "
-                "FROM budget_lines "
-                "WHERE line_item_title LIKE ? AND line_item_title IS NOT NULL "
-                "LIMIT ?",
-                (prefix_param, limit - len(suggestions)),
-            ).fetchall():
-                _add(r["value"], "line_item_title")
+            rows = conn.execute(
+                "SELECT value, field FROM ("
+                "  SELECT DISTINCT line_item_title AS value, 'line_item_title' AS field, 1 AS prio"
+                "  FROM budget_lines"
+                "  WHERE line_item_title LIKE ? AND line_item_title IS NOT NULL"
+                "  UNION ALL"
+                "  SELECT DISTINCT line_item_title, 'line_item_title', 2"
+                "  FROM budget_lines"
+                "  WHERE line_item_title LIKE ? AND line_item_title NOT LIKE ?"
+                "  AND line_item_title IS NOT NULL"
+                "  UNION ALL"
+                "  SELECT DISTINCT account_title, 'account_title', 3"
+                "  FROM budget_lines"
+                "  WHERE account_title LIKE ? AND account_title IS NOT NULL"
+                "  UNION ALL"
+                "  SELECT DISTINCT organization_name, 'organization_name', 4"
+                "  FROM budget_lines"
+                "  WHERE organization_name LIKE ? AND organization_name IS NOT NULL"
+                ") ORDER BY prio LIMIT ?",
+                (prefix_param, contains_param, prefix_param,
+                 contains_param, contains_param, limit * 3),
+            ).fetchall()
+            for r in rows:
+                if len(suggestions) >= limit:
+                    break
+                _add(r["value"], r["field"])
         except sqlite3.OperationalError:
-            logger.debug("Suggest query failed for line_item_title prefix", exc_info=True)
-
-    if len(suggestions) < limit:
-        try:
-            for r in conn.execute(
-                "SELECT DISTINCT line_item_title AS value "
-                "FROM budget_lines "
-                "WHERE line_item_title LIKE ? AND line_item_title NOT LIKE ? "
-                "AND line_item_title IS NOT NULL "
-                "LIMIT ?",
-                (contains_param, prefix_param, limit - len(suggestions)),
-            ).fetchall():
-                _add(r["value"], "line_item_title")
-        except sqlite3.OperationalError:
-            logger.debug("Suggest query failed for line_item_title contains", exc_info=True)
-
-    # account_title
-    if len(suggestions) < limit:
-        try:
-            for r in conn.execute(
-                "SELECT DISTINCT account_title AS value "
-                "FROM budget_lines "
-                "WHERE account_title LIKE ? AND account_title IS NOT NULL "
-                "LIMIT ?",
-                (contains_param, limit - len(suggestions)),
-            ).fetchall():
-                _add(r["value"], "account_title")
-        except sqlite3.OperationalError:
-            logger.debug("Suggest query failed for account_title", exc_info=True)
-
-    # organization_name
-    if len(suggestions) < limit:
-        try:
-            for r in conn.execute(
-                "SELECT DISTINCT organization_name AS value "
-                "FROM budget_lines "
-                "WHERE organization_name LIKE ? AND organization_name IS NOT NULL "
-                "LIMIT ?",
-                (contains_param, limit - len(suggestions)),
-            ).fetchall():
-                _add(r["value"], "organization_name")
-        except sqlite3.OperationalError:
-            logger.debug("Suggest query failed for organization_name", exc_info=True)
+            logger.debug("Suggest query failed", exc_info=True)
 
     return suggestions[:limit]

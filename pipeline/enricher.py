@@ -33,6 +33,7 @@ from pathlib import Path
 
 from utils import get_connection
 from utils.patterns import PE_NUMBER, FISCAL_YEAR
+from utils.query import make_placeholders
 from utils.pdf_sections import parse_narrative_sections, detect_project_boundaries
 
 # Check _HAS_ANTHROPIC once at Phase 3 entry rather than per-batch.
@@ -611,7 +612,7 @@ def run_phase1(conn: sqlite3.Connection, stop_event: threading.Event | None = No
                 JOIN pdf_pages pp ON pp.id = ppn.pdf_page_id
                 WHERE ppn.pe_number IN ({ph})
                   AND pp.page_text IS NOT NULL
-            """.format(ph=",".join("?" for _ in pe_list)), pe_list).fetchall()
+            """.format(ph=make_placeholders(pe_list)), pe_list).fetchall()
             for pe, text in text_rows:
                 if len(pe_texts[pe]) < 10:
                     pe_texts[pe].append(text)
@@ -632,7 +633,7 @@ def run_phase1(conn: sqlite3.Connection, stop_event: threading.Event | None = No
                 WHERE ppn.pe_number IN ({ph})
                 GROUP BY ppn.pe_number, pp.source_category, pp.exhibit_type
                 ORDER BY ppn.pe_number, cnt DESC
-            """.format(ph=",".join("?" for _ in pe_list)), pe_list).fetchall()
+            """.format(ph=make_placeholders(pe_list)), pe_list).fetchall()
             for pe, src_cat, et, cnt in meta_rows:
                 if src_cat and pe_org[pe] is None:
                     pe_org[pe] = src_cat
@@ -651,7 +652,7 @@ def run_phase1(conn: sqlite3.Connection, stop_event: threading.Event | None = No
                 WHERE ppn.pe_number IN ({ph})
                   AND ppn.fiscal_year IS NOT NULL
                 GROUP BY ppn.pe_number, ppn.fiscal_year
-            """.format(ph=",".join("?" for _ in pe_list)), pe_list).fetchall()
+            """.format(ph=make_placeholders(pe_list)), pe_list).fetchall()
             for pe, fy in fy_rows:
                 pe_fys[pe].append(fy)
         except sqlite3.OperationalError:
@@ -664,7 +665,7 @@ def run_phase1(conn: sqlite3.Connection, stop_event: threading.Event | None = No
                 WHERE ppn.pe_number IN ({ph})
                   AND pp.exhibit_type IS NOT NULL
                 GROUP BY ppn.pe_number, pp.exhibit_type
-            """.format(ph=",".join("?" for _ in pe_list)), pe_list).fetchall()
+            """.format(ph=make_placeholders(pe_list)), pe_list).fetchall()
             for pe, et in et_rows:
                 pe_ets[pe].append(et)
         except sqlite3.OperationalError:
