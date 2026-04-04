@@ -6,6 +6,7 @@ Covers both unit tests (row iterator, column list) and integration tests
 
 Consolidated from test_download_route.py and test_download_streaming.py.
 """
+
 import csv
 import io
 import json
@@ -17,11 +18,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from api.models import FilterParams
 from api.routes.download import _iter_rows, _DOWNLOAD_COLUMNS, _build_download_sql
 from utils.query import ALLOWED_SORT_COLUMNS as _ALLOWED_SORT
 from fastapi.testclient import TestClient
 from api.app import create_app
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Unit tests — download internals
@@ -59,15 +60,11 @@ class TestIterRows:
         assert len(rows) == 3
 
     def test_with_where_params(self, dl_db):
-        rows = list(_iter_rows(
-            dl_db, "SELECT * FROM budget_lines WHERE id = ?", [1]
-        ))
+        rows = list(_iter_rows(dl_db, "SELECT * FROM budget_lines WHERE id = ?", [1]))
         assert len(rows) == 1
 
     def test_empty_result(self, dl_db):
-        rows = list(_iter_rows(
-            dl_db, "SELECT * FROM budget_lines WHERE id = ?", [999]
-        ))
+        rows = list(_iter_rows(dl_db, "SELECT * FROM budget_lines WHERE id = ?", [999]))
         assert len(rows) == 0
 
 
@@ -94,14 +91,19 @@ class TestDownloadAllowedSort:
 class TestBuildDownloadSql:
     def test_appropriation_code_filter(self, dl_db):
         """appropriation_code filter restricts results."""
-        dl_db.execute("UPDATE budget_lines SET appropriation_code = '3010' WHERE id = 1")
-        dl_db.execute("UPDATE budget_lines SET appropriation_code = '1506' WHERE id = 2")
+        dl_db.execute(
+            "UPDATE budget_lines SET appropriation_code = '3010' WHERE id = 1"
+        )
+        dl_db.execute(
+            "UPDATE budget_lines SET appropriation_code = '1506' WHERE id = 2"
+        )
         dl_db.commit()
 
         sql, params, total = _build_download_sql(
-            fiscal_year=None, service=None, exhibit_type=None,
-            pe_number=None, appropriation_code=["3010"], q=None,
-            conn=dl_db, limit=100, export_cols=_DOWNLOAD_COLUMNS,
+            filters=FilterParams(appropriation_code=["3010"]),
+            conn=dl_db,
+            limit=100,
+            export_cols=_DOWNLOAD_COLUMNS,
         )
         assert total == 1
         rows = list(_iter_rows(dl_db, sql, params))
@@ -109,26 +111,34 @@ class TestBuildDownloadSql:
 
     def test_min_max_amount_filter(self, dl_db):
         """min_amount and max_amount restrict results."""
-        dl_db.execute("UPDATE budget_lines SET amount_fy2026_request = 500 WHERE id = 1")
-        dl_db.execute("UPDATE budget_lines SET amount_fy2026_request = 1500 WHERE id = 2")
-        dl_db.execute("UPDATE budget_lines SET amount_fy2026_request = 3000 WHERE id = 3")
+        dl_db.execute(
+            "UPDATE budget_lines SET amount_fy2026_request = 500 WHERE id = 1"
+        )
+        dl_db.execute(
+            "UPDATE budget_lines SET amount_fy2026_request = 1500 WHERE id = 2"
+        )
+        dl_db.execute(
+            "UPDATE budget_lines SET amount_fy2026_request = 3000 WHERE id = 3"
+        )
         dl_db.commit()
 
         sql, params, total = _build_download_sql(
-            fiscal_year=None, service=None, exhibit_type=None,
-            pe_number=None, appropriation_code=None, q=None,
-            conn=dl_db, limit=100, export_cols=_DOWNLOAD_COLUMNS,
-            min_amount=1000.0, max_amount=2000.0,
+            filters=FilterParams(min_amount=1000.0, max_amount=2000.0),
+            conn=dl_db,
+            limit=100,
+            export_cols=_DOWNLOAD_COLUMNS,
         )
         assert total == 1  # Only id=2 with amount=1500
 
     def test_sort_order_applied(self, dl_db):
         """sort_by and sort_dir affect result ordering."""
         sql_desc, params_desc, _ = _build_download_sql(
-            fiscal_year=None, service=None, exhibit_type=None,
-            pe_number=None, appropriation_code=None, q=None,
-            conn=dl_db, limit=100, export_cols=_DOWNLOAD_COLUMNS,
-            sort_by="id", sort_dir="desc",
+            filters=FilterParams(),
+            conn=dl_db,
+            limit=100,
+            export_cols=_DOWNLOAD_COLUMNS,
+            sort_by="id",
+            sort_dir="desc",
         )
         rows = list(_iter_rows(dl_db, sql_desc, params_desc))
         ids = [r[0] for r in rows]
@@ -143,7 +153,9 @@ class TestBuildDownloadSql:
 def _strip_csv_comments(text: str) -> str:
     """Remove EAGLE-6 source attribution comment lines (starting with '#') from CSV text."""
     lines = text.split("\n")
-    data_lines = [line for line in lines if not line.startswith('"#') and not line.startswith("#")]
+    data_lines = [
+        line for line in lines if not line.startswith('"#') and not line.startswith("#")
+    ]
     return "\n".join(data_lines)
 
 
@@ -163,6 +175,7 @@ def _strip_ndjson_metadata(lines: list[str]) -> list[str]:
 def clear_rate_counters():
     """Reset global rate-limit counters before each test (avoid 429 in test suite)."""
     import api.app as _app_mod
+
     _app_mod._rate_counters.clear()
     yield
     _app_mod._rate_counters.clear()
@@ -215,12 +228,15 @@ def dl_client(tmp_path_factory):
     for i in range(20):
         service = "Army" if i % 2 == 0 else "Navy"
         fy = "FY 2026" if i < 15 else "FY 2025"
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO budget_lines
                 (source_file, exhibit_type, fiscal_year, organization_name,
                  account_title, line_item_title, amount_fy2026_request)
             VALUES (?, 'p1', ?, ?, 'Account Title', ?, ?)
-        """, (f"file_{i}.xlsx", fy, service, f"Line Item {i}", float(i * 1000)))
+        """,
+            (f"file_{i}.xlsx", fy, service, f"Line Item {i}", float(i * 1000)),
+        )
     conn.commit()
     conn.close()
 
@@ -229,6 +245,7 @@ def dl_client(tmp_path_factory):
 
 
 # ── CSV format tests ─────────────────────────────────────────────────────────
+
 
 class TestCSVDownload:
     def test_csv_returns_200(self, dl_client):
@@ -267,6 +284,7 @@ class TestCSVDownload:
 
 # ── NDJSON format tests ──────────────────────────────────────────────────────
 
+
 class TestNDJSONDownload:
     def test_ndjson_returns_200(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=json")
@@ -303,6 +321,7 @@ class TestNDJSONDownload:
 
 # ── Filter parameter tests ───────────────────────────────────────────────────
 
+
 class TestDownloadFilters:
     def test_service_filter_narrows_results(self, dl_client):
         resp = dl_client.get("/api/v1/download?fmt=csv&service=Army")
@@ -330,6 +349,7 @@ class TestDownloadFilters:
 
 
 # ── Limit parameter tests ───────────────────────────────────────────────────
+
 
 class TestDownloadLimit:
     def test_limit_caps_output_rows(self, dl_client):

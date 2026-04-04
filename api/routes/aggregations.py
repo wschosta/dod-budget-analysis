@@ -19,9 +19,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi import Query as FQuery
 
 from api.database import get_db
-from api.models import AggregationResponse, AggregationRow
+from api.models import AggregationResponse, AggregationRow, FilterParams
 from utils.cache import TTLCache, make_cache_key
-from utils.database import BUDGET_TYPE_CASE_EXPR, _validate_identifier, get_amount_columns
+from utils.database import (
+    BUDGET_TYPE_CASE_EXPR,
+    _validate_identifier,
+    get_amount_columns,
+)
 from utils.query import build_where_clause, compute_yoy_change
 
 _logger = logging.getLogger(__name__)
@@ -29,12 +33,12 @@ _logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/aggregations", tags=["aggregations"])
 
 _ALLOWED_GROUPS = {
-    "service":        "organization_name",
-    "fiscal_year":    "fiscal_year",
-    "appropriation":  "appropriation_code",
-    "exhibit_type":   "exhibit_type",
+    "service": "organization_name",
+    "fiscal_year": "fiscal_year",
+    "appropriation": "appropriation_code",
+    "exhibit_type": "exhibit_type",
     "budget_activity": "budget_activity_title",
-    "budget_type":    "budget_type",
+    "budget_type": "budget_type",
 }
 
 # OPT-AGG-001: 600-second TTL cache keyed on filter params (data changes only on DB rebuild)
@@ -49,8 +53,12 @@ def _cache_key(
     appropriation_code: list[str] | None = None,
 ) -> tuple:
     return make_cache_key(
-        "agg", group_by, fiscal_year, service,
-        exhibit_type, appropriation_code,
+        "agg",
+        group_by,
+        fiscal_year,
+        service,
+        exhibit_type,
+        appropriation_code,
     )
 
 
@@ -59,8 +67,26 @@ def _cache_key(
     response_model=AggregationResponse,
     summary="Aggregate budget data",
     responses={
-        400: {"description": "Invalid group_by parameter", "content": {"application/json": {"example": {"error": "Bad request", "detail": "group_by must be one of: ['appropriation', 'budget_activity', 'exhibit_type', 'fiscal_year', 'service']", "status_code": 400}}}},
-        429: {"description": "Rate limit exceeded", "content": {"application/json": {"example": {"error": "Too many requests", "status_code": 429}}}},
+        400: {
+            "description": "Invalid group_by parameter",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "error": "Bad request",
+                        "detail": "group_by must be one of: ['appropriation', 'budget_activity', 'exhibit_type', 'fiscal_year', 'service']",
+                        "status_code": 400,
+                    }
+                }
+            },
+        },
+        429: {
+            "description": "Rate limit exceeded",
+            "content": {
+                "application/json": {
+                    "example": {"error": "Too many requests", "status_code": 429}
+                }
+            },
+        },
     },
 )
 def aggregate(
@@ -71,10 +97,7 @@ def aggregate(
             "appropriation, exhibit_type, budget_activity"
         ),
     ),
-    fiscal_year: list[str] | None = FQuery(None, description="Pre-filter by fiscal year(s)"),
-    service: list[str] | None = FQuery(None, description="Pre-filter by service name"),
-    exhibit_type: list[str] | None = FQuery(None, description="Pre-filter by exhibit type"),
-    appropriation_code: list[str] | None = FQuery(None, description="Pre-filter by appropriation code(s)"),
+    filters: FilterParams = Depends(),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> AggregationResponse:
     """Aggregate budget totals grouped by the specified dimension.
@@ -91,8 +114,13 @@ def aggregate(
         )
 
     # OPT-AGG-001: Check cache before querying
-    key = _cache_key(group_by, fiscal_year, service, exhibit_type,
-                     appropriation_code=appropriation_code)
+    key = _cache_key(
+        group_by,
+        filters.fiscal_year,
+        filters.service,
+        filters.exhibit_type,
+        appropriation_code=filters.appropriation_code,
+    )
     cached = _agg_cache.get(key)
     if cached is not None:
         return cached
@@ -102,22 +130,24 @@ def aggregate(
     if group_by == "budget_type":
         col = BUDGET_TYPE_CASE_EXPR
     where, params = build_where_clause(
-        fiscal_year=fiscal_year,
-        service=service,
-        exhibit_type=exhibit_type,
-        appropriation_code=appropriation_code,
+        fiscal_year=filters.fiscal_year,
+        service=filters.service,
+        exhibit_type=filters.exhibit_type,
+        appropriation_code=filters.appropriation_code,
     )
 
     # AGG-001: Discover FY amount columns dynamically
     amount_cols = get_amount_columns(conn)
     if not amount_cols:
-        amount_cols = ["amount_fy2024_actual", "amount_fy2025_enacted", "amount_fy2026_request"]
+        amount_cols = [
+            "amount_fy2024_actual",
+            "amount_fy2025_enacted",
+            "amount_fy2026_request",
+        ]
     for c in amount_cols:
         _validate_identifier(c, "column name")
 
-    sum_exprs = ",\n            ".join(
-        f"SUM({c}) AS {c}" for c in amount_cols
-    )
+    sum_exprs = ",\n            ".join(f"SUM({c}) AS {c}" for c in amount_cols)
 
     latest_count_expr = f"COUNT({amount_cols[-1]}) AS rows_with_amount"
     sql = f"""
@@ -143,9 +173,7 @@ def aggregate(
     fy25_col = next((c for c in amount_cols if "fy2025_enacted" in c), None)
     fy24_col = next((c for c in amount_cols if "fy2024_actual" in c), None)
 
-    grand_total = sum(
-        (r.get(latest_col) or 0) for r in raw_rows
-    ) if latest_col else 0
+    grand_total = sum((r.get(latest_col) or 0) for r in raw_rows) if latest_col else 0
 
     enriched: list[AggregationRow] = []
     for r in raw_rows:
@@ -160,17 +188,19 @@ def aggregate(
 
         fy_totals = {c: r.get(c) for c in amount_cols}
 
-        enriched.append(AggregationRow(
-            group_value=r.get("group_value"),
-            row_count=r.get("row_count", 0),
-            rows_with_amount=r.get("rows_with_amount"),
-            total_fy2026_request=r.get(fy26_col) if fy26_col else latest_val,
-            total_fy2025_enacted=r.get(fy25_col),
-            total_fy2024_actual=r.get(fy24_col),
-            fy_totals=fy_totals,
-            pct_of_total=pct_of_total,
-            yoy_change_pct=yoy_change_pct,
-        ))
+        enriched.append(
+            AggregationRow(
+                group_value=r.get("group_value"),
+                row_count=r.get("row_count", 0),
+                rows_with_amount=r.get("rows_with_amount"),
+                total_fy2026_request=r.get(fy26_col) if fy26_col else latest_val,
+                total_fy2025_enacted=r.get(fy25_col),
+                total_fy2024_actual=r.get(fy24_col),
+                fy_totals=fy_totals,
+                pct_of_total=pct_of_total,
+                yoy_change_pct=yoy_change_pct,
+            )
+        )
 
     result = AggregationResponse(group_by=group_by, rows=enriched)
     _agg_cache.set(key, result)
@@ -183,7 +213,9 @@ _hierarchy_cache: TTLCache = TTLCache(maxsize=16, ttl_seconds=600)
 @router.get("/hierarchy", summary="Hierarchical budget breakdown for treemap")
 def hierarchy(
     fiscal_year: str | None = FQuery(None, description="Filter by fiscal year"),
-    service: str | None = FQuery(None, description="Filter by service/organization name"),
+    service: str | None = FQuery(
+        None, description="Filter by service/organization name"
+    ),
     exhibit_type: str | None = FQuery(None, description="Filter by exhibit type"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
@@ -205,8 +237,8 @@ def hierarchy(
 
     prev_amount_expr = (
         f"SUM(COALESCE({prior_col}, 0)) AS prev_amount"
-        if prior_col else
-        "NULL AS prev_amount"
+        if prior_col
+        else "NULL AS prev_amount"
     )
 
     conditions: list[str] = [
@@ -249,7 +281,8 @@ def hierarchy(
         d = dict(r)
         d["pct_of_total"] = (
             round(d["amount"] / grand_total * 100, 2)
-            if grand_total and d["amount"] else None
+            if grand_total and d["amount"]
+            else None
         )
         items.append(d)
 
@@ -279,18 +312,17 @@ def warm_caches(db_path: Path) -> None:
     try:
         conn = _sqlite3.connect(str(db_path))
         conn.row_factory = _sqlite3.Row
-        _logger.info("OPT-AGG-002: warming aggregation caches for %d group keys",
-                     len(_WARMUP_GROUP_KEYS))
+        _logger.info(
+            "OPT-AGG-002: warming aggregation caches for %d group keys",
+            len(_WARMUP_GROUP_KEYS),
+        )
         for grp in _WARMUP_GROUP_KEYS:
             try:
                 # Re-use the request handler logic by calling aggregate() directly.
                 # We pass conn explicitly; no FastAPI Depends() needed here.
                 aggregate(
                     group_by=grp,
-                    fiscal_year=None,
-                    service=None,
-                    exhibit_type=None,
-                    appropriation_code=None,
+                    filters=FilterParams(),
                     conn=conn,
                 )
             except Exception as exc:  # noqa: BLE001
