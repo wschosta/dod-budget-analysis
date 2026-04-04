@@ -19,7 +19,6 @@ from api.models import (
 )
 from utils.query import (
     ALLOWED_SORT_COLUMNS,
-    EXCLUDE_SUMMARY_SQL,
     build_where_clause,
     compute_pagination,
 )
@@ -80,14 +79,6 @@ def list_budget_lines(
                 fts_ids = []  # FTS table missing → no matches
 
     where, params = build_where_clause(**filters.where_kwargs(fts_ids=fts_ids))
-
-    # Exclude summary exhibits (P-1, R-1, O-1, M-1, C-1, RF-1, P-1R) to avoid
-    # double-counting with detail exhibits
-    if filters.exclude_summary:
-        if where:
-            where += f" AND {EXCLUDE_SUMMARY_SQL}"
-        else:
-            where = f"WHERE {EXCLUDE_SUMMARY_SQL}"
 
     direction = "DESC" if sort_dir == "desc" else "ASC"
 

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query
 from api.database import get_db
 from utils.cache import TTLCache
 from utils.database import BUDGET_TYPE_CASE_EXPR
-from utils.query import EXCLUDE_SUMMARY_SQL, detect_fy_columns
+from utils.query import build_where_clause, detect_fy_columns
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -56,28 +56,20 @@ def dashboard_summary(
     # FIX-006: Exclude summary exhibits (p1, r1, o1, m1, c1, rf1, p1r) to avoid
     # double-counting with detail exhibits. Also exclude rows with invalid
     # fiscal_year values (non-numeric like "Details").
-    summary_filter = (
-        f"{EXCLUDE_SUMMARY_SQL} "
-        "AND (fiscal_year IS NULL OR fiscal_year GLOB '[0-9][0-9][0-9][0-9]' "
-        "     OR fiscal_year GLOB 'FY [0-9][0-9][0-9][0-9]' "
-        "     OR fiscal_year GLOB 'FY[0-9][0-9][0-9][0-9]')"
+    _fy_validity = (
+        "(fiscal_year IS NULL OR fiscal_year GLOB '[0-9][0-9][0-9][0-9]' "
+        " OR fiscal_year GLOB 'FY [0-9][0-9][0-9][0-9]' "
+        " OR fiscal_year GLOB 'FY[0-9][0-9][0-9][0-9]')"
     )
 
-    conditions: list[str] = [summary_filter]
-    filter_params: list = []
-    if fiscal_year:
-        conditions.append("fiscal_year = ?")
-        filter_params.append(fiscal_year)
-    if service:
-        conditions.append("organization_name = ?")
-        filter_params.append(service)
-    if exhibit_type:
-        conditions.append("exhibit_type = ?")
-        filter_params.append(exhibit_type)
-    if budget_type:
-        conditions.append("budget_type = ?")
-        filter_params.append(budget_type)
-    fy_filter = "WHERE " + " AND ".join(conditions)
+    fy_filter, filter_params = build_where_clause(
+        fiscal_year=[fiscal_year] if fiscal_year else None,
+        service=[service] if service else None,
+        exhibit_type=[exhibit_type] if exhibit_type else None,
+        budget_type=[budget_type] if budget_type else None,
+        exclude_summary=True,
+        extra_conditions=[_fy_validity],
+    )
 
     # Batch the main budget_lines aggregations into a single CTE query.
     # This scans the table once instead of 4 separate passes.
@@ -167,23 +159,21 @@ def dashboard_summary(
     by_btype_cte = [dict(r) for r in by_btype_rows]
 
     # Top 10 programs — needs its own query since it returns individual rows
-    tp_conditions = [f"{fy26_col} IS NOT NULL", summary_filter]
-    if fiscal_year:
-        tp_conditions.append("fiscal_year = ?")
-    if service:
-        tp_conditions.append("organization_name = ?")
-    if exhibit_type:
-        tp_conditions.append("exhibit_type = ?")
-    if budget_type:
-        tp_conditions.append("budget_type = ?")
-    tp_where = "WHERE " + " AND ".join(tp_conditions)
+    tp_where, tp_params = build_where_clause(
+        fiscal_year=[fiscal_year] if fiscal_year else None,
+        service=[service] if service else None,
+        exhibit_type=[exhibit_type] if exhibit_type else None,
+        budget_type=[budget_type] if budget_type else None,
+        exclude_summary=True,
+        extra_conditions=[f"{fy26_col} IS NOT NULL", _fy_validity],
+    )
     top_programs_rows = conn.execute(
         f"SELECT id, line_item_title, organization_name, pe_number, "
         f"{fy26_col} as fy26_request, {fy25_col} as fy25_enacted "
         f"FROM budget_lines "
         f"{tp_where} "
         f"ORDER BY {fy26_col} DESC LIMIT 10",
-        filter_params,
+        tp_params,
     ).fetchall()
 
     # Enrichment coverage — how much of the database is enriched
