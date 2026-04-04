@@ -21,86 +21,12 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from utils.patterns import PE_SUFFIX_PATTERN
+from utils.strings import clean_narrative  # noqa: F401  (re-exported for callers)
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 log = logging.getLogger(__name__)
 
 DB_PATH = Path(__file__).resolve().parent.parent / "dod_budget_work.sqlite"
-
-
-# ── Page-break artifact patterns ──────────────────────────────────────────
-
-# Multi-line block: from "PE XXXXXXX:" header through the
-# "B. Accomplishments/Planned Programs ($ in Millions) FY ..." line
-_ARTIFACT_BLOCK = re.compile(
-    rf"PE\s+\d{{7}}{PE_SUFFIX_PATTERN}?\s*:.*?"  # PE XXXXXXX: Program Name
-    r"B\.\s*Accomplishments/Planned\s+Programs\s*"
-    r"\(\$\s*in\s+Millions\)\s*"
-    r"(?:FY\s*\d{4}\s*)+",  # FY columns header
-    re.DOTALL | re.IGNORECASE,
-)
-
-# Standalone "UNCLASSIFIED" lines (often appear at page breaks)
-_UNCLASSIFIED = re.compile(r"^\s*UNCLASSIFIED\s*$", re.MULTILINE)
-
-# "Title: Project Name XX.XXX YY.YYY ..." — amounts that got mixed into text
-_TITLE_AMOUNTS = re.compile(
-    r"^Title:\s+.+?\s+\d+\.\d{3}(?:\s+\d+\.\d{3}|\s+[\-0](?:\.\d+)?)+\s*$",
-    re.MULTILINE,
-)
-
-# Exhibit headers that appear mid-text from page breaks
-_EXHIBIT_HEADER = re.compile(
-    r"Exhibit R-2A?,\s*RDT&E\s+Project\s+Justification:.*?(?=\n[A-Z]|\n\n|\Z)",
-    re.DOTALL | re.IGNORECASE,
-)
-
-# Appropriation/Budget Activity header block
-_APPROP_HEADER = re.compile(
-    r"Appropriation/?Budget\s+Activity.*?(?:Project\s*\(Number/Name\)|PROJECT)\s*\n"
-    r".*?(?=\n[A-Z]|\n\n|\Z)",
-    re.DOTALL | re.IGNORECASE,
-)
-
-# Page number markers like "Volume 3 - 355" or "Air Force Page 5 of 70"
-_PAGE_MARKERS = re.compile(
-    r"(?:Volume\s+\d+\s*-\s*\d+|(?:Air Force|Navy|Army|Defense[- ]Wide|MDA)\s+Page \d+ of \d+|R-1 Line #\d+)",
-    re.IGNORECASE,
-)
-
-# Repeated blank lines
-_MULTI_BLANK = re.compile(r"\n{3,}")
-
-
-def clean_narrative(text: str) -> str:
-    """Remove page-break artifacts from narrative text."""
-    if not text:
-        return text
-
-    # Remove the big artifact blocks first
-    text = _ARTIFACT_BLOCK.sub("", text)
-
-    # Remove standalone exhibit headers
-    text = _EXHIBIT_HEADER.sub("", text)
-
-    # Remove appropriation header blocks
-    text = _APPROP_HEADER.sub("", text)
-
-    # Remove standalone UNCLASSIFIED markers
-    text = _UNCLASSIFIED.sub("", text)
-
-    # Remove title+amounts lines
-    text = _TITLE_AMOUNTS.sub("", text)
-
-    # Remove page markers
-    text = _PAGE_MARKERS.sub("", text)
-
-    # Clean up whitespace
-    text = _MULTI_BLANK.sub("\n\n", text)
-    text = text.strip()
-
-    return text
 
 
 # ── PE-level Mission Description extraction ───────────────────────────────
