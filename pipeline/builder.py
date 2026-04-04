@@ -1124,11 +1124,6 @@ def _map_columns(headers: list, exhibit_type: str) -> dict:
         elif "total obligation authority" in h:
             mapping.setdefault("amount_total_obligation", i)
 
-    # DONE 1.B2-c: Multi-row header handling implemented.
-    #   _merge_header_rows() detects two-row split headers and merges them.
-    #   Called from ingest_excel_file() at line ~693. Tests in test_parsing.py
-    #   (test_merge_header_rows_* and test_merge_header_rows_two_row_map_columns).
-
     # Merge catalog-based column detection (Step 1.B2-b).
     # For fields not yet set by heuristic matching above, consult EXHIBIT_CATALOG.
     # The heuristic mapping wins for any field it already identified; the catalog
