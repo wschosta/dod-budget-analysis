@@ -2,38 +2,28 @@
 
 import pytest
 
-pytest.importorskip("fastapi")
-pytest.importorskip("httpx")
-
-from fastapi.testclient import TestClient  # noqa: E402
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture(scope="module")
 def docs_dir(tmp_path_factory):
     """Create a temporary docs directory with sample files."""
     d = tmp_path_factory.mktemp("docs")
-    # Create a fake PDF
     pdf = d / "FY2026" / "PB" / "US_Army" / "r1.pdf"
     pdf.parent.mkdir(parents=True, exist_ok=True)
     pdf.write_bytes(b"%PDF-1.4 fake content")
 
-    # Create a fake Excel file
     xlsx = d / "FY2026" / "PB" / "US_Army" / "r1.xlsx"
     xlsx.write_bytes(b"PK\x03\x04 fake xlsx")
 
-    # Create a text file with unknown extension
     txt = d / "readme.txt"
     txt.write_text("readme")
-
     return d
 
 
 @pytest.fixture(scope="module")
-def client(test_db_excel_only, docs_dir, tmp_path_factory):
-    import os
-
-    os.environ["APP_DOCS_DIR"] = str(docs_dir)
-    # Reload the module to pick up the new env var
+def client(test_db_excel_only, docs_dir):
+    """TestClient with a custom DOCS_DIR pointed at the temp docs directory."""
     import api.routes.files as files_module
     from pathlib import Path
 
@@ -43,9 +33,6 @@ def client(test_db_excel_only, docs_dir, tmp_path_factory):
     app = create_app(db_path=test_db_excel_only)
     with TestClient(app, raise_server_exceptions=False) as c:
         yield c
-
-
-# ── Happy path ───────────────────────────────────────────────────────────────
 
 
 class TestServeFile:
@@ -67,9 +54,6 @@ class TestServeFile:
         assert resp.status_code == 200
 
 
-# ── Security ─────────────────────────────────────────────────────────────────
-
-
 class TestPathTraversalSecurity:
     def test_dotdot_rejected(self, client):
         """Path traversal should not serve files outside DOCS_DIR."""
@@ -81,9 +65,6 @@ class TestPathTraversalSecurity:
     def test_dotdot_in_middle(self, client):
         resp = client.get("/api/v1/files/FY2026/../../../etc/passwd")
         assert resp.status_code in (400, 404)
-
-
-# ── Error cases ──────────────────────────────────────────────────────────────
 
 
 class TestFileErrors:

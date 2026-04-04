@@ -2,85 +2,54 @@
 
 import pytest
 
-pytest.importorskip("fastapi")
-pytest.importorskip("httpx")
-
-from fastapi.testclient import TestClient  # noqa: E402
-
 
 @pytest.fixture(scope="module")
-def client(test_db_excel_only):
-    from api.app import create_app
-    app = create_app(db_path=test_db_excel_only)
-    with TestClient(app, raise_server_exceptions=False) as c:
-        yield c
-
-
-# ── GET /api/v1/dashboard/summary ────────────────────────────────────────────
+def summary(client):
+    """Fetch the unfiltered dashboard summary once for the module."""
+    return client.get("/api/v1/dashboard/summary").json()
 
 
 class TestDashboardSummary:
     def test_summary_returns_200(self, client):
-        resp = client.get("/api/v1/dashboard/summary")
-        assert resp.status_code == 200
+        assert client.get("/api/v1/dashboard/summary").status_code == 200
 
-    def test_summary_has_required_sections(self, client):
-        body = client.get("/api/v1/dashboard/summary").json()
+    def test_summary_has_required_sections(self, summary):
         required = {"totals", "by_service", "top_programs", "by_fiscal_year",
                      "by_budget_type", "by_exhibit_type"}
-        assert required.issubset(body.keys())
+        assert required.issubset(summary.keys())
 
-    def test_totals_section(self, client):
-        body = client.get("/api/v1/dashboard/summary").json()
-        totals = body["totals"]
+    def test_totals_section(self, summary):
+        totals = summary["totals"]
         assert "total_lines" in totals
         assert totals["total_lines"] > 0
         assert "distinct_pes" in totals
 
-    def test_by_service_is_list(self, client):
-        body = client.get("/api/v1/dashboard/summary").json()
-        assert isinstance(body["by_service"], list)
-
-    def test_by_service_has_fields(self, client):
-        body = client.get("/api/v1/dashboard/summary").json()
-        services = body["by_service"]
+    def test_by_service_has_fields(self, summary):
+        assert isinstance(summary["by_service"], list)
+        services = summary["by_service"]
         if services:
             svc = services[0]
             assert "service" in svc
             assert "total" in svc
             assert "line_count" in svc
 
-    def test_by_service_limited_to_six(self, client):
-        body = client.get("/api/v1/dashboard/summary").json()
-        assert len(body["by_service"]) <= 6
+    def test_by_service_limited_to_six(self, summary):
+        assert len(summary["by_service"]) <= 6
 
-    def test_top_programs_is_list(self, client):
-        body = client.get("/api/v1/dashboard/summary").json()
-        assert isinstance(body["top_programs"], list)
-
-    def test_top_programs_limited_to_ten(self, client):
-        body = client.get("/api/v1/dashboard/summary").json()
-        assert len(body["top_programs"]) <= 10
-
-    def test_top_programs_have_pe_number(self, client):
-        body = client.get("/api/v1/dashboard/summary").json()
-        for prog in body["top_programs"]:
+    def test_top_programs(self, summary):
+        assert isinstance(summary["top_programs"], list)
+        assert len(summary["top_programs"]) <= 10
+        for prog in summary["top_programs"]:
             assert "pe_number" in prog
 
-    def test_by_fiscal_year(self, client):
-        body = client.get("/api/v1/dashboard/summary").json()
-        assert isinstance(body["by_fiscal_year"], list)
+    def test_by_fiscal_year(self, summary):
+        assert isinstance(summary["by_fiscal_year"], list)
 
-    def test_by_budget_type(self, client):
-        body = client.get("/api/v1/dashboard/summary").json()
-        assert isinstance(body["by_budget_type"], list)
+    def test_by_budget_type(self, summary):
+        assert isinstance(summary["by_budget_type"], list)
 
-    def test_by_exhibit_type(self, client):
-        body = client.get("/api/v1/dashboard/summary").json()
-        assert isinstance(body["by_exhibit_type"], list)
-
-
-# ── Filters ──────────────────────────────────────────────────────────────────
+    def test_by_exhibit_type(self, summary):
+        assert isinstance(summary["by_exhibit_type"], list)
 
 
 class TestDashboardFilters:
@@ -106,15 +75,11 @@ class TestDashboardFilters:
         assert resp.status_code == 200
 
 
-# ── Cache ────────────────────────────────────────────────────────────────────
-
-
 class TestDashboardCache:
     def test_cache_clear(self, client):
         resp = client.post("/api/v1/dashboard/cache-clear")
         assert resp.status_code == 200
-        body = resp.json()
-        assert body["status"] == "ok"
+        assert resp.json()["status"] == "ok"
 
     def test_second_call_uses_cache(self, client):
         """Two identical calls should both succeed (second hits cache)."""

@@ -12,9 +12,6 @@ from utils.fuzzy_match import (
 )
 
 
-# ── _levenshtein_distance ────────────────────────────────────────────────────
-
-
 class TestLevenshteinDistance:
     def test_identical_strings(self):
         assert _levenshtein_distance("abc", "abc") == 0
@@ -49,9 +46,6 @@ class TestLevenshteinDistance:
         assert _levenshtein_distance("abc", "xyz") == 3
 
 
-# ── _max_edit_distance ───────────────────────────────────────────────────────
-
-
 class TestMaxEditDistance:
     @pytest.mark.parametrize(
         "keyword, expected",
@@ -67,9 +61,6 @@ class TestMaxEditDistance:
     )
     def test_thresholds(self, keyword, expected):
         assert _max_edit_distance(keyword) == expected
-
-
-# ── fuzzy_match_keyword ──────────────────────────────────────────────────────
 
 
 class TestFuzzyMatchKeyword:
@@ -105,9 +96,6 @@ class TestFuzzyMatchKeyword:
         assert fuzzy_match_keyword("test", "test") == "exact"
 
 
-# ── expand_keywords ──────────────────────────────────────────────────────────
-
-
 class TestExpandKeywords:
     def test_basic_expansion(self):
         result = expand_keywords(["UAV"])
@@ -140,9 +128,6 @@ class TestExpandKeywords:
         result = expand_keywords(["unmanned aerial vehicle"])
         lower_result = [kw.lower() for kw in result]
         assert "uav" in lower_result
-
-
-# ── find_matched_keywords_fuzzy ──────────────────────────────────────────────
 
 
 class TestFindMatchedKeywordsFuzzy:
@@ -203,9 +188,6 @@ class TestFindMatchedKeywordsFuzzy:
         assert "hypersonic" in matched_kws
         assert "missile" in matched_kws
         assert "submarine" not in matched_kws
-
-
-# ── find_matched_keywords_simple ─────────────────────────────────────────────
 
 
 class TestFindMatchedKeywordsSimple:

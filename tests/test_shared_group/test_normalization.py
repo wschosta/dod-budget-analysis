@@ -12,11 +12,7 @@ from utils.normalization import (
 )
 
 
-# ── normalize_org_name ───────────────────────────────────────────────────────
-
-
 class TestNormalizeOrgName:
-    """Tests for the exact-match organization name normalizer."""
 
     @pytest.mark.parametrize(
         "raw, expected",
@@ -80,11 +76,7 @@ class TestNormalizeOrgName:
         assert normalize_org_name("ARMY") == "Army"   # uppercase variant matches
 
 
-# ── normalize_org_loose ──────────────────────────────────────────────────────
-
-
 class TestNormalizeOrgLoose:
-    """Tests for the case-insensitive org normalizer with historical aliases."""
 
     @pytest.mark.parametrize(
         "name, expected",
@@ -123,20 +115,13 @@ class TestNormalizeOrgLoose:
         assert normalize_org_loose("SomeNewAgency") == "SomeNewAgency"
 
 
-# ── parse_appropriation ──────────────────────────────────────────────────────
-
-
 class TestParseAppropriation:
-    """Tests for the 3-strategy appropriation parser."""
-
-    # Strategy 0: empty / None input
     @pytest.mark.parametrize("val", [None, "", "   "])
     def test_empty_input_returns_none_none(self, val):
         code, title = parse_appropriation(val)
         assert code is None
         assert title is None
 
-    # Strategy 1: exact title match
     @pytest.mark.parametrize(
         "title, expected_code",
         [
@@ -157,7 +142,6 @@ class TestParseAppropriation:
         assert code == expected_code
         assert returned_title == title
 
-    # Strategy 2: leading numeric code
     @pytest.mark.parametrize(
         "account_title, expected_code, expected_title",
         [
@@ -177,7 +161,6 @@ class TestParseAppropriation:
         # Falls through to strategy 3 (keyword) or returns None
         assert title is not None
 
-    # Strategy 3: keyword substring match
     @pytest.mark.parametrize(
         "text, expected_code",
         [
@@ -198,32 +181,23 @@ class TestParseAppropriation:
         code, _ = parse_appropriation("MILITARY CONSTRUCTION PROJECT")
         assert code == "MILCON"
 
-    # Strategy priority: exact > numeric > keyword
     def test_exact_takes_priority_over_keyword(self):
-        """Exact title match should take priority."""
-        # "RDT&E, Army" is in TITLE_TO_CODE
         code, title = parse_appropriation("RDT&E, Army")
         assert code == "RDTE"
         assert title == "RDT&E, Army"
 
     def test_numeric_takes_priority_over_keyword(self):
-        """Leading numeric code takes priority over keyword."""
         code, title = parse_appropriation("9999 Something with procurement")
         assert code == "9999"
         assert title == "Something with procurement"
 
-    # Fallback: no match
     def test_no_match_returns_none_code(self):
         code, title = parse_appropriation("Completely unrecognized title")
         assert code is None
         assert title == "Completely unrecognized title"
 
 
-# ── Data integrity ───────────────────────────────────────────────────────────
-
-
 class TestDataIntegrity:
-    """Verify mapping data structures are internally consistent."""
 
     def test_org_normalize_has_expected_services(self):
         values = set(ORG_NORMALIZE.values())

@@ -4,19 +4,6 @@ import json
 
 import pytest
 
-pytest.importorskip("fastapi")
-pytest.importorskip("httpx")
-
-from fastapi.testclient import TestClient  # noqa: E402
-
-
-@pytest.fixture(scope="module")
-def client(test_db_excel_only):
-    from api.app import create_app
-    app = create_app(db_path=test_db_excel_only)
-    with TestClient(app, raise_server_exceptions=False) as c:
-        yield c
-
 
 @pytest.fixture(autouse=True)
 def _clean_feedback_file(tmp_path, monkeypatch):
@@ -28,9 +15,6 @@ def _clean_feedback_file(tmp_path, monkeypatch):
     yield
     if feedback_path.exists():
         feedback_path.unlink()
-
-
-# ── POST /api/v1/feedback ────────────────────────────────────────────────────
 
 
 class TestSubmitFeedback:

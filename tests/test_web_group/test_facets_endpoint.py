@@ -1,23 +1,5 @@
 """Tests for api/routes/facets.py — cross-filtered facet counts."""
 
-import pytest
-
-pytest.importorskip("fastapi")
-pytest.importorskip("httpx")
-
-from fastapi.testclient import TestClient  # noqa: E402
-
-
-@pytest.fixture(scope="module")
-def client(test_db_excel_only):
-    from api.app import create_app
-    app = create_app(db_path=test_db_excel_only)
-    with TestClient(app, raise_server_exceptions=False) as c:
-        yield c
-
-
-# ── GET /api/v1/facets ───────────────────────────────────────────────────────
-
 
 class TestFacetsBasic:
     def test_facets_returns_200(self, client):

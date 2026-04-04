@@ -1,6 +1,7 @@
 """Tests for api/models.py — Pydantic request/response model validation."""
 
 import pytest
+from pydantic import ValidationError
 
 from api.models import (
     AggregationResponse,
@@ -19,8 +20,6 @@ from api.models import (
 )
 
 
-# ── FeedbackType enum ────────────────────────────────────────────────────────
-
 
 class TestFeedbackType:
     def test_valid_values(self):
@@ -32,8 +31,6 @@ class TestFeedbackType:
         with pytest.raises(ValueError):
             FeedbackType("invalid")
 
-
-# ── FeedbackSubmission ───────────────────────────────────────────────────────
 
 
 class TestFeedbackSubmission:
@@ -57,7 +54,7 @@ class TestFeedbackSubmission:
         assert fb.page_url == "/dashboard"
 
     def test_description_too_short(self):
-        with pytest.raises(Exception):  # ValidationError
+        with pytest.raises(ValidationError):
             FeedbackSubmission(type="bug", description="short")
 
     def test_description_min_boundary(self):
@@ -69,19 +66,17 @@ class TestFeedbackSubmission:
         assert len(fb.description) == 5000
 
     def test_description_over_max(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             FeedbackSubmission(type="bug", description="a" * 5001)
 
     def test_missing_required_type(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             FeedbackSubmission(description="valid description text here")
 
     def test_missing_required_description(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             FeedbackSubmission(type="bug")
 
-
-# ── ErrorResponse ────────────────────────────────────────────────────────────
 
 
 class TestErrorResponse:
@@ -98,19 +93,17 @@ class TestErrorResponse:
         assert err.status_code == 599
 
     def test_status_code_below_min(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ErrorResponse(error="Error", status_code=399)
 
     def test_status_code_above_max(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             ErrorResponse(error="Error", status_code=600)
 
     def test_detail_is_optional(self):
         err = ErrorResponse(error="Error", status_code=500)
         assert err.detail is None
 
-
-# ── AggregationRow / AggregationResponse ─────────────────────────────────────
 
 
 class TestAggregationModels:
@@ -143,8 +136,6 @@ class TestAggregationModels:
         assert resp.group_by == "service"
         assert len(resp.rows) == 1
 
-
-# ── SearchResultItem / SearchResponse ────────────────────────────────────────
 
 
 class TestSearchModels:
@@ -184,8 +175,6 @@ class TestSearchModels:
         assert resp.has_more is True
 
 
-# ── BudgetLineOut / BudgetLineDetailOut ──────────────────────────────────────
-
 
 class TestBudgetLineModels:
     def test_budget_line_out_minimal(self):
@@ -199,8 +188,6 @@ class TestBudgetLineModels:
         assert hasattr(detail, "id")
         assert hasattr(detail, "source_file")
 
-
-# ── ServiceOut / ExhibitTypeOut / FiscalYearOut ──────────────────────────────
 
 
 class TestReferenceModels:
@@ -216,8 +203,6 @@ class TestReferenceModels:
         fy = FiscalYearOut(fiscal_year="FY2026", row_count=12450)
         assert fy.row_count == 12450
 
-
-# ── PaginatedResponse ────────────────────────────────────────────────────────
 
 
 class TestPaginatedResponse:
