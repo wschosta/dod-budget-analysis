@@ -24,6 +24,8 @@ import pytest
 # Ensure project root is on path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from utils.database import table_exists as _table_exists  # noqa: E402
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -32,15 +34,6 @@ def _get_conn(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
     return conn
-
-
-def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
-    """Check if a table exists in the database."""
-    r = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-        (name,)
-    ).fetchone()
-    return r is not None
 
 
 # ── Unit Tests: PE Number Extraction ─────────────────────────────────────────

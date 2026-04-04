@@ -119,7 +119,7 @@ _COMPILED_TAXONOMY: list[tuple[str, list[re.Pattern]]] = [
     for tag, terms in _TAXONOMY
 ]
 
-# ── Tier-2 taxonomy — broader signal, lower confidence (issue #54) ─────────────
+# ── Tier-2 taxonomy — broader signal, lower confidence ─────────────────────────
 # Confidence assigned in run_phase3(): 0.7 (budget_lines), 0.65 (PDF narrative).
 # Standalone _tags_from_keywords() uses 0.7 for tier-2 terms.
 
@@ -857,7 +857,7 @@ def run_phase2(conn: sqlite3.Connection, stop_event: threading.Event | None = No
 
     logger.info("Done. %d description rows inserted.", total_desc)
 
-    # Issue #55: Fallback — populate descriptions from budget_lines for PEs
+    # Fallback — populate descriptions from budget_lines for PEs
     # that have no PDF-derived descriptions (e.g., PEs only in Excel data).
     # Single JOIN query replaces per-PE loop to avoid N+1.
     fallback_rows = conn.execute("""
