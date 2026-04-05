@@ -2108,14 +2108,8 @@ tr:focus-within td {
 /* Auto-fill grid */
 .grid-auto-fill { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
 
-/* Pre-formatted text block */
-.pre-block      { white-space: pre-wrap; word-break: break-word; background: var(--bg-body); border: 1px solid var(--border-color); border-radius: var(--radius); max-height: 350px; overflow-y: auto; }
-
 /* Search result title */
 .result-title   { font-weight: 600; font-size: .88rem; }
-
-/* PE meta spacing */
-.pe-meta-spacing { margin: .75rem 0 1.25rem; }
 
 /* Summary/details styles */
 .summary-lg     { padding: .75rem 1rem; font-weight: 600; }

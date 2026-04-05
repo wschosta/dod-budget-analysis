@@ -2,9 +2,8 @@
 <div class="detail-panel" id="detail-panel">
   <div class="d-flex flex-wrap gap-sm items-start justify-between">
     <h3>{{ item.line_item_title or item.account_title or "Budget Line Detail" }}</h3>
-    <button class="btn btn-secondary btn-sm"
-            onclick="document.getElementById('detail-container').innerHTML=''"
-            class="flex-shrink-0">✕ Close</button>
+    <button class="btn btn-secondary btn-sm flex-shrink-0"
+            onclick="document.getElementById('detail-container').innerHTML=''">✕ Close</button>
   </div>
 
   <div class="detail-grid mt-md">

@@ -9,7 +9,7 @@
 
 {# ── Header ──────────────────────────────────────────────────────────────── #}
 <h2>{{ item.line_item_title or item.pe_number }}</h2>
-<div class="pe-meta d-flex flex-wrap items-center gap-sm pe-meta-spacing">
+<div class="pe-meta d-flex flex-wrap items-center gap-sm" style="margin:.75rem 0 1.25rem">
   <span class="badge text-lg">{{ item.pe_number }}</span>
   {% if item.organization_name %}
   <span>{{ item.organization_name }}</span>
