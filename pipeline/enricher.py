@@ -2094,6 +2094,23 @@ def run_phase9(conn: sqlite3.Connection, stop_event: threading.Event | None = No
     """
     logger.info("[Phase 9] Extracting BLI descriptions from P-5 PDFs...")
 
+    # Ensure table exists (needed when running Phase 9 without --rebuild)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS bli_descriptions (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            bli_key          TEXT NOT NULL,
+            fiscal_year      TEXT,
+            source_file      TEXT,
+            page_start       INTEGER,
+            page_end         INTEGER,
+            section_header   TEXT,
+            description_text TEXT,
+            FOREIGN KEY (bli_key) REFERENCES bli_index(bli_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_bli_desc_key ON bli_descriptions(bli_key);
+        CREATE INDEX IF NOT EXISTS idx_bli_desc_fy ON bli_descriptions(fiscal_year);
+    """)
+
     existing = conn.execute("SELECT COUNT(*) FROM bli_descriptions").fetchone()[0]
     if existing > 0:
         logger.info("Already %d BLI description rows — nothing to do.", existing)
