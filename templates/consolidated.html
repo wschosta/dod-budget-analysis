@@ -96,7 +96,7 @@
         <div class="meta-md text-ellipsis mt-2xs"
              title="{{ item.appropriation_name }}">{{ item.appropriation_name }}</div>
         {% endif %}
-        <div class="d-flex text-md mt-sm justify-between" style="align-items:baseline">
+        <div class="d-flex text-md mt-sm justify-between items-baseline">
           {% if item.fy_min and item.fy_max %}
           <span class="text-secondary">FY{{ item.fy_min }}–{{ item.fy_max }}{% if item.fy_count %} ({{ item.fy_count }} FYs){% endif %}</span>
           {% endif %}

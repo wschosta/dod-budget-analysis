@@ -292,7 +292,7 @@
   </p>
 
   <div class="kw-pills">
-    <span class="text-sm text-secondary" style="align-self:center;">Keywords:</span>
+    <span class="text-sm text-secondary" style="align-self:center">Keywords:</span>
     {% for kw in keywords %}<span class="kw-pill" data-kw="{{ kw }}" onclick="toggleKeyword(this)">{{ kw }}{% if keyword_counts and keyword_counts.get(kw, 0) > 0 %} <span class="kw-count">({{ keyword_counts[kw] }})</span>{% endif %}</span>{% endfor %}
   </div>
 
@@ -388,9 +388,9 @@
             {% set meta = pe_meta.get(pe, {}) %}
             {{ meta.get('pe_title', pe) }}
             {% if meta.get('pe_title_count', 0) > 1 %}
-            <span style="font-size:0.75em;color:var(--color-text-muted);">(+{{ meta.pe_title_count - 1 }} title{{ 's' if meta.pe_title_count > 2 else '' }})</span>
+            <span class="text-secondary" style="font-size:0.75em">(+{{ meta.pe_title_count - 1 }} title{{ 's' if meta.pe_title_count > 2 else '' }})</span>
             {% endif %}
-            <span style="font-size:0.75em;color:var(--color-text-muted);margin-left:0.5em;">{{ children|length }} sub-elem.</span>
+            <span class="text-secondary" style="font-size:0.75em;margin-left:0.5em">{{ children|length }} sub-elem.</span>
             {% if children[0].has_description %}
             <span class="desc-toggle" onclick="toggleDesc(event, 'desc-pe-{{ pe }}')" title="Show PE description">[desc]</span>
             {% endif %}

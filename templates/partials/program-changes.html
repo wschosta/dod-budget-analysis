@@ -1,7 +1,7 @@
 {% if changes %}
 {# Summary row #}
 {% if summary %}
-<div class="d-flex flex-wrap mb-lg text-lg" style="gap:1rem">
+<div class="d-flex flex-wrap mb-lg text-lg gap-lg">
   <div>
     <span class="text-secondary">Prior Year Total:</span>
     <strong>{{ summary.total_fy2025 | fmt_amount if summary.total_fy2025 is not none else "—" }}</strong>
