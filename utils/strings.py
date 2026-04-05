@@ -207,30 +207,20 @@ _MULTI_BLANK = re.compile(r"\n{3,}")
 
 
 def clean_narrative(text: str) -> str:
-    """Remove page-break artifacts from narrative text."""
+    """Remove page-break artifacts from R-2A narrative text.
+
+    Strips recurring header blocks (PE number lines, exhibit headers,
+    appropriation headers, UNCLASSIFIED markers, page-number markers)
+    that repeat every time the PDF exhibit spans multiple pages.
+    """
     if not text:
         return text
 
-    # Remove the big artifact blocks first
     text = _ARTIFACT_BLOCK.sub("", text)
-
-    # Remove standalone exhibit headers
     text = _EXHIBIT_HEADER.sub("", text)
-
-    # Remove appropriation header blocks
     text = _APPROP_HEADER.sub("", text)
-
-    # Remove standalone UNCLASSIFIED markers
     text = _UNCLASSIFIED.sub("", text)
-
-    # Remove title+amounts lines
     text = _TITLE_AMOUNTS.sub("", text)
-
-    # Remove page markers
     text = _PAGE_MARKERS.sub("", text)
-
-    # Clean up whitespace
     text = _MULTI_BLANK.sub("\n\n", text)
-    text = text.strip()
-
-    return text
+    return text.strip()
