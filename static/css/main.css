@@ -535,6 +535,8 @@ tr:hover td { background: var(--clr-sky); cursor: pointer; }
 /* FIX-013: Use CSS variable instead of hardcoded color for dark mode compat */
 tr.selected td { background: var(--clr-sky); }
 .td-amount { text-align: right; font-variant-numeric: tabular-nums; }
+.td-sparkline { padding: 2px 4px; vertical-align: middle; }
+.td-sparkline svg { display: block; }
 .td-org { font-weight: 600; white-space: nowrap; }
 .badge {
   display: inline-block;

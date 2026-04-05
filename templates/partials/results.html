@@ -89,6 +89,7 @@
       {% set col_short = col.replace("amount_fy", "FY").replace("_actual", " Act.").replace("_enacted", " Enact.").replace("_request", " Req.").replace("_total", " Total").replace("_supplemental", " Supp.").replace("_reconciliation", " Recon.") %}
       <button class="col-toggle{% if loop.index <= 4 %} active{% endif %}" data-col="{{ col_id.replace('amount_', '') }}" onclick="toggleCol(this,'{{ col_id }}')">{{ col_short }}</button>
       {% endfor %}
+      <button class="col-toggle active"  data-col="sparkline" onclick="toggleSparklines()">Trend</button>
       <button class="col-toggle"        data-col="source"   onclick="toggleCol(this,'col-source')">Source</button>
     </div>
   </div>
@@ -135,6 +136,7 @@
             </a>
           </th>
           {% endfor %}
+          <th scope="col" class="col-sparkline" data-tooltip="Funding trend across all visible fiscal years.">Trend</th>
           <th scope="col" class="col-source" style="display:none" data-tooltip="Source file from which this budget line was extracted.">Source</th>
         </tr>
       </thead>
@@ -176,6 +178,7 @@
           {% set col_id = col.replace("amount_", "col-") %}
           <td class="{{ col_id }} td-amount"{% if loop.index > 4 %} style="display:none"{% endif %} {% if item[col] is not none %}data-raw="{{ item[col] }}"{% endif %}>{{ item[col] | fmt_amount if item[col] is not none else "—" }}</td>
           {% endfor %}
+          <td class="col-sparkline td-sparkline"></td>
           <td class="col-source text-base-sm text-ellipsis" style="display:none;max-width:180px" title="{{ item.source_file or '' }}">{{ item.source_file or "—" }}</td>
         </tr>
         {% endfor %}
