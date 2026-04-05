@@ -26,7 +26,7 @@ When making changes to the codebase:
 pip install -r requirements-dev.txt
 python -m playwright install chromium
 
-# Tests (104 files, coverage tracked on api/ and utils/)
+# Tests (114 files, coverage tracked on api/ and utils/)
 python -m pytest tests/ -v
 python -m pytest tests/ --cov=api --cov=utils --cov-report=term-missing
 python -m pytest tests/ --ignore=tests/test_gui_tracker.py --ignore=tests/optimization_validation
@@ -63,7 +63,7 @@ dod-budget-analysis/
 │       ├── facets.py        # GET /api/v1/facets (cross-filtered counts)
 │       ├── feedback.py      # POST /api/v1/feedback
 │       ├── files.py         # GET /api/v1/files/{file_path}
-│       ├── frontend.py      # HTML routes (/, /charts, /dashboard, /about, /programs)
+│       ├── frontend.py      # HTML routes (/, /about, /charts, /compare, /consolidated, /dashboard, /explorer, /hypersonics, /programs)
 │       ├── hypersonics.py   # Hypersonics PE lines pivot view
 │       ├── keyword_search.py # Shared keyword-search cache-building logic
 │       ├── metadata.py      # GET /api/v1/metadata
@@ -83,12 +83,13 @@ dod-budget-analysis/
 │   ├── refresh.py           # Data refresh workflow
 │   └── ...                  # backfill, staging, logging, run_ledger
 ├── downloader/              # Document downloader modules (6 modules)
-├── templates/               # Jinja2 HTML templates + partials/
-├── static/                  # CSS + JS assets
-├── tests/                   # pytest test suite (104 files)
-├── scripts/                 # Operational scripts
-├── docs/                    # PRD, ROADMAP, NOTICED_ISSUES, archive/
+├── templates/               # Jinja2 HTML templates (12 pages + errors/ + partials/)
+├── static/                  # CSS (main.css) + JS assets (10 modules)
+├── tests/                   # pytest test suite (114 files)
+├── scripts/                 # Operational scripts (21 modules: backups, audits, migrations, profiling)
+├── docs/                    # PRD, ROADMAP, NOTICED_ISSUES, TOOL_ASSESSMENT, user-guide/, archive/
 ├── run_pipeline.py          # 5-step pipeline orchestrator
+├── run_precommit_checks.py  # Pre-commit validation (ruff, mypy, pytest)
 ├── repair_database.py       # Data quality repair (7-step process)
 └── stage_budget_data.py     # Data staging utility
 ```
