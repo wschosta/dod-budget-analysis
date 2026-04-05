@@ -2068,29 +2068,21 @@ def run_phase8(conn: sqlite3.Connection, stop_event: threading.Event | None = No
 
 # ── Phase 9: P-5 PDF Parsing → BLI Descriptions ───────────────────────────────
 
-# Header patterns for extracting BLI and account info from P-5 exhibit pages.
-_P5_BLI_RE = re.compile(
-    r"(?:P-1 Line Item|Item No\.?|Item Number|Item Control Number)"
-    r"[^:\n]*?[:/]\s*(?:\n\s*)?"
-    r".*?(\d{4}[A-Z]?)\s*/\s*",
-    re.IGNORECASE | re.DOTALL,
+# Matches patterns like "1508N / 02 / 1    1125 / Direct Support Munitions"
+# Group 1 = account (e.g. 1508N), Group 2 = line item number (e.g. 1125).
+_P5_ACCT_LINE_RE = re.compile(
+    r"(\d{4}[A-Z]?)\s*/\s*\d{2}\s*/\s*\d+\s+(\d{3,})\s*/",
 )
-_P5_ACCOUNT_RE = re.compile(
-    r"(?:Appropriation|Treasury)[^:]*?[:/]\s*(?:\n\s*)?"
-    r".*?(\d{4}[A-Z]?)\s*/",
-    re.IGNORECASE | re.DOTALL,
-)
+_P5_HEADER_SCAN_CHARS = 1200  # account/line-item appears within first ~1200 chars
 
 
 def run_phase9(conn: sqlite3.Connection, stop_event: threading.Event | None = None) -> int:
-    """Extract BLI descriptions from P-5/P-5a PDF pages.
+    """Extract BLI descriptions from procurement exhibit PDF pages.
 
-    Scans pdf_pages for procurement detail exhibits (P-5, P-5a), extracts
-    the BLI code and account from page headers, and stores the page text
+    Scans pdf_pages tagged as exhibit_type='p5', extracts account code
+    and line item number from page headers, and stores the page text
     as bli_descriptions.  This provides narrative context for BLIs that
     is otherwise unavailable from the structured Excel data.
-
-    Limited corpus: ~979 P-5 pages across FY2005, FY2009, FY2015.
     """
     logger.info("[Phase 9] Extracting BLI descriptions from P-5 PDFs...")
 
@@ -2127,15 +2119,14 @@ def run_phase9(conn: sqlite3.Connection, stop_event: threading.Event | None = No
         SELECT source_file, page_number, fiscal_year,
                substr(page_text, 1, {_MAX_NARRATIVE_TEXT_CHARS}) as page_text
         FROM pdf_pages
-        WHERE source_file LIKE '%p5%' OR source_file LIKE '%P5%'
-           OR source_file LIKE '%P-5%'
+        WHERE exhibit_type = 'p5' AND page_text IS NOT NULL
     """).fetchall()
 
     if not pages:
         logger.info("No P-5 PDF pages found.")
         return 0
 
-    logger.info("  Scanning %d P-5 pages...", len(pages))
+    logger.info("  Scanning %d procurement exhibit pages...", len(pages))
 
     insert_buf: list[tuple] = []
     matched = 0
@@ -2143,33 +2134,19 @@ def run_phase9(conn: sqlite3.Connection, stop_event: threading.Event | None = No
 
     for src_file, page_num, fy, text in pages:
         if stop_event and stop_event.is_set():
-            logger.info("  Phase 9 stopped.")
+            logger.info("  Phase 9 stopped — flushing %d buffered rows.", len(insert_buf))
             break
 
-        if not text:
-            continue
-
-        header = text[:800]
-
-        acct_match = _P5_ACCOUNT_RE.search(header)
-        account = acct_match.group(1) if acct_match else None
-
-        bli_match = _P5_BLI_RE.search(header)
-        bli_num = bli_match.group(1) if bli_match else None
-
-        if not account or not bli_num:
+        m = _P5_ACCT_LINE_RE.search(text[:_P5_HEADER_SCAN_CHARS])
+        if not m:
             unmatched += 1
             continue
 
-        bli_key = f"{account}:{bli_num}"
+        bli_key = f"{m.group(1)}:{m.group(2)}"
 
         if bli_key not in known_blis:
-            alt_key = f"{account}:{bli_num.rstrip('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}"
-            if alt_key in known_blis:
-                bli_key = alt_key
-            else:
-                unmatched += 1
-                continue
+            unmatched += 1
+            continue
 
         matched += 1
         desc_text = text.strip()
