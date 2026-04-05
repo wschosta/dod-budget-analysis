@@ -1,4 +1,4 @@
-"""Tests for the unified pipeline runner (run_pipeline.py)."""
+"""Tests for the unified pipeline runner (scripts/run_pipeline.py)."""
 
 from __future__ import annotations
 

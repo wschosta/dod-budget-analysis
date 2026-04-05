@@ -40,7 +40,7 @@ black .
 uvicorn api.app:app --reload --port 8000
 
 # Full pipeline
-python run_pipeline.py --skip-download --rebuild
+python scripts/run_pipeline.py --skip-download --rebuild
 
 # Docker
 docker compose up --build
@@ -86,12 +86,15 @@ dod-budget-analysis/
 ├── templates/               # Jinja2 HTML templates (12 pages + errors/ + partials/)
 ├── static/                  # CSS (main.css) + JS assets (10 modules)
 ├── tests/                   # pytest test suite (114 files)
-├── scripts/                 # Operational scripts (21 modules: backups, audits, migrations, profiling)
+├── scripts/                 # Operational scripts + pipeline entry points
+│   ├── run_pipeline.py      # 5-step pipeline orchestrator
+│   ├── repair_database.py   # Data quality repair (7-step process)
+│   ├── stage_budget_data.py # Data staging utility
+│   ├── run.sh               # Unix server launcher
+│   └── ...                  # backups, audits, migrations, profiling
 ├── docs/                    # PRD, ROADMAP, NOTICED_ISSUES, TOOL_ASSESSMENT, user-guide/, archive/
-├── run_pipeline.py          # 5-step pipeline orchestrator
-├── run_precommit_checks.py  # Pre-commit validation (ruff, mypy, pytest)
-├── repair_database.py       # Data quality repair (7-step process)
-└── stage_budget_data.py     # Data staging utility
+├── run_precommit_checks.py  # Pre-commit validation library (PreCommitChecker)
+└── run.bat                  # Windows server launcher
 ```
 
 ## Architecture Decisions

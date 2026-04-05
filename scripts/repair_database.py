@@ -14,9 +14,9 @@ Fixes data quality issues identified during UI review (see docs/NOTICED_ISSUES.m
 Safe to run multiple times (idempotent). Works on existing databases.
 
 Usage:
-    python repair_database.py
-    python repair_database.py --db /path/to/dod_budget.sqlite
-    python repair_database.py --dry-run
+    python scripts/repair_database.py
+    python scripts/repair_database.py --db /path/to/dod_budget.sqlite
+    python scripts/repair_database.py --dry-run
 """
 
 import argparse
@@ -25,6 +25,11 @@ import sqlite3
 import sys
 import time
 from pathlib import Path
+
+# Ensure the project root is on sys.path so package imports work
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 from utils.config import CORE_SUMMARY_TYPES
 from utils.normalization import (

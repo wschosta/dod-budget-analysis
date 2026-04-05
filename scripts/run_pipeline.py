@@ -19,18 +19,18 @@ Features:
   - Append-only JSONL ledger for cross-run history
 
 Usage:
-    python run_pipeline.py                            # full pipeline (download → enrich)
-    python run_pipeline.py --skip-download            # skip download, build existing docs
-    python run_pipeline.py --rebuild                  # full rebuild from scratch
-    python run_pipeline.py --rebuild --years 2026     # rebuild, only download FY2026
-    python run_pipeline.py --years 2026 --sources all # download all sources for FY2026
-    python run_pipeline.py --use-staging              # use Parquet staging layer
-    python run_pipeline.py --repair-only              # only run the repair step
-    python run_pipeline.py --report                   # generate data_quality_report.json
-    python run_pipeline.py --skip-validate            # skip validation step
-    python run_pipeline.py --skip-enrich              # stop after validation
-    python run_pipeline.py --skip-repair              # skip the repair step
-    python run_pipeline.py --no-rollback              # disable automatic rollback
+    python scripts/run_pipeline.py                            # full pipeline (download → enrich)
+    python scripts/run_pipeline.py --skip-download            # skip download, build existing docs
+    python scripts/run_pipeline.py --rebuild                  # full rebuild from scratch
+    python scripts/run_pipeline.py --rebuild --years 2026     # rebuild, only download FY2026
+    python scripts/run_pipeline.py --years 2026 --sources all # download all sources for FY2026
+    python scripts/run_pipeline.py --use-staging              # use Parquet staging layer
+    python scripts/run_pipeline.py --repair-only              # only run the repair step
+    python scripts/run_pipeline.py --report                   # generate data_quality_report.json
+    python scripts/run_pipeline.py --skip-validate            # skip validation step
+    python scripts/run_pipeline.py --skip-enrich              # stop after validation
+    python scripts/run_pipeline.py --skip-repair              # skip the repair step
+    python scripts/run_pipeline.py --no-rollback              # disable automatic rollback
 """
 
 from __future__ import annotations
@@ -48,10 +48,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
+# Ensure the project root is on sys.path so package imports work
+HERE = Path(__file__).resolve().parent.parent
+if str(HERE) not in sys.path:
+    sys.path.insert(0, str(HERE))
+
 from pipeline.logging import PipelineLogger, StepReport
-
-
-HERE = Path(__file__).resolve().parent
 
 # Download step uses subprocess as a fallback when direct import fails
 STEP_DOWNLOAD = HERE / "dod_budget_downloader.py"
@@ -544,7 +546,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     enr_group.add_argument(
         "--enrich-phases", default=None, metavar="PHASES",
-        help="Comma-separated enrichment phases to run (default: 1,2,3,4,5)",
+        help="Comma-separated enrichment phases to run (default: all)",
     )
     enr_group.add_argument(
         "--rebuild-enrich", action="store_true",
@@ -1144,7 +1146,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.enrich_phases:
             phases = {int(p.strip()) for p in args.enrich_phases.split(",")}
         else:
-            phases = {1, 2, 3, 4, 5}
+            phases = {1, 2, 3, 4, 5, 6, 7, 8, 9}
 
         ok, enrich_result = _run_step(
             "Step 5 / 5 -- Enrich database",

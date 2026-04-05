@@ -5,24 +5,29 @@ Stages parsed Excel/PDF data as Parquet files, or loads staged data into SQLite.
 
 Usage:
     # Stage all files (parse -> Parquet)
-    python stage_budget_data.py --docs-dir DoD_Budget_Documents --staging-dir staging
+    python scripts/stage_budget_data.py --docs-dir DoD_Budget_Documents --staging-dir staging
 
     # Load staged data into SQLite (Parquet -> SQLite)
-    python stage_budget_data.py --load-only --staging-dir staging --db dod_budget.sqlite
+    python scripts/stage_budget_data.py --load-only --staging-dir staging --db dod_budget.sqlite
 
     # Both: stage then load
-    python stage_budget_data.py --docs-dir DoD_Budget_Documents --staging-dir staging --db dod_budget.sqlite
+    python scripts/stage_budget_data.py --docs-dir DoD_Budget_Documents --staging-dir staging --db dod_budget.sqlite
 
     # Force re-stage everything
-    python stage_budget_data.py --docs-dir DoD_Budget_Documents --staging-dir staging --force
+    python scripts/stage_budget_data.py --docs-dir DoD_Budget_Documents --staging-dir staging --force
 
     # Preview what would be staged (no parsing)
-    python stage_budget_data.py --docs-dir DoD_Budget_Documents --staging-dir staging --dry-run
+    python scripts/stage_budget_data.py --docs-dir DoD_Budget_Documents --staging-dir staging --dry-run
 """
 
 import argparse
 import sys
 from pathlib import Path
+
+# Ensure the project root is on sys.path so package imports work
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 
 def main():

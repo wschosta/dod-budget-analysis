@@ -2,12 +2,12 @@
 # DoD Budget Explorer — launch the web GUI
 #
 # Usage:
-#   ./run.sh                      # starts on http://localhost:8000
-#   ./run.sh 9000                 # starts on http://localhost:9000
-#   APP_DB_PATH=my.sqlite ./run.sh
+#   ./scripts/run.sh                      # starts on http://localhost:8000
+#   ./scripts/run.sh 9000                 # starts on http://localhost:9000
+#   APP_DB_PATH=my.sqlite ./scripts/run.sh
 
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 PORT="${1:-${APP_PORT:-8000}}"
 

@@ -362,7 +362,7 @@ def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS pe_descriptions_fts")
     conn.execute("DROP TABLE IF EXISTS _enrichment_checkpoints")
     for table in ("project_descriptions", "pe_lineage", "pe_tags", "pe_descriptions", "pe_index",
-                   "bli_tags", "bli_index"):
+                   "bli_descriptions", "bli_tags", "bli_index"):
         conn.execute(f"DROP TABLE IF EXISTS {table}")
     conn.commit()
     # Recreate the tables so enrichment phases can INSERT into them.
@@ -502,6 +502,20 @@ def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_bli_tags_key ON bli_tags(bli_key);
         CREATE INDEX IF NOT EXISTS idx_bli_tags_tag ON bli_tags(tag);
+
+        CREATE TABLE IF NOT EXISTS bli_descriptions (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            bli_key          TEXT NOT NULL,
+            fiscal_year      TEXT,
+            source_file      TEXT,
+            page_start       INTEGER,
+            page_end         INTEGER,
+            section_header   TEXT,
+            description_text TEXT,
+            FOREIGN KEY (bli_key) REFERENCES bli_index(bli_key)
+        );
+        CREATE INDEX IF NOT EXISTS idx_bli_desc_key ON bli_descriptions(bli_key);
+        CREATE INDEX IF NOT EXISTS idx_bli_desc_fy ON bli_descriptions(fiscal_year);
     """)
     logger.info("Dropped enrichment tables.")
 
@@ -2052,6 +2066,118 @@ def run_phase8(conn: sqlite3.Connection, stop_event: threading.Event | None = No
     return len(insert_buf)
 
 
+# ── Phase 9: P-5 PDF Parsing → BLI Descriptions ───────────────────────────────
+
+# Header patterns for extracting BLI and account info from P-5 exhibit pages.
+_P5_BLI_RE = re.compile(
+    r"(?:P-1 Line Item|Item No\.?|Item Number|Item Control Number)"
+    r"[^:\n]*?[:/]\s*(?:\n\s*)?"
+    r".*?(\d{4}[A-Z]?)\s*/\s*",
+    re.IGNORECASE | re.DOTALL,
+)
+_P5_ACCOUNT_RE = re.compile(
+    r"(?:Appropriation|Treasury)[^:]*?[:/]\s*(?:\n\s*)?"
+    r".*?(\d{4}[A-Z]?)\s*/",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def run_phase9(conn: sqlite3.Connection, stop_event: threading.Event | None = None) -> int:
+    """Extract BLI descriptions from P-5/P-5a PDF pages.
+
+    Scans pdf_pages for procurement detail exhibits (P-5, P-5a), extracts
+    the BLI code and account from page headers, and stores the page text
+    as bli_descriptions.  This provides narrative context for BLIs that
+    is otherwise unavailable from the structured Excel data.
+
+    Limited corpus: ~979 P-5 pages across FY2005, FY2009, FY2015.
+    """
+    logger.info("[Phase 9] Extracting BLI descriptions from P-5 PDFs...")
+
+    existing = conn.execute("SELECT COUNT(*) FROM bli_descriptions").fetchone()[0]
+    if existing > 0:
+        logger.info("Already %d BLI description rows — nothing to do.", existing)
+        return 0
+
+    known_blis = {
+        r[0] for r in conn.execute("SELECT bli_key FROM bli_index").fetchall()
+    }
+    if not known_blis:
+        logger.info("bli_index is empty — run Phase 7 first.")
+        return 0
+
+    pages = conn.execute(f"""
+        SELECT source_file, page_number, fiscal_year,
+               substr(page_text, 1, {_MAX_NARRATIVE_TEXT_CHARS}) as page_text
+        FROM pdf_pages
+        WHERE source_file LIKE '%p5%' OR source_file LIKE '%P5%'
+           OR source_file LIKE '%P-5%'
+    """).fetchall()
+
+    if not pages:
+        logger.info("No P-5 PDF pages found.")
+        return 0
+
+    logger.info("  Scanning %d P-5 pages...", len(pages))
+
+    insert_buf: list[tuple] = []
+    matched = 0
+    unmatched = 0
+
+    for src_file, page_num, fy, text in pages:
+        if stop_event and stop_event.is_set():
+            logger.info("  Phase 9 stopped.")
+            break
+
+        if not text:
+            continue
+
+        header = text[:800]
+
+        acct_match = _P5_ACCOUNT_RE.search(header)
+        account = acct_match.group(1) if acct_match else None
+
+        bli_match = _P5_BLI_RE.search(header)
+        bli_num = bli_match.group(1) if bli_match else None
+
+        if not account or not bli_num:
+            unmatched += 1
+            continue
+
+        bli_key = f"{account}:{bli_num}"
+
+        if bli_key not in known_blis:
+            alt_key = f"{account}:{bli_num.rstrip('ABCDEFGHIJKLMNOPQRSTUVWXYZ')}"
+            if alt_key in known_blis:
+                bli_key = alt_key
+            else:
+                unmatched += 1
+                continue
+
+        matched += 1
+        desc_text = text.strip()
+
+        insert_buf.append((
+            bli_key, fy, src_file, page_num, page_num,
+            "P-5 Justification", desc_text,
+        ))
+
+    if insert_buf:
+        conn.executemany("""
+            INSERT INTO bli_descriptions
+                (bli_key, fiscal_year, source_file, page_start, page_end,
+                 section_header, description_text)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, insert_buf)
+        conn.commit()
+
+    logger.info(
+        "Done. %d description rows inserted (%d pages matched, %d unmatched).",
+        len(insert_buf), matched, unmatched,
+    )
+    return len(insert_buf)
+
+
 # ── Orchestrator ──────────────────────────────────────────────────────────────
 
 def enrich(
@@ -2103,6 +2229,7 @@ def enrich(
         6: lambda: run_phase6(conn, stop_event=stop_event),
         7: lambda: run_phase7(conn, stop_event=stop_event),
         8: lambda: run_phase8(conn, stop_event=stop_event),
+        9: lambda: run_phase9(conn, stop_event=stop_event),
     }
 
     for phase_num in sorted(_phase_runners):
@@ -2137,7 +2264,7 @@ def enrich(
     # Summary counts
     table_counts: dict[str, int] = {}
     for table in ("pe_index", "pe_descriptions", "pe_tags", "pe_lineage", "project_descriptions",
-                   "bli_index", "bli_tags"):
+                   "bli_index", "bli_tags", "bli_descriptions"):
         try:
             n = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             logger.info("  %s: %s rows", table, f"{n:,}")
@@ -2167,8 +2294,8 @@ def main() -> None:
                         help="Path to SQLite database (default: dod_budget.sqlite)")
     parser.add_argument("--with-llm", action="store_true",
                         help="Enable LLM-based tagging (requires ANTHROPIC_API_KEY)")
-    parser.add_argument("--phases", default="1,2,3,4,5,6,7,8",
-                        help="Comma-separated phases to run (default: 1,2,3,4,5,6,7,8)")
+    parser.add_argument("--phases", default="1,2,3,4,5,6,7,8,9",
+                        help="Comma-separated phases to run (default: 1,2,3,4,5,6,7,8,9)")
     parser.add_argument("--rebuild", action="store_true",
                         help="Drop and rebuild all enrichment tables")
     args = parser.parse_args()

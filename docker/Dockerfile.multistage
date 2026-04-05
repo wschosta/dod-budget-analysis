@@ -50,7 +50,7 @@ COPY . .
 ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
 RUN python -m pipeline.builder --skip-download || true
 # If download is needed (full build), uncomment the next line and comment above:
-# RUN python run_pipeline.py --all-years -v
+# RUN python scripts/run_pipeline.py --all-years -v
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM python:3.12-slim AS runtime
@@ -76,7 +76,6 @@ COPY downloader/    downloader/
 COPY pipeline/      pipeline/
 COPY templates/     templates/
 COPY static/        static/
-COPY run_pipeline.py .
 
 # Copy the pre-built database from the builder stage
 COPY --from=builder /build/dod_budget.sqlite /app/dod_budget.sqlite

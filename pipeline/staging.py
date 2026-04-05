@@ -12,10 +12,10 @@ Phase 2: Read Parquet staging → bulk INSERT into SQLite
 
 Usage:
     # Stage all files (Phase 1)
-    python stage_budget_data.py --docs-dir DoD_Budget_Documents --staging-dir staging
+    python scripts/stage_budget_data.py --docs-dir DoD_Budget_Documents --staging-dir staging
 
     # Load staged data into SQLite (Phase 2)
-    python stage_budget_data.py --load-only --staging-dir staging --db dod_budget.sqlite
+    python scripts/stage_budget_data.py --load-only --staging-dir staging --db dod_budget.sqlite
 """
 
 from __future__ import annotations

@@ -328,7 +328,7 @@ def main():
 
     if not args.dry_run and totals["moved"] > 0:
         print("\nMigration complete. You should now rebuild the database:")
-        print("  python run_pipeline.py --rebuild")
+        print("  python scripts/run_pipeline.py --rebuild")
 
     return 0 if totals["errors"] == 0 else 1
 

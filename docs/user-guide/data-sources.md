@@ -142,9 +142,9 @@ DoD_Budget_Documents/FY{year}/{source}/...  # Local storage
 
 **CLI usage:**
 ```bash
-python run_pipeline.py --skip-download    # Parse only (skip download)
-python run_pipeline.py --rebuild          # Full rebuild from downloaded files
-python run_pipeline.py --retry-failures   # Retry from failed_downloads.json
+python scripts/run_pipeline.py --skip-download    # Parse only (skip download)
+python scripts/run_pipeline.py --rebuild          # Full rebuild from downloaded files
+python scripts/run_pipeline.py --retry-failures   # Retry from failed_downloads.json
 ```
 
 **Failure handling:** Failed downloads are logged to `failed_downloads.json` with URL, destination path, and browser-required flag. Use `--retry-failures` to re-attempt.

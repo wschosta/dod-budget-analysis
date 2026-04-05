@@ -22,7 +22,7 @@
 
 ## 2. Data Pipeline
 
-The system operates as a 5-step pipeline orchestrated by `run_pipeline.py`:
+The system operates as a 5-step pipeline orchestrated by `scripts/run_pipeline.py`:
 
 ```
 Download -> Build -> Repair -> Validate -> Enrich
@@ -249,9 +249,9 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 
 | Tool | Description |
 |------|-------------|
-| `run_pipeline.py` | Full 5-step pipeline orchestrator with skip/only flags per step |
-| `repair_database.py` | Database repair/normalization (7-step process) |
-| `stage_budget_data.py` | Optional Parquet staging layer (parse to Parquet, then load to SQLite) |
+| `scripts/run_pipeline.py` | Full 5-step pipeline orchestrator with skip/only flags per step |
+| `scripts/repair_database.py` | Database repair/normalization (7-step process) |
+| `scripts/stage_budget_data.py` | Optional Parquet staging layer (parse to Parquet, then load to SQLite) |
 | `pipeline/builder.py` | Database builder (Excel/PDF parsing, incremental/full-rebuild modes) |
 | `pipeline/gui.py` | tkinter GUI for database build with progress/ETA |
 | `pipeline/enricher.py` | PE enrichment pipeline (tags, descriptions, lineage) |

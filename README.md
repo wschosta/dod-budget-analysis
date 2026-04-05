@@ -12,7 +12,7 @@ pip install -r requirements.txt
 python -m playwright install chromium
 
 # Run the full pipeline (download + build + validate + enrich)
-python run_pipeline.py --years 2026 --sources all
+python scripts/run_pipeline.py --years 2026 --sources all
 
 # Start the web UI and API
 uvicorn api.app:app --reload --port 8000
@@ -46,7 +46,7 @@ enrich_budget_db.py       ->  pe_index, pe_descriptions, pe_tags, pe_lineage
 api/app.py (FastAPI)      ->  Browser (HTMX + Chart.js)
 ```
 
-The full pipeline can be run with `python run_pipeline.py`.
+The full pipeline can be run with `python scripts/run_pipeline.py`.
 
 ## Data Sources
 

@@ -8,7 +8,7 @@ Provides:
     skipped, and why.
   - SkipRecord: single skip event with a category and detail string.
 
-Usage inside run_pipeline.py::
+Usage inside scripts/run_pipeline.py::
 
     from pipeline.logging import PipelineLogger
 

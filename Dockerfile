@@ -38,8 +38,6 @@ COPY pipeline/      pipeline/
 # DOCKER-001: Add frontend templates and static assets
 COPY templates/     templates/
 COPY static/        static/
-# Pipeline orchestrator (root-level entry point)
-COPY run_pipeline.py        .
 
 # Database mount point — override with -v at runtime or COPY in CI builds
 # The health endpoint at /health returns 503 if the DB is absent.
