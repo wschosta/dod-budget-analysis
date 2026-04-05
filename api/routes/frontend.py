@@ -1408,9 +1408,15 @@ async def hypersonics_page(
     request: Request,
     service: str | None = None,
     exhibit: str | None = None,
+    _content: str | None = None,
     conn: sqlite3.Connection = Depends(get_db),
 ) -> HTMLResponse:
-    """Server-rendered hypersonics PE lines pivot table page."""
+    """Hypersonics PE lines pivot table page.
+
+    Two modes:
+    - Shell render (default): returns page skeleton with loading screen instantly.
+    - Content render (_content=1): runs data pipeline, returns inner HTML partial.
+    """
     from api.routes.hypersonics import (
         _ensure_cache,
         _HYPERSONICS_KEYWORDS,
@@ -1423,6 +1429,27 @@ async def hypersonics_page(
         FY_END,
     )
 
+    year_range = list(range(FY_START, FY_END + 1))
+
+    # Shell render: return page skeleton immediately (no data queries)
+    if _content != "1":
+        return _tmpl().TemplateResponse(request, "hypersonics.html", context={
+            "loading": True,
+            "rows": [],
+            "slim_rows": [],
+            "pe_groups": {},
+            "pe_meta": {},
+            "active_years": year_range,
+            "year_range": year_range,
+            "keywords": _HYPERSONICS_KEYWORDS,
+            "keyword_counts": {},
+            "services": [],
+            "exhibits": [],
+            "filters": {"service": service or "", "exhibit": exhibit or ""},
+            "row_count": 0,
+        })
+
+    # Content render: full data pipeline
     _ensure_cache(conn)
 
     extra_where, extra_params = apply_filters(service, exhibit, None, None)
@@ -1430,7 +1457,6 @@ async def hypersonics_page(
     sql = f"SELECT * FROM {_CACHE_TABLE} {where} ORDER BY pe_number, exhibit_type, line_item_title"
     raw_rows = conn.execute(sql, extra_params).fetchall()
 
-    year_range = list(range(FY_START, FY_END + 1))
     rows = cache_rows_to_dicts(raw_rows)
 
     active_years = [
@@ -1438,7 +1464,6 @@ async def hypersonics_page(
         if any(r.get(f"fy{yr}") is not None for r in rows)
     ] if rows else year_range
 
-    # Distinct services and exhibit types from cache for filter dropdowns
     try:
         services = [
             r[0] for r in conn.execute(
@@ -1459,16 +1484,11 @@ async def hypersonics_page(
     except sqlite3.OperationalError:
         exhibits = []
 
-    # Group rows by PE for hierarchy (#1)
     pe_groups: dict[str, list[dict]] = {}
     for row in rows:
         pe = row["pe_number"]
         pe_groups.setdefault(pe, []).append(row)
 
-    # Compute PE-level metadata for parent rows:
-    # - pe_title: most recent R-1 line_item_title (or first R-2 title as fallback)
-    # - pe_title_count: number of distinct R-1 titles (for "also known as" display)
-    # - child_count: number of child rows in the PE group
     pe_meta: dict[str, dict] = {}
     for pe, children in pe_groups.items():
         r1_titles = []
@@ -1476,11 +1496,9 @@ async def hypersonics_page(
         for c in children:
             if c.get("exhibit_type") == "r1" and c.get("line_item_title"):
                 r1_titles.append(c["line_item_title"])
-                r1_row = c  # last R-1 row = most recent
-        # Use last R-1 title (most recent) or first child title as fallback
+                r1_row = c
         title = r1_titles[-1] if r1_titles else (children[0].get("line_item_title") or pe)
         distinct_titles = len(set(r1_titles))
-        # Extract R-1 FY values for parent row display
         r1_fy: dict[str, int | None] = {}
         if r1_row:
             for yr in active_years:
@@ -1492,7 +1510,6 @@ async def hypersonics_page(
             "r1_fy": r1_fy,
         }
 
-    # Compute per-keyword match counts across all rows
     keyword_counts: dict[str, int] = {kw: 0 for kw in _HYPERSONICS_KEYWORDS}
     for row in rows:
         row_kws = set(row.get("matched_keywords_row", []))
@@ -1501,9 +1518,6 @@ async def hypersonics_page(
             if kw in keyword_counts:
                 keyword_counts[kw] += 1
 
-    # Strip heavy fields from template context.
-    # description_text: loaded via AJAX. Keep a boolean flag for [desc] toggle.
-    # Build a slim rows list for JS (only fields needed for totals/sorting).
     js_fields = {"pe_number", "organization_name", "exhibit_type", "line_item_title",
                  "budget_activity_norm", "color_of_money", "_childIdx"}
     fy_prefix = "fy"
@@ -1513,27 +1527,26 @@ async def hypersonics_page(
         row.pop("description_text", None)
         slim = {k: v for k, v in row.items()
                 if k in js_fields or (k.startswith(fy_prefix) and not k.endswith("_ref"))}
-        # Add child count for sorting by sub-element count
         slim["_childCount"] = pe_meta.get(row["pe_number"], {}).get("child_count", 0)
         slim_rows.append(slim)
 
-    return _tmpl().TemplateResponse(request, "hypersonics.html", context={
-        "rows": rows,
-        "slim_rows": slim_rows,
-        "pe_groups": pe_groups,
-        "pe_meta": pe_meta,
-        "active_years": active_years,
-        "year_range": year_range,
-        "keywords": _HYPERSONICS_KEYWORDS,
-        "keyword_counts": keyword_counts,
-        "services": services,
-        "exhibits": exhibits,
-        "filters": {
-            "service": service or "",
-            "exhibit": exhibit or "",
+    return _tmpl().TemplateResponse(
+        request, "partials/hypersonics-content.html", context={
+            "loading": False,
+            "rows": rows,
+            "slim_rows": slim_rows,
+            "pe_groups": pe_groups,
+            "pe_meta": pe_meta,
+            "active_years": active_years,
+            "year_range": year_range,
+            "keywords": _HYPERSONICS_KEYWORDS,
+            "keyword_counts": keyword_counts,
+            "services": services,
+            "exhibits": exhibits,
+            "filters": {"service": service or "", "exhibit": exhibit or ""},
+            "row_count": len(rows),
         },
-        "row_count": len(rows),
-    })
+    )
 
 
 # ── GET /explorer ────────────────────────────────────────────────────────────
