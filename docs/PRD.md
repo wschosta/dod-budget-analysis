@@ -195,6 +195,7 @@ Server-side rendered HTML using Jinja2 templates with HTMX for dynamic updates.
 - **Custom checkbox-select dropdown** component for multi-value filters
 - **Tooltips** on filter labels and column headers (CSS `data-tooltip` attributes)
 - **Chart.js visualizations** fetching data from API aggregation endpoints
+- **Funding trend sparklines** in search results — inline SVG bar charts per row showing amounts across all FY columns, togglable via "Trend" column button, `localStorage`-persisted
 
 ---
 

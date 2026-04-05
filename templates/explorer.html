@@ -171,7 +171,7 @@ details[open] .pe-toggle .toggle-icon { transform: rotate(90deg); }
 
   <!-- 1. Keyword Input -->
   <div class="kw-input-area">
-    <label for="kw-input">Keywords <span style="font-weight:normal; color:var(--color-text-muted)">(comma-separated, max 20)</span></label>
+    <label for="kw-input">Keywords <span class="text-secondary" style="font-weight:normal">(comma-separated, max 20)</span></label>
     <div class="kw-input-row">
       <input type="text" id="kw-input" placeholder="e.g. hypersonic, scramjet, directed energy, 0604030N"
              value="{{ keyword_input or '' }}"
@@ -187,7 +187,7 @@ details[open] .pe-toggle .toggle-icon { transform: rotate(90deg); }
   <div class="build-progress" id="build-progress">
     <span class="spinner"></span>
     <span class="status-text" id="progress-text">Building cache...</span>
-    <div class="elapsed-time mt-sm text-lg" id="elapsed-time" style="color:var(--color-text-muted);">
+    <div class="elapsed-time mt-sm text-lg text-secondary" id="elapsed-time">
       Elapsed: <span id="elapsed-clock">0:00</span>
     </div>
   </div>
@@ -202,7 +202,7 @@ details[open] .pe-toggle .toggle-icon { transform: rotate(90deg); }
         <summary class="pe-toggle">
           <span class="toggle-icon">&#9654;</span> Show Program Element Details
         </summary>
-        <div class="mt-sm" style="overflow-x:auto;">
+        <div class="mt-sm table-wrapper">
           <table class="preview-table" id="preview-table">
             <thead>
               <tr>

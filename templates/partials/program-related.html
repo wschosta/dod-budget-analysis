@@ -38,7 +38,7 @@
 {% if explicit_refs %}
 <div class="mb-lg">
   <h4 class="section-label-lg">
-    <span class="badge" style="background:var(--clr-blue);color:var(--text-on-primary);font-size:.68rem">Explicit Reference</span>
+    <span class="badge badge-explicit text-xs">Explicit Reference</span>
     <span>{{ explicit_refs | length }} found</span>
   </h4>
   <div class="pe-related-grid">
@@ -46,7 +46,7 @@
     <a href="/programs/{{ rel.referenced_pe }}" class="pe-card pe-card-sm">
       <div class="d-flex gap-sm items-center flex-wrap">
         <span class="badge">{{ rel.referenced_pe }}</span>
-        <span class="badge" style="background:var(--clr-blue);color:var(--text-on-primary);font-size:.65rem">Explicit Reference</span>
+        <span class="badge badge-explicit text-xs">Explicit Reference</span>
       </div>
       {% if rel.referenced_title %}
       <span class="text-lg">{{ rel.referenced_title }}</span>
@@ -81,7 +81,7 @@
 {% if name_matches %}
 <div class="mb-lg">
   <h4 class="section-label-lg">
-    <span class="badge" style="background:transparent;color:var(--text-secondary);border:1px solid var(--border-color);font-size:.68rem">Name Match</span>
+    <span class="badge badge-outline text-xs">Name Match</span>
     <span>{{ name_matches | length }} found</span>
   </h4>
   <div class="pe-related-grid">
@@ -89,7 +89,7 @@
     <a href="/programs/{{ rel.referenced_pe }}" class="pe-card pe-card-sm">
       <div class="d-flex gap-sm items-center flex-wrap">
         <span class="badge">{{ rel.referenced_pe }}</span>
-        <span class="badge" style="background:transparent;color:var(--text-secondary);border:1px solid var(--border-color);font-size:.65rem">Name Match</span>
+        <span class="badge badge-outline text-xs">Name Match</span>
       </div>
       {% if rel.referenced_title %}
       <span class="text-lg">{{ rel.referenced_title }}</span>

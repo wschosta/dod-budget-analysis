@@ -778,7 +778,6 @@ def _extract_pe_number(text: str | None) -> str | None:
     PE numbers follow a pattern like '0602702E' or '0305116BB':
     seven digits followed by one or two uppercase letters.
     Returns only the first match. See _extract_all_pe_numbers() for all matches.
-    Implements TODO 1.B4-a.
     """
     if not text:
         return None
@@ -821,7 +820,6 @@ def _detect_currency_year(sheet_name: str, filename: str) -> str:
 
     Checks the sheet name and filename for keywords.  DoD budget exhibits
     default to then-year (nominal) dollars unless explicitly labeled constant.
-    Implements TODO 1.B3-b.
     """
     combined = f"{sheet_name} {filename}".lower()
     if "constant" in combined:
@@ -851,7 +849,7 @@ def _normalise_fiscal_year(raw: str) -> str:
 
 
 def _detect_amount_unit(rows: list, header_idx: int) -> str:
-    """Scan title rows above the header for unit indicators (TODO 1.B3-a).
+    """Scan title rows above the header for unit indicators.
 
     Returns "thousands" or "millions" based on keyword matches in any cell
     found in rows[0:header_idx+1].  Defaults to "thousands" if no indicator

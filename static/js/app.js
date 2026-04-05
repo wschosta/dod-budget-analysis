@@ -612,6 +612,7 @@ document.addEventListener("htmx:afterSwap", function (evt) {
     restoreDensity();
     restoreAmountFormat();
     if (currentAmtFmt !== "K") applyAmountFormat();
+    if (typeof initSparklines === "function") initSparklines();
   }
 
   // JS-004: focus detail panel heading after it loads
@@ -1042,6 +1043,8 @@ document.addEventListener("DOMContentLoaded", function () {
   restoreDensity();
   restoreAmountFormat();
   initResultsKeyboardNav();
+
+  if (typeof initSparklines === "function") initSparklines();
 
   // FALCON-7: Fetch metadata for footer
   loadFooterMetadata();

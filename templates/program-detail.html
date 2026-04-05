@@ -11,7 +11,7 @@
 <div class="pe-meta">
   <span class="badge text-lg">{{ pe_data.pe_number }}</span>
   {% if pe_data.index.source == 'pdf' %}
-  <span class="badge badge-secondary text-base-sm" title="Data derived from PDF narratives only; no structured Excel line items available" style="background:var(--text-secondary);color:var(--bg)">PDF-only</span>
+  <span class="badge badge-outline text-base-sm" title="Data derived from PDF narratives only; no structured Excel line items available">PDF-only</span>
   {% endif %}
   {% if pe_data.index.organization_name %}
   <span>{{ pe_data.index.organization_name }}</span>
@@ -121,7 +121,7 @@
 {# ── Funding trend chart ──────────────────────────────────────────────────── #}
 <section class="pe-section" aria-label="Funding trend">
   <h3>Funding Trend</h3>
-  <div class="chart-card" style="margin-top:0">
+  <div class="chart-card mt-0">
     <canvas id="pe-funding-chart" height="200" role="img" aria-label="Line chart showing program funding trend across fiscal years"></canvas>
   </div>
 </section>

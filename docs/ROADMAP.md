@@ -125,6 +125,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | **3.B1** | Year-over-year trend charts | For a selected program element or appropriation, display a line/bar chart showing budget amounts across fiscal years. | ✅ **Complete** — Chart.js grouped bar chart in `templates/charts.html` with dynamic FY columns |
 | **3.B2** | Service/agency comparison charts | Visual comparison of budget allocations across services for a selected fiscal year. | ✅ **Complete** — Horizontal bar chart with service filter dropdown on charts page |
 | **3.B3** | Top-N budget items dashboard | A summary dashboard showing the largest budget line items by various cuts (service, appropriation, program). | ✅ **Complete** — Top-10 horizontal bar chart plus budget comparison interactive chart |
+| **3.B4** | Funding trend sparklines | Inline SVG bar charts in search result rows showing funding trajectory across all FY columns. Togglable, dark-mode aware, localStorage-persisted. | ✅ **Complete** — `static/js/sparkline.js`, column toggle in results table |
 
 ### 3.C — User Documentation
 

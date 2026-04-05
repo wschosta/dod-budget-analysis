@@ -2,7 +2,7 @@
 <div class="top-movers-grid">
   {% if increases %}
   <div class="top-movers-card">
-    <h4 style="color:var(--clr-green)">Top Increases</h4>
+    <h4 class="text-green">Top Increases</h4>
     <ul class="top-movers-list">
       {% for item in increases[:5] %}
       <li>
@@ -28,7 +28,7 @@
 
   {% if decreases %}
   <div class="top-movers-card">
-    <h4 style="color:var(--clr-red)">Top Decreases</h4>
+    <h4 class="text-red">Top Decreases</h4>
     <ul class="top-movers-list">
       {% for item in decreases[:5] %}
       <li>
