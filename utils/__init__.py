@@ -21,7 +21,7 @@ from utils.patterns import (
 )
 
 # String utilities
-from utils.strings import safe_float, normalize_whitespace, sanitize_fts5_query, normalize_fiscal_year
+from utils.strings import safe_float, normalize_whitespace, sanitize_fts5_query, normalize_fiscal_year, clean_narrative
 
 # Database utilities
 from utils.database import (
@@ -152,6 +152,7 @@ __all__ = [
     "normalize_whitespace",
     "sanitize_fts5_query",
     "normalize_fiscal_year",
+    "clean_narrative",
     # Database
     "init_pragmas",
     "batch_insert",
