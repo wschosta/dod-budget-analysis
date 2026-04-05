@@ -1434,19 +1434,7 @@ async def hypersonics_page(
     # Shell render: return page skeleton immediately (no data queries)
     if _content != "1":
         return _tmpl().TemplateResponse(request, "hypersonics.html", context={
-            "loading": True,
-            "rows": [],
-            "slim_rows": [],
-            "pe_groups": {},
-            "pe_meta": {},
             "active_years": year_range,
-            "year_range": year_range,
-            "keywords": _HYPERSONICS_KEYWORDS,
-            "keyword_counts": {},
-            "services": [],
-            "exhibits": [],
-            "filters": {"service": service or "", "exhibit": exhibit or ""},
-            "row_count": 0,
         })
 
     # Content render: full data pipeline
@@ -1532,7 +1520,6 @@ async def hypersonics_page(
 
     return _tmpl().TemplateResponse(
         request, "partials/hypersonics-content.html", context={
-            "loading": False,
             "rows": rows,
             "slim_rows": slim_rows,
             "pe_groups": pe_groups,
