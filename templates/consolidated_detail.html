@@ -9,7 +9,7 @@
 
 {# ── Header ──────────────────────────────────────────────────────────────── #}
 <h2>{{ item.line_item_title or item.pe_number }}</h2>
-<div class="pe-meta d-flex flex-wrap items-center gap-sm" style="margin:.75rem 0 1.25rem">
+<div class="pe-meta d-flex flex-wrap items-center gap-sm pe-meta-spacing">
   <span class="badge text-lg">{{ item.pe_number }}</span>
   {% if item.organization_name %}
   <span>{{ item.organization_name }}</span>
@@ -20,7 +20,7 @@
 </div>
 
 {# ── Metadata grid ───────────────────────────────────────────────────────── #}
-<div class="d-grid gap-md mb-xl" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr))">
+<div class="d-grid gap-md mb-xl grid-auto-fill">
   {% if item.appropriation_name %}
   <div class="card-surface p-md">
     <div class="section-label">Appropriation</div>
@@ -90,9 +90,9 @@
   {# Tab content panes #}
   {% for desc in pe_descriptions %}
   <div class="pe-desc-pane" data-idx="{{ loop.index0 }}" style="display:{% if loop.last %}block{% else %}none{% endif %}">
-    <div id="pe-desc-text-{{ loop.index0 }}" class="text-base lh-loose expandable-text" style="position:relative">{{ desc.text }}</div>
+    <div id="pe-desc-text-{{ loop.index0 }}" class="text-base lh-loose expandable-text pos-relative">{{ desc.text }}</div>
     <button id="pe-desc-toggle-{{ loop.index0 }}" onclick="togglePeDescExpand({{ loop.index0 }})"
-            class="d-none text-md mt-xs btn-ghost text-accent" style="padding:.25rem 0">
+            class="d-none text-md mt-xs btn-ghost text-accent py-sm">
       Show more &darr;
     </button>
   </div>
@@ -162,7 +162,7 @@ function togglePeDescExpand(idx) {
     <table id="matrix-table" class="text-base-sm text-nowrap table-full">
       <thead>
         <tr>
-          <th class="text-sm text-upper text-secondary table-cell sticky-col" style="text-align:left;border-bottom-width:2px;min-width:180px">Program</th>
+          <th class="text-sm text-upper text-secondary table-cell sticky-col text-left" style="border-bottom-width:2px;min-width:180px">Program</th>
           {% for fy in matrix_fys %}
           <th class="text-right text-mono meta-sm table-cell" style="border-bottom-width:2px;min-width:70px">FY{{ fy }}</th>
           {% endfor %}
@@ -211,7 +211,7 @@ function togglePeDescExpand(idx) {
         {% endfor %}
         {# "Not accounted for" difference row #}
         {% if diff_row %}
-        <tr class="text-italic text-secondary text-sm" style="border-top:2px solid var(--border-color)">
+        <tr class="text-italic text-secondary text-sm border-top-2">
           <td class="table-cell sticky-col">
             {{ diff_row.label }}
           </td>
@@ -379,17 +379,17 @@ function togglePeDescExpand(idx) {
 {% if sub_groups %}
 <section class="mb-xl">
   <details>
-    <summary class="text-xl cursor-pointer" style="font-weight:700;padding:.5rem 0">
+    <summary class="text-xl cursor-pointer summary-xl">
       Submission Archive
       <span class="meta-std fw-normal">({{ sub_count }} document{{ "s" if sub_count != 1 }})</span>
     </summary>
-    <p class="meta-std" style="margin:.5rem 0">
+    <p class="meta-std mt-sm mb-sm">
       Raw data from each budget submission document, grouped by fiscal year.
     </p>
 
     {% for fy, subs in sub_groups.items() | sort(attribute='0', reverse=True) %}
     <details class="card-surface mb-sm">
-      <summary class="text-lg cursor-pointer" style="padding:.75rem 1rem;font-weight:600">
+      <summary class="text-lg cursor-pointer summary-lg">
         FY{{ fy }} Submissions
         <span class="text-md text-secondary fw-normal">({{ subs | length }})</span>
       </summary>
@@ -405,7 +405,7 @@ function togglePeDescExpand(idx) {
             <table class="text-md table-full">
               <thead>
                 <tr>
-                  <th class="text-sm text-upper text-secondary table-cell-sm" style="text-align:left">Column</th>
+                  <th class="text-sm text-upper text-secondary table-cell-sm text-left">Column</th>
                   <th class="text-sm text-upper text-secondary text-right table-cell-sm">Value ($K)</th>
                 </tr>
               </thead>
@@ -440,7 +440,7 @@ function togglePeDescExpand(idx) {
        hx-get="/partials/program-related/{{ item.pe_number }}?min_confidence=0.8&limit=20"
        hx-trigger="load"
        hx-swap="innerHTML">
-    <p class="meta-std"><span class="spinner" style="display:inline-block;width:14px;height:14px;vertical-align:middle;margin-right:.3rem"></span> Loading related programs&hellip;</p>
+    <p class="meta-std"><span class="spinner spinner-inline"></span> Loading related programs&hellip;</p>
   </div>
 </section>
 

@@ -149,7 +149,7 @@
           <span id="amount-range-label" data-tooltip="Amount in thousands of dollars ($K). Filter lines where the selected FY column falls within this range.">Amount Range ($K)</span>
           <div class="mb-xs">
             <select name="amount_column" id="amount_column"
-                    style="width:100%;padding:.25rem .4rem;font-size:.82rem;border:1px solid var(--border-color);border-radius:var(--radius);background:var(--bg-surface);color:var(--text-primary)">
+                    class="input-filter w-full">
               {% for fc in fiscal_year_columns %}
               <option value="{{ fc.column }}" {% if fc.column == amount_column %}selected{% endif %}>{{ fc.label }}</option>
               {% endfor %}
@@ -185,13 +185,13 @@
                 onclick="showSaveSearchInput()" aria-label="Save current search">&#9733; Save</button>
       </div>
       <div id="save-search-inline" class="d-none mt-sm">
-        <label for="save-search-name" class="text-md text-secondary" style="font-weight:600">Search name</label>
+        <label for="save-search-name" class="text-md text-secondary fw-600">Search name</label>
         <div class="d-flex gap-xs mt-2xs">
           <input type="text" id="save-search-name" placeholder="e.g. Army cyber programs"
-                 class="input-filter" style="flex:1">
-          <button type="button" class="btn btn-primary btn-sm" style="padding:.3rem .6rem"
+                 class="input-filter flex-1">
+          <button type="button" class="btn btn-primary btn-sm"
                   onclick="confirmSaveSearch()">Save</button>
-          <button type="button" class="btn btn-secondary btn-sm" style="padding:.3rem .6rem"
+          <button type="button" class="btn btn-secondary btn-sm"
                   onclick="hideSaveSearchInput()">Cancel</button>
         </div>
       </div>
@@ -199,7 +199,7 @@
 
     {# Download modal trigger (3.A5-a) #}
     <hr style="margin: 1rem 0; border-color: var(--clr-gray-200);">
-    <button class="btn btn-secondary btn-sm" style="width:100%"
+    <button class="btn btn-secondary btn-sm w-full"
             onclick="document.getElementById('dl-modal').classList.add('open')">
       &darr; Download Results
     </button>
@@ -228,7 +228,7 @@
     </div>
 
     {# LION-008: Print button #}
-    <div class="d-flex mb-sm" style="justify-content:flex-end">
+    <div class="d-flex mb-sm justify-end">
       <button class="btn btn-secondary btn-sm print-btn" onclick="window.print()">Print Results</button>
     </div>
 
@@ -263,7 +263,7 @@
       Your filters match <strong>{{ "{:,}".format(total) if total is defined else "—" }}</strong> rows.
       Downloads include all matching rows (up to 50,000).
     </p>
-    <div class="d-flex gap-sm" style="flex-direction:column">
+    <div class="d-flex gap-sm flex-col">
       <a id="dl-csv" href="#" class="btn btn-primary" download>
         ↓ Download CSV
       </a>

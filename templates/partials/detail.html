@@ -1,10 +1,10 @@
 {% if item %}
 <div class="detail-panel" id="detail-panel">
-  <div class="d-flex flex-wrap gap-sm" style="align-items:flex-start;justify-content:space-between">
+  <div class="d-flex flex-wrap gap-sm items-start justify-between">
     <h3>{{ item.line_item_title or item.account_title or "Budget Line Detail" }}</h3>
     <button class="btn btn-secondary btn-sm"
             onclick="document.getElementById('detail-container').innerHTML=''"
-            style="flex-shrink:0">✕ Close</button>
+            class="flex-shrink-0">✕ Close</button>
   </div>
 
   <div class="detail-grid mt-md">
@@ -73,7 +73,7 @@
   </div>
 
   <div class="detail-source-info mt-lg p-md card-surface">
-    <h4 class="meta-std mb-sm" style="margin-top:0">Data Source</h4>
+    <h4 class="meta-std mb-sm mt-0">Data Source</h4>
     <div class="detail-grid">
       {% if item.source_fiscal_year and item.source_fiscal_year != item.fiscal_year %}
       <div class="detail-field">
@@ -114,7 +114,7 @@
   <h4 class="mt-lg mb-sm meta-lg">
     Related Fiscal Years
   </h4>
-  <div class="d-flex flex-wrap" style="gap:.4rem">
+  <div class="d-flex flex-wrap gap-sm">
     {# FIX-015: Show the most relevant amount for each related item's fiscal year #}
     {% for rel in related_items %}
     {% set best_amt = rel.amount_fy2026_request if rel.amount_fy2026_request is not none

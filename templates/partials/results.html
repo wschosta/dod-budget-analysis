@@ -151,7 +151,7 @@
             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();selectRow(this);htmx.trigger(this,'click')}"
             role="row">
           <td>
-            <div style="font-weight:600;font-size:.88rem">
+            <div class="result-title">
               {{ item.line_item_title or item.account_title or "—" }}
             </div>
             {% if item.budget_activity_title %}
@@ -159,7 +159,7 @@
             {% endif %}
             {% if item._pe_total %}
             <div class="meta-sm mt-2xs">
-              Total Program Value: <strong style="color:var(--text-primary)">{{ item._pe_total.total_value | fmt_dollars }}</strong>
+              Total Program Value: <strong class="text-primary">{{ item._pe_total.total_value | fmt_dollars }}</strong>
               <span class="text-xs">(FY{{ item._pe_total.fy_min }}–FY{{ item._pe_total.fy_max }})</span>
             </div>
             {% endif %}
@@ -240,7 +240,7 @@
       No budget data is loaded. Run <code>python build_budget_db.py</code> to ingest data.
       {% endif %}
     </p>
-    <ul class="text-secondary" style="font-size:.82rem;text-align:left;max-width:360px;margin:.75rem auto 0;list-style:disc;padding-left:1.5rem">
+    <ul class="text-secondary" class="empty-hint-list">
       <li>Check spelling of keywords or PE numbers</li>
       <li>Try fewer filters or broader search terms</li>
       <li>Remove amount range constraints</li>
