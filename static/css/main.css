@@ -2083,7 +2083,6 @@ tr:focus-within td {
 
 /* Font weights */
 .fw-600         { font-weight: 600; }
-.fw-700         { font-weight: 700; }
 
 /* Position */
 .pos-relative   { position: relative; }
@@ -2133,10 +2132,6 @@ tr:focus-within td {
 /* Margin inline */
 .ml-xs          { margin-left: .25rem; }
 .ml-sm          { margin-left: .5rem; }
-.m-0            { margin: 0; }
-
-/* Justify */
-.justify-between { justify-content: space-between; }
 
 /* Padding */
 .pl-md          { padding-left: 1rem; }
@@ -2158,7 +2153,6 @@ tr:focus-within td {
 /* ── Additional utilities (Issue #49 pass 3) ──────────────────────────── */
 
 /* Fine-grained spacing */
-.mt-2xs         { margin-top: .15rem; }
 .mt-3           { margin-top: .35rem; }
 .mt-5           { margin-top: 1.25rem; }
 .mb-3           { margin-bottom: .35rem; }
@@ -2174,7 +2168,6 @@ tr:focus-within td {
 .lh-loose       { line-height: 1.6; }
 
 /* Text */
-.text-accent    { color: var(--clr-blue); }
 .no-decoration  { text-decoration: none; }
 .word-break-all { word-break: break-all; }
 
