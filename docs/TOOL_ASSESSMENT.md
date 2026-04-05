@@ -95,7 +95,7 @@ This assessment was conducted by reviewing:
 | Gap | Impact | Status | Reference |
 |-----|--------|--------|-----------|
 | **P-5, R-2, R-3, R-4 detail exhibits unverified** against real corpus | HIGH — R-2 is the primary RDT&E exhibit; P-5 is primary procurement detail | Spec-based only | OH-MY-006 notes |
-| **Currency year distinction** (then-year vs. constant dollars) not implemented | MEDIUM — affects multi-year trend accuracy | TODO in methodology.md | 1.B3 |
+| **Currency year distinction** (then-year vs. constant dollars) not implemented | MEDIUM — affects multi-year trend accuracy | Partially addressed (unit detection added in 1.B3) | 1.B3 |
 | **Missing agency sources** (MDA, NGB, DLA standalone) | LOW-MEDIUM — creates gaps for certain PE lookups | Evaluated but not added | data-sources.md |
 | **Amount range filter hardcoded to FY2026 request** | MEDIUM — should match visible/active FY column | Known bug | GUI_MVP_IMPROVEMENT_PLAN 1.2 |
 

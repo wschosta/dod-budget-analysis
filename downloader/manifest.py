@@ -22,7 +22,6 @@ def _compute_sha256(file_path: Path) -> str:
     """Compute the SHA-256 hex digest of a file.
 
     Reads in 64 KB chunks to avoid loading large files into memory.
-    Implements TODO 1.A3-b.
     """
     h = hashlib.sha256()
     with open(file_path, "rb") as fh:
@@ -87,7 +86,6 @@ def write_manifest(output_dir: Path, all_files: dict, manifest_path: Path) -> No
 
     Each entry records: url, expected_filename, source, fiscal_year, extension.
     After downloading, call update_manifest_entry() to add status/size/hash.
-    Implements TODO 1.A3-a.
     """
     global _manifest, _manifest_path
     _manifest_path = manifest_path
@@ -140,7 +138,6 @@ def update_manifest_entry(url: str, status: str, file_size: int,
 
     Writes the updated manifest to disk immediately so it survives crashes.
     Thread-safe: serialised via ``_manifest_lock``.
-    Implements TODO 1.A3-a / 1.A3-b.
     """
     global _manifest, _manifest_path
     with _manifest_lock:

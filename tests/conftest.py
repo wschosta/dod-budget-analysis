@@ -1,84 +1,9 @@
 """
-Pytest fixtures for DoD budget analysis tests — Step 1.C1
+Pytest fixtures for DoD budget analysis tests.
 
 Provides reusable test fixtures: sample Excel files, sample PDFs, temporary
 SQLite databases, and pre-loaded database connections.
-
-──────────────────────────────────────────────────────────────────────────────
-Fixture creation tasks (STEP 1.C1 COMPLETE)
-──────────────────────────────────────────────────────────────────────────────
-
-1.C1-a: Create minimal Excel fixture for each summary exhibit type.
-    DONE — see _create_exhibit_xlsx() and the fixtures_dir fixture below.
-
-1.C1-b: Create minimal PDF fixtures.
-    DONE — see _create_sample_pdf() using fpdf2 below.
-
-1.C1-c: Create a fixture that builds a pre-populated test database.
-    DONE — see test_db fixture below.
-
-1.C1-d: Create a fixture for a "known bad" Excel file.
-    DONE — see bad_excel fixture below.
-
-1.C1-e: Add fixture requirements to requirements-dev.txt.
-    DONE — requirements-dev.txt already lists pytest, pytest-cov, fpdf2.
-
-──────────────────────────────────────────────────────────────────────────────
-Testing Gap TODOs — ALL COMPLETE
-──────────────────────────────────────────────────────────────────────────────
-
-DONE TEST-001  tests/test_frontend_routes.py: End-to-end frontend route tests
-    with FastAPI TestClient covering GET /, /charts, /partials/* routes.
-
-DONE TEST-002  tests/test_charts_data.py: Chart data contract tests covering
-    aggregation endpoints, fiscal year grouping, and edge cases.
-
-DONE TEST-003  tests/test_download_streaming.py: Download endpoint streaming
-    tests for CSV and NDJSON output format verification.
-
-DONE TEST-004  tests/test_rate_limiter.py: Rate limiter behavior tests for
-    per-IP limits, 429 responses, and Retry-After headers.
-
-DONE TEST-005  tests/test_performance.py: Performance regression smoke tests
-    with acceptable time thresholds for search, aggregations, and pagination.
-
-DONE TEST-006  tests/test_accessibility.py: Static accessibility checks on
-    HTML output (alt attributes, labels, tooltips, ARIA regions).
-
-──────────────────────────────────────────────────────────────────────────────
-Historical TODOs (resolved)
-──────────────────────────────────────────────────────────────────────────────
-
-DONE FIX-005  test_pipeline.py PanicException resolved: PDF fixture generation
-    was simplified and pyo3 panic caught; all 8 pipeline tests now pass
-    or skip cleanly. test_db fixture uses test_db_excel_only for non-PDF tests.
-
-DONE FIX-006  test_rows_metric_increases_with_excel passes; FIX-001 (undefined rows)
-    was already resolved earlier. test_build_integration.py 22 pass, 7 skip.
-
-DONE TEST-001: _P5_ROWS, _R2_ROWS, and header patterns added; p5_display.xlsx
-    and r2_display.xlsx generated in fixtures_dir.
-DONE TEST-002: api/app.py implemented; tests/test_charts_data.py created.
-DONE TEST-003: tests/test_download_streaming.py created with format verification.
-DONE TEST-004: tests/test_rate_limiter.py created with behavior tests.
 """
-
-# ──────────────────────────────────────────────────────────────────────────────
-# LION TODOs — Test Cases for Database Import Integrity
-# ──────────────────────────────────────────────────────────────────────────────
-#
-# LION-108: Write comprehensive test suite for PE alignment and data integrity.
-#     New test file: tests/test_lion_db_integrity.py covering:
-#     (a) PE alignment: every PE in budget_lines R-2 detail also appears in R-1
-#         summary for the same organization/FY
-#     (b) FY validation: fiscal_year column always matches "FY YYYY" format;
-#         directory-derived FY matches sheet-derived FY
-#     (c) PDF FY/exhibit_type: pdf_pages.fiscal_year and exhibit_type are populated
-#     (d) pdf_pe_numbers junction: PE mentions in PDFs match expected PE set
-#     (e) Tag completeness: every PE in pe_index has at least one structured tag
-#     (f) Tag confidence: structured tags have confidence=1.0, keyword tags < 1.0
-#     (g) Source tracking: pe_tags.source_files is non-null for all rows
-#     (h) Enrichment coverage: pe_descriptions covers expected PE/FY/source combos
 
 import sys
 import types
@@ -110,7 +35,7 @@ def _create_exhibit_xlsx(path: Path, exhibit_type: str, rows: list[tuple]) -> Pa
 
     Builds a workbook with one sheet containing a realistic header row and
     the provided data rows.  Values are deterministic so test assertions are
-    stable.  Implements TODO 1.C1-a.
+    stable.
 
     Args:
         path:         Destination file path (must end in .xlsx).
@@ -256,7 +181,7 @@ def _create_sample_pdf(
     """Create a minimal PDF fixture using fpdf2.
 
     Generates a PDF with extractable text and optionally a simple table
-    layout.  Implements TODO 1.C1-b.
+    layout.
 
     Args:
         path:          Destination .pdf path.
@@ -492,7 +417,7 @@ def test_db(fixtures_dir, tmp_path_factory):
     """Return a Path to a SQLite database pre-built from fixture files.
 
     Runs build_database() once per test session so integration tests can
-    query real data without repeating the build.  Implements TODO 1.C1-c.
+    query real data without repeating the build.
     """
     # Import here so test collection works even without the full dep stack
     from pipeline.builder import build_database  # type: ignore
@@ -550,7 +475,7 @@ def bad_excel(tmp_path_factory) -> Path:
 
     The file has: no recognisable header row, merged-cell-like empty columns,
     inconsistent column names, and blank rows scattered through the data.
-    Used to verify that the parser degrades gracefully.  Implements TODO 1.C1-d.
+    Used to verify that the parser degrades gracefully.
     """
     d = tmp_path_factory.mktemp("bad_fixtures")
     path = d / "malformed_exhibit.xlsx"

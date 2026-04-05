@@ -512,20 +512,6 @@ def test_detect_currency_year(sheet_name, filename, expected):
     assert _detect_currency_year(sheet_name, filename) == expected
 # ── STEP 1.C2 STATUS: Core tests implemented ───────────────────────────────
 #
-# COMPLETED test groups:
-#   ✓ 1.C2-a: test_detect_exhibit_type
-#   ✓ 1.C2-c: test_safe_float
-#   ✓ 1.C2-d: test_determine_category
-#   ✓ 1.C2-e: test_extract_table_text
-#   ✓ 1.C2-b: test_map_columns (partial coverage for P-1, C-1)
-#
-# REMAINING tasks (per docs/TODO_1C2_unit_tests_parsing.md):
-#   - 1.C2-b-extended: Additional _map_columns tests for R, M, O, RF exhibits
-#   - 1.C2-f: _sanitize_filename edge case testing
-#   - 1.C2-g: DONE — Legacy TODO comments cleaned up across test files
-#
-# See docs/TODO_1C2_unit_tests_parsing.md for full specification.
-
 
 
 

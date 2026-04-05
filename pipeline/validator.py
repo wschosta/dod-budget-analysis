@@ -11,18 +11,9 @@ Usage:
     python validate_budget_data.py --strict              # Non-zero exit on warnings
     python validate_budget_data.py --json                # Output as JSON
 
-Status: Core validation checks implemented (1.B6-b, 1.B6-c, 1.B6-e, 1.B6-f, 1.B6-g)
-
----
-Remaining TODOs
----
-
-DONE 1.B6-a: check_fiscal_year_coverage() added — flags orgs missing expected FYs.
-DONE 1.B6-d: check_column_types() added — detects text in numeric amount columns.
-DONE 1.B6-h: validate_all() wired into build_budget_db.py post-build step.
-DONE 2.B3-a: generate_quality_report() writes data_quality_report.json with
-    row counts by (service, fiscal_year, exhibit_type), null/zero percentages
-    for each amount column, and full validation check results.
+Checks: fiscal year coverage, column types, null/zero percentages, row counts,
+and full validation results.  Integrates as a post-build step via validate_all()
+and can generate data_quality_report.json via generate_quality_report().
 """
 
 import json
