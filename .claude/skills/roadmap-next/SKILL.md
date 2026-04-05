@@ -2,7 +2,7 @@
 name: roadmap-next
 description: Find the next open task from docs/ROADMAP.md and present an implementation plan. Use when looking for what to work on next.
 user-invocable: true
-allowed-tools: "Read Grep Glob Bash Agent"
+allowed-tools: "Read Grep Glob Bash"
 argument-hint: "[phase-or-task-id]"
 ---
 
@@ -14,15 +14,11 @@ Scan `docs/ROADMAP.md` for incomplete tasks and present a prioritized implementa
 
 ### 1. Parse the roadmap
 
-Read `docs/ROADMAP.md` and identify all tasks that are NOT marked `✅ **Complete**`. Look for:
-- `⚠️ Not started`
-- `✅ Partially Complete`
-- `✅ Mostly Complete`
-- Any status that isn't fully complete
+Read `docs/ROADMAP.md` and identify all tasks NOT marked `✅ **Complete**`. Incomplete statuses include `⚠️ Not started`, `Partially Complete`, `Mostly Complete`, or any status without the word "Complete" standing alone.
 
 ### 2. Filter by argument (optional)
 
-If the user passed a phase number (e.g., `4`) or task ID (e.g., `4.A1`), filter to just that scope. Otherwise, show all open tasks.
+If `$ARGUMENTS` contains a phase number (e.g., `4`) or task ID (e.g., `4.A1`), filter to just that scope. Otherwise, show all open tasks.
 
 ### 3. Prioritize
 
@@ -49,8 +45,10 @@ For the top 1-3 actionable tasks, present:
 
 Present the plan and **ask the user which task to proceed with** before writing any code. Do not start implementation automatically.
 
+After implementation, suggest running `/update-docs` to keep PRD and ROADMAP in sync.
+
 ## Important
 
-- Also check `docs/NOTICED_ISSUES.md` for open issues that overlap with roadmap tasks.
+- If a candidate task overlaps with known data quality issues, check `docs/NOTICED_ISSUES.md` for context.
 - Distinguish between tasks blocked on external factors (hosting, domain, user feedback) vs tasks that can be done now.
-- Read `docs/PRD.md` to understand existing features before proposing changes.
+- Read `docs/PRD.md` only when needed to understand the feature area of a specific task.

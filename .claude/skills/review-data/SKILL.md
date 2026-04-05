@@ -2,7 +2,7 @@
 name: review-data
 description: Audit database quality by running validators and cross-referencing NOTICED_ISSUES.md. Use to check data integrity or find new issues.
 user-invocable: true
-allowed-tools: "Read Bash Grep Glob Agent"
+allowed-tools: "Read Bash Grep Glob"
 argument-hint: "[db-path]"
 ---
 
@@ -20,23 +20,18 @@ If the database doesn't exist, report that and stop.
 
 ### 2. Run automated validators
 
-Execute the built-in validation suite:
+Execute the built-in validation CLI (see `pipeline/db_validator.py`):
 
 ```bash
-python -c "
-from pipeline.db_validator import DataValidator
-from pathlib import Path
-v = DataValidator(Path('${DB_PATH:-dod_budget.sqlite}'))
-results = v.run_all()
-for r in results:
-    print(f'{r.status}: {r.check_name} — {r.message}')
-"
+python pipeline/db_validator.py --db dod_budget.sqlite --verbose
 ```
+
+Replace `dod_budget.sqlite` with the actual path from step 1.
 
 If that fails (e.g., missing module or DB), fall back to direct SQL checks:
 
 ```bash
-sqlite3 "${DB_PATH:-dod_budget.sqlite}" "
+sqlite3 dod_budget.sqlite "
 SELECT 'Total rows', COUNT(*) FROM budget_lines;
 SELECT 'Distinct services', COUNT(DISTINCT service_agency) FROM budget_lines;
 SELECT 'Distinct FYs', COUNT(DISTINCT fiscal_year) FROM budget_lines;
@@ -48,10 +43,18 @@ SELECT 'FTS index rows', COUNT(*) FROM budget_lines_fts;
 
 ### 3. Cross-reference with NOTICED_ISSUES.md
 
-Read `docs/NOTICED_ISSUES.md` and check:
+Use Grep to find open and resolved issues efficiently:
+
+```
+Grep pattern="\[OPEN\]|\[RESOLVED\]" path="docs/NOTICED_ISSUES.md"
+```
+
+Then check:
 - Are any `**[RESOLVED]**` issues showing regression in the current data?
 - Are any `**[OPEN]**` issues now fixed based on the validator results?
 - Are there new issues the validators found that aren't documented?
+
+Only read the full file if you need more context around a specific issue.
 
 ### 4. Report
 
@@ -73,4 +76,4 @@ For any new or regressed issues, provide:
 
 ### 5. Suggest doc updates
 
-If any issues changed status, recommend specific edits to `docs/NOTICED_ISSUES.md` — but do NOT make the edits automatically. Let the user decide.
+If any issues changed status, recommend specific edits to `docs/NOTICED_ISSUES.md` — but do NOT make the edits automatically. Suggest running `/update-docs` afterward.

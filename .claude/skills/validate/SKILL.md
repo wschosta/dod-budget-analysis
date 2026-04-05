@@ -12,37 +12,29 @@ Run the project's full validation pipeline and report results. This matches the 
 
 ## Steps
 
-Run these three checks **sequentially** so failures are easy to read:
-
-### 1. Lint (ruff)
-
-```!
-ruff check . --select=E,W,F --ignore=E501 --exclude=DoD_Budget_Documents 2>&1 | tail -20
-```
-
-### 2. Type check (mypy)
-
-```!
-mypy api/ utils/ --ignore-missing-imports --no-error-summary 2>&1 | tail -20
-```
-
-### 3. Tests (pytest)
-
-If the user passed `--quick` as an argument, run a fast subset:
+If `$ARGUMENTS` contains `--quick`, run a fast subset (stop on first failure, no coverage):
 
 ```bash
 python -m pytest tests/ --ignore=tests/test_gui_tracker.py --ignore=tests/optimization_validation -q --tb=short -x
 ```
 
-Otherwise run the full suite with coverage:
+Otherwise, run the full suite via the existing pre-commit checker, which orchestrates ruff, mypy, and pytest with coverage:
 
 ```bash
+python run_precommit_checks.py
+```
+
+If `run_precommit_checks.py` is unavailable or fails to import, fall back to running the three checks directly:
+
+```bash
+ruff check . --select=E,W,F --ignore=E501 --exclude=DoD_Budget_Documents
+mypy api/ utils/ --ignore-missing-imports --no-error-summary
 python -m pytest tests/ --ignore=tests/test_gui_tracker.py --ignore=tests/optimization_validation --cov=api --cov=utils --cov-report=term-missing -q --tb=short
 ```
 
 ## Output
 
-After all three steps, produce a summary table:
+After all checks complete, produce a summary table:
 
 | Check | Status | Issues |
 |-------|--------|--------|
