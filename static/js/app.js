@@ -612,11 +612,7 @@ document.addEventListener("htmx:afterSwap", function (evt) {
     restoreDensity();
     restoreAmountFormat();
     if (currentAmtFmt !== "K") applyAmountFormat();
-    // Sparkline: apply visibility and render if enabled
-    if (typeof applySparklineVisibility === "function") {
-      applySparklineVisibility();
-      if (sparklinesEnabled()) renderSparklines();
-    }
+    if (typeof initSparklines === "function") initSparklines();
   }
 
   // JS-004: focus detail panel heading after it loads
@@ -1048,14 +1044,7 @@ document.addEventListener("DOMContentLoaded", function () {
   restoreAmountFormat();
   initResultsKeyboardNav();
 
-  // Sparkline: initial render on page load
-  if (typeof applySparklineVisibility === "function") {
-    applySparklineVisibility();
-    if (sparklinesEnabled()) renderSparklines();
-    // Sync toggle button with saved preference
-    var sparkBtn = document.querySelector('[data-col="sparkline"]');
-    if (sparkBtn) sparkBtn.classList.toggle("active", sparklinesEnabled());
-  }
+  if (typeof initSparklines === "function") initSparklines();
 
   // FALCON-7: Fetch metadata for footer
   loadFooterMetadata();
