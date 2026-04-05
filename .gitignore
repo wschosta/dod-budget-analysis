@@ -46,8 +46,9 @@ profile_report.json
 # Pipeline logs, progress files, reports, and discovery cache
 logs/
 
-# Claude Code
-.claude/
+# Claude Code (keep skills tracked, ignore transient state)
+.claude/*
+!.claude/skills/
 plan.md
 
 # Playwright MCP logs
