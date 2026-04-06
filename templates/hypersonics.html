@@ -269,13 +269,16 @@
   fetch(url)
     .then(r => {
       if (!r.ok) throw new Error(r.statusText);
-      statusText.textContent = 'Rendering...';
       return r.text();
     })
     .then(html => {
       clearInterval(timer);
+      statusText.textContent = 'Rendering...';
+      // Yield one frame so the browser can paint "Rendering..." before the heavy DOM work
+      return new Promise(resolve => requestAnimationFrame(() => resolve(html)));
+    })
+    .then(html => {
       content.innerHTML = html;
-      // Execute inline scripts from the partial
       content.querySelectorAll('script').forEach(old => {
         const s = document.createElement('script');
         s.textContent = old.textContent;

@@ -745,41 +745,40 @@ document.querySelectorAll('.hyp-table thead th[data-sort]').forEach(th => {
       peValues[pe].push(r);
     }
 
-    // Sort PEs: checked (SHOW) first, then unchecked; within each group sort by key
+    // Pre-compute checked state and sort values to avoid DOM queries inside sort
     const isFY = key.startsWith('fy');
-    peOrder.sort((a, b) => {
-      // Checked PEs always before unchecked
-      const aChecked = peElements[a]?.[0]?.querySelector('.cb-parent-table')?.checked ? 1 : 0;
-      const bChecked = peElements[b]?.[0]?.querySelector('.cb-parent-table')?.checked ? 1 : 0;
-      if (aChecked !== bChecked) return bChecked - aChecked;
-
-      const aRows = peValues[a] || [];
-      const bRows = peValues[b] || [];
-
-      let aVal, bVal;
+    const peSortData = {};
+    for (const pe of peOrder) {
+      const cb = peElements[pe]?.[0]?.querySelector('.cb-parent-table');
+      const checked = cb ? cb.checked : false;
+      const rows = peValues[pe] || [];
+      let val;
       if (isFY) {
-        // For FY columns, sort by sum of children
-        aVal = aRows.reduce((s, r) => s + (r[key] || 0), 0);
-        bVal = bRows.reduce((s, r) => s + (r[key] || 0), 0);
+        val = rows.reduce((s, r) => s + (r[key] || 0), 0);
       } else {
-        // For text columns, sort by first child's value
-        aVal = (aRows[0] && aRows[0][key]) || '';
-        bVal = (bRows[0] && bRows[0][key]) || '';
+        val = (rows[0] && rows[0][key]) || '';
       }
+      peSortData[pe] = { checked, val };
+    }
 
-      if (typeof aVal === 'string') {
-        const cmp = aVal.localeCompare(bVal);
+    peOrder.sort((a, b) => {
+      const da = peSortData[a], db = peSortData[b];
+      if (da.checked !== db.checked) return db.checked ? 1 : -1;
+      if (typeof da.val === 'string') {
+        const cmp = da.val.localeCompare(db.val);
         return currentSort.asc ? cmp : -cmp;
       }
-      return currentSort.asc ? aVal - bVal : bVal - aVal;
+      return currentSort.asc ? da.val - db.val : db.val - da.val;
     });
 
-    // Re-append rows in sorted order
+    // Re-append rows in sorted order using DocumentFragment to avoid layout thrashing
+    const frag = document.createDocumentFragment();
     for (const pe of peOrder) {
       for (const row of peElements[pe]) {
-        tbody.appendChild(row);
+        frag.appendChild(row);
       }
     }
+    tbody.appendChild(frag);
   });
 });
 
