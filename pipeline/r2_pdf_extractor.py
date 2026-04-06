@@ -19,19 +19,14 @@ import argparse
 import logging
 import re
 import sqlite3
-import sys
 import time
+from collections import defaultdict
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 from utils import get_connection
+from utils.patterns import PE_NUMBER as _PE_RE
 
 logger = logging.getLogger(__name__)
-
-# ── PE number extraction ─────────────────────────────────────────────────────
-
-_PE_RE = re.compile(r"PE\s+(\d{7,}[A-Z]*\d*[A-Z]*)")
 
 # ── Appropriation code extraction ────────────────────────────────────────────
 # Matches "0400:" or "0400 /" at the start of the appropriation line
@@ -79,10 +74,6 @@ _COST_HEADER_RE = re.compile(
 _FY_4DIGIT_RE = re.compile(r"FY\s*(\d{4})")
 _FY_2DIGIT_RE = re.compile(r"FY\s*(\d{2})(?!\d)")
 _BARE_YEAR_RE = re.compile(r"(?<!\d)(\d{4})(?!\d)")
-
-# Numeric amount: e.g. "19.708", "633,782", "0", ".833"
-_AMOUNT_TOKEN_RE = re.compile(r"^-?[\d,]+\.?\d*$")
-
 
 def _parse_amount(token: str) -> float | None:
     """Parse a single amount token, returning None for non-numeric values."""
@@ -198,22 +189,20 @@ def parse_r2_cost_table(
         if line.startswith(("A.", "B.", "C.", "D.", "E.", "Note", "R-1 Line")):
             break
 
-        # Try to split line into label + amounts
-        # The amounts are at the end, space-separated
         tokens = line.split()
         if len(tokens) < 2:
             continue
 
-        # Find where the numbers start by scanning from the right
         amounts: list[float | None] = []
         label_end = len(tokens)
         for j in range(len(tokens) - 1, -1, -1):
             parsed = _parse_amount(tokens[j])
-            if parsed is not None or tokens[j] in ("-", "--", "TBD", "N/A", "Continuing", "CONTINUING"):
-                amounts.insert(0, parsed)
+            if parsed is not None:
+                amounts.append(parsed)
                 label_end = j
             else:
                 break
+        amounts.reverse()
 
         if not amounts:
             continue
@@ -240,13 +229,8 @@ def parse_r2_cost_table(
 
 # ── budget_lines column mapping ──────────────────────────────────────────────
 
-def _fy_to_amount_col(fy_year: str, source_fy: int | None) -> str | None:
-    """Map a fiscal year label to the appropriate amount column name.
-
-    The column naming depends on the relationship between the FY in the data
-    and the source document's fiscal year.  For simplicity, we use _total
-    as the suffix for all extracted amounts.
-    """
+def _fy_to_amount_col(fy_year: str) -> str | None:
+    """Map a fiscal year label to an amount column name (e.g. 'amount_fy2025_total')."""
     try:
         year = int(fy_year)
     except (ValueError, TypeError):
@@ -298,27 +282,12 @@ def extract_r2_from_pdfs(
     if not pages:
         return {"pages_scanned": 0, "rows_inserted": 0, "pages_parsed": 0, "pages_skipped": 0}
 
-    # Track which source_file+page combos already have budget_lines rows
-    existing = set()
-    try:
-        rows = conn.execute(
-            "SELECT DISTINCT source_file FROM budget_lines WHERE exhibit_type = 'r2_pdf'"
-        ).fetchall()
-        existing = {r[0] for r in rows}
-    except sqlite3.OperationalError:
-        pass
-
-    # Collect all needed amount columns
     needed_cols: set[str] = set()
     insert_rows: list[dict] = []
     parsed = 0
     skipped = 0
 
     for page_id, source_file, page_num, fiscal_year, text in pages:
-        if source_file in existing:
-            skipped += 1
-            continue
-
         result = parse_r2_cost_table(text)
         if not result:
             skipped += 1
@@ -346,7 +315,7 @@ def extract_r2_from_pdfs(
             }
 
             for fy_year, amount in fy_pairs:
-                col = _fy_to_amount_col(fy_year, source_fy)
+                col = _fy_to_amount_col(fy_year)
                 if col and amount is not None:
                     row_data[col] = amount * mult
                     needed_cols.add(col)
@@ -373,22 +342,25 @@ def extract_r2_from_pdfs(
             "rows_prepared": len(insert_rows),
         }
 
-    # Ensure all needed columns exist
     if needed_cols:
         _ensure_amount_columns(conn, needed_cols)
 
-    # Get the full column list for budget_lines
-    all_cols = [r[1] for r in conn.execute("PRAGMA table_info(budget_lines)").fetchall()]
-
-    # Insert rows
-    inserted = 0
+    # Group rows by column set for efficient executemany
+    all_cols = {r[1] for r in conn.execute("PRAGMA table_info(budget_lines)").fetchall()}
+    groups: dict[tuple[str, ...], list[list]] = defaultdict(list)
     for row_data in insert_rows:
-        cols = [c for c in all_cols if c in row_data]
-        vals = [row_data[c] for c in cols]
+        cols = tuple(sorted(c for c in row_data if c in all_cols))
+        groups[cols].append([row_data[c] for c in cols])
+
+    inserted = 0
+    for cols, val_lists in groups.items():
         placeholders = ", ".join("?" for _ in cols)
         col_names = ", ".join(cols)
-        conn.execute(f"INSERT OR IGNORE INTO budget_lines ({col_names}) VALUES ({placeholders})", vals)
-        inserted += 1
+        conn.executemany(
+            f"INSERT OR IGNORE INTO budget_lines ({col_names}) VALUES ({placeholders})",
+            val_lists,
+        )
+        inserted += len(val_lists)
 
     conn.commit()
     elapsed = time.time() - t0
