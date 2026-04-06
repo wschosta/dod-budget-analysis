@@ -86,7 +86,11 @@ Adds contextual metadata to program elements.
 - **PE tags:** Keyword-based categorization with confidence scoring (1.0 structured match, 0.9 budget-lines keyword, 0.85 project-level, 0.8 PDF narrative, 0.7 LLM-generated)
 - **PE lineage:** Historical tracking of program element changes over time
 - **Project descriptions:** Program-level detail decomposition
-- **Uniform progress reporting** across all 5 phases: logs completed/total count, percentage, elapsed time, ETA, and throughput rate via `_log_progress()` helper
+- **BLI index:** Master list of budget line items from procurement exhibits
+- **BLI tags:** Keyword-based categorization of procurement line items
+- **BLI descriptions:** Narrative text extracted from P-5 procurement exhibit PDF pages, linked to BLIs by account code and line item number
+- **9 enrichment phases** (PE index → descriptions → tags → lineage → project decomposition → project tags → BLI index → BLI tags → BLI descriptions)
+- **Uniform progress reporting** across all phases: logs completed/total count, percentage, elapsed time, ETA, and throughput rate via `_log_progress()` helper
 
 ---
 
@@ -157,7 +161,7 @@ Server-side rendered HTML using Jinja2 templates with HTMX for dynamic updates.
 | Page | Route | Description |
 |------|-------|-------------|
 | **Explorer** | `/explorer` (also `/`) | **Default landing page.** Generalized keyword search tool. Enter any keywords (comma-separated, max 20) or PE numbers (e.g., `0604030N`) to search budget lines and PE descriptions with fuzzy matching (prefix, acronym expansion, edit-distance). PE numbers entered as keywords are matched directly against `budget_lines` and `pe_index`. Async cache build with progress polling and elapsed-time display. Collapsible PE-level preview table showing match counts. Two-list drag-and-drop column picker for XLSX download with customizable column order. Toggle to filter to directly matching sub-elements only. XLSX export includes totals row for keyword-matched rows and italic styling for non-matching rows. |
-| **Hypersonics** | `/hypersonics` | Pivoted table of all hypersonics-related PE lines and sub-programs, FY2015+. One row per unique PE + sub-element; one column per fiscal year showing primary requested/enacted funding ($K). Filter by service, exhibit type, and FY range. 25 forced-inclusion PEs (`_EXTRA_PES`) including 9 D8Z Defense-Wide programs. PDF-only PEs get stub R-1 rows with funding mined from R-2 detail PDFs. CSV and XLSX download; XLSX includes per-FY description columns from `pe_descriptions`. Filter presets with save/load/delete. **Rebuild Cache** button in the filter bar triggers `POST /api/v1/hypersonics/rebuild` and reloads the page with fresh data. |
+| **Hypersonics** | `/hypersonics` | Pivoted table of all hypersonics-related PE lines and sub-programs, FY2015+. **Async loading screen** with spinner and elapsed timer while data loads; content fetched via `?_content=1` partial and swapped in via JS. One row per unique PE + sub-element; one column per fiscal year showing primary requested/enacted funding ($K). Filter by service, exhibit type, and FY range. 25 forced-inclusion PEs (`_EXTRA_PES`) including 9 D8Z Defense-Wide programs. PDF-only PEs get stub R-1 rows with funding mined from R-2 detail PDFs. CSV and XLSX download; XLSX includes per-FY description columns from `pe_descriptions`. Filter presets with save/load/delete. **Rebuild Cache** button in the filter bar triggers `POST /api/v1/hypersonics/rebuild` and reloads the page with fresh data. |
 | **Home (legacy)** | `/home` | Original full-text keyword search with filter sidebar: fiscal year, service/agency (sorted by count), exhibit type, budget type, amount range. Faceted filter counts, HTMX-driven results table. Still accessible but removed from nav. |
 | **Charts** | `/charts` | Budget by service (horizontal bar), stacked budget totals by service & FY, Top-N programs (excludes summary exhibits), multi-entity comparison (2-6 services across all FY columns), budget hierarchy treemap, budget type breakdown (shared doughnut utility). FY selector (newest first) and multi-select service filter. Not in primary nav; accessible via direct URL. |
 | **Dashboard** | `/dashboard` | Summary cards (FY totals, YOY change), budget-by-service bar chart, Top-10 programs, appropriation breakdown. Not in primary nav; accessible via direct URL. |
@@ -230,6 +234,9 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 - **`pe_tags`** — Keyword tags with confidence scores and `source_files` provenance
 - **`pe_lineage`** — Historical PE change tracking
 - **`project_descriptions`** — Project-level detail within PEs
+- **`bli_index`** — Master list of budget line items from procurement exhibits (account, line_item, display_title, organization_name)
+- **`bli_tags`** — Keyword tags for procurement line items
+- **`bli_descriptions`** — Narrative text from P-5 procurement exhibit PDF pages, linked to BLIs by account code and line item number
 
 ### 5.5 Cache Tables
 
@@ -254,7 +261,8 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 | `scripts/stage_budget_data.py` | Optional Parquet staging layer (parse to Parquet, then load to SQLite) |
 | `pipeline/builder.py` | Database builder (Excel/PDF parsing, incremental/full-rebuild modes) |
 | `pipeline/gui.py` | tkinter GUI for database build with progress/ETA |
-| `pipeline/enricher.py` | PE enrichment pipeline (tags, descriptions, lineage) |
+| `pipeline/enricher.py` | PE/BLI enrichment pipeline (9 phases: index, descriptions, tags, lineage, projects, BLI) |
+| `pipeline/r2_pdf_extractor.py` | Extract R-2 funding tables from Defense-Wide PDF pages into budget_lines |
 | `pipeline/db_validator.py` | Data quality validation with JSON report output |
 | `pipeline/search.py` | CLI full-text search with filters, export (CSV/JSON) |
 | `pipeline/refresh.py` | Scheduled data refresh with automatic rollback, dry-run, webhook notifications |
