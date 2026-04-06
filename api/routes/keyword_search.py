@@ -1282,6 +1282,22 @@ def build_cache_table(
                 [org_name, f"%{path_fragment}%", f"%{path_fragment}%"],
             )
 
+        # Final fallback: fill from pe_index (enrichment Phase 1)
+        try:
+            conn.execute(f"""
+                UPDATE {cache_table}
+                SET organization_name = (
+                    SELECT pi.organization_name
+                    FROM pe_index pi
+                    WHERE pi.pe_number = {cache_table}.pe_number
+                      AND pi.organization_name IS NOT NULL
+                    LIMIT 1
+                )
+                WHERE organization_name IS NULL OR organization_name = ''
+            """)
+        except sqlite3.OperationalError:
+            pass  # pe_index may not exist if enrichment hasn't run
+
     count += pdf_count
     logger.info("Cache: %d R-2 sub-element rows from PDFs", pdf_count)
 
