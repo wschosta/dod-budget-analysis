@@ -73,6 +73,19 @@ _HYPERSONICS_KEYWORDS = [
     "conventional prompt strike",   # Navy CPS program
     "prompt strike",        # catches "Intermediate Range Conventional Prompt Strike"
 
+    # ── Offensive — Navy / SM-6 / OASUW ──────────────────────────────────
+    "offensive anti",       # Offensive Anti-Surface Warfare references
+    "oasuw",                # Offensive Anti-Surface Warfare (OASUW)
+    "standard missile 6",   # Standard Missile 6 (SM-6)
+    "sm-6",                 # SM-6 abbreviation
+    "blk ib",               # Block IB variant designation
+    "increment ii",         # program increment references
+
+    # ── Generic speed / regime ─────────────────────────────────────────────
+    "high speed",           # high-speed strike / high-speed weapons
+    "mach",                 # Mach-regime references (broad)
+    "conventional prompt",  # broader catch for conventional prompt programs
+
     # ── Defensive / tracking ───────────────────────────────────────────────
     "Glide Phase Interceptor",  # GPI — MDA program to defeat HGVs in glide
     "HBTSS",                # Hypersonic and Ballistic Tracking Space Sensor
@@ -91,10 +104,19 @@ _DESC_KEYWORDS = [
     "C-HGB",
     "CHGB",
     "conventional prompt strike",
+    "conventional prompt",
     "prompt strike",
     "Glide Phase Interceptor",
     "HBTSS",
     "OpFires",
+    "offensive anti",
+    "oasuw",
+    "standard missile 6",
+    "sm-6",
+    "blk ib",
+    "increment ii",
+    "high speed",
+    "mach",
 ]
 
 _CACHE_TABLE = "hypersonics_cache"
