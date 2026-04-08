@@ -19,6 +19,7 @@ import argparse
 import logging
 import re
 import sqlite3
+import sys
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -398,7 +399,7 @@ def main() -> None:
     result = extract_r2_from_pdfs(conn, dry_run=args.dry_run, limit=args.limit)
     conn.close()
 
-    print(f"\nSummary:")
+    print("\nSummary:")
     for k, v in result.items():
         print(f"  {k}: {v:,}")
 

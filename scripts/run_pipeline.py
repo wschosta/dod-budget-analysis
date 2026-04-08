@@ -53,7 +53,7 @@ HERE = Path(__file__).resolve().parent.parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
-from pipeline.logging import PipelineLogger, StepReport
+from pipeline.logging import PipelineLogger, StepReport  # noqa: E402
 
 # Download step uses subprocess as a fallback when direct import fails
 STEP_DOWNLOAD = HERE / "dod_budget_downloader.py"
