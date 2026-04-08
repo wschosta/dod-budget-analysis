@@ -123,35 +123,24 @@ class TestKeywordLists:
         "blk ib", "increment ii", "high speed", "mach",
     ]
 
-    def test_all_required_keywords_present(self):
-        kw_lower = [kw.lower() for kw in _HYPERSONICS_KEYWORDS]
-        missing = [kw for kw in self.REQUIRED_KEYWORDS if kw.lower() not in kw_lower]
-        assert not missing, f"Missing from _HYPERSONICS_KEYWORDS: {missing}"
+    @pytest.mark.parametrize("required, actual, label", [
+        ("REQUIRED_KEYWORDS", _HYPERSONICS_KEYWORDS, "_HYPERSONICS_KEYWORDS"),
+        ("REQUIRED_DESC_KEYWORDS", _DESC_KEYWORDS, "_DESC_KEYWORDS"),
+    ])
+    def test_all_required_present(self, required, actual, label):
+        required_list = getattr(self, required) if isinstance(required, str) else required
+        actual_lower = [kw.lower() for kw in actual]
+        missing = [kw for kw in required_list if kw.lower() not in actual_lower]
+        assert not missing, f"Missing from {label}: {missing}"
 
-    def test_all_required_desc_keywords_present(self):
-        kw_lower = [kw.lower() for kw in _DESC_KEYWORDS]
-        missing = [kw for kw in self.REQUIRED_DESC_KEYWORDS if kw.lower() not in kw_lower]
-        assert not missing, f"Missing from _DESC_KEYWORDS: {missing}"
-
-    def test_no_duplicates_in_keywords(self):
+    @pytest.mark.parametrize("keywords, label", [
+        (_HYPERSONICS_KEYWORDS, "_HYPERSONICS_KEYWORDS"),
+        (_DESC_KEYWORDS, "_DESC_KEYWORDS"),
+    ])
+    def test_no_duplicates(self, keywords, label):
         seen: set[str] = set()
-        dupes = []
-        for kw in _HYPERSONICS_KEYWORDS:
-            low = kw.lower()
-            if low in seen:
-                dupes.append(kw)
-            seen.add(low)
-        assert not dupes, f"Duplicate entries in _HYPERSONICS_KEYWORDS: {dupes}"
-
-    def test_no_duplicates_in_desc_keywords(self):
-        seen: set[str] = set()
-        dupes = []
-        for kw in _DESC_KEYWORDS:
-            low = kw.lower()
-            if low in seen:
-                dupes.append(kw)
-            seen.add(low)
-        assert not dupes, f"Duplicate entries in _DESC_KEYWORDS: {dupes}"
+        dupes = [kw for kw in keywords if (low := kw.lower()) in seen or seen.add(low)]  # type: ignore[func-returns-value]
+        assert not dupes, f"Duplicate entries in {label}: {dupes}"
 
     def test_desc_keywords_subset_of_main(self):
         """Every desc keyword should also be in the main keyword list."""
