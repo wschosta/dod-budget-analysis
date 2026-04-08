@@ -31,13 +31,13 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from utils.config import CORE_SUMMARY_TYPES
-from utils.normalization import (
+from utils.config import CORE_SUMMARY_TYPES  # noqa: E402
+from utils.normalization import (  # noqa: E402
     APPROPRIATION_KEYWORDS as _APPROPRIATION_KEYWORDS,
     ORG_NORMALIZE as _ORG_NORMALIZE,
     TITLE_TO_CODE as _TITLE_TO_CODE,
 )
-from utils.patterns import PE_NUMBER as _PE_RE
+from utils.patterns import PE_NUMBER as _PE_RE  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
