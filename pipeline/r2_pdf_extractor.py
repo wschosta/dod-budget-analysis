@@ -70,8 +70,10 @@ _ORG_FROM_FILE: list[tuple[str, str]] = [
     ("MarineCorps", "Marine Corps"),
     ("Space_Force", "Space Force"),
     ("SpaceForce", "Space Force"),
-    # Bare agency codes for older filenames ("DARPA PB09", "DISA_PB10", etc.)
+    # Bare agency codes for older filenames ("DARPA PB09", "CBDP.pdf", etc.)
+    ("CBDP", "CBDP"),
     ("DARPA", "DARPA"),
+    ("DLA", "DLA"),
     ("DSCA", "DSCA"),
     ("DTIC", "DTIC"),
     ("DTRA", "DTRA"),
@@ -82,6 +84,7 @@ _ORG_FROM_FILE: list[tuple[str, str]] = [
     ("DCAA", "DCAA"),
     ("OSD", "OSD"),
     ("SDA", "SDA"),
+    ("mda", "MDA"),
     ("volume", "OSD"),  # older "volumeN" files
 ]
 
