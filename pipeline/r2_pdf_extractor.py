@@ -73,19 +73,63 @@ _ORG_FROM_FILE: list[tuple[str, str]] = [
     ("volume", "OSD"),  # older "volumeN" files
 ]
 
-# ── Department name extraction from page text (fallback for org inference) ───
-# Patterns stored uppercase; matched case-insensitively in infer_org().
+# ── Agency name extraction from page text (fallback for org inference) ────────
+
+# Modern R-2 exhibit headers: "PB 2024 <Agency Name> Date: ..."
+_R2_AGENCY_RE = re.compile(
+    r"PB\s+\d{4}\s+(.+?)\s+Date:", re.IGNORECASE
+)
+
+# Older R-2 headers: "<AGENCY> RDT&E BUDGET ITEM JUSTIFICATION"
+_OLDER_AGENCY_RE = re.compile(
+    r"^(?:UNCLASSIFIED\s+)?(\w[\w\s&,]+?)\s+RDT&E\s+BUDGET\s+ITEM",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# Map agency full names (from R-2 headers) to standardized org codes.
+# Keys are uppercase for case-insensitive lookup.
+_AGENCY_NAME_MAP: dict[str, str] = {
+    "OFFICE OF SECRETARY OF DEFENSE": "OSD",
+    "OFFICE OF THE SECRETARY OF DEFENSE": "OSD",
+    "DEFENSE CONTRACT AUDIT AGENCY": "DCAA",
+    "DEFENSE CONTRACT MANAGEMENT AGENCY": "DCMA",
+    "DEFENSE COUNTERINTELLIGENCE AND SECURITY AGENCY": "DCSA",
+    "DEFENSE INFORMATION SYSTEMS AGENCY": "DISA",
+    "DEFENSE LOGISTICS AGENCY": "DLA",
+    "DEFENSE SECURITY COOPERATION AGENCY": "DSCA",
+    "DEFENSE SECURITY SERVICE": "DCSA",  # renamed to DCSA
+    "DEFENSE TECHNICAL INFORMATION CENTER": "DTIC",
+    "DEFENSE THREAT REDUCTION AGENCY": "DTRA",
+    "DOD HUMAN RESOURCES ACTIVITY": "DHRA",
+    "THE JOINT STAFF": "TJS",
+    "UNITED STATES SPECIAL OPERATIONS COMMAND": "SOCOM",
+    "CHEMICAL AND BIOLOGICAL DEFENSE PROGRAM": "CBDP",
+    "WASHINGTON HEADQUARTERS SERVICE": "WHS",
+    "WASHINGTON HEADQUARTERS SERVICES": "WHS",
+    "OPERATIONAL TEST AND EVALUATION, DEFENSE": "OSD",
+    "DEFENSE BUSINESS TRANSFORMATION AGENCY": "OSD",
+    "MISSILE DEFENSE AGENCY": "MDA",
+    "BALLISTIC MISSILE DEFENSE ORGANIZATION": "MDA",
+    "DEFENSE ADVANCED RESEARCH PROJECTS AGENCY": "DARPA",
+    "DEFENSE HEALTH PROGRAM": "DHP",
+    # Older header prefixes (from _OLDER_AGENCY_RE)
+    "BMDO": "MDA",
+    "DARPA": "DARPA",
+}
+
+# Substring patterns for cases where the full name doesn't match the map.
+# Checked case-insensitively against the first 500 chars of page text.
 _DEPT_FROM_TEXT: list[tuple[str, str]] = [
     ("DEPARTMENT OF THE ARMY", "Army"),
     ("DEPARTMENT OF THE NAVY", "Navy"),
     ("DEPARTMENT OF THE AIR FORCE", "Air Force"),
-    ("MISSILE DEFENSE AGENCY", "MDA"),
     ("DEFENSE ADVANCED RESEARCH", "DARPA"),
     ("SPECIAL OPERATIONS COMMAND", "SOCOM"),
     ("DEFENSE THREAT REDUCTION", "DTRA"),
     ("DEFENSE INFORMATION SYSTEMS", "DISA"),
     ("DEFENSE LOGISTICS AGENCY", "DLA"),
     ("DEFENSE HEALTH", "DHP"),
+    ("MISSILE DEFENSE", "MDA"),
 ]
 
 # ── Row labels to skip in R-2 cost tables (aggregation/metadata rows) ────────
@@ -146,12 +190,34 @@ def infer_org(source_file: str, page_text: str | None = None) -> str | None:
         if fragment.lower() in source_file.lower():
             return org
 
-    # Fallback: scan page text header for department names (case-insensitive)
-    if page_text:
-        header_upper = page_text[:500].upper()
-        for phrase, org in _DEPT_FROM_TEXT:
-            if phrase in header_upper:
-                return org
+    if not page_text:
+        return None
+
+    header = page_text[:500]
+
+    # Try R-2 exhibit header: "PB 2024 <Agency Name> Date: ..."
+    m = _R2_AGENCY_RE.search(header)
+    if m:
+        agency = m.group(1).strip()
+        # Strip trailing "RDT&E Budget Item Justification" if present
+        agency = re.sub(r"\s+RDT&E\s+Budget\s+Item\s+Justification$", "", agency, flags=re.IGNORECASE)
+        mapped = _AGENCY_NAME_MAP.get(agency.upper())
+        if mapped:
+            return mapped
+
+    # Try older header: "<AGENCY> RDT&E BUDGET ITEM JUSTIFICATION"
+    m = _OLDER_AGENCY_RE.search(header)
+    if m:
+        prefix = m.group(1).strip().upper()
+        mapped = _AGENCY_NAME_MAP.get(prefix)
+        if mapped:
+            return mapped
+
+    # Last resort: substring scan for department names
+    header_upper = header.upper()
+    for phrase, org in _DEPT_FROM_TEXT:
+        if phrase in header_upper:
+            return org
 
     return None
 

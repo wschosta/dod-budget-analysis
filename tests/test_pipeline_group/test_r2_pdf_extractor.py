@@ -137,6 +137,47 @@ class TestInferOrg:
         )
         assert result == "Navy"
 
+    def test_r2_exhibit_header_agency_extraction(self):
+        """Modern R-2 header: 'PB 2024 <Agency> Date:' extracts agency."""
+        result = infer_org(
+            "FY2024/Defense_Wide/other/PB_2024_RDTE_VOL_5.pdf",
+            page_text=(
+                "UNCLASSIFIED Exhibit R-2, RDT&E Budget Item Justification: "
+                "PB 2024 Defense Contract Audit Agency Date: March 2023"
+            ),
+        )
+        assert result == "DCAA"
+
+    def test_r2_header_osd(self):
+        result = infer_org(
+            "FY2024/Defense_Wide/other/file.pdf",
+            page_text=(
+                "Exhibit R-2, RDT&E Budget Item Justification: "
+                "PB 2024 Office of Secretary Of Defense Date: March 2023"
+            ),
+        )
+        assert result == "OSD"
+
+    def test_r2_header_strips_trailing_justification(self):
+        """Agency names sometimes include 'RDT&E Budget Item Justification'."""
+        result = infer_org(
+            "FY2015/Defense_Wide/other/file.pdf",
+            page_text=(
+                "Exhibit R-2, RDT&E Budget Item Justification: "
+                "PB 2015 DoD Human Resources Activity RDT&E Budget Item "
+                "Justification Date: March 2014"
+            ),
+        )
+        assert result == "DHRA"
+
+    def test_older_bmdo_header(self):
+        """Older format: 'BMDO RDT&E BUDGET ITEM JUSTIFICATION'."""
+        result = infer_org(
+            "FY2002/Defense_Wide/detail/vol2_bmdo.pdf",
+            page_text="UNCLASSIFIED BMDO RDT&E BUDGET ITEM JUSTIFICATION (R-2 Exhibit)",
+        )
+        assert result == "MDA"
+
     def test_unknown_returns_none(self):
         assert infer_org("FY2024/other/mystery.pdf") is None
 

@@ -582,37 +582,31 @@ def step_11_backfill_r2_org_names(
     if null_count == 0:
         return 0
 
-    # Fetch distinct source files with NULL org
+    # Multi-agency books (Vol5, etc.) have different agencies per page, so we
+    # resolve per-row by joining to pdf_pages for each row's specific page.
     rows = conn.execute(
-        "SELECT DISTINCT source_file FROM budget_lines"
-        " WHERE exhibit_type = 'r2_pdf' AND (organization_name IS NULL OR organization_name = '')"
+        "SELECT bl.rowid, bl.source_file, bl.sheet_name,"
+        "       substr(pp.page_text, 1, 500)"
+        " FROM budget_lines bl"
+        " LEFT JOIN pdf_pages pp"
+        "   ON bl.source_file = pp.source_file"
+        "   AND bl.sheet_name = 'page_' || pp.page_number"
+        " WHERE bl.exhibit_type = 'r2_pdf'"
+        "   AND (bl.organization_name IS NULL OR bl.organization_name = '')"
     ).fetchall()
-    source_files = [r[0] for r in rows]
-    logger.info(f"  {len(source_files):,} distinct source files to resolve")
+    logger.info(f"  {len(rows):,} rows to resolve (with page text join)")
 
-    # Resolve org for each source file, collect update pairs
-    update_pairs: list[tuple[str, str]] = []  # (org, source_file)
-    for sf in source_files:
-        org = _r2_infer_org(sf)
-        if not org:
-            page_row = conn.execute(
-                "SELECT substr(page_text, 1, 500) FROM pdf_pages"
-                " WHERE source_file = ? LIMIT 1",
-                (sf,),
-            ).fetchone()
-            if page_row:
-                org = _r2_infer_org(sf, page_text=page_row[0])
+    update_pairs: list[tuple[str, int]] = []  # (org, rowid)
+    for rowid, source_file, sheet_name, page_text in rows:
+        org = _r2_infer_org(source_file, page_text=page_text)
         if org:
-            update_pairs.append((org, sf))
+            update_pairs.append((org, rowid))
 
-    logger.info(f"  Resolved {len(update_pairs):,} of {len(source_files):,} source files")
+    logger.info(f"  Resolved {len(update_pairs):,} of {len(rows):,} rows")
 
     if not dry_run and update_pairs:
         conn.executemany(
-            "UPDATE OR IGNORE budget_lines SET organization_name = ?"
-            " WHERE exhibit_type = 'r2_pdf'"
-            " AND (organization_name IS NULL OR organization_name = '')"
-            " AND source_file = ?",
+            "UPDATE OR IGNORE budget_lines SET organization_name = ? WHERE rowid = ?",
             update_pairs,
         )
         conn.commit()
