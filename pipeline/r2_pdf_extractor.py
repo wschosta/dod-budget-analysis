@@ -77,7 +77,7 @@ _ORG_FROM_FILE: list[tuple[str, str]] = [
 
 # Modern R-2 exhibit headers: "PB 2024 <Agency Name> Date: ..."
 _R2_AGENCY_RE = re.compile(
-    r"PB\s+\d{4}\s+(.+?)\s+Date:", re.IGNORECASE
+    r"(?:PB|FY)\s+\d{4}\s+(.+?)\s+Date:", re.IGNORECASE
 )
 
 # Older R-2 headers: "<AGENCY> RDT&E BUDGET ITEM JUSTIFICATION"
@@ -112,6 +112,8 @@ _AGENCY_NAME_MAP: dict[str, str] = {
     "BALLISTIC MISSILE DEFENSE ORGANIZATION": "MDA",
     "DEFENSE ADVANCED RESEARCH PROJECTS AGENCY": "DARPA",
     "DEFENSE HEALTH PROGRAM": "DHP",
+    "UNITED STATES CYBER COMMAND": "CYBER",
+    "SPACE DEVELOPMENT AGENCY": "SDA",
     # Older header prefixes (from _OLDER_AGENCY_RE)
     "BMDO": "MDA",
     "DARPA": "DARPA",
