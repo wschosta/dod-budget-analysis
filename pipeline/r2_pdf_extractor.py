@@ -186,12 +186,20 @@ _FY_4DIGIT_RE = re.compile(r"FY\s*(\d{4})")
 _FY_2DIGIT_RE = re.compile(r"FY\s*(\d{2})(?!\d)")
 _BARE_YEAR_RE = re.compile(r"(?<!\d)(\d{4})(?!\d)")
 
+# Tokens that represent a valid "no value" entry in a cost table column.
+# These must be recognized as null amounts (not label text) so the
+# right-to-left scanner doesn't stop prematurely.
+_NULL_AMOUNT_TOKENS: frozenset[str] = frozenset({
+    "-", "--", "TBD", "N/A", "Continuing", "CONTINUING", "Complete", "Cost",
+})
+
+
 def _parse_amount(token: str) -> float | None:
     """Parse a single amount token, returning None for non-numeric values."""
     token = token.strip().replace(",", "")
     # Strip footnote markers like "19.708*" or "0****"
     token = token.rstrip("*#")
-    if not token or token in ("-", "--", "TBD", "N/A", "Continuing", "CONTINUING"):
+    if not token or token in _NULL_AMOUNT_TOKENS:
         return None
     try:
         return float(token)
@@ -340,15 +348,20 @@ def parse_r2_cost_table(
         amounts: list[float | None] = []
         label_end = len(tokens)
         for j in range(len(tokens) - 1, -1, -1):
-            parsed = _parse_amount(tokens[j])
-            if parsed is not None:
-                amounts.append(parsed)
+            clean_tok = tokens[j].strip().replace(",", "").rstrip("*#")
+            if clean_tok in _NULL_AMOUNT_TOKENS:
+                amounts.append(None)
                 label_end = j
             else:
-                break
+                parsed = _parse_amount(tokens[j])
+                if parsed is not None:
+                    amounts.append(parsed)
+                    label_end = j
+                else:
+                    break
         amounts.reverse()
 
-        if not amounts:
+        if not amounts or all(a is None for a in amounts):
             continue
 
         label = " ".join(tokens[:label_end]).strip()
