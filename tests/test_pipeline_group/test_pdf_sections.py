@@ -14,6 +14,7 @@ from utils.pdf_sections import (
     parse_narrative_sections,
     is_narrative_exhibit,
     extract_sections_for_page,
+    strip_exhibit_headers,
     SECTION_PATTERN,
 )
 
@@ -178,3 +179,112 @@ class TestExtractSectionsForPage:
 
     def test_empty_input(self):
         assert extract_sections_for_page("") == ""
+
+
+# ── strip_exhibit_headers ────────────────────────────────────────────────────
+
+# Sample R-1 summary page header (Army, FY1998 format)
+_ARMY_R1_HEADER = """\
+UNCLASSIFIED
+Department of the Army
+FY 1998/1999 R D T & E Program Exhibit R-1
+Appropriation: 2040 A Research Development Test & Eval Army Date: FEB 1997
+---------------------------------------------------------------------------------------------------------------------------------
+Thousands of Dollars
+Program ---------------------------------------------------------S
+Line Element e
+No Number Item Act FY 1996 FY 1997 FY 1998 FY 1999 c
+--- --------- --------- --------- ---------
+1 0601101A In-House Laboratory Independent Research 1 13,657 14,393 15,113 15,828 U
+2 0601102A Defense Research Sciences 1 207,610 175,274 187,155 192,345 U
+"""
+
+# Sample AF P-40 header with DESCRIPTION: marker followed by real content
+_AF_P40_HEADER_WITH_CONTENT = """\
+UNCLASSIFIED
+BUDGET ITEM JUSTIFICATION (EXHIBIT P-40) DATE:
+FEBRUARY 1998
+APPROP CODE/BA: P-1 NOMENCLATURE:
+OPAF/ELECTRONICS MILSATCOM SPACE
+FY 1996 FY 1997 FY1998 FY1999
+QUANTITY
+COST
+$ $58,422 $18,034 $28,233 $44,541
+(in thousands)
+DESCRIPTION:
+MILSATCOM is a set of joint service satellite communications systems that provides
+a broad range of satellite communication capabilities to meet essential strategic and
+tactical requirements for the Department of Defense.
+"""
+
+# Navy OCR-split header with real content after
+_NAVY_OCR_HEADER = """\
+UN CLASSIFIED
+FY 1998/1999 RDT&E,N BUDGET ITEM JUSTIFICATION SHEET DATE: February 1997
+BUDGET ACTIVITY: 2 PROGRAM ELEMENT: 0602314N
+PROGRAM ELEMENT TITLE: Undersea Warfare Surveillance Technology
+Development of optical depth and heading sensors to support low cost all-optical
+array designs both for towed and deployable applications.
+"""
+
+
+class TestStripExhibitHeaders:
+    def test_full_r1_header_returns_empty(self):
+        """A complete R-1 exhibit header block should yield empty string."""
+        result = strip_exhibit_headers(_ARMY_R1_HEADER)
+        assert result == ""
+
+    def test_empty_input(self):
+        assert strip_exhibit_headers("") == ""
+        assert strip_exhibit_headers(None) == ""
+
+    def test_plain_narrative_unchanged(self):
+        """Normal narrative text should pass through with content preserved."""
+        text = (
+            "This program develops advanced targeting algorithms for "
+            "precision-guided munitions. The FY2024 effort focuses on "
+            "integration testing with existing fire control systems."
+        )
+        result = strip_exhibit_headers(text)
+        assert len(result) > 50
+        assert "targeting algorithms" in result
+
+    def test_af_p40_keeps_description_content(self):
+        """AF P-40 header should be stripped, keeping DESCRIPTION: content."""
+        result = strip_exhibit_headers(_AF_P40_HEADER_WITH_CONTENT)
+        assert result  # not empty
+        assert "MILSATCOM" in result
+        assert "satellite communication" in result
+
+    def test_ocr_split_unclassified_stripped(self):
+        """OCR-split 'UN CLASSIFIED' variant should be handled."""
+        result = strip_exhibit_headers(_NAVY_OCR_HEADER)
+        assert result  # not empty (has real content after header)
+        assert "optical depth" in result
+
+    def test_department_variants(self):
+        """Department of the Army/Navy/Air Force headers all recognized."""
+        for dept in ["Army", "Navy", "Air Force"]:
+            header = (
+                f"UNCLASSIFIED\n"
+                f"Department of the {dept}\n"
+                f"FY 2013 R D T & E Program Exhibit R-1\n"
+                f"Appropriation: 2040\n"
+                f"{'=' * 60}\n"
+                f"Thousands of Dollars\n"
+            )
+            result = strip_exhibit_headers(header)
+            assert result == "", f"Department of the {dept} header not fully stripped"
+
+    def test_standalone_unclassified_stripped(self):
+        """Standalone UNCLASSIFIED line is stripped."""
+        text = "UNCLASSIFIED\nThis is real program description content here."
+        result = strip_exhibit_headers(text)
+        assert "UNCLASSIFIED" not in result
+        assert "real program description" in result
+
+    def test_short_residual_returns_empty(self):
+        """Text shorter than 25 chars after stripping returns empty."""
+        text = "UNCLASSIFIED\nTechnology\n\nTechnology"
+        result = strip_exhibit_headers(text)
+        assert result == ""

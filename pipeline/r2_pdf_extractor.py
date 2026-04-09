@@ -36,6 +36,7 @@ _APPROP_RE = re.compile(r"(\d{4}[A-Z]?)\s*[:/]")
 # ── Organization from source_file path ───────────────────────────────────────
 
 _ORG_FROM_FILE: list[tuple[str, str]] = [
+    # Defense-Wide agencies (specific patterns first)
     ("RDTE_OSD", "OSD"),
     ("RDTE_DARPA", "DARPA"),
     ("RDTE_SOCOM", "SOCOM"),
@@ -59,8 +60,59 @@ _ORG_FROM_FILE: list[tuple[str, str]] = [
     ("Joint_Staff", "TJS"),
     ("jcs", "TJS"),
     ("whs", "WHS"),
+    # Service-specific patterns
+    ("US_Army", "Army"),
+    ("Army", "Army"),
+    ("US_Navy", "Navy"),
+    ("Navy", "Navy"),
+    ("US_Air_Force", "Air Force"),
+    ("Air_Force", "Air Force"),
+    ("AirForce", "Air Force"),
+    ("USMC", "Marine Corps"),
+    ("MarineCorps", "Marine Corps"),
+    ("Space_Force", "Space Force"),
+    ("SpaceForce", "Space Force"),
+    # Generic Defense-Wide fallback
     ("volume", "OSD"),  # generic fallback for older "volumeN" files
 ]
+
+# ── Department name extraction from page text (fallback for org inference) ───
+_DEPT_FROM_TEXT: list[tuple[str, str]] = [
+    ("DEPARTMENT OF THE ARMY", "Army"),
+    ("Department of the Army", "Army"),
+    ("DEPARTMENT OF THE NAVY", "Navy"),
+    ("Department of the Navy", "Navy"),
+    ("DEPARTMENT OF THE AIR FORCE", "Air Force"),
+    ("Department of the Air Force", "Air Force"),
+    ("MISSILE DEFENSE AGENCY", "MDA"),
+    ("DEFENSE ADVANCED RESEARCH", "DARPA"),
+    ("SPECIAL OPERATIONS COMMAND", "SOCOM"),
+    ("DEFENSE THREAT REDUCTION", "DTRA"),
+    ("DEFENSE INFORMATION SYSTEMS", "DISA"),
+    ("DEFENSE LOGISTICS AGENCY", "DLA"),
+    ("DEFENSE HEALTH", "DHP"),
+]
+
+# ── Row labels to skip in R-2 cost tables (aggregation/metadata rows) ────────
+
+_SKIP_LINE_LABELS: frozenset[str] = frozenset({
+    "Total Program Element",
+    "Total PE Cost",
+    "Total Cost",
+    "Total Program Element (PE) Cost",
+    "Total Program Element Cost",
+})
+
+_SKIP_LABEL_PREFIXES: tuple[str, ...] = (
+    "# FY",
+    "MDAP/MAIS Code",
+    "MDAP Code",
+    "MAIS Code",
+    "Quantity of RDT&E",
+    "Other MDAP",
+    "Other MAIS",
+    "Program MDAP",
+)
 
 # ── COST table parsing ───────────────────────────────────────────────────────
 
@@ -89,11 +141,23 @@ def _parse_amount(token: str) -> float | None:
         return None
 
 
-def _infer_org(source_file: str) -> str | None:
-    """Infer organization name from source_file path."""
+def _infer_org(source_file: str, page_text: str | None = None) -> str | None:
+    """Infer organization name from source_file path or page header text.
+
+    Tries filename patterns first (fast, high confidence), then falls back
+    to scanning the first 500 characters of page text for department names.
+    """
     for fragment, org in _ORG_FROM_FILE:
         if fragment.lower() in source_file.lower():
             return org
+
+    # Fallback: scan page text header for department names
+    if page_text:
+        header = page_text[:500]
+        for phrase, org in _DEPT_FROM_TEXT:
+            if phrase in header:
+                return org
+
     return None
 
 
@@ -131,7 +195,7 @@ def parse_r2_cost_table(
     pe_match = _PE_RE.search(text[:800])
     if not pe_match:
         return None
-    pe_number = pe_match.group(1)
+    pe_number = pe_match.group(0)
 
     # Extract appropriation code
     approp_match = _APPROP_RE.search(text[:500])
@@ -212,6 +276,10 @@ def parse_r2_cost_table(
         if not label:
             continue
 
+        # Skip aggregation/metadata rows (Total PE, MDAP codes, etc.)
+        if label in _SKIP_LINE_LABELS or label.startswith(_SKIP_LABEL_PREFIXES):
+            continue
+
         # Pair amounts with FY labels (amounts may be fewer than FY labels)
         paired = list(zip(fy_labels, amounts))
         if paired:
@@ -255,8 +323,17 @@ def extract_r2_from_pdfs(
     *,
     dry_run: bool = False,
     limit: int | None = None,
+    service_filter: str | None = None,
 ) -> dict:
-    """Extract R-2 funding data from Defense-Wide PDF pages into budget_lines.
+    """Extract R-2 funding data from PDF pages into budget_lines.
+
+    Scans all pdf_pages (not just Defense-Wide) for R-2 COST tables and
+    inserts structured funding rows into budget_lines.
+
+    Args:
+        service_filter: Optional substring to restrict source_file paths,
+            e.g. ``"Army"`` or ``"Defense_Wide"``.  Useful for incremental
+            testing per service.
 
     Returns a summary dict with counts.
     """
@@ -268,12 +345,13 @@ def extract_r2_from_pdfs(
         SELECT id, source_file, page_number, fiscal_year,
                substr(page_text, 1, 4000) as page_text
         FROM pdf_pages
-        WHERE source_file LIKE '%Defense_Wide%'
-          AND (page_text LIKE '%Total PE Cost%' OR page_text LIKE '%Total Program Element%')
+        WHERE (page_text LIKE '%Total PE Cost%' OR page_text LIKE '%Total Program Element%')
           AND (page_text LIKE '%COST%Millions%' OR page_text LIKE '%Cost%millions%'
                OR page_text LIKE '%COST%Thousands%' OR page_text LIKE '%Cost%thousands%'
                OR page_text LIKE "%$'s in Millions%")
     """
+    if service_filter:
+        query += f" AND source_file LIKE '%{service_filter}%'"
     if limit:
         query += f" LIMIT {limit}"
 
@@ -296,7 +374,7 @@ def extract_r2_from_pdfs(
 
         parsed += 1
         source_fy = _extract_fy_from_fiscal_year(fiscal_year)
-        org = _infer_org(source_file)
+        org = _infer_org(source_file, page_text=text)
         pe = result["pe_number"]
         approp = result["approp_code"]
         mult = result["unit_multiplier"]
@@ -381,7 +459,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     parser = argparse.ArgumentParser(
-        description="Extract R-2 funding data from Defense-Wide PDF pages into budget_lines."
+        description="Extract R-2 funding data from PDF pages into budget_lines."
     )
     parser.add_argument("--db", type=Path, default=Path("dod_budget.sqlite"),
                         help="Path to SQLite database")
@@ -389,6 +467,9 @@ def main() -> None:
                         help="Parse but don't insert; show sample rows")
     parser.add_argument("--limit", type=int, default=None,
                         help="Limit number of pages to process")
+    parser.add_argument("--service", type=str, default=None,
+                        help="Restrict to source files matching this string "
+                             "(e.g. 'Army', 'Navy', 'Defense_Wide')")
     args = parser.parse_args()
 
     if not args.db.exists():
@@ -396,7 +477,10 @@ def main() -> None:
         sys.exit(1)
 
     conn = get_connection(args.db)
-    result = extract_r2_from_pdfs(conn, dry_run=args.dry_run, limit=args.limit)
+    result = extract_r2_from_pdfs(
+        conn, dry_run=args.dry_run, limit=args.limit,
+        service_filter=args.service,
+    )
     conn.close()
 
     print("\nSummary:")

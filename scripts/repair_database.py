@@ -10,6 +10,9 @@ Fixes data quality issues identified during UI review (see docs/NOTICED_ISSUES.m
   5. Adds missing performance indexes
   6. Runs reference table backfill from normalized data
   9. Backfills pe_number via cross-exhibit line_item_title matching
+ 10. Cleans exhibit header text leaked into pe_descriptions / project_descriptions
+ 11. Removes R-2 PDF aggregation/metadata rows from budget_lines
+ 12. Backfills organization_name for R-2 PDF rows with NULL org
 
 Safe to run multiple times (idempotent). Works on existing databases.
 
@@ -38,6 +41,12 @@ from utils.normalization import (  # noqa: E402
     TITLE_TO_CODE as _TITLE_TO_CODE,
 )
 from utils.patterns import PE_NUMBER as _PE_RE  # noqa: E402
+from utils.pdf_sections import strip_exhibit_headers  # noqa: E402
+from pipeline.r2_pdf_extractor import (  # noqa: E402
+    _infer_org as _r2_infer_org,
+    _SKIP_LINE_LABELS as _R2_SKIP_LABELS,
+    _SKIP_LABEL_PREFIXES as _R2_SKIP_PREFIXES,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
@@ -447,6 +456,192 @@ def step_9_backfill_pe_numbers(conn: sqlite3.Connection, dry_run: bool = False) 
     return xref_updated + extract_count
 
 
+def step_10_clean_header_leaked_descriptions(
+    conn: sqlite3.Connection, dry_run: bool = False
+) -> dict:
+    """Remove or fix description rows that contain exhibit page headers.
+
+    Pass 1: DELETE rows where strip_exhibit_headers() returns empty.
+    Pass 2: UPDATE rows where the header prepends real content.
+    Applies to both pe_descriptions and project_descriptions.
+    """
+    logger.info("Step 10: Cleaning header-leaked descriptions...")
+    result = {"pe_deleted": 0, "pe_updated": 0, "proj_deleted": 0, "proj_updated": 0}
+
+    for table, prefix in [("pe_descriptions", "pe"), ("project_descriptions", "proj")]:
+        # Check if table exists
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ).fetchone()
+        if not exists:
+            logger.info(f"  {table}: table does not exist, skipping")
+            continue
+
+        # Count candidates
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM {table} WHERE description_text LIKE 'UNCLASSIFIED%'"
+            f" AND section_header IS NULL"
+        ).fetchone()[0]
+        logger.info(f"  {table}: {total:,} UNCLASSIFIED+NULL-header rows to process")
+        if total == 0:
+            continue
+
+        # Process in chunks
+        CHUNK = 5000
+        delete_ids: list[int] = []
+        update_pairs: list[tuple[str, int]] = []
+
+        cur = conn.execute(
+            f"SELECT id, description_text FROM {table}"
+            f" WHERE description_text LIKE 'UNCLASSIFIED%' AND section_header IS NULL"
+        )
+        while True:
+            rows = cur.fetchmany(CHUNK)
+            if not rows:
+                break
+            for row_id, text in rows:
+                cleaned = strip_exhibit_headers(text)
+                if not cleaned:
+                    delete_ids.append(row_id)
+                elif cleaned != text:
+                    update_pairs.append((cleaned, row_id))
+
+        logger.info(f"  {table}: {len(delete_ids):,} to delete, {len(update_pairs):,} to update")
+        result[f"{prefix}_deleted"] = len(delete_ids)
+        result[f"{prefix}_updated"] = len(update_pairs)
+
+        if not dry_run:
+            # Batch delete
+            for i in range(0, len(delete_ids), 10000):
+                batch = delete_ids[i:i + 10000]
+                placeholders = ",".join("?" for _ in batch)
+                conn.execute(f"DELETE FROM {table} WHERE id IN ({placeholders})", batch)
+            # Batch update
+            for i in range(0, len(update_pairs), 10000):
+                batch = update_pairs[i:i + 10000]
+                conn.executemany(
+                    f"UPDATE {table} SET description_text = ? WHERE id = ?", batch
+                )
+            conn.commit()
+
+    return result
+
+
+def step_11_clean_r2_metadata_rows(
+    conn: sqlite3.Connection, dry_run: bool = False
+) -> int:
+    """Delete R-2 PDF aggregation and metadata rows from budget_lines.
+
+    Targets rows with exhibit_type='r2_pdf' whose line_item_title matches
+    known non-data patterns (Total Program Element, # FY comments,
+    MDAP/MAIS metadata, etc.).
+    """
+    logger.info("Step 11: Cleaning R-2 PDF metadata/aggregation rows...")
+
+    # Count exact-match labels
+    placeholders = ",".join("?" for _ in _R2_SKIP_LABELS)
+    exact_count = conn.execute(
+        f"SELECT COUNT(*) FROM budget_lines"
+        f" WHERE exhibit_type = 'r2_pdf' AND line_item_title IN ({placeholders})",
+        list(_R2_SKIP_LABELS),
+    ).fetchone()[0]
+
+    # Count prefix-match labels
+    prefix_clauses = " OR ".join(
+        "line_item_title LIKE ?" for _ in _R2_SKIP_PREFIXES
+    )
+    prefix_params = [f"{p}%" for p in _R2_SKIP_PREFIXES]
+    prefix_count = conn.execute(
+        f"SELECT COUNT(*) FROM budget_lines"
+        f" WHERE exhibit_type = 'r2_pdf' AND ({prefix_clauses})",
+        prefix_params,
+    ).fetchone()[0]
+
+    total = exact_count + prefix_count
+    logger.info(f"  Found {exact_count:,} exact + {prefix_count:,} prefix = {total:,} rows to delete")
+
+    if not dry_run and total > 0:
+        conn.execute(
+            f"DELETE FROM budget_lines"
+            f" WHERE exhibit_type = 'r2_pdf' AND line_item_title IN ({placeholders})",
+            list(_R2_SKIP_LABELS),
+        )
+        conn.execute(
+            f"DELETE FROM budget_lines"
+            f" WHERE exhibit_type = 'r2_pdf' AND ({prefix_clauses})",
+            prefix_params,
+        )
+        conn.commit()
+
+    return total
+
+
+def step_12_backfill_r2_org_names(
+    conn: sqlite3.Connection, dry_run: bool = False
+) -> int:
+    """Backfill organization_name for R-2 PDF rows with NULL org.
+
+    Uses the expanded _infer_org() from r2_pdf_extractor which checks
+    filename patterns and page header text.
+    """
+    logger.info("Step 12: Backfilling R-2 PDF organization names...")
+
+    null_count = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines"
+        " WHERE exhibit_type = 'r2_pdf' AND (organization_name IS NULL OR organization_name = '')"
+    ).fetchone()[0]
+    logger.info(f"  {null_count:,} r2_pdf rows with NULL organization_name")
+
+    if null_count == 0:
+        return 0
+
+    # Fetch distinct source files with NULL org
+    rows = conn.execute(
+        "SELECT DISTINCT source_file FROM budget_lines"
+        " WHERE exhibit_type = 'r2_pdf' AND (organization_name IS NULL OR organization_name = '')"
+    ).fetchall()
+    source_files = [r[0] for r in rows]
+    logger.info(f"  {len(source_files):,} distinct source files to resolve")
+
+    updated = 0
+    for sf in source_files:
+        # Try filename-based inference first
+        org = _r2_infer_org(sf)
+
+        # If no match, try page text from pdf_pages
+        if not org:
+            page_row = conn.execute(
+                "SELECT substr(page_text, 1, 500) FROM pdf_pages"
+                " WHERE source_file = ? LIMIT 1",
+                (sf,),
+            ).fetchone()
+            if page_row:
+                org = _r2_infer_org(sf, page_text=page_row[0])
+
+        if org and not dry_run:
+            conn.execute(
+                "UPDATE budget_lines SET organization_name = ?"
+                " WHERE exhibit_type = 'r2_pdf'"
+                " AND (organization_name IS NULL OR organization_name = '')"
+                " AND source_file = ?",
+                (org, sf),
+            )
+            updated += 1
+        elif org:
+            updated += 1
+
+    if not dry_run:
+        conn.commit()
+
+    # Report remaining NULLs
+    remaining = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines"
+        " WHERE exhibit_type = 'r2_pdf' AND (organization_name IS NULL OR organization_name = '')"
+    ).fetchone()[0]
+    logger.info(f"  Resolved {updated:,} source files, {remaining:,} NULL orgs remaining")
+    return updated
+
+
 def repair(db_path: Path, dry_run: bool = False) -> dict:
     """Run all repair steps on the database.
 
@@ -478,6 +673,9 @@ def repair(db_path: Path, dry_run: bool = False) -> dict:
         summary["reference"] = step_6_backfill_reference_data(conn, dry_run)
         summary["source_fy_backfilled"] = step_7_backfill_source_fiscal_year(conn, dry_run)
         summary["pe_backfilled"] = step_9_backfill_pe_numbers(conn, dry_run)
+        summary["header_cleaned"] = step_10_clean_header_leaked_descriptions(conn, dry_run)
+        summary["r2_metadata_deleted"] = step_11_clean_r2_metadata_rows(conn, dry_run)
+        summary["r2_org_backfilled"] = step_12_backfill_r2_org_names(conn, dry_run)
         if not dry_run:
             step_8_rebuild_fts(conn)
     finally:

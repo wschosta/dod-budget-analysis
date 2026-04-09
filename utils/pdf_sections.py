@@ -20,6 +20,8 @@ Usage:
 import re
 from typing import Optional
 
+from utils.strings import clean_narrative
+
 # ── Section header patterns for R-2 and R-3 exhibits ─────────────────────────
 #
 # R-2 (RDT&E Program Summary) sections, per the OSD exhibit instructions:
@@ -207,6 +209,185 @@ def parse_narrative_sections(
             sections.append({"header": last_header, "text": body})
 
     return sections
+
+
+# ── Exhibit page header patterns for strip_exhibit_headers() ─────────────────
+#
+# Budget exhibit PDFs (R-1, P-40, etc.) have page headers/banners that the
+# enricher Phase 2 fallback path incorrectly stores as description text.
+# These patterns match the header blocks so they can be stripped.
+
+# UNCLASSIFIED line, including common OCR split variants
+_UNCLASS_LINE = re.compile(
+    r"^\s*(?:UN\s?CLA\s?SSI\s?FIED|UNCLASSIFIED)\s*$", re.MULTILINE | re.IGNORECASE
+)
+
+# R-1 exhibit header block: "Department of the <service>" + "Exhibit R-1" or
+# "R D T & E Program" through a dashed separator line and column headers.
+# These are full summary table pages with no real narrative content.
+_R1_EXHIBIT_BLOCK = re.compile(
+    r"Department\s+of\s+the\s+(?:Army|Navy|Air\s*Force|Defense)\b"
+    r".*?"                            # header continuation
+    r"(?:Exhibit\s+R-1|R\s+D\s+T\s*&?\s*E\s+Program)"
+    r".*?"                            # more header text
+    r"(?=\n\s*\d+\s+\d{7}|\Z)",      # stop before first table data row or end
+    re.DOTALL | re.IGNORECASE,
+)
+
+# Budget Item Justification header (P-40 / R-2 pages): from CLASSIFICATION or
+# BUDGET ITEM JUSTIFICATION through COST/QUANTITY lines and dollar amounts.
+# Also matches "FY XXXX RDT&E,N BUDGET ITEM JUSTIFICATION SHEET" variant.
+_BUDGET_JUSTIFICATION_HEADER = re.compile(
+    r"(?:"
+    r"CLASSIFICATION\s*:?\s*\n"                  # P-40 variant
+    r"|BUDGET\s+ITEM\s+JUSTIFICATION"            # Standard
+    r"|FY\s*\d{4}(?:/\d{4})?\s+RDT&E[,\s]\w+\s+BUDGET\s+ITEM"  # Navy RDT&E variant
+    r")"
+    r".*?"                                       # header content
+    r"(?:"
+    r"(?:COST|QUANTITY)\s*\n"                    # COST or QUANTITY line
+    r"(?:\s*\(.*?\)\s*\n)??"                     # optional "(In Millions)"
+    r"(?:\s*\$[\d,.\s$]+\n)?"                    # optional dollar amounts line
+    r"|(?=DESCRIPTION\s*:)"                      # or stop before DESCRIPTION:
+    r"|(?=\n[A-Z][a-z]{3,})"                     # or stop before mixed-case paragraph
+    r")",
+    re.DOTALL | re.IGNORECASE,
+)
+
+# Exhibit type and date header lines from P-40 / R-2 pages
+_EXHIBIT_DATE_LINE = re.compile(
+    r"^\s*(?:"
+    r"(?:APPROP\s+CODE|APPROPRIATION)[/\s].*"    # Appropriation lines
+    r"|P-\d+\s*(?:FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|JAN).*"  # P-40 date
+    r"|(?:FEBRUARY|MARCH|APRIL|MAY|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|JANUARY)\s+\d{4}"
+    r"|DATE\s*:?\s*$"                            # standalone DATE line
+    r"|RDT&E\s+BUDGET\s+ITEM\s+JUSTIFICATION\s+SHEET.*"
+    r"|BUDGET\s+ACTIVITY\s*:.*"                  # Budget activity lines
+    r"|PROGRAM\s+ELEMENT\s*:.*"                  # PE identifier lines
+    r"|PROGRAM\s+ELEMENT\s+TITLE\s*:.*"          # PE title lines
+    r"|PROJECT\s+NUMBER\s*:\s*$"                  # Standalone "PROJECT NUMBER:" label only
+    r"|PROGRAM\s+ELEMENT\s+DESCRIPTIVE\s+SUMMARIES"
+    r"|INTRODUCTION\s+AND\s+EXPLANATION\s+OF\s+CONTENTS"
+    r")\s*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+# Dashed separator lines (20+ dashes or equals)
+_DASHED_LINE = re.compile(r"^[\s\-=]{20,}$", re.MULTILINE)
+
+# Column header lines: "Thousands of Dollars", "Line Element", "No Number",
+# FY year column headers, and lines of "--- ---------" separators
+_COLUMN_HEADER_LINE = re.compile(
+    r"^\s*(?:"
+    r"Thousands\s+of\s+Dollars"
+    r"|(?:Program|Line|Element)\s+[-\s]*(?:S|e)?"
+    r"|No\s+Number\s+Item"
+    r"|(?:---\s+){2,}"
+    r")\s*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+# Tabular data lines from R-1 summaries: numbered row with PE number followed
+# by title text and optional dollar amounts.
+# E.g., "175 0301359A 07 SPECIAL ARMY PROGRAM 35"
+_TABLE_DATA_LINE = re.compile(
+    r"^\s*\d{1,4}\s+\d{7}[A-Z]{0,3}\s+.*$",
+    re.MULTILINE,
+)
+
+# Budget activity total / subtotal lines: activity name followed by dollar amounts.
+# E.g., "Basic Research 181,722 179,059 198,854 210,349"
+# Also: "Total: Management support 1,341,545 1,153,980 ..."
+_BUDGET_ACTIVITY_TOTAL = re.compile(
+    r"^\s*(?:Total\s*:\s*)?[A-Z][A-Za-z &/\-:]+(?:\d[\d,]+\s+){2,}\d[\d,]+\s*$",
+    re.MULTILINE,
+)
+
+# OCR double-printed lines: characters duplicated (e.g., "FFCCSS RREECCOONNNNAAIISSSSAANNCCEE")
+# These appear when OCR misreads overlapping text from scanned PDFs.
+# Requires 3+ consecutive DIFFERENT doubled-letter pairs to avoid false positives.
+_OCR_DOUBLED_LINE = re.compile(
+    r"^.*?([A-Z])\1(?!\1)([A-Z])\2(?!\2)([A-Z])\3.*$",
+    re.MULTILINE,
+)
+
+# FY column header line (repeated "FY XXXX" entries on one line)
+_FY_COLUMN_LINE = re.compile(
+    r"^\s*(?:FY\s*\d{2,4}\s+){2,}.*$", re.MULTILINE | re.IGNORECASE
+)
+
+# Page markers: "Page A-1", "Page B-3", "Page 5 of 70"
+_PAGE_MARKER_LINE = re.compile(
+    r"^\s*Page\s+[A-Z]?-?\d+(?:\s+of\s+\d+)?\s*$", re.MULTILINE | re.IGNORECASE
+)
+
+# Standalone COST / QUANTITY / dollar-amount lines left over from P-40 headers
+_COST_QUANTITY_LINE = re.compile(
+    r"^\s*(?:"
+    r"(?:COST|QUANTITY)\s*$"                     # standalone COST / QUANTITY
+    r"|\$[\s\d,.$]+$"                            # dollar amounts: "$ $58,422 $18,034"
+    r"|\(\s*(?:in|In)\s+(?:Thousands|Millions|thousands|millions)\s*\)"  # "(in thousands)"
+    r")\s*$",
+    re.MULTILINE,
+)
+
+# "FY XXXX/XXXX RDT&E, ARMY/NAVY" header lines from service-specific PDFs
+_SERVICE_RDTE_LINE = re.compile(
+    r"^\s*FY\s*\d{4}(?:/\d{4})?\s+RDT&E[,\s].*$", re.MULTILINE | re.IGNORECASE
+)
+
+_MIN_USEFUL_LENGTH = 25
+
+
+def strip_exhibit_headers(text: str) -> str:
+    """Strip exhibit page headers and table artifacts from PDF text.
+
+    Removes header blocks that appear at the top of budget exhibit pages
+    (R-1 summaries, P-40 justification sheets, etc.) that were incorrectly
+    stored as description text by the enricher fallback path.
+
+    Also applies :func:`utils.strings.clean_narrative` for R-2A page-break
+    artifacts.
+
+    Returns:
+        Cleaned text, or empty string if nothing meaningful remains after
+        stripping (fewer than 20 characters).
+    """
+    if not text:
+        return ""
+
+    # Apply existing R-2A artifact cleaning first
+    text = clean_narrative(text)
+
+    # Strip UNCLASSIFIED lines (standalone or OCR-split)
+    text = _UNCLASS_LINE.sub("", text)
+
+    # Strip R-1 exhibit header blocks
+    text = _R1_EXHIBIT_BLOCK.sub("", text)
+
+    # Strip Budget Item Justification (P-40) header blocks
+    text = _BUDGET_JUSTIFICATION_HEADER.sub("", text)
+
+    # Strip individual header-like lines
+    text = _EXHIBIT_DATE_LINE.sub("", text)
+    text = _DASHED_LINE.sub("", text)
+    text = _COLUMN_HEADER_LINE.sub("", text)
+    text = _TABLE_DATA_LINE.sub("", text)
+    text = _BUDGET_ACTIVITY_TOTAL.sub("", text)
+    text = _FY_COLUMN_LINE.sub("", text)
+    text = _PAGE_MARKER_LINE.sub("", text)
+    text = _COST_QUANTITY_LINE.sub("", text)
+    text = _SERVICE_RDTE_LINE.sub("", text)
+    text = _OCR_DOUBLED_LINE.sub("", text)
+
+    # Collapse blank lines and trim
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = text.strip()
+
+    if len(text) < _MIN_USEFUL_LENGTH:
+        return ""
+
+    return text
 
 
 def detect_project_boundaries(page_text: str) -> list[dict[str, str]]:

@@ -34,7 +34,11 @@ from pathlib import Path
 from utils import get_connection
 from utils.patterns import PE_NUMBER, FISCAL_YEAR
 from utils.query import make_placeholders
-from utils.pdf_sections import parse_narrative_sections, detect_project_boundaries
+from utils.pdf_sections import (
+    detect_project_boundaries,
+    parse_narrative_sections,
+    strip_exhibit_headers,
+)
 
 # Check _HAS_ANTHROPIC once at Phase 3 entry rather than per-batch.
 _HAS_ANTHROPIC = False
@@ -807,6 +811,11 @@ def run_phase2(conn: sqlite3.Connection, stop_event: threading.Event | None = No
             # For each PE run in this file, extract narrative sections
             for pe, run in pe_runs.items():
                 run_text = "\n\n".join(run["parts"])
+                # Strip exhibit page headers (R-1 banners, P-40 headers, etc.)
+                # before attempting section parsing or fallback storage.
+                run_text = strip_exhibit_headers(run_text)
+                if not run_text:
+                    continue
                 sections = parse_narrative_sections(run_text)
                 if sections:
                     for sec in sections:
@@ -1666,6 +1675,11 @@ def run_phase5(conn: sqlite3.Connection, stop_event: threading.Event | None = No
             chunk_max_rowid = rowid  # ordered by rowid, so last = max
 
             if source_file and source_file in done_files:
+                continue
+
+            # Strip exhibit page headers that may have leaked into pe_descriptions
+            desc_text = strip_exhibit_headers(desc_text)
+            if not desc_text:
                 continue
 
             # Attempt project-level decomposition
