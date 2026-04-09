@@ -2,17 +2,18 @@
 Repair and upgrade an existing DoD budget database.
 
 Fixes data quality issues identified during UI review (see docs/NOTICED_ISSUES.md):
-  1. Creates missing reference tables (services_agencies, exhibit_types,
-     appropriation_titles, budget_cycles)
+  1. Creates missing reference tables
   2. Seeds reference tables with canonical display names
   3. Normalizes organization_name values (ARMY->Army, AF->Air Force, etc.)
   4. Parses and backfills appropriation_code from account_title
   5. Adds missing performance indexes
   6. Runs reference table backfill from normalized data
-  9. Backfills pe_number via cross-exhibit line_item_title matching
- 10. Cleans exhibit header text leaked into pe_descriptions / project_descriptions
- 11. Removes R-2 PDF aggregation/metadata rows from budget_lines
- 12. Backfills organization_name for R-2 PDF rows with NULL org
+  7. Backfills source_fiscal_year from directory structure
+  8. Backfills pe_number via cross-exhibit line_item_title matching
+  9. Cleans exhibit header text leaked into pe_descriptions / project_descriptions
+ 10. Removes R-2 PDF aggregation/metadata rows from budget_lines
+ 11. Backfills organization_name for R-2 PDF rows with NULL org
+ 12. Rebuilds FTS5 indexes (always runs last)
 
 Safe to run multiple times (idempotent). Works on existing databases.
 
@@ -317,28 +318,14 @@ def step_7_backfill_source_fiscal_year(conn: sqlite3.Connection, dry_run: bool =
     return len(updates)
 
 
-def step_8_rebuild_fts(conn: sqlite3.Connection) -> None:
-    """Rebuild FTS5 indexes to ensure consistency after data changes."""
-    logger.info("Step 8: Rebuilding FTS5 indexes...")
-    for table in ["budget_lines_fts", "pdf_pages_fts"]:
-        try:
-            conn.execute(f"INSERT INTO {table}({table}) VALUES('rebuild')")
-            logger.info(f"  Rebuilt {table}")
-        except sqlite3.OperationalError:
-            logger.debug(f"  {table} does not exist, skipping")
-    conn.execute("PRAGMA optimize")
-    conn.commit()
-    logger.info("  ✓ FTS5 rebuild complete")
-
-
-def step_9_backfill_pe_numbers(conn: sqlite3.Connection, dry_run: bool = False) -> int:
+def step_8_backfill_pe_numbers(conn: sqlite3.Connection, dry_run: bool = False) -> int:
     """Backfill pe_number on rows missing it by cross-referencing other exhibit types.
 
     Joins NULL-PE rows to rows that have PE numbers using
     (line_item_title, organization_name, fiscal_year).  Only applies
     when the match is unambiguous (exactly one distinct PE for that combo).
     """
-    logger.info("Step 9: Backfilling PE numbers via cross-reference...")
+    logger.info("Step 8: Backfilling PE numbers via cross-reference...")
 
     # Find unambiguous PE mappings
     before_null = conn.execute(
@@ -456,7 +443,7 @@ def step_9_backfill_pe_numbers(conn: sqlite3.Connection, dry_run: bool = False) 
     return xref_updated + extract_count
 
 
-def step_10_clean_header_leaked_descriptions(
+def step_9_clean_header_leaked_descriptions(
     conn: sqlite3.Connection, dry_run: bool = False
 ) -> dict:
     """Remove or fix description rows that contain exhibit page headers.
@@ -465,7 +452,7 @@ def step_10_clean_header_leaked_descriptions(
     Pass 2: UPDATE rows where the header prepends real content.
     Applies to both pe_descriptions and project_descriptions.
     """
-    logger.info("Step 10: Cleaning header-leaked descriptions...")
+    logger.info("Step 9: Cleaning header-leaked descriptions...")
     result = {"pe_deleted": 0, "pe_updated": 0, "proj_deleted": 0, "proj_updated": 0}
 
     for table, prefix in [("pe_descriptions", "pe"), ("project_descriptions", "proj")]:
@@ -527,7 +514,7 @@ def step_10_clean_header_leaked_descriptions(
     return result
 
 
-def step_11_clean_r2_metadata_rows(
+def step_10_clean_r2_metadata_rows(
     conn: sqlite3.Connection, dry_run: bool = False
 ) -> int:
     """Delete R-2 PDF aggregation and metadata rows from budget_lines.
@@ -536,7 +523,7 @@ def step_11_clean_r2_metadata_rows(
     known non-data patterns (Total Program Element, # FY comments,
     MDAP/MAIS metadata, etc.).
     """
-    logger.info("Step 11: Cleaning R-2 PDF metadata/aggregation rows...")
+    logger.info("Step 10: Cleaning R-2 PDF metadata/aggregation rows...")
 
     # Count exact-match labels
     placeholders = ",".join("?" for _ in _R2_SKIP_LABELS)
@@ -576,7 +563,7 @@ def step_11_clean_r2_metadata_rows(
     return total
 
 
-def step_12_backfill_r2_org_names(
+def step_11_backfill_r2_org_names(
     conn: sqlite3.Connection, dry_run: bool = False
 ) -> int:
     """Backfill organization_name for R-2 PDF rows with NULL org.
@@ -584,7 +571,7 @@ def step_12_backfill_r2_org_names(
     Uses the expanded _infer_org() from r2_pdf_extractor which checks
     filename patterns and page header text.
     """
-    logger.info("Step 12: Backfilling R-2 PDF organization names...")
+    logger.info("Step 11: Backfilling R-2 PDF organization names...")
 
     null_count = conn.execute(
         "SELECT COUNT(*) FROM budget_lines"
@@ -622,7 +609,7 @@ def step_12_backfill_r2_org_names(
 
     if not dry_run and update_pairs:
         conn.executemany(
-            "UPDATE budget_lines SET organization_name = ?"
+            "UPDATE OR IGNORE budget_lines SET organization_name = ?"
             " WHERE exhibit_type = 'r2_pdf'"
             " AND (organization_name IS NULL OR organization_name = '')"
             " AND source_file = ?",
@@ -637,6 +624,19 @@ def step_12_backfill_r2_org_names(
     rows_updated = null_count - remaining
     logger.info(f"  {rows_updated:,} rows updated, {remaining:,} NULL orgs remaining")
     return rows_updated
+
+
+def step_12_rebuild_fts(conn: sqlite3.Connection) -> None:
+    """Rebuild FTS5 indexes to ensure consistency after data changes."""
+    logger.info("Step 12: Rebuilding FTS5 indexes...")
+    for table in ["budget_lines_fts", "pdf_pages_fts"]:
+        try:
+            conn.execute(f"INSERT INTO {table}({table}) VALUES('rebuild')")
+            logger.info(f"  Rebuilt {table}")
+        except sqlite3.OperationalError:
+            logger.debug(f"  {table} does not exist, skipping")
+    conn.execute("PRAGMA optimize")
+    conn.commit()
 
 
 def repair(db_path: Path, dry_run: bool = False) -> dict:
@@ -669,12 +669,12 @@ def repair(db_path: Path, dry_run: bool = False) -> dict:
         step_5_add_indexes(conn)
         summary["reference"] = step_6_backfill_reference_data(conn, dry_run)
         summary["source_fy_backfilled"] = step_7_backfill_source_fiscal_year(conn, dry_run)
-        summary["pe_backfilled"] = step_9_backfill_pe_numbers(conn, dry_run)
-        summary["header_cleaned"] = step_10_clean_header_leaked_descriptions(conn, dry_run)
-        summary["r2_metadata_deleted"] = step_11_clean_r2_metadata_rows(conn, dry_run)
-        summary["r2_org_backfilled"] = step_12_backfill_r2_org_names(conn, dry_run)
+        summary["pe_backfilled"] = step_8_backfill_pe_numbers(conn, dry_run)
+        summary["header_cleaned"] = step_9_clean_header_leaked_descriptions(conn, dry_run)
+        summary["r2_metadata_deleted"] = step_10_clean_r2_metadata_rows(conn, dry_run)
+        summary["r2_org_backfilled"] = step_11_backfill_r2_org_names(conn, dry_run)
         if not dry_run:
-            step_8_rebuild_fts(conn)
+            step_12_rebuild_fts(conn)
     finally:
         conn.close()
 
