@@ -36,7 +36,6 @@ _APPROP_RE = re.compile(r"(\d{4}[A-Z]?)\s*[:/]")
 # ── Organization from source_file path ───────────────────────────────────────
 
 _ORG_FROM_FILE: list[tuple[str, str]] = [
-    # Defense-Wide agencies (specific patterns first)
     ("RDTE_OSD", "OSD"),
     ("RDTE_DARPA", "DARPA"),
     ("RDTE_SOCOM", "SOCOM"),
@@ -60,7 +59,6 @@ _ORG_FROM_FILE: list[tuple[str, str]] = [
     ("Joint_Staff", "TJS"),
     ("jcs", "TJS"),
     ("whs", "WHS"),
-    # Service-specific patterns
     ("US_Army", "Army"),
     ("Army", "Army"),
     ("US_Navy", "Navy"),
@@ -72,18 +70,15 @@ _ORG_FROM_FILE: list[tuple[str, str]] = [
     ("MarineCorps", "Marine Corps"),
     ("Space_Force", "Space Force"),
     ("SpaceForce", "Space Force"),
-    # Generic Defense-Wide fallback
-    ("volume", "OSD"),  # generic fallback for older "volumeN" files
+    ("volume", "OSD"),  # older "volumeN" files
 ]
 
 # ── Department name extraction from page text (fallback for org inference) ───
+# Patterns stored uppercase; matched case-insensitively in infer_org().
 _DEPT_FROM_TEXT: list[tuple[str, str]] = [
     ("DEPARTMENT OF THE ARMY", "Army"),
-    ("Department of the Army", "Army"),
     ("DEPARTMENT OF THE NAVY", "Navy"),
-    ("Department of the Navy", "Navy"),
     ("DEPARTMENT OF THE AIR FORCE", "Air Force"),
-    ("Department of the Air Force", "Air Force"),
     ("MISSILE DEFENSE AGENCY", "MDA"),
     ("DEFENSE ADVANCED RESEARCH", "DARPA"),
     ("SPECIAL OPERATIONS COMMAND", "SOCOM"),
@@ -95,7 +90,7 @@ _DEPT_FROM_TEXT: list[tuple[str, str]] = [
 
 # ── Row labels to skip in R-2 cost tables (aggregation/metadata rows) ────────
 
-_SKIP_LINE_LABELS: frozenset[str] = frozenset({
+SKIP_LINE_LABELS: frozenset[str] = frozenset({
     "Total Program Element",
     "Total PE Cost",
     "Total Cost",
@@ -103,7 +98,7 @@ _SKIP_LINE_LABELS: frozenset[str] = frozenset({
     "Total Program Element Cost",
 })
 
-_SKIP_LABEL_PREFIXES: tuple[str, ...] = (
+SKIP_LABEL_PREFIXES: tuple[str, ...] = (
     "# FY",
     "MDAP/MAIS Code",
     "MDAP Code",
@@ -141,7 +136,7 @@ def _parse_amount(token: str) -> float | None:
         return None
 
 
-def _infer_org(source_file: str, page_text: str | None = None) -> str | None:
+def infer_org(source_file: str, page_text: str | None = None) -> str | None:
     """Infer organization name from source_file path or page header text.
 
     Tries filename patterns first (fast, high confidence), then falls back
@@ -151,11 +146,11 @@ def _infer_org(source_file: str, page_text: str | None = None) -> str | None:
         if fragment.lower() in source_file.lower():
             return org
 
-    # Fallback: scan page text header for department names
+    # Fallback: scan page text header for department names (case-insensitive)
     if page_text:
-        header = page_text[:500]
+        header_upper = page_text[:500].upper()
         for phrase, org in _DEPT_FROM_TEXT:
-            if phrase in header:
+            if phrase in header_upper:
                 return org
 
     return None
@@ -277,7 +272,7 @@ def parse_r2_cost_table(
             continue
 
         # Skip aggregation/metadata rows (Total PE, MDAP codes, etc.)
-        if label in _SKIP_LINE_LABELS or label.startswith(_SKIP_LABEL_PREFIXES):
+        if label in SKIP_LINE_LABELS or label.startswith(SKIP_LABEL_PREFIXES):
             continue
 
         # Pair amounts with FY labels (amounts may be fewer than FY labels)
@@ -350,12 +345,14 @@ def extract_r2_from_pdfs(
                OR page_text LIKE '%COST%Thousands%' OR page_text LIKE '%Cost%thousands%'
                OR page_text LIKE "%$'s in Millions%")
     """
+    params: list = []
     if service_filter:
-        query += f" AND source_file LIKE '%{service_filter}%'"
+        query += " AND source_file LIKE ?"
+        params.append(f"%{service_filter}%")
     if limit:
-        query += f" LIMIT {limit}"
+        query += f" LIMIT {int(limit)}"
 
-    pages = conn.execute(query).fetchall()
+    pages = conn.execute(query, params).fetchall()
     logger.info("  Found %d pages with R-2 cost tables", len(pages))
 
     if not pages:
@@ -374,7 +371,7 @@ def extract_r2_from_pdfs(
 
         parsed += 1
         source_fy = _extract_fy_from_fiscal_year(fiscal_year)
-        org = _infer_org(source_file, page_text=text)
+        org = infer_org(source_file, page_text=text)
         pe = result["pe_number"]
         approp = result["approp_code"]
         mult = result["unit_multiplier"]

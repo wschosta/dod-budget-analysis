@@ -811,8 +811,6 @@ def run_phase2(conn: sqlite3.Connection, stop_event: threading.Event | None = No
             # For each PE run in this file, extract narrative sections
             for pe, run in pe_runs.items():
                 run_text = "\n\n".join(run["parts"])
-                # Strip exhibit page headers (R-1 banners, P-40 headers, etc.)
-                # before attempting section parsing or fallback storage.
                 run_text = strip_exhibit_headers(run_text)
                 if not run_text:
                     continue
@@ -1677,7 +1675,6 @@ def run_phase5(conn: sqlite3.Connection, stop_event: threading.Event | None = No
             if source_file and source_file in done_files:
                 continue
 
-            # Strip exhibit page headers that may have leaked into pe_descriptions
             desc_text = strip_exhibit_headers(desc_text)
             if not desc_text:
                 continue

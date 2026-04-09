@@ -43,9 +43,9 @@ from utils.normalization import (  # noqa: E402
 from utils.patterns import PE_NUMBER as _PE_RE  # noqa: E402
 from utils.pdf_sections import strip_exhibit_headers  # noqa: E402
 from pipeline.r2_pdf_extractor import (  # noqa: E402
-    _infer_org as _r2_infer_org,
-    _SKIP_LINE_LABELS as _R2_SKIP_LABELS,
-    _SKIP_LABEL_PREFIXES as _R2_SKIP_PREFIXES,
+    infer_org as _r2_infer_org,
+    SKIP_LINE_LABELS as _R2_SKIP_LABELS,
+    SKIP_LABEL_PREFIXES as _R2_SKIP_PREFIXES,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -603,12 +603,10 @@ def step_12_backfill_r2_org_names(
     source_files = [r[0] for r in rows]
     logger.info(f"  {len(source_files):,} distinct source files to resolve")
 
-    updated = 0
+    # Resolve org for each source file, collect update pairs
+    update_pairs: list[tuple[str, str]] = []  # (org, source_file)
     for sf in source_files:
-        # Try filename-based inference first
         org = _r2_infer_org(sf)
-
-        # If no match, try page text from pdf_pages
         if not org:
             page_row = conn.execute(
                 "SELECT substr(page_text, 1, 500) FROM pdf_pages"
@@ -617,29 +615,28 @@ def step_12_backfill_r2_org_names(
             ).fetchone()
             if page_row:
                 org = _r2_infer_org(sf, page_text=page_row[0])
+        if org:
+            update_pairs.append((org, sf))
 
-        if org and not dry_run:
-            conn.execute(
-                "UPDATE budget_lines SET organization_name = ?"
-                " WHERE exhibit_type = 'r2_pdf'"
-                " AND (organization_name IS NULL OR organization_name = '')"
-                " AND source_file = ?",
-                (org, sf),
-            )
-            updated += 1
-        elif org:
-            updated += 1
+    logger.info(f"  Resolved {len(update_pairs):,} of {len(source_files):,} source files")
 
-    if not dry_run:
+    if not dry_run and update_pairs:
+        conn.executemany(
+            "UPDATE budget_lines SET organization_name = ?"
+            " WHERE exhibit_type = 'r2_pdf'"
+            " AND (organization_name IS NULL OR organization_name = '')"
+            " AND source_file = ?",
+            update_pairs,
+        )
         conn.commit()
 
-    # Report remaining NULLs
     remaining = conn.execute(
         "SELECT COUNT(*) FROM budget_lines"
         " WHERE exhibit_type = 'r2_pdf' AND (organization_name IS NULL OR organization_name = '')"
     ).fetchone()[0]
-    logger.info(f"  Resolved {updated:,} source files, {remaining:,} NULL orgs remaining")
-    return updated
+    rows_updated = null_count - remaining
+    logger.info(f"  {rows_updated:,} rows updated, {remaining:,} NULL orgs remaining")
+    return rows_updated
 
 
 def repair(db_path: Path, dry_run: bool = False) -> dict:
