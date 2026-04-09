@@ -70,6 +70,18 @@ _ORG_FROM_FILE: list[tuple[str, str]] = [
     ("MarineCorps", "Marine Corps"),
     ("Space_Force", "Space Force"),
     ("SpaceForce", "Space Force"),
+    # Bare agency codes for older filenames ("DARPA PB09", "DISA_PB10", etc.)
+    ("DARPA", "DARPA"),
+    ("DSCA", "DSCA"),
+    ("DTIC", "DTIC"),
+    ("DTRA", "DTRA"),
+    ("DISA", "DISA"),
+    ("DHRA", "DHRA"),
+    ("DCSA", "DCSA"),
+    ("DCMA", "DCMA"),
+    ("DCAA", "DCAA"),
+    ("OSD", "OSD"),
+    ("SDA", "SDA"),
     ("volume", "OSD"),  # older "volumeN" files
 ]
 
@@ -77,7 +89,7 @@ _ORG_FROM_FILE: list[tuple[str, str]] = [
 
 # Modern R-2 exhibit headers: "PB 2024 <Agency Name> Date: ..."
 _R2_AGENCY_RE = re.compile(
-    r"(?:PB|FY)\s+\d{4}\s+(.+?)\s+Date:", re.IGNORECASE
+    r"(?:PBR?|FY)\s+\d{4}\s+(.+?)\s+Date:", re.IGNORECASE
 )
 
 # Older R-2 headers: "<AGENCY> RDT&E BUDGET ITEM JUSTIFICATION"
