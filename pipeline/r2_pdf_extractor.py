@@ -98,6 +98,11 @@ _OLDER_AGENCY_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+# Trailing text sometimes captured as part of agency name by _R2_AGENCY_RE
+_STRIP_JUSTIFICATION_RE = re.compile(
+    r"\s+RDT&E\s+Budget\s+Item\s+Justification$", re.IGNORECASE
+)
+
 # Map agency full names (from R-2 headers) to standardized org codes.
 # Keys are uppercase for case-insensitive lookup.
 _AGENCY_NAME_MAP: dict[str, str] = {
@@ -200,8 +205,9 @@ def infer_org(source_file: str, page_text: str | None = None) -> str | None:
     Tries filename patterns first (fast, high confidence), then falls back
     to scanning the first 500 characters of page text for department names.
     """
+    source_lower = source_file.lower()
     for fragment, org in _ORG_FROM_FILE:
-        if fragment.lower() in source_file.lower():
+        if fragment.lower() in source_lower:
             return org
 
     if not page_text:
@@ -212,9 +218,7 @@ def infer_org(source_file: str, page_text: str | None = None) -> str | None:
     # Try R-2 exhibit header: "PB 2024 <Agency Name> Date: ..."
     m = _R2_AGENCY_RE.search(header)
     if m:
-        agency = m.group(1).strip()
-        # Strip trailing "RDT&E Budget Item Justification" if present
-        agency = re.sub(r"\s+RDT&E\s+Budget\s+Item\s+Justification$", "", agency, flags=re.IGNORECASE)
+        agency = _STRIP_JUSTIFICATION_RE.sub("", m.group(1).strip())
         mapped = _AGENCY_NAME_MAP.get(agency.upper())
         if mapped:
             return mapped
