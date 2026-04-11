@@ -1145,28 +1145,27 @@ def _build_xlsx_summary(
     money_fmt = sty["money_fmt"]
     title_font = Font(bold=True, size=12)
 
-    # Single pass: collect unique dimension values and track which PEs have FY data
-    # from matching rows (is_total=True). PEs with only non-matching sub-elements
-    # would show all zeros in the Y summary and are excluded.
-    pes_with_y_data: set[str] = set()
+    # Single pass: collect all unique dimension values.
+    # All PEs with FY data are included so SUMIFS formulas stay live — users can
+    # change N→Y/P on the data sheet and see the Summary update immediately.
+    pes_with_data: set[str] = set()
     svcs: set[str] = set()
     bas: set[str] = set()
     coms: set[str] = set()
     for row in items:
         pe = row.get("pe_number", "")
-        if pe and pe not in pes_with_y_data:
-            if row.get("matched_keywords_row") or row.get("matched_keywords_desc"):
-                for yr in active_years:
-                    if row.get(f"fy{yr}") is not None:
-                        pes_with_y_data.add(pe)
-                        break
+        if pe and pe not in pes_with_data:
+            for yr in active_years:
+                if row.get(f"fy{yr}") is not None:
+                    pes_with_data.add(pe)
+                    break
         if v := row.get("organization_name", ""):
             svcs.add(v)
         if v := row.get("budget_activity_norm", ""):
             bas.add(v)
         if v := row.get("color_of_money", ""):
             coms.add(v)
-    unique_pes = sorted(pes_with_y_data)
+    unique_pes = sorted(pes_with_data)
     unique_svcs = sorted(svcs)
     unique_bas = sorted(bas)
     unique_coms = sorted(coms)
@@ -1177,14 +1176,19 @@ def _build_xlsx_summary(
     ds = data_sheet_name  # short alias for formula references
     pe_col = field_to_col.get("pe_number", "$A")
 
+    tot_col = 2 + len(active_years)  # "Row Total" column after all FY columns
+    tot_letter = get_col_letter(tot_col)
+
     def _write_pe_section(
         start_row: int, title: str, criteria: str | None,
         y_data_start: int = 0, p_data_start: int = 0,
     ) -> tuple[int, int]:
         r = start_row
         ws.cell(row=r, column=1, value=title).font = title_font
-        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=1 + len(active_years))
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=tot_col)
         r += 1
+
+        # Header row with auto-filter
         ws.cell(row=r, column=1, value="PE Number").font = header_font
         ws.cell(row=r, column=1).fill = header_fill
         for yi, yr in enumerate(active_years):
@@ -1192,6 +1196,10 @@ def _build_xlsx_summary(
             c.font = header_font
             c.fill = header_fill
             c.alignment = Alignment(horizontal="center")
+        c = ws.cell(row=r, column=tot_col, value="Row Total")
+        c.font = header_font
+        c.fill = header_fill
+        c.alignment = Alignment(horizontal="center")
         r += 1
         data_start = r
 
@@ -1200,6 +1208,9 @@ def _build_xlsx_summary(
             vr_list = [f"'{ds}'!${val_letters[yi]}${first_data_row}:${val_letters[yi]}${last_data_row}" for yi in range(len(active_years))]
             pr_str = f"'{ds}'!${pe_col}${first_data_row}:${pe_col}${last_data_row}"
             ir_list = [f"'{ds}'!${intotal_letters[yi]}${first_data_row}:${intotal_letters[yi]}${last_data_row}" for yi in range(len(active_years))]
+
+        first_fy = get_col_letter(2)
+        last_fy = pe_fy_letters[-1] if pe_fy_letters else get_col_letter(2)
 
         for pe in unique_pes:
             ws.cell(row=r, column=1, value=pe).font = base_font
@@ -1213,14 +1224,22 @@ def _build_xlsx_summary(
                 c = ws.cell(row=r, column=2 + yi, value=formula)
                 c.font = base_font
                 c.number_format = money_fmt
+            # Row Total = sum of all FY columns for this PE
+            c = ws.cell(row=r, column=tot_col, value=f"=SUM({first_fy}{r}:{last_fy}{r})")
+            c.font = base_font
+            c.number_format = money_fmt
             r += 1
 
+        # Column totals
         ws.cell(row=r, column=1, value="Total").font = total_font
         for yi in range(len(active_years)):
             cl = pe_fy_letters[yi]
             c = ws.cell(row=r, column=2 + yi, value=f"=SUM({cl}{data_start}:{cl}{r - 1})")
             c.font = total_font
             c.number_format = money_fmt
+        c = ws.cell(row=r, column=tot_col, value=f"=SUM({tot_letter}{data_start}:{tot_letter}{r - 1})")
+        c.font = total_font
+        c.number_format = money_fmt
         r += 1
         return r, data_start
 
@@ -1304,6 +1323,7 @@ def _build_xlsx_summary(
     ws.column_dimensions["A"].width = 22
     ws.column_dimensions["B"].width = 30
     ws.column_dimensions["C"].width = 14
+    ws.column_dimensions[tot_letter].width = 14
     for yi in range(len(active_years)):
         ws.column_dimensions[pe_fy_letters[yi]].width = 14
         ws.column_dimensions[dim_fy_letters[yi]].width = 14
