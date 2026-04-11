@@ -1123,7 +1123,6 @@ def _build_xlsx_summary(
     ir = [f"'{ds}'!${intotal_letters[yi]}${first_data_row}:${intotal_letters[yi]}${last_data_row}" for yi in range(n_years)]
 
     tot_col_idx = 1 + n_years  # 0-indexed column for Row Total
-    tot_letter = _col_letter(tot_col_idx + 1)  # 1-based for formula refs
 
     if fmt is None:
         sty = xlsx_base_styles()
@@ -1137,174 +1136,119 @@ def _build_xlsx_summary(
 
     def _write_spill_sheet(
         sheet_name: str, criteria: str | None,
-        y_sheet: str = "", p_sheet: str = "",
+        label_col: str = "PE Number",
+        match_rng: str | None = None,
     ) -> None:
-        ws = wb.add_worksheet(sheet_name)
+        """Write a spill-formula summary sheet.
 
-        # Headers (row 0)
-        ws.write(0, 0, "PE Number", fmt["header"])
+        Row 0: headers. Row 1: totals (bold, SUMPRODUCT). Row 2+: spill data.
+        ``match_rng`` is the data-sheet column range to match against (pe_col
+        for PE sheets, or a dimension column for service/BA/CoM sheets).
+        """
+        ws = wb.add_worksheet(sheet_name)
+        mr = match_rng or pr
+
+        # Row 0: headers
+        ws.write(0, 0, label_col, fmt["header"])
         for yi, yr in enumerate(active_years):
             ws.write(0, 1 + yi, f"FY{yr}", fmt["header"])
         ws.write(0, tot_col_idx, "Row Total", fmt["header"])
 
-        # _xlpm. prefix required for LAMBDA parameter names in xlsxwriter.
-        # Avoid LET (xlsxwriter doesn't add _xlfn.LET prefix). Inline everything.
-        # Avoid # spill references (xlsxwriter can't encode them correctly).
-        pe_expr = f"SORT(UNIQUE({pr}))"
-
+        # Row 1: totals (above spill, uses SUMPRODUCT over data sheet directly)
+        ws.write(1, 0, "Total", fmt["total"])
         if criteria:
-            # A2: FILTER(all_pes, MAP(all_pes, totals) <> 0)
-            sumifs_all = "+".join(f"SUMIFS({vr[yi]},{pr},_xlpm.pe,{ir[yi]},\"{criteria}\")" for yi in range(n_years))
-            pe_formula = (
-                f"=FILTER({pe_expr},"
-                f"MAP({pe_expr},LAMBDA(_xlpm.pe,{sumifs_all}))<>0,"
-                f"\"(none)\")"
-            )
-            ws.write_dynamic_array_formula(1, 0, 1, 0, pe_formula, fmt["base"])
-
-            # B2+: MAP over the same filtered PE list, SUMIFS for one year
             for yi in range(n_years):
-                formula = (
-                    f"=MAP(FILTER({pe_expr},"
-                    f"MAP({pe_expr},LAMBDA(_xlpm.pe,{sumifs_all}))<>0,"
-                    f"\"(none)\"),"
-                    f"LAMBDA(_xlpm.pe,SUMIFS({vr[yi]},{pr},_xlpm.pe,{ir[yi]},\"{criteria}\")))"
-                )
-                ws.write_dynamic_array_formula(1, 1 + yi, 1, 1 + yi, formula, fmt["base_money"])
-
-            # Row Total: MAP over filtered PEs, sum all years
-            tot_formula = (
-                f"=MAP(FILTER({pe_expr},"
-                f"MAP({pe_expr},LAMBDA(_xlpm.pe,{sumifs_all}))<>0,"
-                f"\"(none)\"),"
-                f"LAMBDA(_xlpm.pe,{sumifs_all}))"
-            )
-            ws.write_dynamic_array_formula(1, tot_col_idx, 1, tot_col_idx, tot_formula, fmt["base_money"])
+                formula = f'=SUMPRODUCT(({ir[yi]}="{criteria}")*{vr[yi]})'
+                ws.write_formula(1, 1 + yi, formula, fmt["total_money"])
+            all_sumproduct = "+".join(f'SUMPRODUCT(({ir[yi]}="{criteria}")*{vr[yi]})' for yi in range(n_years))
+            ws.write_formula(1, tot_col_idx, f"={all_sumproduct}", fmt["total_money"])
         else:
-            # Grand Total: filter PEs where Y+P total > 0
-            sumifs_y = "+".join(f"SUMIFS({vr[yi]},{pr},_xlpm.pe,{ir[yi]},\"Y\")" for yi in range(n_years))
-            sumifs_p = "+".join(f"SUMIFS({vr[yi]},{pr},_xlpm.pe,{ir[yi]},\"P\")" for yi in range(n_years))
-            grand_filter = (
-                f"FILTER({pe_expr},"
-                f"MAP({pe_expr},LAMBDA(_xlpm.pe,{sumifs_y}+{sumifs_p}))<>0,"
-                f"\"(none)\")"
-            )
-            ws.write_dynamic_array_formula(1, 0, 1, 0, f"={grand_filter}", fmt["base"])
-
             for yi in range(n_years):
-                formula = (
-                    f"=MAP({grand_filter},"
-                    f"LAMBDA(_xlpm.pe,"
-                    f"SUMIFS({vr[yi]},{pr},_xlpm.pe,{ir[yi]},\"Y\")"
-                    f"+SUMIFS({vr[yi]},{pr},_xlpm.pe,{ir[yi]},\"P\")))"
-                )
-                ws.write_dynamic_array_formula(1, 1 + yi, 1, 1 + yi, formula, fmt["base_money"])
-
-            all_y_p = "+".join(
-                f"SUMIFS({vr[yi]},{pr},_xlpm.pe,{ir[yi]},\"Y\")+SUMIFS({vr[yi]},{pr},_xlpm.pe,{ir[yi]},\"P\")"
+                formula = f'=SUMPRODUCT(({ir[yi]}="Y")*{vr[yi]})+SUMPRODUCT(({ir[yi]}="P")*{vr[yi]})'
+                ws.write_formula(1, 1 + yi, formula, fmt["total_money"])
+            all_gp = "+".join(
+                f'SUMPRODUCT(({ir[yi]}="Y")*{vr[yi]})+SUMPRODUCT(({ir[yi]}="P")*{vr[yi]})'
                 for yi in range(n_years)
             )
-            tot_formula = (
-                f"=MAP({grand_filter},"
-                f"LAMBDA(_xlpm.pe,{all_y_p}))"
-            )
-            ws.write_dynamic_array_formula(1, tot_col_idx, 1, tot_col_idx, tot_formula, fmt["base_money"])
+            ws.write_formula(1, tot_col_idx, f"={all_gp}", fmt["total_money"])
 
-        # Conditional formatting on generous range (rows 2-2000)
-        cf_gray = wb.add_format({"font_color": "#C0C0C0", "bg_color": "#F5F5F5"})
-        cf_bold = wb.add_format({"bold": True})
-        ws.conditional_format(1, 0, 2000, tot_col_idx, {
-            "type": "formula", "criteria": f"=${tot_letter}2=0", "format": cf_gray,
-        })
-        ws.conditional_format(1, 0, 2000, tot_col_idx, {
-            "type": "formula", "criteria": f"=${tot_letter}2<>0", "format": cf_bold,
-        })
+        # Row 2+: spill formulas
+        unique_expr = f"SORT(UNIQUE({mr}))"
+
+        if criteria:
+            sumifs_all = "+".join(f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"{criteria}\")" for yi in range(n_years))
+            filtered = (
+                f"FILTER({unique_expr},"
+                f"MAP({unique_expr},LAMBDA(_xlpm.v,{sumifs_all}))<>0,"
+                f"\"(none)\")"
+            )
+            ws.write_dynamic_array_formula(2, 0, 2, 0, f"={filtered}", fmt["base"])
+
+            for yi in range(n_years):
+                formula = (
+                    f"=MAP({filtered},"
+                    f"LAMBDA(_xlpm.v,SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"{criteria}\")))"
+                )
+                ws.write_dynamic_array_formula(2, 1 + yi, 2, 1 + yi, formula, fmt["base_money"])
+
+            tot_formula = (
+                f"=MAP({filtered},"
+                f"LAMBDA(_xlpm.v,{sumifs_all}))"
+            )
+            ws.write_dynamic_array_formula(2, tot_col_idx, 2, tot_col_idx, tot_formula, fmt["base_money"])
+        else:
+            sumifs_y = "+".join(f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"Y\")" for yi in range(n_years))
+            sumifs_p = "+".join(f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"P\")" for yi in range(n_years))
+            filtered = (
+                f"FILTER({unique_expr},"
+                f"MAP({unique_expr},LAMBDA(_xlpm.v,{sumifs_y}+{sumifs_p}))<>0,"
+                f"\"(none)\")"
+            )
+            ws.write_dynamic_array_formula(2, 0, 2, 0, f"={filtered}", fmt["base"])
+
+            for yi in range(n_years):
+                formula = (
+                    f"=MAP({filtered},"
+                    f"LAMBDA(_xlpm.v,"
+                    f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"Y\")"
+                    f"+SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"P\")))"
+                )
+                ws.write_dynamic_array_formula(2, 1 + yi, 2, 1 + yi, formula, fmt["base_money"])
+
+            all_yp = "+".join(
+                f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"Y\")+SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"P\")"
+                for yi in range(n_years)
+            )
+            ws.write_dynamic_array_formula(2, tot_col_idx, 2, tot_col_idx,
+                                           f"=MAP({filtered},LAMBDA(_xlpm.v,{all_yp}))", fmt["base_money"])
 
         ws.set_column(0, 0, 16)
         for yi in range(n_years):
             ws.set_column(1 + yi, 1 + yi, 14)
         ws.set_column(tot_col_idx, tot_col_idx, 14)
-        ws.freeze_panes(1, 1)
+        ws.freeze_panes(2, 1)
 
+    # PE Summary sheets
     _write_spill_sheet("Y Summary", "Y")
     _write_spill_sheet("P Summary", "P")
-    _write_spill_sheet("Grand Total", None, y_sheet="Y Summary", p_sheet="P Summary")
+    _write_spill_sheet("Grand Total", None)
 
-    # ── Dimensions sheet (static SUMIFS — dimension values are known at export) ──
-    svcs: set[str] = set()
-    bas: set[str] = set()
-    coms: set[str] = set()
-    for row in items:
-        if v := row.get("organization_name", ""):
-            svcs.add(v)
-        if v := row.get("budget_activity_norm", ""):
-            bas.add(v)
-        if v := row.get("color_of_money", ""):
-            coms.add(v)
-
+    # Dimension sheets — same spill pattern, different match column
     svc_col = field_to_col.get("organization_name", "B")
     ba_col = field_to_col.get("budget_activity_norm", field_to_col.get("budget_activity_title", "E"))
     com_col = field_to_col.get("color_of_money", "F")
 
-    ws_dim = wb.add_worksheet("Dimensions")
-    dim_fy_letters = [_col_letter(4 + yi) for yi in range(n_years)]
-
-    for ci, h in enumerate(["Category", "Value", "Type"]):
-        ws_dim.write(0, ci, h, fmt["header"])
-    for yi, yr in enumerate(active_years):
-        ws_dim.write(0, 3 + yi, f"FY{yr}", fmt["header"])
-
-    cur = 1  # 0-indexed current row
-    dim_groups: list[tuple[str, list[str], str]] = [
-        ("Service/Agency", sorted(svcs), svc_col),
-        ("Budget Activity", sorted(bas), ba_col),
-        ("Color of Money", sorted(coms), com_col),
+    dim_configs = [
+        ("By Service", "Service/Agency", svc_col),
+        ("By Budget Activity", "Budget Activity", ba_col),
+        ("By Color of Money", "Color of Money", com_col),
     ]
+    for sheet_name, label, dcol in dim_configs:
+        dim_rng = f"'{ds}'!${dcol}${first_data_row}:${dcol}${last_data_row}"
+        _write_spill_sheet(f"{sheet_name} (Y)", "Y", label_col=label, match_rng=dim_rng)
+        _write_spill_sheet(f"{sheet_name} (P)", "P", label_col=label, match_rng=dim_rng)
+        _write_spill_sheet(f"{sheet_name} (Total)", None, label_col=label, match_rng=dim_rng)
 
-    for category, values, data_col in dim_groups:
-        group_start = cur
-        for val in values:
-            for type_label, crit in [("Y", "Y"), ("P", "P"), ("Grand Total", None)]:
-                f_use = fmt["total"] if type_label == "Grand Total" else fmt["base"]
-                f_money = fmt["total_money"] if type_label == "Grand Total" else fmt["base_money"]
-                ws_dim.write(cur, 0, category, f_use)
-                ws_dim.write(cur, 1, val, f_use)
-                ws_dim.write(cur, 2, type_label, f_use)
-                cur_1 = cur + 1  # 1-based row for formula refs
-                for yi in range(n_years):
-                    if crit:
-                        dr = f"'{ds}'!${data_col}${first_data_row}:${data_col}${last_data_row}"
-                        formula = f'=SUMIFS({vr[yi]},{dr},$B{cur_1},{ir[yi]},"{crit}")'
-                    else:
-                        cl = dim_fy_letters[yi]
-                        formula = f"={cl}{cur_1 - 2}+{cl}{cur_1 - 1}"
-                    ws_dim.write_formula(cur, 3 + yi, formula, f_money)
-                cur += 1
-
-        for type_label, crit in [("Y", "Y"), ("P", "P"), ("Grand Total", None)]:
-            ws_dim.write(cur, 0, f"{category} Total", fmt["total"])
-            ws_dim.write(cur, 1, "", fmt["total"])
-            ws_dim.write(cur, 2, type_label, fmt["total"])
-            cur_1 = cur + 1
-            for yi in range(n_years):
-                cl = dim_fy_letters[yi]
-                if crit:
-                    offset = 0 if crit == "Y" else 1
-                    # group_start is 0-indexed; formula refs are 1-indexed
-                    refs = [f"{cl}{group_start + 1 + i * 3 + offset}" for i in range(len(values))]
-                    formula = "=" + "+".join(refs)
-                else:
-                    formula = f"={cl}{cur_1 - 2}+{cl}{cur_1 - 1}"
-                ws_dim.write_formula(cur, 3 + yi, formula, fmt["total_money"])
-            cur += 1
-        cur += 1
-
-    ws_dim.set_column(0, 0, 22)
-    ws_dim.set_column(1, 1, 30)
-    ws_dim.set_column(2, 2, 14)
-    for yi in range(n_years):
-        ws_dim.set_column(3 + yi, 3 + yi, 14)
-    ws_dim.freeze_panes(1, 3)
 
 
 def _build_keyword_matrix(

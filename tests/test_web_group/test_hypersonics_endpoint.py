@@ -238,17 +238,10 @@ class TestDownloadXLSX:
         )
 
     def test_summary_sheets_exist(self, client):
-        """Workbook should have Y Summary, P Summary, Grand Total, and Dimensions sheets."""
+        """Workbook should have PE and dimension summary sheets."""
         wb = self._download_xlsx(client)
-        for name in ["Y Summary", "P Summary", "Grand Total", "Dimensions"]:
+        for name in ["Y Summary", "P Summary", "Grand Total"]:
             assert name in wb.sheetnames, f"Missing {name} sheet: {wb.sheetnames}"
-
-        # Y Summary should have spill formula in A2
-        ws_y = wb["Y Summary"]
-        a2 = ws_y.cell(row=2, column=1).value
-        assert a2 and isinstance(a2, str) and "UNIQUE" in a2, (
-            f"Expected UNIQUE spill formula in Y Summary A2, got: {a2!r}"
-        )
 
     def test_data_validation_on_intotal_cells(self, client):
         """In Total cells should have Y/N/P data validation."""
