@@ -35,6 +35,7 @@ from api.routes.keyword_search import (
     build_cache_table,
     cache_rows_to_dicts,
     load_per_fy_descriptions,
+    xlsx_base_styles,
 )
 from utils.fuzzy_match import expand_keywords
 
@@ -457,7 +458,7 @@ def download_explorer_xlsx(
 ) -> Response:
     """Generate XLSX with user-selected columns in chosen order."""
     import openpyxl
-    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.styles import Alignment
 
     try:
         keyword_list = _parse_keywords(keywords)
@@ -498,13 +499,13 @@ def download_explorer_xlsx(
     ws = wb.active
     ws.title = "Explorer"
 
-    # Styles (matching hypersonics formatting)
-    header_fill = PatternFill(start_color="2C3E50", end_color="2C3E50", fill_type="solid")
-    header_font_white = Font(bold=True, size=11, color="FFFFFF")
-    normal_font = Font(size=10)
-    italic_font = Font(italic=True, color="888888", size=10)
-    total_font = Font(bold=True, size=11)
-    money_fmt = '#,##0'
+    sty = xlsx_base_styles()
+    header_fill = sty["header_fill"]
+    header_font_white = sty["header_font"]
+    normal_font = sty["base_font"]
+    italic_font = sty["italic_font"]
+    total_font = sty["total_font"]
+    money_fmt = sty["money_fmt"]
 
     # Ensure an "In Totals" column is present so users can see which rows feed the
     # per-FY totals and so SUMIF formulas have something to key on. We append it

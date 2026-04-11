@@ -158,7 +158,8 @@ class TestDownloadXLSX:
         )
         assert resp.status_code == 400
 
-    def _pick_show_ids(self, client, limit: int = 4) -> list[str]:
+    @staticmethod
+    def _pick_show_ids(client, limit: int = 4) -> list[str]:
         """Read hypersonics JSON and construct ``pe-{idx}`` identifiers."""
         body = client.get("/api/v1/hypersonics").json()
         rows = body.get("rows", [])
@@ -177,50 +178,87 @@ class TestDownloadXLSX:
                 break
         return ids
 
-    def test_interleaved_fy_headers(self, client):
-        """Each FY should be followed immediately by its Source and Description."""
-        show_ids = self._pick_show_ids(client, limit=4)
+    @staticmethod
+    def _download_xlsx(client) -> "openpyxl.Workbook":
+        """POST the XLSX endpoint with sample IDs and return the loaded workbook."""
+        show_ids = TestDownloadXLSX._pick_show_ids(client, limit=4)
         resp = client.post(
             "/api/v1/hypersonics/download/xlsx",
             json={"show_ids": show_ids, "total_ids": show_ids[:2]},
         )
         assert resp.status_code == 200
-        wb = openpyxl.load_workbook(io.BytesIO(resp.content))
+        return openpyxl.load_workbook(io.BytesIO(resp.content))
+
+    def test_interleaved_fy_headers(self, client):
+        """Each FY should produce a quad: ($K), In Total, Source, Description."""
+        wb = self._download_xlsx(client)
         ws = wb.active
         headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
 
-        # Fixed headers at the front
-        assert headers[:7] == [
+        assert headers[:6] == [
             "PE Number", "Service/Org", "Exhibit", "Line Item / Sub-Program",
-            "Budget Activity", "Color of Money", "In Totals",
+            "Budget Activity", "Color of Money",
         ]
 
-        # Remaining headers must form triples: [FY{yr} ($K), FY{yr} Source, FY{yr} Description]
-        remainder = headers[7:]
-        assert len(remainder) % 3 == 0, f"FY columns not in triples: {remainder}"
-        for i in range(0, len(remainder), 3):
-            val_h, src_h, desc_h = remainder[i : i + 3]
+        remainder = headers[6:]
+        assert len(remainder) % 4 == 0, f"FY columns not in quads: {remainder}"
+        for i in range(0, len(remainder), 4):
+            val_h, it_h, src_h, desc_h = remainder[i : i + 4]
             assert val_h.endswith("($K)"), f"Expected value header at {i}: {val_h}"
             year = val_h.replace("FY", "").replace(" ($K)", "").strip()
+            assert it_h == f"FY{year} In Total"
             assert src_h == f"FY{year} Source"
             assert desc_h == f"FY{year} Description"
 
-    def test_totals_row_uses_sumif_formula(self, client):
-        """Bottom totals row should contain SUMIF formulas keyed off 'In Totals'."""
-        show_ids = self._pick_show_ids(client, limit=4)
-        resp = client.post(
-            "/api/v1/hypersonics/download/xlsx",
-            json={"show_ids": show_ids, "total_ids": show_ids[:2]},
-        )
-        assert resp.status_code == 200
-        wb = openpyxl.load_workbook(io.BytesIO(resp.content))
+    def test_totals_rows_y_p_grand(self, client):
+        """Bottom should have Y TOTALS, P TOTALS, GRAND TOTAL rows with SUMIF formulas."""
+        wb = self._download_xlsx(client)
         ws = wb.active
         last_row = ws.max_row
-        assert ws.cell(row=last_row, column=1).value == "TOTALS"
 
-        # Locate the first FY value column (position 8: right after fixed headers)
-        fy_val_cell = ws.cell(row=last_row, column=8).value
-        assert isinstance(fy_val_cell, str) and fy_val_cell.startswith("=SUMIF("), (
-            f"Expected SUMIF formula in FY totals cell, got: {fy_val_cell!r}"
+        assert ws.cell(row=last_row - 2, column=1).value == "Y TOTALS"
+        assert ws.cell(row=last_row - 1, column=1).value == "P TOTALS"
+        assert ws.cell(row=last_row, column=1).value == "GRAND TOTAL"
+
+        y_formula = ws.cell(row=last_row - 2, column=7).value
+        assert isinstance(y_formula, str) and y_formula.startswith("=SUMIF("), (
+            f"Expected SUMIF formula in Y totals cell, got: {y_formula!r}"
         )
-        assert '"Yes"' in fy_val_cell
+        assert '"Y"' in y_formula
+
+        p_formula = ws.cell(row=last_row - 1, column=7).value
+        assert isinstance(p_formula, str) and p_formula.startswith("=SUMIF("), (
+            f"Expected SUMIF formula in P totals cell, got: {p_formula!r}"
+        )
+        assert '"P"' in p_formula
+
+        grand_formula = ws.cell(row=last_row, column=7).value
+        assert isinstance(grand_formula, str) and grand_formula.startswith("="), (
+            f"Expected formula in Grand Total cell, got: {grand_formula!r}"
+        )
+
+    def test_summary_sheet_exists(self, client):
+        """Workbook should have a Summary sheet with PE and dimension sections."""
+        wb = self._download_xlsx(client)
+        assert "Summary" in wb.sheetnames, f"Missing Summary sheet: {wb.sheetnames}"
+        ws = wb["Summary"]
+
+        titles = []
+        for r in range(1, ws.max_row + 1):
+            val = ws.cell(row=r, column=1).value
+            if val and isinstance(val, str) and ("PE Summary" in val or "Summary by" in val):
+                titles.append(val)
+        assert any("Y Values" in t for t in titles), f"Missing PE Y section: {titles}"
+        assert any("P Values" in t for t in titles), f"Missing PE P section: {titles}"
+        assert any("Grand Total" in t for t in titles), f"Missing PE Grand Total section: {titles}"
+        assert any("Summary by" in t for t in titles), f"Missing dimension section: {titles}"
+
+    def test_data_validation_on_intotal_cells(self, client):
+        """In Total cells should have Y/N/P data validation."""
+        wb = self._download_xlsx(client)
+        ws = wb.active
+        validations = ws.data_validations.dataValidation
+        assert len(validations) > 0, "No data validations found"
+        dv = validations[0]
+        assert dv.type == "list"
+        assert "Y" in dv.formula1 and "N" in dv.formula1 and "P" in dv.formula1

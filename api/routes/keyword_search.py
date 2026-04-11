@@ -818,6 +818,28 @@ def load_per_fy_descriptions(
     return result
 
 
+# ── Shared XLSX styles ───────────────────────────────────────────────────────
+
+
+def xlsx_base_styles() -> dict[str, Any]:
+    """Return a dict of openpyxl style objects shared across XLSX export endpoints.
+
+    Lazily imports openpyxl so module load stays cheap.
+    """
+    from openpyxl.styles import Font, PatternFill
+
+    return {
+        "header_fill": PatternFill(start_color="2C3E50", end_color="2C3E50", fill_type="solid"),
+        "header_font": Font(bold=True, size=11, color="FFFFFF"),
+        "base_font": Font(size=10),
+        "italic_font": Font(italic=True, color="888888", size=10),
+        "total_font": Font(bold=True, size=11),
+        "source_font": Font(size=9, color="666666"),
+        "desc_font": Font(size=9, color="444444"),
+        "money_fmt": "#,##0",
+    }
+
+
 # ── R-1 stub enrichment helpers ──────────────────────────────────────────────
 
 
