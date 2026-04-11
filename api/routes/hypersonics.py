@@ -348,16 +348,21 @@ def download_hypersonics_xlsx(
     money_fmt = '#,##0'
     desc_font = Font(size=9, color="444444")
     desc_font_italic = Font(size=9, color="999999", italic=True)
+    source_font = Font(size=9, color="666666")
+    source_font_italic = Font(size=9, color="999999", italic=True)
 
-    # Headers: fixed cols + FY funding + FY descriptions
-    headers = [
+    # Headers: fixed cols then an interleaved [value/source/description] triple per FY.
+    # This places each year's description next to the matching funding amount so analysts
+    # can read across a single row to see what was funded in that year and why.
+    fixed_headers = [
         "PE Number", "Service/Org", "Exhibit", "Line Item / Sub-Program",
-        "Budget Activity", "Color of Money", "Description", "In Totals",
+        "Budget Activity", "Color of Money", "In Totals",
     ]
+    headers: list[str] = list(fixed_headers)
     for yr in active_years:
         headers.append(f"FY{yr} ($K)")
-    for yr in active_years:
-        headers.append(f"Desc FY{yr}")
+        headers.append(f"FY{yr} Source")
+        headers.append(f"FY{yr} Description")
 
     for col_idx, h in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col_idx, value=h)
@@ -365,12 +370,17 @@ def download_hypersonics_xlsx(
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="center", wrap_text=True)
 
-    fixed_col_count = 8  # PE through In Totals
-    fy_funding_count = len(active_years)
+    fixed_col_count = len(fixed_headers)  # PE through In Totals
+    in_totals_col = fixed_col_count  # 1-indexed column holding the "Yes"/"" marker
+
+    # Helpers to locate each FY's triple — (value_col, source_col, desc_col).
+    def _fy_triple(fy_col_idx: int) -> tuple[int, int, int]:
+        base = fixed_col_count + (fy_col_idx * 3) + 1
+        return base, base + 1, base + 2
 
     # Data rows
-    total_sums: dict[int, float] = {}  # FY year → sum
-    row_num = 2
+    first_data_row = 2
+    row_num = first_data_row
     for data_idx, row in selected_rows:
         is_total = data_idx in total_set
         font = normal_font if is_total else italic_font
@@ -382,55 +392,62 @@ def download_hypersonics_xlsx(
             row.get("line_item_title", ""),
             row.get("budget_activity_norm", ""),
             row.get("color_of_money", ""),
-            row.get("description_text", ""),
             "Yes" if is_total else "",
         ]
         for i, v in enumerate(vals, 1):
             cell = ws.cell(row=row_num, column=i, value=v)
             cell.font = font
 
-        # FY funding columns
-        for fy_col_idx, yr in enumerate(active_years):
-            col = fixed_col_count + fy_col_idx + 1
-            amount = row.get(f"fy{yr}")
-            cell = ws.cell(row=row_num, column=col, value=amount)
-            cell.font = font
-            if amount is not None:
-                cell.number_format = money_fmt
-                if is_total:
-                    total_sums[yr] = total_sums.get(yr, 0) + amount
-
-        # FY description columns
+        # Interleaved FY triples (value / source / description)
         pe = row.get("pe_number", "")
+        refs_map = row.get("refs", {}) or {}
+        s_font = source_font if is_total else source_font_italic
         d_font = desc_font if is_total else desc_font_italic
-        for desc_col_idx, yr in enumerate(active_years):
-            col = fixed_col_count + fy_funding_count + desc_col_idx + 1
+        for fy_col_idx, yr in enumerate(active_years):
+            val_col, src_col, desc_col = _fy_triple(fy_col_idx)
+
+            amount = row.get(f"fy{yr}")
+            val_cell = ws.cell(row=row_num, column=val_col, value=amount)
+            val_cell.font = font
+            if amount is not None:
+                val_cell.number_format = money_fmt
+
+            source_ref = refs_map.get(f"fy{yr}", "") or ""
+            if source_ref:
+                src_cell = ws.cell(row=row_num, column=src_col, value=source_ref)
+                src_cell.font = s_font
+                src_cell.alignment = Alignment(wrap_text=True, vertical="top")
+
             desc_text = desc_by_pe_fy.get((pe, str(yr)), "")
             if desc_text:
-                cell = ws.cell(row=row_num, column=col, value=desc_text)
-                cell.font = d_font
-                cell.alignment = Alignment(wrap_text=True, vertical="top")
+                desc_cell = ws.cell(row=row_num, column=desc_col, value=desc_text)
+                desc_cell.font = d_font
+                desc_cell.alignment = Alignment(wrap_text=True, vertical="top")
 
         row_num += 1
 
-    # Totals row
-    if total_sums:
-        ws.cell(row=row_num, column=1, value="TOTALS").font = total_font
-        ws.cell(row=row_num, column=fixed_col_count, value="Sum").font = total_font
-        for fy_col_idx, yr in enumerate(active_years):
-            col = fixed_col_count + fy_col_idx + 1
-            val = total_sums.get(yr)
-            if val is not None:
-                cell = ws.cell(row=row_num, column=col, value=val)
-                cell.font = total_font
-                cell.number_format = money_fmt
+    last_data_row = row_num - 1
 
-    # Column widths
-    col_widths = (
-        [14, 14, 8, 50, 20, 12, 60, 10]
-        + [14] * fy_funding_count
-        + [40] * fy_funding_count
-    )
+    # Totals row — live SUMIF formulas against the "In Totals" marker column so users
+    # can toggle the flag in Excel and have the totals update.
+    if last_data_row >= first_data_row and active_years:
+        ws.cell(row=row_num, column=1, value="TOTALS").font = total_font
+        ws.cell(row=row_num, column=in_totals_col, value="Sum").font = total_font
+        in_totals_letter = openpyxl.utils.get_column_letter(in_totals_col)
+        in_totals_range = f"${in_totals_letter}${first_data_row}:${in_totals_letter}${last_data_row}"
+        for fy_col_idx, _yr in enumerate(active_years):
+            val_col, _src_col, _desc_col = _fy_triple(fy_col_idx)
+            val_letter = openpyxl.utils.get_column_letter(val_col)
+            val_range = f"${val_letter}${first_data_row}:${val_letter}${last_data_row}"
+            formula = f'=SUMIF({in_totals_range},"Yes",{val_range})'
+            cell = ws.cell(row=row_num, column=val_col, value=formula)
+            cell.font = total_font
+            cell.number_format = money_fmt
+
+    # Column widths — fixed widths then a 14/30/40 triple for each year
+    col_widths: list[int] = [14, 14, 8, 50, 20, 12, 10]
+    for _yr in active_years:
+        col_widths.extend([14, 30, 40])
     for i, w in enumerate(col_widths, 1):
         ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
 
