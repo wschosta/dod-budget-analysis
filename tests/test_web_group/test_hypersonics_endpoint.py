@@ -237,21 +237,18 @@ class TestDownloadXLSX:
             f"Expected formula in Grand Total cell, got: {grand_formula!r}"
         )
 
-    def test_summary_sheet_exists(self, client):
-        """Workbook should have a Summary sheet with PE and dimension sections."""
+    def test_summary_sheets_exist(self, client):
+        """Workbook should have Y Summary, P Summary, Grand Total, and Dimensions sheets."""
         wb = self._download_xlsx(client)
-        assert "Summary" in wb.sheetnames, f"Missing Summary sheet: {wb.sheetnames}"
-        ws = wb["Summary"]
+        for name in ["Y Summary", "P Summary", "Grand Total", "Dimensions"]:
+            assert name in wb.sheetnames, f"Missing {name} sheet: {wb.sheetnames}"
 
-        titles = []
-        for r in range(1, ws.max_row + 1):
-            val = ws.cell(row=r, column=1).value
-            if val and isinstance(val, str) and ("PE Summary" in val or "Summary by" in val):
-                titles.append(val)
-        assert any("Y Values" in t for t in titles), f"Missing PE Y section: {titles}"
-        assert any("P Values" in t for t in titles), f"Missing PE P section: {titles}"
-        assert any("Grand Total" in t for t in titles), f"Missing PE Grand Total section: {titles}"
-        assert any("Summary by" in t for t in titles), f"Missing dimension section: {titles}"
+        # Y Summary should have spill formula in A2
+        ws_y = wb["Y Summary"]
+        a2 = ws_y.cell(row=2, column=1).value
+        assert a2 and isinstance(a2, str) and "UNIQUE" in a2, (
+            f"Expected UNIQUE spill formula in Y Summary A2, got: {a2!r}"
+        )
 
     def test_data_validation_on_intotal_cells(self, client):
         """In Total cells should have Y/N/P data validation."""
