@@ -40,6 +40,9 @@ echo.
 
 :deps_ok
 
+REM Clear stale bytecode cache to avoid serving old code after updates
+for /d /r %%d in (__pycache__) do if exist "%%d" rd /s /q "%%d" >nul 2>&1
+
 echo Starting DoD Budget Explorer on http://localhost:%PORT%
 echo Database: %APP_DB_PATH%
 if "%APP_DB_PATH%"=="" echo Database: dod_budget.sqlite
