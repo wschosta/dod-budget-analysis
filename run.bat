@@ -43,11 +43,7 @@ echo.
 REM Kill any existing server on this port so we get a clean start.
 REM The uvicorn --reload watcher can leave orphaned child processes
 REM after Ctrl+C, which hold the port and serve stale code.
-for /f "tokens=5" %%p in ('netstat -ano 2^>nul ^| findstr ":%PORT% " ^| findstr "LISTENING"') do (
-    echo Killing leftover process on port %PORT% (PID %%p)...
-    taskkill /F /PID %%p >nul 2>&1
-)
-REM Brief pause so the OS releases the socket
+python -c "import subprocess,re,os,sys; port=sys.argv[1]; out=subprocess.run(['netstat','-ano'],capture_output=True,text=True).stdout; pids={m.group(1) for m in re.finditer(r':'+port+r'\s.*LISTENING\s+(\d+)',out)}; [os.system('taskkill /F /PID '+p) for p in pids if p!='0']; print('Killed '+str(len(pids))+' leftover process(es) on port '+port if pids else 'Port '+port+' is free')" %PORT%
 timeout /t 1 /nobreak >nul 2>&1
 
 REM Clear stale bytecode cache to avoid serving old code after updates
