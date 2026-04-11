@@ -47,7 +47,7 @@ python -c "import subprocess,re,os,sys; port=sys.argv[1]; out=subprocess.run(['n
 timeout /t 1 /nobreak >nul 2>&1
 
 REM Clear stale bytecode cache to avoid serving old code after updates
-for /d /r %%d in (__pycache__) do if exist "%%d" rd /s /q "%%d" >nul 2>&1
+python -c "import pathlib,shutil; [shutil.rmtree(p) for p in pathlib.Path('.').rglob('__pycache__')]" 2>nul
 
 echo Starting DoD Budget Explorer on http://localhost:%PORT%
 echo Database: %APP_DB_PATH%
