@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import sqlite3
+from collections.abc import Callable
 from typing import Any
 
 from utils.database import get_amount_columns
@@ -838,6 +839,449 @@ def xlsx_base_styles() -> dict[str, Any]:
         "desc_font": Font(size=9, color="444444"),
         "money_fmt": "#,##0",
     }
+
+
+# ── Shared XLSX workbook builder ─────────────────────────────────────────────
+
+# Default column widths keyed by header name.
+_COL_WIDTH_DEFAULTS: dict[str, int] = {
+    "PE Number": 14, "Service/Org": 14,
+    "Exhibit": 8, "Exhibit Type": 8,
+    "Line Item / Sub-Program": 50, "Line Item Title": 50,
+    "Budget Activity": 20, "Budget Activity (Normalized)": 20,
+    "Appropriation": 30, "Color of Money": 12,
+    "Keywords (Row)": 20, "Keywords (Desc)": 20,
+    "Description": 60, "In Totals": 10,
+}
+
+
+def build_keyword_xlsx(
+    items: list[dict],
+    active_years: list[int],
+    desc_by_pe_fy: dict[tuple[str, str], str],
+    is_total_fn: Callable[[dict], bool],
+    fixed_columns: list[tuple[str, str]],
+    include_source: bool = True,
+    include_description: bool = True,
+    include_intotal: bool = True,
+    sheet_title: str = "Results",
+    build_summary: bool = True,
+) -> bytes:
+    """Build a keyword-search XLSX workbook and return it as bytes.
+
+    Parameters
+    ----------
+    items : list of row dicts (from ``cache_rows_to_dicts``)
+    active_years : fiscal years that have data
+    desc_by_pe_fy : (pe_number, fy) → description text map
+    is_total_fn : predicate returning True for rows marked "Y" in the In Total column
+    fixed_columns : ordered list of (header_name, field_name) tuples for non-FY columns
+    include_source / include_description / include_intotal : toggle FY sub-columns
+    sheet_title : name for the data worksheet
+    build_summary : whether to add a Summary pivot sheet
+    """
+    import io
+
+    import openpyxl
+    from openpyxl.formatting.rule import FormulaRule
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    sty = xlsx_base_styles()
+    header_fill = sty["header_fill"]
+    header_font = sty["header_font"]
+    base_font = sty["base_font"]
+    total_font = sty["total_font"]
+    money_fmt = sty["money_fmt"]
+    source_font = sty["source_font"]
+    desc_font = sty["desc_font"]
+
+    cf_bold = Font(bold=True)
+    cf_italic_gray = Font(italic=True, color="888888")
+    cf_green = PatternFill(bgColor="C6EFCE")
+    cf_yellow = PatternFill(bgColor="FFEB9C")
+    cf_red = PatternFill(bgColor="FFC7CE")
+
+    get_col_letter = openpyxl.utils.get_column_letter
+    fixed_count = len(fixed_columns)
+
+    # Compute FY column stride and per-year column positions
+    fy_stride = 1 + int(include_intotal) + int(include_source) + int(include_description)
+
+    class _FyCols:
+        __slots__ = ("val", "intotal", "src", "desc",
+                     "val_l", "intotal_l", "src_l", "desc_l")
+
+        def __init__(self, fy_idx: int) -> None:
+            base = fixed_count + (fy_idx * fy_stride) + 1
+            col = base
+            self.val = col
+            col += 1
+            self.intotal = col if include_intotal else 0
+            if include_intotal:
+                col += 1
+            self.src = col if include_source else 0
+            if include_source:
+                col += 1
+            self.desc = col if include_description else 0
+            # Letter cache
+            self.val_l = get_col_letter(self.val)
+            self.intotal_l = get_col_letter(self.intotal) if self.intotal else ""
+            self.src_l = get_col_letter(self.src) if self.src else ""
+            self.desc_l = get_col_letter(self.desc) if self.desc else ""
+
+    fy_cols = [_FyCols(i) for i in range(len(active_years))]
+    intotal_letters = [fc.intotal_l for fc in fy_cols if fc.intotal_l]
+
+    # ── Build workbook ──
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = sheet_title
+
+    # ── Headers ──
+    headers: list[str] = [h for h, _ in fixed_columns]
+    for yr in active_years:
+        headers.append(f"FY{yr} ($K)")
+        if include_intotal:
+            headers.append(f"FY{yr} In Total")
+        if include_source:
+            headers.append(f"FY{yr} Source")
+        if include_description:
+            headers.append(f"FY{yr} Description")
+
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", wrap_text=True)
+
+    # ── Data rows ──
+    first_data_row = 2
+    row_num = first_data_row
+    for row in items:
+        is_total = is_total_fn(row)
+
+        for ci, (_header, field) in enumerate(fixed_columns, 1):
+            val = row.get(field, "")
+            if isinstance(val, list):
+                val = ", ".join(val)
+            ws.cell(row=row_num, column=ci, value=val if val is not None else "").font = base_font
+
+        pe = row.get("pe_number", "")
+        refs_map = row.get("refs", {}) or {}
+        for fi, yr in enumerate(active_years):
+            fc = fy_cols[fi]
+
+            amount = row.get(f"fy{yr}")
+            val_cell = ws.cell(row=row_num, column=fc.val, value=amount)
+            val_cell.font = base_font
+            if amount is not None:
+                val_cell.number_format = money_fmt
+
+            if fc.intotal:
+                ws.cell(
+                    row=row_num, column=fc.intotal,
+                    value="Y" if is_total else "N",
+                ).font = base_font
+
+            if fc.src:
+                source_ref = refs_map.get(f"fy{yr}", "")
+                if source_ref:
+                    src_cell = ws.cell(row=row_num, column=fc.src, value=source_ref)
+                    src_cell.font = source_font
+                    src_cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+            if fc.desc:
+                desc_text = desc_by_pe_fy.get((pe, str(yr)), "")
+                if desc_text:
+                    desc_cell = ws.cell(row=row_num, column=fc.desc, value=desc_text)
+                    desc_cell.font = desc_font
+                    desc_cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+        row_num += 1
+
+    last_data_row = row_num - 1
+
+    # ── Data validation (Y/N/P dropdown) ──
+    if include_intotal and last_data_row >= first_data_row:
+        dv = DataValidation(type="list", formula1='"Y,N,P"', allow_blank=False)
+        dv.error = "Please enter Y, N, or P"
+        dv.errorTitle = "Invalid value"
+        for fc in fy_cols:
+            dv.add(f"{fc.intotal_l}{first_data_row}:{fc.intotal_l}{last_data_row}")
+        ws.add_data_validation(dv)
+
+    # ── Conditional formatting ──
+    if include_intotal and last_data_row >= first_data_row and active_years:
+        for fc in fy_cols:
+            data_letters = [fc.val_l]
+            if fc.src_l:
+                data_letters.append(fc.src_l)
+            if fc.desc_l:
+                data_letters.append(fc.desc_l)
+            for cl in data_letters:
+                rng = f"{cl}{first_data_row}:{cl}{last_data_row}"
+                ws.conditional_formatting.add(rng, FormulaRule(
+                    formula=[f'=${fc.intotal_l}{first_data_row}="Y"'],
+                    font=cf_bold, stopIfTrue=True,
+                ))
+                ws.conditional_formatting.add(rng, FormulaRule(
+                    formula=[f'=${fc.intotal_l}{first_data_row}="N"'],
+                    font=cf_italic_gray, stopIfTrue=True,
+                ))
+            it_rng = f"{fc.intotal_l}{first_data_row}:{fc.intotal_l}{last_data_row}"
+            for val, fill in [("Y", cf_green), ("P", cf_yellow), ("N", cf_red)]:
+                ws.conditional_formatting.add(it_rng, FormulaRule(
+                    formula=[f'=${fc.intotal_l}{first_data_row}="{val}"'],
+                    fill=fill, stopIfTrue=True,
+                ))
+
+        fixed_last = get_col_letter(fixed_count)
+        fixed_rng = f"A{first_data_row}:{fixed_last}{last_data_row}"
+        or_y = ",".join(f'${lt}{first_data_row}="Y"' for lt in intotal_letters)
+        and_n = ",".join(f'${lt}{first_data_row}="N"' for lt in intotal_letters)
+        ws.conditional_formatting.add(fixed_rng, FormulaRule(
+            formula=[f"=OR({or_y})"], font=cf_bold, stopIfTrue=True,
+        ))
+        ws.conditional_formatting.add(fixed_rng, FormulaRule(
+            formula=[f"=AND({and_n})"], font=cf_italic_gray, stopIfTrue=True,
+        ))
+
+    # ── Totals rows (Y / P / Grand Total) ──
+    if include_intotal and last_data_row >= first_data_row and active_years:
+        y_row, p_row, grand_row = row_num, row_num + 1, row_num + 2
+        ws.cell(row=y_row, column=1, value="Y TOTALS").font = total_font
+        ws.cell(row=p_row, column=1, value="P TOTALS").font = total_font
+        ws.cell(row=grand_row, column=1, value="GRAND TOTAL").font = total_font
+        for fc in fy_cols:
+            val_rng = f"${fc.val_l}${first_data_row}:${fc.val_l}${last_data_row}"
+            it_rng = f"${fc.intotal_l}${first_data_row}:${fc.intotal_l}${last_data_row}"
+            for tr, label, criteria in [(y_row, "Y Sum", "Y"), (p_row, "P Sum", "P")]:
+                ws.cell(row=tr, column=fc.intotal, value=label).font = total_font
+                c = ws.cell(
+                    row=tr, column=fc.val,
+                    value=f'=SUMIF({it_rng},"{criteria}",{val_rng})',
+                )
+                c.font = total_font
+                c.number_format = money_fmt
+            ws.cell(row=grand_row, column=fc.intotal, value="Grand Sum").font = total_font
+            c = ws.cell(row=grand_row, column=fc.val,
+                        value=f"={fc.val_l}{y_row}+{fc.val_l}{p_row}")
+            c.font = total_font
+            c.number_format = money_fmt
+    elif last_data_row >= first_data_row and active_years:
+        # Fallback: single SUMIF totals row when intotal is off
+        totals_row = row_num
+        ws.cell(row=totals_row, column=1, value="TOTALS").font = total_font
+        for fc in fy_cols:
+            vr = f"${fc.val_l}${first_data_row}:${fc.val_l}${last_data_row}"
+            c = ws.cell(row=totals_row, column=fc.val,
+                        value=f"=SUM({vr})")
+            c.font = total_font
+            c.number_format = money_fmt
+
+    # ── Column widths ──
+    for ci, (header, _field) in enumerate(fixed_columns, 1):
+        ws.column_dimensions[get_col_letter(ci)].width = _COL_WIDTH_DEFAULTS.get(header, 14)
+    for fc in fy_cols:
+        ws.column_dimensions[fc.val_l].width = 14
+        if fc.intotal:
+            ws.column_dimensions[fc.intotal_l].width = 10
+        if fc.src:
+            ws.column_dimensions[fc.src_l].width = 30
+        if fc.desc:
+            ws.column_dimensions[fc.desc_l].width = 40
+
+    freeze_col = min(5, fixed_count + 1)
+    ws.freeze_panes = f"{get_col_letter(freeze_col)}2"
+    ws.auto_filter.ref = ws.dimensions
+
+    # ── Summary sheet ──
+    if build_summary and include_intotal:
+        # Map field names → data-sheet column letters for SUMIFS
+        field_to_col = {field: get_col_letter(ci) for ci, (_h, field) in enumerate(fixed_columns, 1)}
+        val_letters = [fc.val_l for fc in fy_cols]
+        it_letters = [fc.intotal_l for fc in fy_cols]
+        _build_xlsx_summary(
+            wb, items, active_years, sheet_title,
+            field_to_col, val_letters, it_letters,
+            first_data_row, last_data_row,
+        )
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def _build_xlsx_summary(
+    wb: Any,
+    items: list[dict],
+    active_years: list[int],
+    data_sheet_name: str,
+    field_to_col: dict[str, str],
+    val_letters: list[str],
+    intotal_letters: list[str],
+    first_data_row: int,
+    last_data_row: int,
+) -> None:
+    """Build a Summary sheet with PE pivots and dimension breakdowns."""
+    import openpyxl
+    from openpyxl.styles import Alignment, Font
+
+    ws = wb.create_sheet("Summary")
+    get_col_letter = openpyxl.utils.get_column_letter
+
+    sty = xlsx_base_styles()
+    header_fill = sty["header_fill"]
+    header_font = sty["header_font"]
+    total_font = sty["total_font"]
+    base_font = sty["base_font"]
+    money_fmt = sty["money_fmt"]
+    title_font = Font(bold=True, size=12)
+
+    def _uniq(key: str) -> list[str]:
+        return sorted(v for v in dict.fromkeys(row.get(key, "") for row in items) if v)
+
+    unique_pes = _uniq("pe_number")
+    unique_svcs = _uniq("organization_name")
+    unique_bas = _uniq("budget_activity_norm")
+    unique_coms = _uniq("color_of_money")
+
+    pe_fy_letters = [get_col_letter(2 + yi) for yi in range(len(active_years))]
+    dim_fy_letters = [get_col_letter(4 + yi) for yi in range(len(active_years))]
+
+    ds = data_sheet_name  # short alias for formula references
+    pe_col = field_to_col.get("pe_number", "$A")
+
+    def _write_pe_section(
+        start_row: int, title: str, criteria: str | None,
+        y_data_start: int = 0, p_data_start: int = 0,
+    ) -> tuple[int, int]:
+        r = start_row
+        ws.cell(row=r, column=1, value=title).font = title_font
+        ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=1 + len(active_years))
+        r += 1
+        ws.cell(row=r, column=1, value="PE Number").font = header_font
+        ws.cell(row=r, column=1).fill = header_fill
+        for yi, yr in enumerate(active_years):
+            c = ws.cell(row=r, column=2 + yi, value=f"FY{yr}")
+            c.font = header_font
+            c.fill = header_fill
+            c.alignment = Alignment(horizontal="center")
+        r += 1
+        data_start = r
+
+        for pe in unique_pes:
+            ws.cell(row=r, column=1, value=pe).font = base_font
+            for yi in range(len(active_years)):
+                if criteria:
+                    vr = f"'{ds}'!${val_letters[yi]}${first_data_row}:${val_letters[yi]}${last_data_row}"
+                    pr = f"'{ds}'!${pe_col}${first_data_row}:${pe_col}${last_data_row}"
+                    ir = f"'{ds}'!${intotal_letters[yi]}${first_data_row}:${intotal_letters[yi]}${last_data_row}"
+                    formula = f'=SUMIFS({vr},{pr},$A{r},{ir},"{criteria}")'
+                else:
+                    offset = r - data_start
+                    cl = pe_fy_letters[yi]
+                    formula = f"={cl}{y_data_start + offset}+{cl}{p_data_start + offset}"
+                c = ws.cell(row=r, column=2 + yi, value=formula)
+                c.font = base_font
+                c.number_format = money_fmt
+            r += 1
+
+        ws.cell(row=r, column=1, value="Total").font = total_font
+        for yi in range(len(active_years)):
+            cl = pe_fy_letters[yi]
+            c = ws.cell(row=r, column=2 + yi, value=f"=SUM({cl}{data_start}:{cl}{r - 1})")
+            c.font = total_font
+            c.number_format = money_fmt
+        r += 1
+        return r, data_start
+
+    cur = 1
+    cur, y_ds = _write_pe_section(cur, "PE Summary \u2014 Y Values", "Y")
+    cur += 1
+    cur, p_ds = _write_pe_section(cur, "PE Summary \u2014 P Values", "P")
+    cur += 1
+    cur, _ = _write_pe_section(
+        cur, "PE Summary \u2014 Grand Total", None,
+        y_data_start=y_ds, p_data_start=p_ds,
+    )
+    cur += 2
+
+    # ── Section D: Summary by Dimension ──
+    ws.cell(row=cur, column=1, value="Summary by Service/Agency, Budget Activity, Color of Money").font = title_font
+    ws.merge_cells(start_row=cur, start_column=1, end_row=cur, end_column=3 + len(active_years))
+    cur += 1
+
+    for ci, h in enumerate(["Category", "Value", "Type"]):
+        c = ws.cell(row=cur, column=ci + 1, value=h)
+        c.font = header_font
+        c.fill = header_fill
+    for yi, yr in enumerate(active_years):
+        c = ws.cell(row=cur, column=4 + yi, value=f"FY{yr}")
+        c.font = header_font
+        c.fill = header_fill
+        c.alignment = Alignment(horizontal="center")
+    cur += 1
+
+    # Dimension groups: (display_name, unique_values, data_sheet_column_letter)
+    svc_col = field_to_col.get("organization_name", "B")
+    ba_col = field_to_col.get("budget_activity_norm", field_to_col.get("budget_activity_title", "E"))
+    com_col = field_to_col.get("color_of_money", "F")
+    dim_groups: list[tuple[str, list[str], str]] = [
+        ("Service/Agency", unique_svcs, svc_col),
+        ("Budget Activity", unique_bas, ba_col),
+        ("Color of Money", unique_coms, com_col),
+    ]
+
+    for category, values, data_col in dim_groups:
+        group_start = cur
+        for val in values:
+            for type_label, crit in [("Y", "Y"), ("P", "P"), ("Grand Total", None)]:
+                ws.cell(row=cur, column=1, value=category).font = base_font
+                ws.cell(row=cur, column=2, value=val).font = base_font
+                fnt = total_font if type_label == "Grand Total" else base_font
+                ws.cell(row=cur, column=3, value=type_label).font = fnt
+                for yi in range(len(active_years)):
+                    if crit:
+                        vr = f"'{ds}'!${val_letters[yi]}${first_data_row}:${val_letters[yi]}${last_data_row}"
+                        mr = f"'{ds}'!${data_col}${first_data_row}:${data_col}${last_data_row}"
+                        ir = f"'{ds}'!${intotal_letters[yi]}${first_data_row}:${intotal_letters[yi]}${last_data_row}"
+                        formula = f'=SUMIFS({vr},{mr},$B{cur},{ir},"{crit}")'
+                    else:
+                        cl = dim_fy_letters[yi]
+                        formula = f"={cl}{cur - 2}+{cl}{cur - 1}"
+                    c = ws.cell(row=cur, column=4 + yi, value=formula)
+                    c.font = fnt
+                    c.number_format = money_fmt
+                cur += 1
+
+        for type_label, crit in [("Y", "Y"), ("P", "P"), ("Grand Total", None)]:
+            ws.cell(row=cur, column=1, value=f"{category} Total").font = total_font
+            ws.cell(row=cur, column=2, value="").font = total_font
+            ws.cell(row=cur, column=3, value=type_label).font = total_font
+            for yi in range(len(active_years)):
+                cl = dim_fy_letters[yi]
+                if crit:
+                    offset = 0 if crit == "Y" else 1
+                    refs = [f"{cl}{group_start + i * 3 + offset}" for i in range(len(values))]
+                    formula = "=" + "+".join(refs)
+                else:
+                    formula = f"={cl}{cur - 2}+{cl}{cur - 1}"
+                c = ws.cell(row=cur, column=4 + yi, value=formula)
+                c.font = total_font
+                c.number_format = money_fmt
+            cur += 1
+        cur += 1
+
+    ws.column_dimensions["A"].width = 22
+    ws.column_dimensions["B"].width = 30
+    ws.column_dimensions["C"].width = 14
+    for yi in range(len(active_years)):
+        ws.column_dimensions[pe_fy_letters[yi]].width = 14
+        ws.column_dimensions[dim_fy_letters[yi]].width = 14
+
+    ws.freeze_panes = "B2"
 
 
 # ── R-1 stub enrichment helpers ──────────────────────────────────────────────

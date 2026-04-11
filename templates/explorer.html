@@ -171,13 +171,19 @@ details[open] .pe-toggle .toggle-icon { transform: rotate(90deg); }
 
   <!-- 1. Keyword Input -->
   <div class="kw-input-area">
-    <label for="kw-input">Keywords <span class="text-secondary" style="font-weight:normal">(comma-separated, max 20)</span></label>
+    <label for="kw-input">Keywords <span class="text-secondary" style="font-weight:normal">(comma-separated, max 50)</span></label>
     <div class="kw-input-row">
-      <input type="text" id="kw-input" placeholder="e.g. hypersonic, scramjet, directed energy, 0604030N"
+      <input type="text" id="kw-input" placeholder="e.g. hypersonic, scramjet, directed energy"
              value="{{ keyword_input or '' }}"
              aria-describedby="kw-validation">
       <button class="btn btn-primary" id="kw-search-btn" onclick="startSearch()">Search</button>
     </div>
+    <details style="margin-top:0.5rem;">
+      <summary class="text-secondary" style="font-size:0.85rem; cursor:pointer;">Additional PE Numbers (optional)</summary>
+      <input type="text" id="extra-pes-input" placeholder="e.g. 0603673N, 0101101F"
+             style="margin-top:0.25rem; width:100%; padding:0.4rem;"
+             aria-label="Extra PE numbers to force-include">
+    </details>
     <div class="kw-tags" id="kw-tags"></div>
     <div class="kw-expanded d-none" id="kw-expanded"></div>
     <div class="kw-validation-error" id="kw-validation"></div>
@@ -234,11 +240,22 @@ details[open] .pe-toggle .toggle-icon { transform: rotate(90deg); }
       </div>
     </div>
 
-    <!-- 3c. Download -->
+    <!-- 3c. FY column toggles + download -->
     <div class="download-area">
-      <label class="filter-toggle">
-        <input type="checkbox" id="matching-only"> Only include directly matching sub-elements
-      </label>
+      <div style="display:flex; flex-wrap:wrap; gap:1rem; margin-bottom:0.5rem;">
+        <label class="filter-toggle">
+          <input type="checkbox" id="matching-only"> Only matching sub-elements
+        </label>
+        <label class="filter-toggle">
+          <input type="checkbox" id="include-intotal" checked> In Total (Y/N/P)
+        </label>
+        <label class="filter-toggle">
+          <input type="checkbox" id="include-source" checked> Source columns
+        </label>
+        <label class="filter-toggle">
+          <input type="checkbox" id="include-description" checked> Description columns
+        </label>
+      </div>
       <button class="btn btn-primary btn-download" onclick="downloadXlsx()">&#8681; Download XLSX</button>
     </div>
   </div>
@@ -304,7 +321,7 @@ function removeKeyword(idx) {
 
 function validateKeywords(keywords) {
   if (keywords.length === 0) return 'Enter at least one keyword';
-  if (keywords.length > 20) return 'Maximum 20 keywords allowed';
+  if (keywords.length > 50) return 'Maximum 50 keywords allowed';
   for (const kw of keywords) {
     if (kw.length < 2) return `Keyword "${kw}" is too short (min 2 characters)`;
     if (kw.length > 100) return `Keyword "${kw}" is too long (max 100 characters)`;
@@ -357,7 +374,10 @@ function startSearch() {
   startElapsedTimer();
 
   // Start build
-  fetch('/api/v1/explorer/build?keywords=' + encodeURIComponent(keywords.join(',')), {
+  const extraPes = (document.getElementById('extra-pes-input').value || '').trim();
+  let buildUrl = '/api/v1/explorer/build?keywords=' + encodeURIComponent(keywords.join(','));
+  if (extraPes) buildUrl += '&extra_pes=' + encodeURIComponent(extraPes);
+  fetch(buildUrl, {
     method: 'POST', cache: 'no-store',
   })
   .then(r => r.json())
@@ -396,7 +416,10 @@ function startPolling() {
 }
 
 function pollStatus() {
-  fetch('/api/v1/explorer/status?keywords=' + encodeURIComponent(currentKeywords.join(',')), {cache: 'no-store'})
+  const extraPes = (document.getElementById('extra-pes-input').value || '').trim();
+  let statusUrl = '/api/v1/explorer/status?keywords=' + encodeURIComponent(currentKeywords.join(','));
+  if (extraPes) statusUrl += '&extra_pes=' + encodeURIComponent(extraPes);
+  fetch(statusUrl, {cache: 'no-store'})
   .then(r => r.json())
   .then(data => {
     const textEl = document.getElementById('progress-text');
@@ -496,8 +519,10 @@ function renderPreview(data) {
 let selectedColumns = [];
 
 function renderColumnPicker(data) {
-  selectedColumns = [...data.default_columns];
-  renderAvailableList(data.available_columns);
+  // FY columns are now auto-generated — only show fixed/static columns in the picker
+  const isFyCol = c => /^FY\d{4}\s/.test(c) || c === 'In Totals';
+  selectedColumns = data.default_columns.filter(c => !isFyCol(c));
+  renderAvailableList(data.available_columns.filter(c => !isFyCol(c)));
   renderSelectedList();
 }
 
@@ -642,6 +667,9 @@ function downloadXlsx() {
   }
 
   const matchingOnly = document.getElementById('matching-only').checked;
+  const includeIntotal = document.getElementById('include-intotal').checked;
+  const includeSource = document.getElementById('include-source').checked;
+  const includeDescription = document.getElementById('include-description').checked;
 
   fetch('/api/v1/explorer/download/xlsx', {
     method: 'POST',
@@ -650,6 +678,9 @@ function downloadXlsx() {
       keywords: currentKeywords.join(','),
       columns: selectedColumns,
       matching_only: matchingOnly,
+      include_source: includeSource,
+      include_description: includeDescription,
+      include_intotal: includeIntotal,
     }),
   })
   .then(resp => {

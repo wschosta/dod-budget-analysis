@@ -16,7 +16,6 @@ Endpoints:
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import logging
 import re
@@ -33,9 +32,9 @@ from api.routes.keyword_search import (
     FY_END,
     FY_START,
     build_cache_table,
+    build_keyword_xlsx,
     cache_rows_to_dicts,
     load_per_fy_descriptions,
-    xlsx_base_styles,
 )
 from utils.fuzzy_match import expand_keywords
 
@@ -45,7 +44,7 @@ router = APIRouter(prefix="/explorer", tags=["explorer"])
 
 # ── Input validation constants ────────────────────────────────────────────────
 
-MAX_KEYWORDS = 20
+MAX_KEYWORDS = 50
 MIN_KEYWORD_LEN = 2
 MAX_KEYWORD_LEN = 100
 MAX_CACHE_TABLES = 50
@@ -93,10 +92,13 @@ _COL_TO_FIELD: dict[str, str] = {
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _keyword_set_id(keywords: list[str]) -> str:
-    """SHA-256 hash of sorted lowercase keywords."""
+def _keyword_set_id(keywords: list[str], extra_pes: list[str] | None = None) -> str:
+    """SHA-256 hash of sorted lowercase keywords + optional extra PEs."""
     normalized = sorted(set(kw.strip().lower() for kw in keywords if kw.strip()))
-    return hashlib.sha256(",".join(normalized).encode()).hexdigest()
+    key = ",".join(normalized)
+    if extra_pes:
+        key += "|" + ",".join(sorted(set(pe.strip().upper() for pe in extra_pes if pe.strip())))
+    return hashlib.sha256(key.encode()).hexdigest()
 
 
 def _cache_table_name(kw_id: str) -> str:
@@ -165,6 +167,7 @@ def _do_build(
     kw_id: str,
     keywords: list[str],
     expanded: list[str],
+    extra_pes: list[str] | None = None,
 ) -> None:
     """Background task: build the explorer cache table.
 
@@ -193,6 +196,7 @@ def _do_build(
             conn, cache_table, expanded, expanded,
             fy_start=FY_START, fy_end=FY_END,
             progress_callback=_progress,
+            extra_pes=extra_pes or None,
         )
 
         # Record in metadata
@@ -229,6 +233,7 @@ def _do_build(
 )
 def start_build(
     keywords: str = Query(..., description="Comma-separated keywords"),
+    extra_pes: str = Query("", description="Comma-separated PE numbers to force-include"),
     background_tasks: BackgroundTasks = BackgroundTasks(),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
@@ -238,8 +243,10 @@ def start_build(
     except ValueError as e:
         return {"error": str(e)}
 
+    pe_list = [pe.strip().upper() for pe in extra_pes.split(",") if pe.strip()] if extra_pes else []
+
     expanded = expand_keywords(keyword_list)
-    kw_id = _keyword_set_id(keyword_list)
+    kw_id = _keyword_set_id(keyword_list, pe_list or None)
 
     # Check if cache already exists and is fresh
     _ensure_meta_table(conn)
@@ -289,7 +296,7 @@ def start_build(
     # Get DB path for the background thread
     db_path = conn.execute("PRAGMA database_list").fetchone()[2]
 
-    background_tasks.add_task(_do_build, db_path, kw_id, keyword_list, expanded)
+    background_tasks.add_task(_do_build, db_path, kw_id, keyword_list, expanded, pe_list or None)
 
     return {
         "keyword_set_id": kw_id,
@@ -307,6 +314,7 @@ def start_build(
 )
 def build_status(
     keywords: str = Query(..., description="Comma-separated keywords"),
+    extra_pes: str = Query("", description="Comma-separated PE numbers (must match build call)"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
     """Return current build state for a keyword set.
@@ -319,7 +327,8 @@ def build_status(
     except ValueError as e:
         return {"state": "error", "progress": str(e)}
 
-    kw_id = _keyword_set_id(keyword_list)
+    pe_list = [pe.strip().upper() for pe in extra_pes.split(",") if pe.strip()] if extra_pes else []
+    kw_id = _keyword_set_id(keyword_list, pe_list or None)
 
     with _build_lock:
         status = _build_progress.get(kw_id)
@@ -452,14 +461,18 @@ def get_explorer_data(
 )
 def download_explorer_xlsx(
     keywords: str = Body(..., description="Comma-separated keywords"),
-    columns: list[str] = Body(..., description="Ordered list of column names to include"),
+    columns: list[str] = Body(..., description="Ordered list of fixed column names to include"),
     matching_only: bool = Body(False, description="Only include directly matching sub-elements"),
+    include_source: bool = Body(True, description="Include FY Source columns"),
+    include_description: bool = Body(True, description="Include FY Description columns"),
+    include_intotal: bool = Body(True, description="Include per-year In Total (Y/N/P) columns"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> Response:
-    """Generate XLSX with user-selected columns in chosen order."""
-    import openpyxl
-    from openpyxl.styles import Alignment
+    """Generate XLSX with user-selected fixed columns and FY data.
 
+    FY columns are auto-included for all active years. Toggles control whether
+    Source, Description, and In Total sub-columns appear per year.
+    """
     try:
         keyword_list = _parse_keywords(keywords)
     except ValueError as e:
@@ -476,7 +489,6 @@ def download_explorer_xlsx(
 
     items = cache_rows_to_dicts(raw_rows)
 
-    # Filter to matching-only if requested
     if matching_only:
         items = [
             r for r in items
@@ -487,108 +499,40 @@ def download_explorer_xlsx(
         return Response(content=b"No rows to export", media_type="text/plain", status_code=400)
 
     year_range = list(range(FY_START, FY_END + 1))
+    active_years = [
+        yr for yr in year_range
+        if any(r.get(f"fy{yr}") is not None for r in items)
+    ]
 
-    # Per-(pe, fy) descriptions so each year's column can display narrative text
-    # from that year's submission (often a different source than the amount).
     desc_by_pe_fy = load_per_fy_descriptions(
         conn, {r.get("pe_number", "") for r in items}
     )
 
-    # Build workbook
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Explorer"
+    # Strip any FY-related or "In Totals" columns from the user selection —
+    # FY columns are now auto-generated from active_years + toggles.
+    fixed_cols: list[tuple[str, str]] = []
+    for col_name in columns:
+        field = _COL_TO_FIELD.get(col_name)
+        if field:
+            fixed_cols.append((col_name, field))
 
-    sty = xlsx_base_styles()
-    header_fill = sty["header_fill"]
-    header_font_white = sty["header_font"]
-    normal_font = sty["base_font"]
-    italic_font = sty["italic_font"]
-    total_font = sty["total_font"]
-    money_fmt = sty["money_fmt"]
+    if not fixed_cols:
+        fixed_cols = [(h, _COL_TO_FIELD[h]) for h in _ALL_COLUMNS if h in _COL_TO_FIELD]
 
-    # Ensure an "In Totals" column is present so users can see which rows feed the
-    # per-FY totals and so SUMIF formulas have something to key on. We append it
-    # (without dropping anything the user explicitly asked for) if absent.
-    export_columns: list[str] = list(columns)
-    if "In Totals" not in export_columns:
-        export_columns.append("In Totals")
-    in_totals_col_idx = export_columns.index("In Totals") + 1  # 1-indexed
-
-    # Headers
-    for col_idx, col_name in enumerate(export_columns, 1):
-        cell = ws.cell(row=1, column=col_idx, value=col_name)
-        cell.font = header_font_white
-        cell.fill = header_fill
-        cell.alignment = Alignment(horizontal="center", wrap_text=True)
-
-    # Data rows
-    first_data_row = 2
-    fy_value_columns: dict[str, int] = {}  # column name → 1-indexed column number
-    for row_num, row in enumerate(items, first_data_row):
-        has_match = bool(
-            row.get("matched_keywords_row") or row.get("matched_keywords_desc")
-        )
-        font = normal_font if has_match else italic_font
-        for col_idx, col_name in enumerate(export_columns, 1):
-            value = _extract_column_value(
-                row, col_name, year_range, desc_by_pe_fy, has_match
-            )
-            cell = ws.cell(row=row_num, column=col_idx, value=value)
-            cell.font = font
-            if col_name.endswith("($K)") and isinstance(value, (int, float)):
-                cell.number_format = money_fmt
-                fy_value_columns.setdefault(col_name, col_idx)
-
-    last_data_row = first_data_row + len(items) - 1
-
-    # Totals row — live SUMIF formulas keyed off the "In Totals" column so users
-    # can edit flags in Excel and have the totals recalculate.
-    if fy_value_columns and last_data_row >= first_data_row:
-        totals_row = last_data_row + 1
-        ws.cell(row=totals_row, column=1, value="TOTALS").font = total_font
-        if in_totals_col_idx != 1:
-            ws.cell(row=totals_row, column=in_totals_col_idx, value="Sum").font = total_font
-        in_totals_letter = openpyxl.utils.get_column_letter(in_totals_col_idx)
-        in_totals_range = f"${in_totals_letter}${first_data_row}:${in_totals_letter}${last_data_row}"
-        for col_name, col_idx in fy_value_columns.items():
-            val_letter = openpyxl.utils.get_column_letter(col_idx)
-            val_range = f"${val_letter}${first_data_row}:${val_letter}${last_data_row}"
-            formula = f'=SUMIF({in_totals_range},"Yes",{val_range})'
-            cell = ws.cell(row=totals_row, column=col_idx, value=formula)
-            cell.font = total_font
-            cell.number_format = money_fmt
-
-    # Column widths
-    _WIDTH_MAP = {
-        "Description": 60, "Line Item Title": 50,
-        "Budget Activity": 20, "Budget Activity (Normalized)": 20,
-        "PE Number": 14, "Service/Org": 14, "Exhibit Type": 8,
-        "Color of Money": 12, "Appropriation": 30, "In Totals": 10,
-    }
-    for col_idx, col_name in enumerate(export_columns, 1):
-        if col_name in _WIDTH_MAP:
-            width = _WIDTH_MAP[col_name]
-        elif col_name.endswith("($K)"):
-            width = 14
-        elif col_name.endswith("Source"):
-            width = 30
-        elif col_name.endswith("Description"):
-            width = 40
-        else:
-            width = max(14, len(col_name) + 2)
-        ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = width
-
-    # Freeze header row + first 4 columns (PE, Service, Exhibit, Title)
-    freeze_col = min(5, len(columns) + 1)
-    ws.freeze_panes = f"{openpyxl.utils.get_column_letter(freeze_col)}2"
-    ws.auto_filter.ref = ws.dimensions
-
-    buf = io.BytesIO()
-    wb.save(buf)
+    xlsx_bytes = build_keyword_xlsx(
+        items=items,
+        active_years=active_years,
+        desc_by_pe_fy=desc_by_pe_fy,
+        is_total_fn=lambda r: bool(r.get("matched_keywords_row") or r.get("matched_keywords_desc")),
+        fixed_columns=fixed_cols,
+        include_source=include_source,
+        include_description=include_description,
+        include_intotal=include_intotal,
+        sheet_title="Explorer",
+    )
 
     return Response(
-        content=buf.getvalue(),
+        content=xlsx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="explorer_results.xlsx"'},
     )
