@@ -177,6 +177,7 @@ details[open] .pe-toggle .toggle-icon { transform: rotate(90deg); }
              value="{{ keyword_input or '' }}"
              aria-describedby="kw-validation">
       <button class="btn btn-primary" id="kw-search-btn" onclick="startSearch()">Search</button>
+      <button class="btn" style="font-size:0.85rem;" onclick="loadPreset('hypersonics')" title="Load Hypersonics keyword set and PE list">Hypersonics Preset</button>
     </div>
     <details style="margin-top:0.5rem;">
       <summary class="text-secondary" style="font-size:0.85rem; cursor:pointer;">Additional PE Numbers (optional)</summary>
@@ -345,6 +346,23 @@ function updateElapsedClock() {
   const m = Math.floor(secs / 60);
   const s = secs % 60;
   document.getElementById('elapsed-clock').textContent = m + ':' + String(s).padStart(2, '0');
+}
+
+/* ── Presets ────────────────────────────────────────────── */
+function loadPreset(name) {
+  fetch('/api/v1/explorer/presets/' + encodeURIComponent(name))
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) { alert(data.error); return; }
+      document.getElementById('kw-input').value = data.keywords.join(', ');
+      document.getElementById('extra-pes-input').value = (data.extra_pes || []).join(', ');
+      // Open the extra PEs details if there are any
+      if (data.extra_pes && data.extra_pes.length) {
+        document.querySelector('details').open = true;
+      }
+      startSearch();
+    })
+    .catch(err => alert('Failed to load preset: ' + err.message));
 }
 
 /* ── Search flow ────────────────────────────────────────── */

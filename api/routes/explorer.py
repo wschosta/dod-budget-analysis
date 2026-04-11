@@ -540,6 +540,28 @@ def download_explorer_xlsx(
     )
 
 
+# ── GET /api/v1/explorer/presets ──────────────────────────────────────────────
+
+@router.get(
+    "/presets/{name}",
+    summary="Return keyword and PE lists for a named preset",
+)
+def get_preset(name: str) -> dict:
+    """Return keywords and extra_pes for a named search preset."""
+    from api.routes.hypersonics import _HYPERSONICS_KEYWORDS, _EXTRA_PES
+
+    presets = {
+        "hypersonics": {
+            "keywords": _HYPERSONICS_KEYWORDS,
+            "extra_pes": _EXTRA_PES,
+            "label": "Hypersonics Programs",
+        },
+    }
+    if name not in presets:
+        return {"error": f"Unknown preset: {name}", "available": list(presets)}
+    return presets[name]
+
+
 def _extract_column_value(
     row: dict,
     col_name: str,
