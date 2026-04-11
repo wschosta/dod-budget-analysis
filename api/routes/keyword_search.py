@@ -834,9 +834,9 @@ def xlsx_base_styles() -> dict[str, Any]:
         "base": {"font_size": 10},
         "italic": {"italic": True, "font_color": "#888888", "font_size": 10},
         "total": {"bold": True, "font_size": 11},
-        "source": {"font_size": 9, "font_color": "#666666", "text_wrap": True, "valign": "top"},
-        "desc": {"font_size": 9, "font_color": "#444444", "text_wrap": True, "valign": "top"},
-        "money_fmt": "#,##0",
+        "source": {"font_size": 9, "font_color": "#666666", "valign": "top"},
+        "desc": {"font_size": 9, "font_color": "#444444", "valign": "top"},
+        "money_fmt": "$#,##0",
     }
 
 
@@ -1087,6 +1087,7 @@ def build_keyword_xlsx(
             wb, items, active_years, sheet_title,
             field_to_col, val_letters, it_letters,
             first_data_row, last_data_row, fmt,
+            keywords=keywords,
         )
 
     # ── Keyword co-occurrence matrix ──
@@ -1108,11 +1109,12 @@ def _build_xlsx_summary(
     first_data_row: int,
     last_data_row: int,
     fmt: dict[str, Any] | None = None,
+    keywords: list[str] | None = None,
 ) -> None:
     """Build dynamic Summary sheets using xlsxwriter spill formulas.
 
-    Creates Y Summary, P Summary, Grand Total (with FILTER/UNIQUE/MAP/LAMBDA
-    spill formulas that auto-update), and a Dimensions breakdown sheet.
+    Creates PE Summary, dimension breakdowns (By Service, etc.), Keyword Matrix
+    (if keywords provided), and an About sheet with methodology documentation.
     """
     ds = data_sheet_name
     pe_col = field_to_col.get("pe_number", "A")
@@ -1132,21 +1134,52 @@ def _build_xlsx_summary(
             "total_money": wb.add_format({**sty["total"], "num_format": sty["money_fmt"]}),
         }
 
+    # Pre-compute PE→title map for PE Summary sheet
+    pe_titles: dict[str, str] = {}
+    for row in items:
+        pe = row.get("pe_number", "")
+        if not pe or pe in pe_titles:
+            continue
+        # Prefer R-1 title; will be overwritten by later R-1 rows (last wins)
+        if row.get("exhibit_type") == "r1":
+            pe_titles[pe] = row.get("line_item_title", pe)
+        elif pe not in pe_titles:
+            pe_titles[pe] = row.get("line_item_title", pe)
+    # Second pass: R-1 titles overwrite any R-2 fallbacks
+    for row in items:
+        pe = row.get("pe_number", "")
+        if pe and row.get("exhibit_type") == "r1" and row.get("line_item_title"):
+            pe_titles[pe] = row["line_item_title"]
+
+    # Merged header format (centered, no wrap)
+    fmt_merge = wb.add_format({
+        "bold": True, "font_size": 11, "font_color": "#FFFFFF",
+        "bg_color": "#2C3E50", "align": "center", "valign": "vcenter",
+        "border": 1,
+    })
+    fmt_sub = wb.add_format({
+        "bold": True, "font_size": 10, "font_color": "#FFFFFF",
+        "bg_color": "#34495E", "align": "center", "border": 1,
+    })
+
     def _write_summary_sheet(
         sheet_name: str,
         label_col: str = "PE Number",
         match_rng: str | None = None,
+        include_title: bool = False,
     ) -> None:
-        """Write a summary sheet with Y/P/Total as column groups per FY year.
+        """Write a summary sheet with merged FY headers and Y/P/Total column groups.
 
-        Layout: Label | FY2024 Y | FY2024 P | FY2024 Total | FY2025 Y | ... | Row Total
-        Row 0: headers. Row 1: totals (SUMPRODUCT). Row 2+: spill data.
+        Layout:
+        Row 0: Label | (PE Title) |    FY2024 ($K)     |    FY2025 ($K)     |      Row Total      |
+        Row 1:       |            |  Y  |  P  | Total  |  Y  |  P  | Total  |  Y  |  P  | Total  |
+        Row 2: Total |            | $xx | $xx |  $xx   | ... (SUMPRODUCT)   | $xx | $xx |  $xx   |
+        Row 3+: (spill data)
         """
         ws = wb.add_worksheet(sheet_name)
         mr = match_rng or pr
         unique_expr = f"SORT(UNIQUE({mr}))"
 
-        # Build the filtered PE/dimension list (non-zero grand total across all years)
         sumifs_y_all = "+".join(f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"Y\")" for yi in range(n_years))
         sumifs_p_all = "+".join(f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"P\")" for yi in range(n_years))
         filtered = (
@@ -1155,76 +1188,116 @@ def _build_xlsx_summary(
             f"\"(none)\")"
         )
 
-        # Column layout: Label, then per-year (Y, P, Total), then Row Total
+        # Column A: label (PE Number or dimension name)
         col = 0
-        ws.write(0, col, label_col, fmt["header"])
-        ws.write(1, col, "Total", fmt["total"])
-        ws.write_dynamic_array_formula(2, col, 2, col, f"={filtered}", fmt["base"])
-        ws.set_column(col, col, 16)
+        ws.merge_range(0, col, 1, col, label_col, fmt_merge)
+        ws.write(2, col, "Total", fmt["total"])
+        ws.write_dynamic_array_formula(3, col, 3, col, f"={filtered}", fmt["base"])
+        ws.set_column(col, col, 16, fmt["base"])
         col += 1
 
-        row_tot_parts_y = []
-        row_tot_parts_p = []
+        # Column B: PE Title (only for PE Summary)
+        if include_title:
+            ws.merge_range(0, col, 1, col, "PE Title", fmt_merge)
+            ws.write(2, col, "", fmt["total"])
+            # Write PE→title lookup table in far-right columns (ZA/ZB)
+            lk_col_pe = 200  # column GS (far right, hidden)
+            lk_col_title = 201
+            for ti, (pe, title) in enumerate(sorted(pe_titles.items())):
+                ws.write(ti, lk_col_pe, pe)
+                ws.write(ti, lk_col_title, title)
+            lk_count = len(pe_titles)
+            # INDEX/MATCH formula to look up title from PE in column A
+            pe_lk = f"${_col_letter(lk_col_pe + 1)}$1:${_col_letter(lk_col_pe + 1)}${lk_count}"
+            ti_lk = f"${_col_letter(lk_col_title + 1)}$1:${_col_letter(lk_col_title + 1)}${lk_count}"
+            ws.write_dynamic_array_formula(
+                3, col, 3, col,
+                f"=MAP({filtered},LAMBDA(_xlpm.v,IFERROR(INDEX({ti_lk},MATCH(_xlpm.v,{pe_lk},0)),_xlpm.v)))",
+                fmt["base"],
+            )
+            ws.set_column(col, col, 40, fmt["base"])
+            # Hide lookup columns
+            ws.set_column(lk_col_pe, lk_col_title, None, None, {"hidden": True})
+            col += 1
+
+        # FY year groups: each gets 3 columns (Y, P, Total) with merged header
+        row_tot_y = []
+        row_tot_p = []
 
         for yi in range(n_years):
             yr = active_years[yi]
 
-            # Y column
-            ws.write(0, col, f"FY{yr} Y", fmt["header"])
-            ws.write_formula(1, col, f'=SUMPRODUCT(({ir[yi]}="Y")*{vr[yi]})', fmt["total_money"])
-            formula_y = (
-                f"=MAP({filtered},"
-                f"LAMBDA(_xlpm.v,SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"Y\")))"
+            # Merged FY header across 3 columns
+            ws.merge_range(0, col, 0, col + 2, f"FY{yr} ($K)", fmt_merge)
+
+            for ci, (sub_label, crit) in enumerate([("Y", "Y"), ("P", "P"), ("Total", None)]):
+                c = col + ci
+                ws.write(1, c, sub_label, fmt_sub)
+
+                if crit:
+                    ws.write_formula(2, c,
+                                     f'=SUMPRODUCT(({ir[yi]}="{crit}")*{vr[yi]})',
+                                     fmt["total_money"])
+                    formula = (
+                        f"=MAP({filtered},"
+                        f"LAMBDA(_xlpm.v,SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"{crit}\")))"
+                    )
+                    if crit == "Y":
+                        row_tot_y.append(f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"Y\")")
+                    else:
+                        row_tot_p.append(f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"P\")")
+                else:
+                    ws.write_formula(2, c,
+                                     f'=SUMPRODUCT(({ir[yi]}="Y")*{vr[yi]})+SUMPRODUCT(({ir[yi]}="P")*{vr[yi]})',
+                                     fmt["total_money"])
+                    formula = (
+                        f"=MAP({filtered},"
+                        f"LAMBDA(_xlpm.v,"
+                        f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"Y\")"
+                        f"+SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"P\")))"
+                    )
+
+                ws.write_dynamic_array_formula(3, c, 3, c, formula, fmt["base_money"])
+                ws.set_column(c, c, 14, fmt["base_money"])  # default format for spill rows
+
+            col += 3
+
+        # Row Total group: Y, P, Total (same 3-column pattern)
+        ws.merge_range(0, col, 0, col + 2, "Row Total ($K)", fmt_merge)
+
+        for ci, (sub_label, parts_y, parts_p) in enumerate([
+            ("Y", row_tot_y, []),
+            ("P", [], row_tot_p),
+            ("Total", row_tot_y, row_tot_p),
+        ]):
+            c = col + ci
+            ws.write(1, c, sub_label, fmt_sub)
+
+            if sub_label == "Y":
+                sp = "+".join(f'SUMPRODUCT(({ir[yi]}="Y")*{vr[yi]})' for yi in range(n_years))
+                sumifs = "+".join(parts_y)
+            elif sub_label == "P":
+                sp = "+".join(f'SUMPRODUCT(({ir[yi]}="P")*{vr[yi]})' for yi in range(n_years))
+                sumifs = "+".join(parts_p)
+            else:
+                sp = "+".join(
+                    f'SUMPRODUCT(({ir[yi]}="Y")*{vr[yi]})+SUMPRODUCT(({ir[yi]}="P")*{vr[yi]})'
+                    for yi in range(n_years)
+                )
+                sumifs = "+".join(row_tot_y) + "+" + "+".join(row_tot_p)
+
+            ws.write_formula(2, c, f"={sp}", fmt["total_money"])
+            ws.write_dynamic_array_formula(
+                3, c, 3, c,
+                f"=MAP({filtered},LAMBDA(_xlpm.v,{sumifs}))",
+                fmt["base_money"],
             )
-            ws.write_dynamic_array_formula(2, col, 2, col, formula_y, fmt["base_money"])
-            row_tot_parts_y.append(f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"Y\")")
-            ws.set_column(col, col, 14)
-            col += 1
+            ws.set_column(c, c, 14, fmt["base_money"])
 
-            # P column
-            ws.write(0, col, f"FY{yr} P", fmt["header"])
-            ws.write_formula(1, col, f'=SUMPRODUCT(({ir[yi]}="P")*{vr[yi]})', fmt["total_money"])
-            formula_p = (
-                f"=MAP({filtered},"
-                f"LAMBDA(_xlpm.v,SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"P\")))"
-            )
-            ws.write_dynamic_array_formula(2, col, 2, col, formula_p, fmt["base_money"])
-            row_tot_parts_p.append(f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"P\")")
-            ws.set_column(col, col, 14)
-            col += 1
+        ws.freeze_panes(3, 1)
 
-            # Total column (Y+P)
-            ws.write(0, col, f"FY{yr} Total", fmt["header"])
-            ws.write_formula(1, col,
-                             f'=SUMPRODUCT(({ir[yi]}="Y")*{vr[yi]})+SUMPRODUCT(({ir[yi]}="P")*{vr[yi]})',
-                             fmt["total_money"])
-            formula_t = (
-                f"=MAP({filtered},"
-                f"LAMBDA(_xlpm.v,"
-                f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"Y\")"
-                f"+SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"P\")))"
-            )
-            ws.write_dynamic_array_formula(2, col, 2, col, formula_t, fmt["base_money"])
-            ws.set_column(col, col, 14)
-            col += 1
-
-        # Row Total (sum of all Y + all P across all years)
-        ws.write(0, col, "Row Total", fmt["header"])
-        all_sp = "+".join(
-            f'SUMPRODUCT(({ir[yi]}="Y")*{vr[yi]})+SUMPRODUCT(({ir[yi]}="P")*{vr[yi]})'
-            for yi in range(n_years)
-        )
-        ws.write_formula(1, col, f"={all_sp}", fmt["total_money"])
-        all_sumifs = "+".join(row_tot_parts_y) + "+" + "+".join(row_tot_parts_p)
-        ws.write_dynamic_array_formula(2, col, 2, col,
-                                       f"=MAP({filtered},LAMBDA(_xlpm.v,{all_sumifs}))",
-                                       fmt["base_money"])
-        ws.set_column(col, col, 14)
-
-        ws.freeze_panes(2, 1)
-
-    # PE Summary
-    _write_summary_sheet("PE Summary")
+    # PE Summary (with title column)
+    _write_summary_sheet("PE Summary", include_title=True)
 
     # Dimension summaries
     svc_col = field_to_col.get("organization_name", "B")
@@ -1238,6 +1311,94 @@ def _build_xlsx_summary(
     ]:
         dim_rng = f"'{ds}'!${dcol}${first_data_row}:${dcol}${last_data_row}"
         _write_summary_sheet(sheet_name, label_col=label, match_rng=dim_rng)
+
+    # ── About sheet (last) ──
+    import time as _time
+
+    ws_about = wb.add_worksheet("About")
+    fmt_title = wb.add_format({"bold": True, "font_size": 14})
+    fmt_section = wb.add_format({"bold": True, "font_size": 12, "bottom": 1})
+    fmt_label = wb.add_format({"bold": True, "font_size": 10, "valign": "top"})
+    fmt_text = wb.add_format({"font_size": 10, "text_wrap": True, "valign": "top"})
+
+    r = 0
+    ws_about.write(r, 0, "DoD Budget Explorer \u2014 Export Documentation", fmt_title)
+    r += 1
+    ws_about.write(r, 0, "Generated", fmt_label)
+    ws_about.write(r, 1, _time.strftime("%Y-%m-%d %H:%M:%S"), fmt_text)
+    r += 2
+
+    ws_about.write(r, 0, "Search Parameters", fmt_section)
+    r += 1
+    ws_about.write(r, 0, "Keywords", fmt_label)
+    ws_about.write(r, 1, ", ".join(keywords) if keywords else "(none)", fmt_text)
+    r += 1
+    ws_about.write(r, 0, "Total rows", fmt_label)
+    ws_about.write(r, 1, len(items), fmt_text)
+    r += 1
+    matching = sum(1 for row in items if row.get("matched_keywords_row") or row.get("matched_keywords_desc"))
+    ws_about.write(r, 0, "Matching rows", fmt_label)
+    ws_about.write(r, 1, matching, fmt_text)
+    r += 1
+    unique_pe_count = len({row.get("pe_number") for row in items if row.get("pe_number")})
+    ws_about.write(r, 0, "Unique PEs", fmt_label)
+    ws_about.write(r, 1, unique_pe_count, fmt_text)
+    r += 2
+
+    ws_about.write(r, 0, "Data Source", fmt_section)
+    r += 1
+    ws_about.write(r, 0, "DoD Comptroller budget justification documents: Excel R-1/R-2 exhibits "
+                   "and PDF-mined R-2/R-2A sub-element pages. All amounts in thousands of dollars ($K).", fmt_text)
+    r += 2
+
+    ws_about.write(r, 0, "Y/N/P Methodology", fmt_section)
+    r += 1
+    ws_about.write(r, 0, "Y (Yes)", fmt_label)
+    ws_about.write(r, 1, "Row directly matches one or more search keywords. Included in Y totals.", fmt_text)
+    r += 1
+    ws_about.write(r, 0, "N (No)", fmt_label)
+    ws_about.write(r, 1, "Row included for PE context but does not directly match keywords. Excluded from totals.", fmt_text)
+    r += 1
+    ws_about.write(r, 0, "P (Possible)", fmt_label)
+    ws_about.write(r, 1, "User-assigned flag for rows that may be relevant. Change N\u2192P in the data sheet "
+                   "and the summary sheets will update automatically.", fmt_text)
+    r += 2
+
+    ws_about.write(r, 0, "Sheet Descriptions", fmt_section)
+    r += 1
+    sheets_desc = [
+        (ds, "Raw data with per-year In Total (Y/N/P) flags, conditional formatting, "
+         "and data validation. Change flags here to update all summary sheets."),
+        ("PE Summary", "Pivot by Program Element. Shows only PEs with non-zero Y+P totals. "
+         "Includes PE title lookup. Columns: Y/P/Total per fiscal year."),
+        ("By Service", "Pivot by Service/Agency (Army, Navy, Air Force, etc.)."),
+        ("By Budget Activity", "Pivot by Budget Activity category."),
+        ("By Color of Money", "Pivot by appropriation type (RDT&E, Procurement, etc.)."),
+        ("Keyword Matrix", "NxN co-occurrence table showing how often each pair of search "
+         "keywords appears together in the same row."),
+    ]
+    for sname, sdesc in sheets_desc:
+        ws_about.write(r, 0, sname, fmt_label)
+        ws_about.write(r, 1, sdesc, fmt_text)
+        r += 1
+    r += 1
+
+    ws_about.write(r, 0, "Caveats", fmt_section)
+    r += 1
+    caveats = [
+        "PDF-mined rows (exhibit_type='r2_pdf') may show 'Unknown' for Budget Activity and Color of Money.",
+        "Amounts are in thousands of dollars ($K). Multiply by 1,000 for actual dollar values.",
+        "Non-matching rows (N) are included because their parent PE matched a keyword. "
+        "They provide context but are excluded from Y totals.",
+        "Summary sheets use Excel 365 dynamic array formulas (FILTER, MAP, LAMBDA). "
+        "They require Microsoft 365 or Excel 2021+.",
+    ]
+    for caveat in caveats:
+        ws_about.write(r, 0, "\u2022 " + caveat, fmt_text)
+        r += 1
+
+    ws_about.set_column(0, 0, 20)
+    ws_about.set_column(1, 1, 80)
 
 
 
