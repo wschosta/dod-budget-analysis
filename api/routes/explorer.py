@@ -539,7 +539,7 @@ def download_explorer_xlsx(
     return Response(
         content=xlsx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="explorer_results.xlsx"'},
+        headers={"Content-Disposition": f'attachment; filename="explorer_{time.strftime("%Y%m%d_%H%M%S")}.xlsx"'},
     )
 
 

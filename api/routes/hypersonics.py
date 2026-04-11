@@ -27,6 +27,7 @@ import io
 import json
 import logging
 import sqlite3
+import time
 from collections import Counter, OrderedDict
 from typing import Any
 
@@ -298,7 +299,7 @@ def download_hypersonics_xlsx(
     return Response(
         content=xlsx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="hypersonics_selected.xlsx"'},
+        headers={"Content-Disposition": f'attachment; filename="hypersonics_{time.strftime("%Y%m%d_%H%M%S")}.xlsx"'},
     )
 
 
