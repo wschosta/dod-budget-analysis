@@ -40,6 +40,7 @@ from api.routes.keyword_search import (
     build_cache_table,
     cache_rows_to_dicts,
     ensure_cache,
+    load_per_fy_descriptions,
 )
 
 logger = logging.getLogger(__name__)
@@ -120,6 +121,21 @@ _DESC_KEYWORDS = [
 ]
 
 _CACHE_TABLE = "hypersonics_cache"
+
+# Fixed (non-FY) columns in the XLSX export, in order.
+_XLSX_FIXED_HEADERS: list[str] = [
+    "PE Number", "Service/Org", "Exhibit", "Line Item / Sub-Program",
+    "Budget Activity", "Color of Money", "In Totals",
+]
+
+
+def _fy_triple(
+    fy_col_idx: int, fixed_col_count: int = len(_XLSX_FIXED_HEADERS)
+) -> tuple[int, int, int]:
+    """Return 1-indexed (value_col, source_col, desc_col) for an FY column index."""
+    base = fixed_col_count + (fy_col_idx * 3) + 1
+    return base, base + 1, base + 2
+
 
 # PEs to always include regardless of keyword matching
 _EXTRA_PES = [
@@ -311,28 +327,9 @@ def download_hypersonics_xlsx(
         if any(row.get(f"fy{yr}") is not None for _, row in selected_rows)
     ]
 
-    # Build per-FY description map from pe_descriptions
-    selected_pes = list({row.get("pe_number") for _, row in selected_rows if row.get("pe_number")})
-    desc_by_pe_fy: dict[tuple[str, str], str] = {}
-    if selected_pes:
-        pe_placeholders = ", ".join("?" for _ in selected_pes)
-        desc_rows = conn.execute(
-            f"SELECT pe_number, fiscal_year, section_header, description_text "
-            f"FROM pe_descriptions "
-            f"WHERE pe_number IN ({pe_placeholders}) "
-            f"  AND section_header IS NOT NULL "
-            f"ORDER BY pe_number, fiscal_year, "
-            f"  CASE "
-            f"    WHEN section_header LIKE '%Mission Description%' THEN 1 "
-            f"    WHEN section_header LIKE '%Accomplishments%' THEN 2 "
-            f"    WHEN section_header LIKE '%Acquisition Strategy%' THEN 3 "
-            f"    ELSE 4 END",
-            selected_pes,
-        ).fetchall()
-        for dr in desc_rows:
-            key = (dr[0], dr[1])  # (pe_number, fiscal_year)
-            if key not in desc_by_pe_fy and dr[3] and len(dr[3].strip()) >= 80:
-                desc_by_pe_fy[key] = dr[3].strip()
+    desc_by_pe_fy = load_per_fy_descriptions(
+        conn, {row.get("pe_number", "") for _, row in selected_rows}
+    )
 
     # Build workbook
     wb = openpyxl.Workbook()
@@ -351,14 +348,9 @@ def download_hypersonics_xlsx(
     source_font = Font(size=9, color="666666")
     source_font_italic = Font(size=9, color="999999", italic=True)
 
-    # Headers: fixed cols then an interleaved [value/source/description] triple per FY.
-    # This places each year's description next to the matching funding amount so analysts
-    # can read across a single row to see what was funded in that year and why.
-    fixed_headers = [
-        "PE Number", "Service/Org", "Exhibit", "Line Item / Sub-Program",
-        "Budget Activity", "Color of Money", "In Totals",
-    ]
-    headers: list[str] = list(fixed_headers)
+    # Headers: fixed cols then an interleaved [value/source/description] triple per FY
+    # so each year's description sits next to the matching funding amount.
+    headers: list[str] = list(_XLSX_FIXED_HEADERS)
     for yr in active_years:
         headers.append(f"FY{yr} ($K)")
         headers.append(f"FY{yr} Source")
@@ -370,13 +362,7 @@ def download_hypersonics_xlsx(
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="center", wrap_text=True)
 
-    fixed_col_count = len(fixed_headers)  # PE through In Totals
-    in_totals_col = fixed_col_count  # 1-indexed column holding the "Yes"/"" marker
-
-    # Helpers to locate each FY's triple — (value_col, source_col, desc_col).
-    def _fy_triple(fy_col_idx: int) -> tuple[int, int, int]:
-        base = fixed_col_count + (fy_col_idx * 3) + 1
-        return base, base + 1, base + 2
+    in_totals_col = len(_XLSX_FIXED_HEADERS)  # 1-indexed column holding the "Yes"/"" marker
 
     # Data rows
     first_data_row = 2
@@ -412,7 +398,7 @@ def download_hypersonics_xlsx(
             if amount is not None:
                 val_cell.number_format = money_fmt
 
-            source_ref = refs_map.get(f"fy{yr}", "") or ""
+            source_ref = refs_map.get(f"fy{yr}", "")
             if source_ref:
                 src_cell = ws.cell(row=row_num, column=src_col, value=source_ref)
                 src_cell.font = s_font

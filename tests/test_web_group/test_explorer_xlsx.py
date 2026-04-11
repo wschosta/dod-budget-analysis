@@ -11,10 +11,8 @@ import pytest
 
 pytest.importorskip("fastapi")
 
-from api.routes.explorer import (  # noqa: E402
-    _extract_column_value,
-    _load_per_fy_descriptions,
-)
+from api.routes.explorer import _extract_column_value  # noqa: E402
+from api.routes.keyword_search import load_per_fy_descriptions  # noqa: E402
 
 
 class TestExtractColumnValue:
@@ -34,7 +32,6 @@ class TestExtractColumnValue:
             "fy2024": 12345.0,
             "fy2025": 67890.0,
             "refs": {"fy2024": "FY2024_PB.xlsx", "fy2025": "FY2026_PB.xlsx"},
-            "_in_totals": True,
         }
 
     def test_fy_value_column(self):
@@ -59,13 +56,21 @@ class TestExtractColumnValue:
         val = _extract_column_value(self._row(), "FY2024 Description", [2024, 2025])
         assert val == ""
 
-    def test_in_totals_column_yes(self):
+    def test_in_totals_column_yes_from_matches(self):
+        # Row has matched_keywords_row → inferred as in totals
         assert _extract_column_value(self._row(), "In Totals", [2024]) == "Yes"
 
-    def test_in_totals_column_blank(self):
+    def test_in_totals_column_blank_when_no_matches(self):
         row = self._row()
-        row["_in_totals"] = False
+        row["matched_keywords_row"] = []
+        row["matched_keywords_desc"] = []
         assert _extract_column_value(row, "In Totals", [2024]) == ""
+
+    def test_in_totals_column_respects_explicit_flag(self):
+        # Explicit in_totals=False overrides inferred state
+        row = self._row()
+        val = _extract_column_value(row, "In Totals", [2024], None, False)
+        assert val == ""
 
     def test_keywords_list_joined(self):
         val = _extract_column_value(self._row(), "Keywords (Row)", [2024])
@@ -73,6 +78,7 @@ class TestExtractColumnValue:
 
 
 class TestLoadPerFyDescriptions:
+    """Tests for the shared ``load_per_fy_descriptions`` helper."""
     @pytest.fixture()
     def conn(self, tmp_path):
         db_path = tmp_path / "pe_desc.sqlite"
@@ -121,8 +127,7 @@ class TestLoadPerFyDescriptions:
         conn.close()
 
     def test_priority_and_length_filter(self, conn):
-        items = [{"pe_number": "0603285E"}]
-        result = _load_per_fy_descriptions(conn, items)
+        result = load_per_fy_descriptions(conn, ["0603285E"])
         assert result[("0603285E", "2024")] == "x" * 100
         assert result[("0603285E", "2025")] == "y" * 120
         # 2026 row is filtered out because description is too short
@@ -132,7 +137,7 @@ class TestLoadPerFyDescriptions:
         empty_db = tmp_path / "empty.sqlite"
         conn = sqlite3.connect(str(empty_db))
         try:
-            result = _load_per_fy_descriptions(conn, [{"pe_number": "0603285E"}])
+            result = load_per_fy_descriptions(conn, ["0603285E"])
             assert result == {}
         finally:
             conn.close()

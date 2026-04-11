@@ -34,6 +34,7 @@ from api.routes.keyword_search import (
     FY_START,
     build_cache_table,
     cache_rows_to_dicts,
+    load_per_fy_descriptions,
 )
 from utils.fuzzy_match import expand_keywords
 
@@ -486,19 +487,11 @@ def download_explorer_xlsx(
 
     year_range = list(range(FY_START, FY_END + 1))
 
-    # Per-(pe, fy) description map from pe_descriptions so each year's column can
-    # show the narrative text that originated in that submission year's PDFs. The
-    # description and the funding amount often come from different source files
-    # due to the golden time-series merge, so we surface both.
-    desc_by_pe_fy = _load_per_fy_descriptions(conn, items)
-
-    # Pre-compute which rows have keyword matches and will drive the totals.
-    # We also inject a synthetic "_in_totals" field so the column extractor can
-    # emit a visible "Yes"/"" marker referenced by SUMIF in the totals row.
-    for r in items:
-        r["_in_totals"] = bool(
-            r.get("matched_keywords_row") or r.get("matched_keywords_desc")
-        )
+    # Per-(pe, fy) descriptions so each year's column can display narrative text
+    # from that year's submission (often a different source than the amount).
+    desc_by_pe_fy = load_per_fy_descriptions(
+        conn, {r.get("pe_number", "") for r in items}
+    )
 
     # Build workbook
     wb = openpyxl.Workbook()
@@ -532,10 +525,14 @@ def download_explorer_xlsx(
     first_data_row = 2
     fy_value_columns: dict[str, int] = {}  # column name → 1-indexed column number
     for row_num, row in enumerate(items, first_data_row):
-        has_match = bool(row["_in_totals"])
+        has_match = bool(
+            row.get("matched_keywords_row") or row.get("matched_keywords_desc")
+        )
         font = normal_font if has_match else italic_font
         for col_idx, col_name in enumerate(export_columns, 1):
-            value = _extract_column_value(row, col_name, year_range, desc_by_pe_fy)
+            value = _extract_column_value(
+                row, col_name, year_range, desc_by_pe_fy, has_match
+            )
             cell = ws.cell(row=row_num, column=col_idx, value=value)
             cell.font = font
             if col_name.endswith("($K)") and isinstance(value, (int, float)):
@@ -596,65 +593,20 @@ def download_explorer_xlsx(
     )
 
 
-def _load_per_fy_descriptions(
-    conn: sqlite3.Connection, items: list[dict]
-) -> dict[tuple[str, str], str]:
-    """Return a ``(pe_number, fiscal_year)`` → description text map.
-
-    Pulled from ``pe_descriptions`` so each year's column can display narrative
-    text taken from that year's submission. Priority matches the hypersonics
-    export (Mission Description → Accomplishments → Acquisition Strategy).
-    """
-    pe_set: set[str] = {
-        r["pe_number"] for r in items if r.get("pe_number")
-    }
-    if not pe_set:
-        return {}
-    pes: list[str] = sorted(pe_set)
-
-    try:
-        conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
-    except sqlite3.OperationalError:
-        return {}
-
-    placeholders = ", ".join("?" for _ in pes)
-    rows = conn.execute(
-        f"SELECT pe_number, fiscal_year, section_header, description_text "
-        f"FROM pe_descriptions "
-        f"WHERE pe_number IN ({placeholders}) "
-        f"  AND section_header IS NOT NULL "
-        f"ORDER BY pe_number, fiscal_year, "
-        f"  CASE "
-        f"    WHEN section_header LIKE '%Mission Description%' THEN 1 "
-        f"    WHEN section_header LIKE '%Accomplishments%' THEN 2 "
-        f"    WHEN section_header LIKE '%Acquisition Strategy%' THEN 3 "
-        f"    ELSE 4 END",
-        pes,
-    ).fetchall()
-
-    result: dict[tuple[str, str], str] = {}
-    for pe_num, fiscal_year, _section_header, description_text in rows:
-        if not description_text:
-            continue
-        key = (pe_num, fiscal_year)
-        if key in result:
-            continue
-        text = description_text.strip()
-        if len(text) < 80:
-            continue
-        result[key] = text
-    return result
-
-
 def _extract_column_value(
     row: dict,
     col_name: str,
     year_range: list[int],
     desc_by_pe_fy: dict[tuple[str, str], str] | None = None,
+    in_totals: bool | None = None,
 ) -> Any:
     """Extract a cell value from a cache row dict for a given column name."""
     if col_name == "In Totals":
-        return "Yes" if row.get("_in_totals") else ""
+        if in_totals is None:
+            in_totals = bool(
+                row.get("matched_keywords_row") or row.get("matched_keywords_desc")
+            )
+        return "Yes" if in_totals else ""
 
     # Static columns
     field = _COL_TO_FIELD.get(col_name)
