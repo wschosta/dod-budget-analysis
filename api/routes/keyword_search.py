@@ -1147,31 +1147,68 @@ def _build_xlsx_summary(
             ws.write(0, 1 + yi, f"FY{yr}", fmt["header"])
         ws.write(0, tot_col_idx, "Row Total", fmt["header"])
 
+        # _xlpm. prefix required for LAMBDA parameter names in xlsxwriter.
+        # Avoid LET (xlsxwriter doesn't add _xlfn.LET prefix). Inline everything.
+        # Avoid # spill references (xlsxwriter can't encode them correctly).
+        pe_expr = f"SORT(UNIQUE({pr}))"
+
         if criteria:
-            # A2: LET+SORT+UNIQUE+MAP+FILTER — only PEs with non-zero totals
-            sumifs_parts = [f"SUMIFS({vr[yi]},{pr},pe,{ir[yi]},\"{criteria}\")" for yi in range(n_years)]
+            # A2: FILTER(all_pes, MAP(all_pes, totals) <> 0)
+            sumifs_all = "+".join(f"SUMIFS({vr[yi]},{pr},_xlpm.pe,{ir[yi]},\"{criteria}\")" for yi in range(n_years))
             pe_formula = (
-                f"=LET(pes,SORT(UNIQUE({pr})),"
-                f"tots,MAP(pes,LAMBDA(pe,{'+'.join(sumifs_parts)})),"
-                f'FILTER(pes,tots<>0,"(none)"))'
+                f"=FILTER({pe_expr},"
+                f"MAP({pe_expr},LAMBDA(_xlpm.pe,{sumifs_all}))<>0,"
+                f"\"(none)\")"
             )
             ws.write_dynamic_array_formula(1, 0, 1, 0, pe_formula, fmt["base"])
 
-            # B2+: MAP+SUMIFS per FY year — spills to match PE list
+            # B2+: MAP over the same filtered PE list, SUMIFS for one year
             for yi in range(n_years):
-                formula = f'=MAP($A$2#,LAMBDA(pe,SUMIFS({vr[yi]},{pr},pe,{ir[yi]},"{criteria}")))'
-                ws.write_dynamic_array_formula(1, 1 + yi, 1, 1 + yi, formula, fmt["base_money"])
-        else:
-            # Grand Total: PE list from Y sheet, values = Y + P
-            ws.write_dynamic_array_formula(1, 0, 1, 0, f"='{y_sheet}'!$A$2#", fmt["base"])
-            for yi in range(n_years):
-                yl = _col_letter(2 + yi)
-                formula = f"=IFERROR('{y_sheet}'!{yl}$2#+'{p_sheet}'!{yl}$2#,'{y_sheet}'!{yl}$2#)"
+                formula = (
+                    f"=MAP(FILTER({pe_expr},"
+                    f"MAP({pe_expr},LAMBDA(_xlpm.pe,{sumifs_all}))<>0,"
+                    f"\"(none)\"),"
+                    f"LAMBDA(_xlpm.pe,SUMIFS({vr[yi]},{pr},_xlpm.pe,{ir[yi]},\"{criteria}\")))"
+                )
                 ws.write_dynamic_array_formula(1, 1 + yi, 1, 1 + yi, formula, fmt["base_money"])
 
-        # Row Total: element-wise sum of FY spill columns
-        fy_refs = "+".join(f"{_col_letter(2 + yi)}$2#" for yi in range(n_years))
-        ws.write_dynamic_array_formula(1, tot_col_idx, 1, tot_col_idx, f"={fy_refs}", fmt["base_money"])
+            # Row Total: MAP over filtered PEs, sum all years
+            tot_formula = (
+                f"=MAP(FILTER({pe_expr},"
+                f"MAP({pe_expr},LAMBDA(_xlpm.pe,{sumifs_all}))<>0,"
+                f"\"(none)\"),"
+                f"LAMBDA(_xlpm.pe,{sumifs_all}))"
+            )
+            ws.write_dynamic_array_formula(1, tot_col_idx, 1, tot_col_idx, tot_formula, fmt["base_money"])
+        else:
+            # Grand Total: filter PEs where Y+P total > 0
+            sumifs_y = "+".join(f"SUMIFS({vr[yi]},{pr},_xlpm.pe,{ir[yi]},\"Y\")" for yi in range(n_years))
+            sumifs_p = "+".join(f"SUMIFS({vr[yi]},{pr},_xlpm.pe,{ir[yi]},\"P\")" for yi in range(n_years))
+            grand_filter = (
+                f"FILTER({pe_expr},"
+                f"MAP({pe_expr},LAMBDA(_xlpm.pe,{sumifs_y}+{sumifs_p}))<>0,"
+                f"\"(none)\")"
+            )
+            ws.write_dynamic_array_formula(1, 0, 1, 0, f"={grand_filter}", fmt["base"])
+
+            for yi in range(n_years):
+                formula = (
+                    f"=MAP({grand_filter},"
+                    f"LAMBDA(_xlpm.pe,"
+                    f"SUMIFS({vr[yi]},{pr},_xlpm.pe,{ir[yi]},\"Y\")"
+                    f"+SUMIFS({vr[yi]},{pr},_xlpm.pe,{ir[yi]},\"P\")))"
+                )
+                ws.write_dynamic_array_formula(1, 1 + yi, 1, 1 + yi, formula, fmt["base_money"])
+
+            all_y_p = "+".join(
+                f"SUMIFS({vr[yi]},{pr},_xlpm.pe,{ir[yi]},\"Y\")+SUMIFS({vr[yi]},{pr},_xlpm.pe,{ir[yi]},\"P\")"
+                for yi in range(n_years)
+            )
+            tot_formula = (
+                f"=MAP({grand_filter},"
+                f"LAMBDA(_xlpm.pe,{all_y_p}))"
+            )
+            ws.write_dynamic_array_formula(1, tot_col_idx, 1, tot_col_idx, tot_formula, fmt["base_money"])
 
         # Conditional formatting on generous range (rows 2-2000)
         cf_gray = wb.add_format({"font_color": "#C0C0C0", "bg_color": "#F5F5F5"})
