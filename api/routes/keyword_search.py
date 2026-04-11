@@ -1028,14 +1028,16 @@ def build_keyword_xlsx(
                     "format": fmt[key],
                 })
 
+        or_parts = ",".join(f'${lt}{first_data_row}="Y"' for lt in intotal_letters)
+        and_parts = ",".join(f'${lt}{first_data_row}="N"' for lt in intotal_letters)
         ws.conditional_format(r1, 0, r2, fixed_count - 1, {
             "type": "formula",
-            "criteria": f'=OR({",".join(f"${lt}{first_data_row}=""Y""" for lt in intotal_letters)})',
+            "criteria": f"=OR({or_parts})",
             "format": fmt["cf_bold"],
         })
         ws.conditional_format(r1, 0, r2, fixed_count - 1, {
             "type": "formula",
-            "criteria": f'=AND({",".join(f"${lt}{first_data_row}=""N""" for lt in intotal_letters)})',
+            "criteria": f"=AND({and_parts})",
             "format": fmt["cf_italic_gray"],
         })
 
@@ -1077,6 +1079,39 @@ def build_keyword_xlsx(
     freeze_col = min(5, fixed_count + 1)
     ws.freeze_panes(1, freeze_col - 1)
     ws.autofilter(0, 0, max(last_data_row, row_num) - 1, len(headers) - 1)
+
+    # ── Selected sheet (dynamic FILTER of data sheet, Y or P rows only) ──
+    if include_intotal and last_data_row >= first_data_row and active_years:
+        ws_sel = wb.add_worksheet("Selected")
+
+        # Same headers as data sheet
+        for ci, h in enumerate(headers):
+            ws_sel.write(0, ci, h, fmt["header"])
+
+        # FILTER formula: show rows where ANY In Total column = "Y" or "P"
+        data_range = f"'{sheet_title}'!$A${first_data_row}:${_col_letter(len(headers))}${last_data_row}"
+        it_checks = []
+        for fc in fy_cols:
+            if fc.intotal:
+                it_col = f"'{sheet_title}'!${fc.intotal_l}${first_data_row}:${fc.intotal_l}${last_data_row}"
+                it_checks.append(f'({it_col}="Y")+({it_col}="P")')
+        filter_crit = "+".join(it_checks)
+        filter_formula = f"=FILTER({data_range},{filter_crit},\"No matching rows\")"
+        ws_sel.write_dynamic_array_formula(1, 0, 1, 0, filter_formula, fmt["base"])
+
+        # Copy column widths from data sheet
+        for ci, (header, _field) in enumerate(fixed_columns):
+            ws_sel.set_column(ci, ci, _COL_WIDTH_DEFAULTS.get(header, 14))
+        for fc in fy_cols:
+            ws_sel.set_column(fc.val - 1, fc.val - 1, 14, fmt["base_money"])
+            if fc.intotal:
+                ws_sel.set_column(fc.intotal - 1, fc.intotal - 1, 10)
+            if fc.src:
+                ws_sel.set_column(fc.src - 1, fc.src - 1, 30)
+            if fc.desc:
+                ws_sel.set_column(fc.desc - 1, fc.desc - 1, 40)
+
+        ws_sel.freeze_panes(1, freeze_col - 1)
 
     # ── Summary sheets ──
     if build_summary and include_intotal:
