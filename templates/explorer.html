@@ -686,6 +686,11 @@ function downloadXlsx() {
     return;
   }
 
+  const btn = document.querySelector('.btn-download');
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Generating XLSX…';
+
   const matchingOnly = document.getElementById('matching-only').checked;
   const includeIntotal = document.getElementById('include-intotal').checked;
   const includeSource = document.getElementById('include-source').checked;
@@ -721,6 +726,10 @@ function downloadXlsx() {
   })
   .catch(err => {
     alert('Download failed: ' + err.message);
+  })
+  .finally(() => {
+    btn.disabled = false;
+    btn.textContent = origText;
   });
 }
 
