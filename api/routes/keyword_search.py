@@ -1105,7 +1105,7 @@ def build_keyword_xlsx(
         _build_xlsx_summary(
             wb, items, active_years, sheet_title,
             field_to_col, val_letters, it_letters,
-            first_data_row, last_data_row,
+            first_data_row, last_data_row, sty,
         )
 
     buf = io.BytesIO()
@@ -1123,6 +1123,7 @@ def _build_xlsx_summary(
     intotal_letters: list[str],
     first_data_row: int,
     last_data_row: int,
+    sty: dict[str, Any] | None = None,
 ) -> None:
     """Build a Summary sheet with PE pivots and dimension breakdowns."""
     import openpyxl
@@ -1131,7 +1132,8 @@ def _build_xlsx_summary(
     ws = wb.create_sheet("Summary")
     get_col_letter = openpyxl.utils.get_column_letter
 
-    sty = xlsx_base_styles()
+    if sty is None:
+        sty = xlsx_base_styles()
     header_fill = sty["header_fill"]
     header_font = sty["header_font"]
     total_font = sty["total_font"]
@@ -1139,13 +1141,24 @@ def _build_xlsx_summary(
     money_fmt = sty["money_fmt"]
     title_font = Font(bold=True, size=12)
 
-    def _uniq(key: str) -> list[str]:
-        return sorted(v for v in dict.fromkeys(row.get(key, "") for row in items) if v)
-
-    unique_pes = _uniq("pe_number")
-    unique_svcs = _uniq("organization_name")
-    unique_bas = _uniq("budget_activity_norm")
-    unique_coms = _uniq("color_of_money")
+    # Single pass to collect all unique dimension values
+    pes: set[str] = set()
+    svcs: set[str] = set()
+    bas: set[str] = set()
+    coms: set[str] = set()
+    for row in items:
+        if v := row.get("pe_number", ""):
+            pes.add(v)
+        if v := row.get("organization_name", ""):
+            svcs.add(v)
+        if v := row.get("budget_activity_norm", ""):
+            bas.add(v)
+        if v := row.get("color_of_money", ""):
+            coms.add(v)
+    unique_pes = sorted(pes)
+    unique_svcs = sorted(svcs)
+    unique_bas = sorted(bas)
+    unique_coms = sorted(coms)
 
     pe_fy_letters = [get_col_letter(2 + yi) for yi in range(len(active_years))]
     dim_fy_letters = [get_col_letter(4 + yi) for yi in range(len(active_years))]
@@ -1171,14 +1184,17 @@ def _build_xlsx_summary(
         r += 1
         data_start = r
 
+        # Precompute per-year range strings (invariant across PEs)
+        if criteria:
+            vr_list = [f"'{ds}'!${val_letters[yi]}${first_data_row}:${val_letters[yi]}${last_data_row}" for yi in range(len(active_years))]
+            pr_str = f"'{ds}'!${pe_col}${first_data_row}:${pe_col}${last_data_row}"
+            ir_list = [f"'{ds}'!${intotal_letters[yi]}${first_data_row}:${intotal_letters[yi]}${last_data_row}" for yi in range(len(active_years))]
+
         for pe in unique_pes:
             ws.cell(row=r, column=1, value=pe).font = base_font
             for yi in range(len(active_years)):
                 if criteria:
-                    vr = f"'{ds}'!${val_letters[yi]}${first_data_row}:${val_letters[yi]}${last_data_row}"
-                    pr = f"'{ds}'!${pe_col}${first_data_row}:${pe_col}${last_data_row}"
-                    ir = f"'{ds}'!${intotal_letters[yi]}${first_data_row}:${intotal_letters[yi]}${last_data_row}"
-                    formula = f'=SUMIFS({vr},{pr},$A{r},{ir},"{criteria}")'
+                    formula = f'=SUMIFS({vr_list[yi]},{pr_str},$A{r},{ir_list[yi]},"{criteria}")'
                 else:
                     offset = r - data_start
                     cl = pe_fy_letters[yi]

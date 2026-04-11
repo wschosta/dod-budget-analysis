@@ -196,7 +196,7 @@ def _do_build(
             conn, cache_table, expanded, expanded,
             fy_start=FY_START, fy_end=FY_END,
             progress_callback=_progress,
-            extra_pes=extra_pes or None,
+            extra_pes=extra_pes,
         )
 
         # Record in metadata
@@ -365,6 +365,7 @@ def build_status(
 )
 def get_explorer_data(
     keywords: str = Query(..., description="Comma-separated keywords"),
+    extra_pes: str = Query("", description="Comma-separated PE numbers (must match build call)"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
     """Return PE-level summary of cached results plus available download columns."""
@@ -373,7 +374,8 @@ def get_explorer_data(
     except ValueError as e:
         return {"error": str(e)}
 
-    kw_id = _keyword_set_id(keyword_list)
+    pe_list = [pe.strip().upper() for pe in extra_pes.split(",") if pe.strip()] if extra_pes else []
+    kw_id = _keyword_set_id(keyword_list, pe_list or None)
     cache_table = _cache_table_name(kw_id)
     expanded = expand_keywords(keyword_list)
 

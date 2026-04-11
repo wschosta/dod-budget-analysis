@@ -100,11 +100,6 @@ _DESC_KEYWORDS = [kw for kw in _HYPERSONICS_KEYWORDS if kw not in _DESC_EXCLUDE]
 
 _CACHE_TABLE = "hypersonics_cache"
 
-# Fixed (non-FY) columns in the XLSX export, in order.
-_XLSX_FIXED_HEADERS: list[str] = [
-    "PE Number", "Service/Org", "Exhibit", "Line Item / Sub-Program",
-    "Budget Activity", "Color of Money",
-]
 _XLSX_COL_TO_FIELD: list[tuple[str, str]] = [
     ("PE Number", "pe_number"),
     ("Service/Org", "organization_name"),
@@ -296,6 +291,7 @@ def download_hypersonics_xlsx(
         is_total_fn=lambda row: row.get("_data_idx", "") in total_set,
         fixed_columns=_XLSX_COL_TO_FIELD,
         sheet_title="Hypersonics",
+        build_summary=True,
     )
 
     return Response(
