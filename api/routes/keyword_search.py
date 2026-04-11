@@ -768,6 +768,56 @@ def cache_rows_to_dicts(
     return result
 
 
+def load_per_fy_descriptions(
+    conn: sqlite3.Connection,
+    pe_numbers: list[str] | set[str],
+    min_length: int = 80,
+) -> dict[tuple[str, str], str]:
+    """Return a ``(pe_number, fiscal_year)`` → description text map.
+
+    Pulled from ``pe_descriptions`` so each year's column can display narrative
+    text taken from that year's submission. Priority order: Mission Description
+    → Accomplishments → Acquisition Strategy. Descriptions shorter than
+    ``min_length`` characters (after stripping) are filtered out as noise.
+    """
+    pes = sorted({pe for pe in pe_numbers if pe})
+    if not pes:
+        return {}
+
+    try:
+        conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
+    except sqlite3.OperationalError:
+        return {}
+
+    placeholders = ", ".join("?" for _ in pes)
+    rows = conn.execute(
+        f"SELECT pe_number, fiscal_year, section_header, description_text "
+        f"FROM pe_descriptions "
+        f"WHERE pe_number IN ({placeholders}) "
+        f"  AND section_header IS NOT NULL "
+        f"ORDER BY pe_number, fiscal_year, "
+        f"  CASE "
+        f"    WHEN section_header LIKE '%Mission Description%' THEN 1 "
+        f"    WHEN section_header LIKE '%Accomplishments%' THEN 2 "
+        f"    WHEN section_header LIKE '%Acquisition Strategy%' THEN 3 "
+        f"    ELSE 4 END",
+        pes,
+    ).fetchall()
+
+    result: dict[tuple[str, str], str] = {}
+    for pe_num, fiscal_year, _section_header, description_text in rows:
+        if not description_text:
+            continue
+        key = (pe_num, fiscal_year)
+        if key in result:
+            continue
+        text = description_text.strip()
+        if len(text) < min_length:
+            continue
+        result[key] = text
+    return result
+
+
 # ── R-1 stub enrichment helpers ──────────────────────────────────────────────
 
 

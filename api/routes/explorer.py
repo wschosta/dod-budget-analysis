@@ -34,6 +34,7 @@ from api.routes.keyword_search import (
     FY_START,
     build_cache_table,
     cache_rows_to_dicts,
+    load_per_fy_descriptions,
 )
 from utils.fuzzy_match import expand_keywords
 
@@ -407,17 +408,26 @@ def get_explorer_data(
             "matching_sub_elements": matching,
         })
 
-    # Build available columns list (static + dynamic FY columns)
+    # Build available columns list (static + dynamic FY columns).
+    # Per-year columns are offered as an interleaved [value, source, description]
+    # triple so selecting them in order keeps the output columns grouped by year.
     available_columns = list(_ALL_COLUMNS)
     for yr in active_years:
         available_columns.append(f"FY{yr} ($K)")
         available_columns.append(f"FY{yr} Source")
+        available_columns.append(f"FY{yr} Description")
 
-    # Default selected columns
+    # Default selected columns — fixed metadata, then an interleaved FY triple
+    # (value / source / description) per active year so the sheet reads left to
+    # right in chronological order with descriptions adjacent to amounts.
     default_columns = [
         "PE Number", "Service/Org", "Exhibit Type", "Line Item Title",
-        "Description", "Color of Money",
-    ] + [f"FY{yr} ($K)" for yr in active_years]
+        "Color of Money",
+    ]
+    for yr in active_years:
+        default_columns.append(f"FY{yr} ($K)")
+        default_columns.append(f"FY{yr} Source")
+        default_columns.append(f"FY{yr} Description")
 
     return {
         "keyword_set_id": kw_id,
@@ -477,6 +487,12 @@ def download_explorer_xlsx(
 
     year_range = list(range(FY_START, FY_END + 1))
 
+    # Per-(pe, fy) descriptions so each year's column can display narrative text
+    # from that year's submission (often a different source than the amount).
+    desc_by_pe_fy = load_per_fy_descriptions(
+        conn, {r.get("pe_number", "") for r in items}
+    )
+
     # Build workbook
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -490,52 +506,74 @@ def download_explorer_xlsx(
     total_font = Font(bold=True, size=11)
     money_fmt = '#,##0'
 
+    # Ensure an "In Totals" column is present so users can see which rows feed the
+    # per-FY totals and so SUMIF formulas have something to key on. We append it
+    # (without dropping anything the user explicitly asked for) if absent.
+    export_columns: list[str] = list(columns)
+    if "In Totals" not in export_columns:
+        export_columns.append("In Totals")
+    in_totals_col_idx = export_columns.index("In Totals") + 1  # 1-indexed
+
     # Headers
-    for col_idx, col_name in enumerate(columns, 1):
+    for col_idx, col_name in enumerate(export_columns, 1):
         cell = ws.cell(row=1, column=col_idx, value=col_name)
         cell.font = header_font_white
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal="center", wrap_text=True)
 
     # Data rows
-    # Track totals for FY columns
-    fy_totals: dict[str, float] = {}
-    for row_num, row in enumerate(items, 2):
-        has_match = bool(row.get("matched_keywords_row") or row.get("matched_keywords_desc"))
+    first_data_row = 2
+    fy_value_columns: dict[str, int] = {}  # column name → 1-indexed column number
+    for row_num, row in enumerate(items, first_data_row):
+        has_match = bool(
+            row.get("matched_keywords_row") or row.get("matched_keywords_desc")
+        )
         font = normal_font if has_match else italic_font
-        for col_idx, col_name in enumerate(columns, 1):
-            value = _extract_column_value(row, col_name, year_range)
+        for col_idx, col_name in enumerate(export_columns, 1):
+            value = _extract_column_value(
+                row, col_name, year_range, desc_by_pe_fy, has_match
+            )
             cell = ws.cell(row=row_num, column=col_idx, value=value)
             cell.font = font
             if col_name.endswith("($K)") and isinstance(value, (int, float)):
                 cell.number_format = money_fmt
-                if has_match:
-                    fy_totals[col_name] = fy_totals.get(col_name, 0) + value
+                fy_value_columns.setdefault(col_name, col_idx)
 
-    # Totals row
-    if fy_totals:
-        totals_row = len(items) + 2
+    last_data_row = first_data_row + len(items) - 1
+
+    # Totals row — live SUMIF formulas keyed off the "In Totals" column so users
+    # can edit flags in Excel and have the totals recalculate.
+    if fy_value_columns and last_data_row >= first_data_row:
+        totals_row = last_data_row + 1
         ws.cell(row=totals_row, column=1, value="TOTALS").font = total_font
-        for col_idx, col_name in enumerate(columns, 1):
-            if col_name in fy_totals:
-                cell = ws.cell(row=totals_row, column=col_idx, value=fy_totals[col_name])
-                cell.font = total_font
-                cell.number_format = money_fmt
+        if in_totals_col_idx != 1:
+            ws.cell(row=totals_row, column=in_totals_col_idx, value="Sum").font = total_font
+        in_totals_letter = openpyxl.utils.get_column_letter(in_totals_col_idx)
+        in_totals_range = f"${in_totals_letter}${first_data_row}:${in_totals_letter}${last_data_row}"
+        for col_name, col_idx in fy_value_columns.items():
+            val_letter = openpyxl.utils.get_column_letter(col_idx)
+            val_range = f"${val_letter}${first_data_row}:${val_letter}${last_data_row}"
+            formula = f'=SUMIF({in_totals_range},"Yes",{val_range})'
+            cell = ws.cell(row=totals_row, column=col_idx, value=formula)
+            cell.font = total_font
+            cell.number_format = money_fmt
 
     # Column widths
     _WIDTH_MAP = {
         "Description": 60, "Line Item Title": 50,
         "Budget Activity": 20, "Budget Activity (Normalized)": 20,
         "PE Number": 14, "Service/Org": 14, "Exhibit Type": 8,
-        "Color of Money": 12, "Appropriation": 30,
+        "Color of Money": 12, "Appropriation": 30, "In Totals": 10,
     }
-    for col_idx, col_name in enumerate(columns, 1):
+    for col_idx, col_name in enumerate(export_columns, 1):
         if col_name in _WIDTH_MAP:
             width = _WIDTH_MAP[col_name]
         elif col_name.endswith("($K)"):
             width = 14
         elif col_name.endswith("Source"):
             width = 30
+        elif col_name.endswith("Description"):
+            width = 40
         else:
             width = max(14, len(col_name) + 2)
         ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = width
@@ -555,8 +593,21 @@ def download_explorer_xlsx(
     )
 
 
-def _extract_column_value(row: dict, col_name: str, year_range: list[int]) -> Any:
+def _extract_column_value(
+    row: dict,
+    col_name: str,
+    year_range: list[int],
+    desc_by_pe_fy: dict[tuple[str, str], str] | None = None,
+    in_totals: bool | None = None,
+) -> Any:
     """Extract a cell value from a cache row dict for a given column name."""
+    if col_name == "In Totals":
+        if in_totals is None:
+            in_totals = bool(
+                row.get("matched_keywords_row") or row.get("matched_keywords_desc")
+            )
+        return "Yes" if in_totals else ""
+
     # Static columns
     field = _COL_TO_FIELD.get(col_name)
     if field:
@@ -578,6 +629,15 @@ def _extract_column_value(row: dict, col_name: str, year_range: list[int]) -> An
     if m:
         yr = int(m.group(1))
         return row.get("refs", {}).get(f"fy{yr}", "")
+
+    # FY description columns: "FY2024 Description"
+    m = re.match(r"FY(\d{4})\s*Description", col_name)
+    if m:
+        yr = int(m.group(1))
+        if desc_by_pe_fy is None:
+            return ""
+        pe = row.get("pe_number", "")
+        return desc_by_pe_fy.get((pe, str(yr)), "")
 
     return ""
 
