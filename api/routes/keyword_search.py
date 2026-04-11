@@ -1146,19 +1146,19 @@ def _build_xlsx_summary(
     title_font = Font(bold=True, size=12)
 
     # Single pass: collect unique dimension values and track which PEs have FY data
-    pes: set[str] = set()
-    pes_with_data: set[str] = set()
+    # from matching rows (is_total=True). PEs with only non-matching sub-elements
+    # would show all zeros in the Y summary and are excluded.
+    pes_with_y_data: set[str] = set()
     svcs: set[str] = set()
     bas: set[str] = set()
     coms: set[str] = set()
     for row in items:
         pe = row.get("pe_number", "")
-        if pe:
-            pes.add(pe)
-            if pe not in pes_with_data:
+        if pe and pe not in pes_with_y_data:
+            if row.get("matched_keywords_row") or row.get("matched_keywords_desc"):
                 for yr in active_years:
                     if row.get(f"fy{yr}") is not None:
-                        pes_with_data.add(pe)
+                        pes_with_y_data.add(pe)
                         break
         if v := row.get("organization_name", ""):
             svcs.add(v)
@@ -1166,8 +1166,7 @@ def _build_xlsx_summary(
             bas.add(v)
         if v := row.get("color_of_money", ""):
             coms.add(v)
-    # Only include PEs that have at least one non-null FY value
-    unique_pes = sorted(pes_with_data)
+    unique_pes = sorted(pes_with_y_data)
     unique_svcs = sorted(svcs)
     unique_bas = sorted(bas)
     unique_coms = sorted(coms)
