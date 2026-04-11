@@ -480,8 +480,10 @@ function onBuildReady() {
   stopElapsedTimer();
   document.getElementById('build-progress').style.display = 'none';
 
-  // Fetch full data
-  fetch('/api/v1/explorer?keywords=' + encodeURIComponent(currentKeywords.join(',')), {cache: 'no-store'})
+  const epFetch = (document.getElementById('extra-pes-input').value || '').trim();
+  let dataUrl = '/api/v1/explorer?keywords=' + encodeURIComponent(currentKeywords.join(','));
+  if (epFetch) dataUrl += '&extra_pes=' + encodeURIComponent(epFetch);
+  fetch(dataUrl, {cache: 'no-store'})
   .then(r => r.json())
   .then(data => {
     if (data.error) { showValidationError(data.error); return; }
