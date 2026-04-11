@@ -2,6 +2,7 @@ requests>=2.28
 beautifulsoup4>=4.11
 playwright>=1.40
 openpyxl>=3.0
+xlsxwriter>=3.1          # XLSX export with dynamic array formula support
 xlrd>=2.0                # legacy .xls support (FY1998-2009 era documents)
 pandas>=1.5
 pdfplumber>=0.7
