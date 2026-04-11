@@ -240,7 +240,7 @@ class TestDownloadXLSX:
     def test_summary_sheets_exist(self, client):
         """Workbook should have PE and dimension summary sheets."""
         wb = self._download_xlsx(client)
-        for name in ["Y Summary", "P Summary", "Grand Total"]:
+        for name in ["PE Summary", "By Service", "By Budget Activity", "By Color of Money"]:
             assert name in wb.sheetnames, f"Missing {name} sheet: {wb.sheetnames}"
 
     def test_data_validation_on_intotal_cells(self, client):
