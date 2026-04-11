@@ -689,13 +689,26 @@ function downloadXlsx() {
   const btn = document.querySelector('.btn-download');
   const origText = btn.textContent;
   btn.disabled = true;
-  btn.textContent = '⏳ Generating XLSX…';
 
   const matchingOnly = document.getElementById('matching-only').checked;
   const includeIntotal = document.getElementById('include-intotal').checked;
   const includeSource = document.getElementById('include-source').checked;
   const includeDescription = document.getElementById('include-description').checked;
   const dlPes = (document.getElementById('extra-pes-input').value || '').trim();
+
+  // Show row count and estimated size while generating
+  const rowCount = explorerData ? (explorerData.pe_summary || []).reduce((s, p) => s + (p.total_sub_elements || 0), 0) : 0;
+  const colCount = 1 + (includeIntotal ? 1 : 0) + (includeSource ? 1 : 0) + (includeDescription ? 1 : 0);
+  const estKB = Math.round(rowCount * colCount * 0.5);
+  const estMB = (estKB / 1024).toFixed(1);
+  const sizeHint = estKB > 1024 ? `~${estMB} MB` : `~${estKB} KB`;
+  btn.textContent = `⏳ Generating ${rowCount.toLocaleString()} rows (${sizeHint})…`;
+
+  const t0 = Date.now();
+  const tickTimer = setInterval(() => {
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(0);
+    btn.textContent = `⏳ Generating… ${elapsed}s (${sizeHint})`;
+  }, 1000);
 
   fetch('/api/v1/explorer/download/xlsx', {
     method: 'POST',
@@ -728,6 +741,7 @@ function downloadXlsx() {
     alert('Download failed: ' + err.message);
   })
   .finally(() => {
+    clearInterval(tickTimer);
     btn.disabled = false;
     btn.textContent = origText;
   });
