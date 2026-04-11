@@ -1152,20 +1152,30 @@ def _build_xlsx_summary(
     pe_col = field_to_col.get("pe_number", "A")
     n_years = len(active_years)
 
-    pe_rng = f"'{ds}'!${pe_col}${first_data_row}:${pe_col}${last_data_row}"
+    pr_str = f"'{ds}'!${pe_col}${first_data_row}:${pe_col}${last_data_row}"
     vr = [f"'{ds}'!${val_letters[yi]}${first_data_row}:${val_letters[yi]}${last_data_row}" for yi in range(n_years)]
     ir = [f"'{ds}'!${intotal_letters[yi]}${first_data_row}:${intotal_letters[yi]}${last_data_row}" for yi in range(n_years)]
 
-    def _write_spill_sheet(
+    # Collect unique PEs that have any FY data
+    pes_with_data: set[str] = set()
+    for row in items:
+        pe = row.get("pe_number", "")
+        if pe and pe not in pes_with_data:
+            for yr in active_years:
+                if row.get(f"fy{yr}") is not None:
+                    pes_with_data.add(pe)
+                    break
+    unique_pes = sorted(pes_with_data)
+
+    def _write_pe_sheet(
         sheet_name: str,
         criteria: str | None,
         y_sheet: str = "",
         p_sheet: str = "",
     ) -> None:
-        """Write a dynamic PE summary sheet with spill formulas."""
+        """Write a PE summary sheet with static SUMIFS rows + auto-filter."""
         ws = wb.create_sheet(sheet_name)
 
-        # Headers
         ws.cell(row=1, column=1, value="PE Number").font = header_font
         ws.cell(row=1, column=1).fill = header_fill
         for yi, yr in enumerate(active_years):
@@ -1173,59 +1183,56 @@ def _build_xlsx_summary(
             c.font = header_font
             c.fill = header_fill
             c.alignment = Alignment(horizontal="center")
-        c = ws.cell(row=1, column=2 + n_years, value="Row Total")
+        tot_col = 2 + n_years
+        tot_letter = get_col_letter(tot_col)
+        c = ws.cell(row=1, column=tot_col, value="Row Total")
         c.font = header_font
         c.fill = header_fill
         c.alignment = Alignment(horizontal="center")
 
-        # Excel 365 dynamic array functions need _xlfn. / _xlws. prefixes
-        # when written via openpyxl, otherwise Excel flags them as corrupt.
-        _LET = "_xlfn.LET"
-        _SORT = "_xlfn.SORT"
-        _UNIQUE = "_xlfn.UNIQUE"
-        _MAP = "_xlfn.MAP"
-        _LAMBDA = "_xlfn.LAMBDA"
-        _FILTER = "_xlfn._xlws.FILTER"
+        first_fy = get_col_letter(2)
+        last_fy = get_col_letter(1 + n_years) if n_years else first_fy
+        pe_fy_letters = [get_col_letter(2 + yi) for yi in range(n_years)]
 
-        if criteria:
-            sumifs_parts = [f"SUMIFS({vr[yi]},{pe_rng},pe,{ir[yi]},\"{criteria}\")" for yi in range(n_years)]
-            any_nonzero = "+".join(sumifs_parts)
-            pe_formula = (
-                f"={_LET}(pes,{_SORT}({_UNIQUE}({pe_rng})),"
-                f"tots,{_MAP}(pes,{_LAMBDA}(pe,{any_nonzero})),"
-                f'{_FILTER}(pes,tots<>0,"(none)"))'
-            )
-            ws.cell(row=2, column=1, value=pe_formula).font = base_font
-
+        r = 2
+        data_start = r
+        for pe in unique_pes:
+            ws.cell(row=r, column=1, value=pe).font = base_font
             for yi in range(n_years):
-                formula = f'={_MAP}($A$2#,{_LAMBDA}(pe,SUMIFS({vr[yi]},{pe_rng},pe,{ir[yi]},"{criteria}")))'
-                c = ws.cell(row=2, column=2 + yi, value=formula)
+                if criteria:
+                    formula = f'=SUMIFS({vr[yi]},{pr_str},$A{r},{ir[yi]},"{criteria}")'
+                else:
+                    yl = pe_fy_letters[yi]
+                    formula = f"='{y_sheet}'!{yl}{r}+'{p_sheet}'!{yl}{r}"
+                c = ws.cell(row=r, column=2 + yi, value=formula)
                 c.font = base_font
                 c.number_format = money_fmt
-        else:
-            ws.cell(row=2, column=1, value=f"='{y_sheet}'!$A$2#").font = base_font
-            for yi in range(n_years):
-                yl = get_col_letter(2 + yi)
-                formula = f"=IFERROR('{y_sheet}'!{yl}$2#+'{p_sheet}'!{yl}$2#,'{y_sheet}'!{yl}$2#)"
-                c = ws.cell(row=2, column=2 + yi, value=formula)
-                c.font = base_font
-                c.number_format = money_fmt
+            c = ws.cell(row=r, column=tot_col, value=f"=SUM({first_fy}{r}:{last_fy}{r})")
+            c.font = base_font
+            c.number_format = money_fmt
+            r += 1
 
-        # Row Total: element-wise sum of all FY spill columns
-        fy_refs = "+".join(f"{get_col_letter(2 + yi)}$2#" for yi in range(n_years))
-        ws.cell(row=2, column=2 + n_years, value=f"={fy_refs}").font = base_font
+        ws.cell(row=r, column=1, value="Total").font = total_font
+        for yi in range(n_years):
+            cl = pe_fy_letters[yi]
+            c = ws.cell(row=r, column=2 + yi, value=f"=SUM({cl}{data_start}:{cl}{r - 1})")
+            c.font = total_font
+            c.number_format = money_fmt
+        c = ws.cell(row=r, column=tot_col, value=f"=SUM({tot_letter}{data_start}:{tot_letter}{r - 1})")
+        c.font = total_font
+        c.number_format = money_fmt
 
-        # Column widths
+        ws.auto_filter.ref = f"A1:{tot_letter}{r}"
         ws.column_dimensions["A"].width = 16
         for yi in range(n_years):
-            ws.column_dimensions[get_col_letter(2 + yi)].width = 14
-        ws.column_dimensions[get_col_letter(2 + n_years)].width = 14
+            ws.column_dimensions[pe_fy_letters[yi]].width = 14
+        ws.column_dimensions[tot_letter].width = 14
         ws.freeze_panes = "B2"
 
     # ── PE Summary sheets ──
-    _write_spill_sheet("Y Summary", "Y")
-    _write_spill_sheet("P Summary", "P")
-    _write_spill_sheet("Grand Total", None, y_sheet="Y Summary", p_sheet="P Summary")
+    _write_pe_sheet("Y Summary", "Y")
+    _write_pe_sheet("P Summary", "P")
+    _write_pe_sheet("Grand Total", None, y_sheet="Y Summary", p_sheet="P Summary")
 
     # ── Dimension Summary sheet (static — dimension values don't change dynamically) ──
     svcs: set[str] = set()
