@@ -292,6 +292,7 @@ def download_hypersonics_xlsx(
         fixed_columns=_XLSX_COL_TO_FIELD,
         sheet_title="Hypersonics",
         build_summary=True,
+        keywords=_HYPERSONICS_KEYWORDS,
     )
 
     return Response(

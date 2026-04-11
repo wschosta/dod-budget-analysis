@@ -866,6 +866,7 @@ def build_keyword_xlsx(
     include_intotal: bool = True,
     sheet_title: str = "Results",
     build_summary: bool = True,
+    keywords: list[str] | None = None,
 ) -> bytes:
     """Build a keyword-search XLSX workbook and return it as bytes.
 
@@ -1098,7 +1099,6 @@ def build_keyword_xlsx(
 
     # ── Summary sheet ──
     if build_summary and include_intotal:
-        # Map field names → data-sheet column letters for SUMIFS
         field_to_col = {field: get_col_letter(ci) for ci, (_h, field) in enumerate(fixed_columns, 1)}
         val_letters = [fc.val_l for fc in fy_cols]
         it_letters = [fc.intotal_l for fc in fy_cols]
@@ -1107,6 +1107,10 @@ def build_keyword_xlsx(
             field_to_col, val_letters, it_letters,
             first_data_row, last_data_row, sty,
         )
+
+    # ── Keyword co-occurrence matrix ──
+    if keywords and len(keywords) > 1:
+        _build_keyword_matrix(wb, items, keywords, sty)
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -1141,21 +1145,29 @@ def _build_xlsx_summary(
     money_fmt = sty["money_fmt"]
     title_font = Font(bold=True, size=12)
 
-    # Single pass to collect all unique dimension values
+    # Single pass: collect unique dimension values and track which PEs have FY data
     pes: set[str] = set()
+    pes_with_data: set[str] = set()
     svcs: set[str] = set()
     bas: set[str] = set()
     coms: set[str] = set()
     for row in items:
-        if v := row.get("pe_number", ""):
-            pes.add(v)
+        pe = row.get("pe_number", "")
+        if pe:
+            pes.add(pe)
+            if pe not in pes_with_data:
+                for yr in active_years:
+                    if row.get(f"fy{yr}") is not None:
+                        pes_with_data.add(pe)
+                        break
         if v := row.get("organization_name", ""):
             svcs.add(v)
         if v := row.get("budget_activity_norm", ""):
             bas.add(v)
         if v := row.get("color_of_money", ""):
             coms.add(v)
-    unique_pes = sorted(pes)
+    # Only include PEs that have at least one non-null FY value
+    unique_pes = sorted(pes_with_data)
     unique_svcs = sorted(svcs)
     unique_bas = sorted(bas)
     unique_coms = sorted(coms)
@@ -1296,6 +1308,105 @@ def _build_xlsx_summary(
     for yi in range(len(active_years)):
         ws.column_dimensions[pe_fy_letters[yi]].width = 14
         ws.column_dimensions[dim_fy_letters[yi]].width = 14
+
+    ws.freeze_panes = "B2"
+
+
+def _build_keyword_matrix(
+    wb: Any,
+    items: list[dict],
+    keywords: list[str],
+    sty: dict[str, Any] | None = None,
+) -> None:
+    """Build a keyword co-occurrence matrix sheet.
+
+    Shows an NxN table: cell (i,j) = number of rows where keyword i AND keyword j
+    both appear (in matched_keywords_row or matched_keywords_desc). Diagonal = total
+    rows matching that keyword alone.
+    """
+    import json
+
+    import openpyxl
+    from openpyxl.styles import Alignment, PatternFill
+
+    if sty is None:
+        sty = xlsx_base_styles()
+
+    ws = wb.create_sheet("Keyword Matrix")
+    get_col_letter = openpyxl.utils.get_column_letter
+
+    header_fill = sty["header_fill"]
+    header_font = sty["header_font"]
+    base_font = sty["base_font"]
+    total_font = sty["total_font"]
+    diag_fill = PatternFill(start_color="D6E4F0", end_color="D6E4F0", fill_type="solid")
+
+    # Normalize keywords to lowercase for matching
+    kw_lower = [kw.lower() for kw in keywords]
+    kw_display = list(keywords)
+
+    # Build per-row keyword sets (combine row + desc matches)
+    row_kw_sets: list[set[str]] = []
+    for row in items:
+        kws_r = row.get("matched_keywords_row", [])
+        kws_d = row.get("matched_keywords_desc", [])
+        if isinstance(kws_r, str):
+            kws_r = json.loads(kws_r) if kws_r else []
+        if isinstance(kws_d, str):
+            kws_d = json.loads(kws_d) if kws_d else []
+        combined = {k.lower() for k in kws_r} | {k.lower() for k in kws_d}
+        if combined:
+            row_kw_sets.append(combined)
+
+    # Compute co-occurrence counts
+    n = len(kw_lower)
+    matrix = [[0] * n for _ in range(n)]
+    for kw_set in row_kw_sets:
+        present = [i for i in range(n) if kw_lower[i] in kw_set]
+        for i in present:
+            for j in present:
+                matrix[i][j] += 1
+
+    # Filter to only keywords that have at least one match
+    active = [i for i in range(n) if matrix[i][i] > 0]
+    if not active:
+        ws.cell(row=1, column=1, value="No keyword matches found.").font = base_font
+        return
+
+    # Write headers
+    ws.cell(row=1, column=1, value="Keyword").font = header_font
+    ws.cell(row=1, column=1).fill = header_fill
+    for ci, idx in enumerate(active):
+        c = ws.cell(row=1, column=2 + ci, value=kw_display[idx])
+        c.font = header_font
+        c.fill = header_fill
+        c.alignment = Alignment(horizontal="center", text_rotation=90)
+
+    # Total column header
+    c = ws.cell(row=1, column=2 + len(active), value="Total")
+    c.font = header_font
+    c.fill = header_fill
+
+    # Data rows
+    for ri, idx_i in enumerate(active):
+        ws.cell(row=2 + ri, column=1, value=kw_display[idx_i]).font = base_font
+        row_total = 0
+        for ci, idx_j in enumerate(active):
+            val = matrix[idx_i][idx_j]
+            cell = ws.cell(row=2 + ri, column=2 + ci, value=val if val > 0 else "")
+            cell.font = base_font
+            cell.alignment = Alignment(horizontal="center")
+            if idx_i == idx_j:
+                cell.fill = diag_fill
+                cell.font = total_font
+            row_total += val if idx_i != idx_j else 0
+        # Total = diagonal (self-match count)
+        ws.cell(row=2 + ri, column=2 + len(active), value=matrix[idx_i][idx_i]).font = total_font
+
+    # Column widths
+    ws.column_dimensions["A"].width = 28
+    for ci in range(len(active) + 1):
+        ws.column_dimensions[get_col_letter(2 + ci)].width = 6
 
     ws.freeze_panes = "B2"
 

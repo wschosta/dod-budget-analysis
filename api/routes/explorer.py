@@ -533,6 +533,7 @@ def download_explorer_xlsx(
         include_description=include_description,
         include_intotal=include_intotal,
         sheet_title="Explorer",
+        keywords=keyword_list,
     )
 
     return Response(
