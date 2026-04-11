@@ -1178,25 +1178,31 @@ def _build_xlsx_summary(
         c.fill = header_fill
         c.alignment = Alignment(horizontal="center")
 
+        # Excel 365 dynamic array functions need _xlfn. / _xlws. prefixes
+        # when written via openpyxl, otherwise Excel flags them as corrupt.
+        _LET = "_xlfn.LET"
+        _SORT = "_xlfn.SORT"
+        _UNIQUE = "_xlfn.UNIQUE"
+        _MAP = "_xlfn.MAP"
+        _LAMBDA = "_xlfn.LAMBDA"
+        _FILTER = "_xlfn._xlws.FILTER"
+
         if criteria:
-            # A2: Filtered unique PEs — only those with non-zero totals
             sumifs_parts = [f"SUMIFS({vr[yi]},{pe_rng},pe,{ir[yi]},\"{criteria}\")" for yi in range(n_years)]
             any_nonzero = "+".join(sumifs_parts)
             pe_formula = (
-                f"=LET(pes,SORT(UNIQUE({pe_rng})),"
-                f"tots,MAP(pes,LAMBDA(pe,{any_nonzero})),"
-                f'FILTER(pes,tots<>0,"(none)"))'
+                f"={_LET}(pes,{_SORT}({_UNIQUE}({pe_rng})),"
+                f"tots,{_MAP}(pes,{_LAMBDA}(pe,{any_nonzero})),"
+                f'{_FILTER}(pes,tots<>0,"(none)"))'
             )
             ws.cell(row=2, column=1, value=pe_formula).font = base_font
 
-            # B2+: MAP+SUMIFS for each FY year (spills to match PE column)
             for yi in range(n_years):
-                formula = f'=MAP($A$2#,LAMBDA(pe,SUMIFS({vr[yi]},{pe_rng},pe,{ir[yi]},"{criteria}")))'
+                formula = f'={_MAP}($A$2#,{_LAMBDA}(pe,SUMIFS({vr[yi]},{pe_rng},pe,{ir[yi]},"{criteria}")))'
                 c = ws.cell(row=2, column=2 + yi, value=formula)
                 c.font = base_font
                 c.number_format = money_fmt
         else:
-            # Grand Total: PE list from Y sheet, values = Y + P
             ws.cell(row=2, column=1, value=f"='{y_sheet}'!$A$2#").font = base_font
             for yi in range(n_years):
                 yl = get_col_letter(2 + yi)
