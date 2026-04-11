@@ -35,6 +35,7 @@ _ACRONYM_PAIRS: list[tuple[str, str]] = [
     ("HACM", "hypersonic attack cruise missile"),
     ("LRHW", "long range hypersonic weapon"),
     ("C-HGB", "common hypersonic glide body"),
+    ("CPS", "conventional prompt strike"),
     ("GPI", "glide phase interceptor"),
     ("HBTSS", "hypersonic and ballistic tracking space sensor"),
     ("NGI", "next generation interceptor"),
