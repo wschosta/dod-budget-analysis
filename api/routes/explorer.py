@@ -468,6 +468,7 @@ def download_explorer_xlsx(
     include_source: bool = Body(True, description="Include FY Source columns"),
     include_description: bool = Body(True, description="Include FY Description columns"),
     include_intotal: bool = Body(True, description="Include per-year In Total (Y/N/P) columns"),
+    extra_pes: str = Body("", description="Comma-separated PE numbers (must match build call)"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> Response:
     """Generate XLSX with user-selected fixed columns and FY data.
@@ -480,7 +481,8 @@ def download_explorer_xlsx(
     except ValueError as e:
         return Response(content=str(e).encode(), media_type="text/plain", status_code=400)
 
-    kw_id = _keyword_set_id(keyword_list)
+    pe_list = [pe.strip().upper() for pe in extra_pes.split(",") if pe.strip()] if extra_pes else []
+    kw_id = _keyword_set_id(keyword_list, pe_list or None)
     cache_table = _cache_table_name(kw_id)
 
     try:

@@ -681,8 +681,8 @@ document.addEventListener('dragend', () => {
 
 /* ── Download ───────────────────────────────────────────── */
 function downloadXlsx() {
-  if (!currentKeywords.length || !selectedColumns.length) {
-    alert('No keywords or columns selected.');
+  if (!currentKeywords.length) {
+    alert('No keywords entered. Run a search first.');
     return;
   }
 
@@ -690,6 +690,7 @@ function downloadXlsx() {
   const includeIntotal = document.getElementById('include-intotal').checked;
   const includeSource = document.getElementById('include-source').checked;
   const includeDescription = document.getElementById('include-description').checked;
+  const dlPes = (document.getElementById('extra-pes-input').value || '').trim();
 
   fetch('/api/v1/explorer/download/xlsx', {
     method: 'POST',
@@ -701,6 +702,7 @@ function downloadXlsx() {
       include_source: includeSource,
       include_description: includeDescription,
       include_intotal: includeIntotal,
+      extra_pes: dlPes,
     }),
   })
   .then(resp => {
