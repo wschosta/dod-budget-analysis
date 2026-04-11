@@ -541,8 +541,9 @@ let selectedColumns = [];
 function renderColumnPicker(data) {
   // FY columns are now auto-generated — only show fixed/static columns in the picker
   const isFyCol = c => /^FY\d{4}\s/.test(c) || c === 'In Totals';
-  selectedColumns = data.default_columns.filter(c => !isFyCol(c));
-  renderAvailableList(data.available_columns.filter(c => !isFyCol(c)));
+  const fixedCols = data.available_columns.filter(c => !isFyCol(c));
+  selectedColumns = [...fixedCols];
+  renderAvailableList(fixedCols);
   renderSelectedList();
 }
 
