@@ -1887,9 +1887,9 @@ def build_cache_table(
         key = (d["pe_number"], d["_project_code"] or clean_title)
         r2_by_code.setdefault(key, []).append(d)
 
-    r1_rows: list[dict] = []
-    r2_by_code: dict[tuple[str, str | None], list[dict]] = {}
-    other_rows: list[dict] = []
+    r1_rows: list[dict[str, Any]] = []
+    r2_by_code: dict[tuple[str, str | None], list[dict[str, Any]]] = {}
+    other_rows: list[dict[str, Any]] = []
 
     # Collect budget_lines rows (r2_pdf + non-R2 types)
     for r in rows:
@@ -1909,7 +1909,7 @@ def build_cache_table(
     # description matches have their R-1 row marked with matched_keywords_desc.
     pe_desc_kws: dict[str, list[str]] = {}
     try:
-        all_pe_nums = sorted({d.get("pe_number") for d in other_rows if d.get("pe_number")}
+        all_pe_nums: list[str] = sorted({str(d["pe_number"]) for d in other_rows if d.get("pe_number")}
                              | {d.get("pe_number", "") for group in r2_by_code.values() for d in group})
         if all_pe_nums:
             ph = ", ".join("?" for _ in all_pe_nums)
@@ -1977,7 +1977,7 @@ def build_cache_table(
     # Uses Levenshtein distance < 20% to merge near-duplicates.
     # Prefers r2 (Excel) metadata over r2_pdf; keeps longer title.
     # Keeps rows separate if titles differ substantially (e.g. Mk4A vs Mk4B).
-    def _merge_into(target: dict, source: dict) -> None:
+    def _merge_into(target: dict[str, Any], source: dict[str, Any]) -> None:
         """Merge source row into target: FY amounts + consolidated titles."""
         # Prefer r2 exhibit_type
         if source.get("exhibit_type") == "r2" and target.get("exhibit_type") != "r2":
@@ -2007,7 +2007,7 @@ def build_cache_table(
         # Sort: r2 (Excel) first so they become the merge target
         group.sort(key=lambda d: (0 if d.get("exhibit_type") == "r2" else 1))
 
-        clusters: list[dict] = []
+        clusters: list[dict[str, Any]] = []
         for row in group:
             title = row.get("_clean_title_only", "").lower()
             matched = False
@@ -2078,8 +2078,8 @@ def build_cache_table(
 
     # Dedup R1 rows: same PE may have variant titles across FYs.
     # Keep the longest title, merge FY amounts.
-    r1_dedup: dict[str, dict] = {}
-    deduped_other: list[dict] = []
+    r1_dedup: dict[str, dict[str, Any]] = {}
+    deduped_other: list[dict[str, Any]] = []
     for d in other_rows:
         if d.get("exhibit_type") == "r1":
             pe = d["pe_number"]
@@ -2118,7 +2118,7 @@ def build_cache_table(
         if (not ba_norm or ba_norm == "Unknown") and d.get("budget_activity_title"):
             ba_norm = d["budget_activity_title"]  # may have been set by R1 inheritance
         elif not ba_norm or ba_norm == "Unknown":
-            ba_norm = r1_ba.get(d["pe_number"])
+            ba_norm = r1_ba.get(d["pe_number"]) or ba_norm
 
         com_val = d.get("_inherited_com") or color_of_money(d.get("appropriation_title"))
 

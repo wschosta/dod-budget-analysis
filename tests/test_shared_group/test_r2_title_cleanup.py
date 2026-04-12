@@ -1,7 +1,5 @@
 """Tests for R-2 PDF sub-element title cleanup in utils/normalization.py."""
 
-import pytest
-
 from utils.normalization import clean_r2_title, normalize_r2_project_code
 
 
