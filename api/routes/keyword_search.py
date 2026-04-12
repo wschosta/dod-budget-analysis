@@ -2015,7 +2015,31 @@ def build_cache_table(
         row.pop("_project_code", None)
         row.pop("_clean_title_only", None)
 
-    all_rows = other_rows + list(merged_r2.values())
+    # Dedup R1 rows: same PE may have variant titles across FYs.
+    # Keep the longest title, merge FY amounts.
+    r1_dedup: dict[str, dict] = {}
+    deduped_other: list[dict] = []
+    for d in other_rows:
+        if d.get("exhibit_type") == "r1":
+            pe = d["pe_number"]
+            if pe in r1_dedup:
+                existing = r1_dedup[pe]
+                if len(d.get("line_item_title", "")) > len(existing.get("line_item_title", "")):
+                    existing["line_item_title"] = d["line_item_title"]
+                for yr in year_range:
+                    col = f"fy{yr}"
+                    if existing.get(col) is None and d.get(col) is not None:
+                        existing[col] = d[col]
+                        ref_col = f"fy{yr}_ref"
+                        if d.get(ref_col):
+                            existing[ref_col] = d[ref_col]
+            else:
+                r1_dedup[pe] = d
+                deduped_other.append(d)
+        else:
+            deduped_other.append(d)
+
+    all_rows = deduped_other + list(merged_r2.values())
 
     count = 0
     for d in all_rows:
