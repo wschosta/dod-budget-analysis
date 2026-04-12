@@ -477,6 +477,13 @@ def extract_r2_from_pdfs(
         mult = result["unit_multiplier"]
 
         for label, fy_pairs in result["fy_amounts"].items():
+            # Clean title: strip trailing amounts, reject junk rows
+            from utils.normalization import clean_r2_title
+            cleaned_code, cleaned_label = clean_r2_title(label)
+            if cleaned_code is None and cleaned_label is None:
+                continue
+            label = f"{cleaned_code}: {cleaned_label}" if cleaned_code else (cleaned_label or label)
+
             row_data = {
                 "source_file": source_file,
                 "exhibit_type": "r2_pdf",

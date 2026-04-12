@@ -7,6 +7,8 @@ to keep the mappings consistent.
 
 from __future__ import annotations
 
+import re
+
 # ---------------------------------------------------------------------------
 # Organization name normalization
 # ---------------------------------------------------------------------------
@@ -309,4 +311,123 @@ def parse_appropriation(
         if keyword in lower:
             return code, s
 
+    return None, s
+
+
+# ---------------------------------------------------------------------------
+# R-2 PDF sub-element title cleanup
+# ---------------------------------------------------------------------------
+# PDF-mined R-2 titles often contain embedded budget amounts, table
+# headers/footers, or variant project codes. These constants and functions
+# provide centralized cleanup used by the parser, cache builder, and pipeline.
+
+R2_JUNK_TITLES: frozenset[str] = frozenset({
+    "Total",
+    "Total PE",
+    "Total PE Cost",
+    "Total Cost",
+    "Total Program Element",
+    "Total Program Element Cost",
+    "Total Program Element (PE)",
+    "Total Program Element (PE) Cost",
+    "R-1 SHOPPING LIST - Item No.",
+    "R-1 SHOPPING LIST",
+})
+
+R2_JUNK_PREFIXES: tuple[str, ...] = (
+    "Total ",
+    "R-1 ",
+    "# FY",
+    "MDAP",
+    "MAIS",
+    "Note:",
+    "* ",
+    "Quantity of",
+)
+
+# Trailing budget amounts: sequences like "4,439.845 101.694 - *" at end of string.
+# Requires .\d{2,3} to distinguish from calibers like "2.75 Inch" mid-title.
+_TRAILING_AMOUNTS_RE = re.compile(
+    r"(?:\s+(?:[\d,]+\.\d{2,3}|-{1,2}|\*{1,2})\s*)+\s*$"
+)
+
+# Project code with E-prefix: E1662 → 1662
+_E_PREFIX_CODE_RE = re.compile(r"^[Ee](\d{3,5})$")
+
+# Project code extraction: "1662: Title" or "E1662 Title" or "1662 Title"
+_CODE_COLON_RE = re.compile(r"^([A-Za-z]?\d{3,5}):\s*(.+)")
+_CODE_SPACE_RE = re.compile(r"^([A-Za-z]?\d{3,5})\s+(.+)")
+
+
+def normalize_r2_project_code(raw_code: str | None) -> str | None:
+    """Normalize a project code for dedup grouping.
+
+    Strips E-prefix (E1662 → 1662) and leading zeros.
+    """
+    if not raw_code:
+        return None
+    m = _E_PREFIX_CODE_RE.match(raw_code)
+    if m:
+        return m.group(1).lstrip("0") or m.group(1)
+    # Strip E-prefix even with trailing alpha (e.g., E62 → 62)
+    if raw_code.startswith(("E", "e")) and raw_code[1:].isdigit():
+        return raw_code[1:].lstrip("0") or raw_code[1:]
+    return raw_code
+
+
+def clean_r2_title(raw_title: str) -> tuple[str | None, str | None]:
+    """Clean a PDF-mined R-2 sub-element title.
+
+    Returns ``(project_code, clean_title)`` or ``(None, None)`` if the
+    title is junk (table header/footer/total row). Idempotent.
+
+    Examples::
+
+        >>> clean_r2_title("1662: F/A-18 Improvement 4,439.845 101.694 -")
+        ('1662', 'F/A-18 Improvement')
+        >>> clean_r2_title("E1662 F/A-18 Improvements")
+        ('1662', 'F/A-18 Improvements')
+        >>> clean_r2_title("Total PE")
+        (None, None)
+        >>> clean_r2_title("D549 2.75 Inch Anti-Air TD")
+        ('D549', '2.75 Inch Anti-Air TD')
+    """
+    if not raw_title:
+        return None, None
+
+    s = raw_title.strip()
+    if not s:
+        return None, None
+
+    # Strip trailing budget amounts (anchored to end of string)
+    s = _TRAILING_AMOUNTS_RE.sub("", s).strip()
+    # Strip trailing lone dashes
+    s = re.sub(r"\s+-\s*$", "", s).strip()
+
+    if not s:
+        return None, None
+
+    # Reject junk titles
+    if s in R2_JUNK_TITLES:
+        return None, None
+    s_stripped = re.sub(r"\s*[\*\-]+\s*$", "", s).strip()
+    if s_stripped in R2_JUNK_TITLES:
+        return None, None
+    if s.startswith(R2_JUNK_PREFIXES):
+        return None, None
+
+    # Extract project code
+    m = _CODE_COLON_RE.match(s)
+    if m:
+        code = normalize_r2_project_code(m.group(1))
+        title = m.group(2).strip()
+        return code, title
+
+    m = _CODE_SPACE_RE.match(s)
+    if m:
+        code = normalize_r2_project_code(m.group(1))
+        title = m.group(2).strip()
+        return code, title
+
+    # No code found — return title as-is
     return None, s

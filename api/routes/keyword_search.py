@@ -411,18 +411,19 @@ def parse_r2_cost_block(
                 results[-1]["project_title"] += " " + line.strip()
             continue
 
-        first_num_pos = re.search(r"\s[\d,]+\.\d{3}|\s-\s|\s-$", line)
+        first_num_pos = re.search(r"\s[\d,]+\.\d{2,3}|\s-\s|\s-$", line)
         if first_num_pos:
             prefix = line[: first_num_pos.start()].strip()
         else:
             prefix = line.strip()
 
-        code_m = re.match(r"^([A-Z0-9]+):\s*(.+)", prefix)
-        if code_m:
-            project_code = code_m.group(1)
-            project_title = code_m.group(2).strip()
-        else:
-            project_code = None
+        # Clean the extracted title: strip any remaining trailing amounts,
+        # normalize project codes, and reject junk rows.
+        from utils.normalization import clean_r2_title
+        project_code, project_title = clean_r2_title(prefix)
+        if project_code is None and project_title is None:
+            continue  # junk row (table header/footer/total)
+        if project_title is None:
             project_title = prefix
 
         all_nums = num_pattern.findall(line)
@@ -522,9 +523,18 @@ def consolidate_r2_timeseries(
     items: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Collapse multiple budget-submission rows into one golden row per project."""
+    from utils.normalization import normalize_r2_project_code
+
     groups: dict[tuple[str, str | None], list[dict[str, Any]]] = {}
     for item in items:
-        key = (item["pe_number"], item.get("project_code"))
+        raw_code = item.get("project_code")
+        norm_code = normalize_r2_project_code(raw_code)
+        # Fallback: extract code from title if none parsed
+        if norm_code is None:
+            m = re.match(r"^[Ee]?(\d{3,5})\s+", item.get("project_title", ""))
+            if m:
+                norm_code = m.group(1).lstrip("0") or m.group(1)
+        key = (item["pe_number"], norm_code)
         groups.setdefault(key, []).append(item)
 
     results: list[dict[str, Any]] = []
@@ -1653,6 +1663,8 @@ def build_cache_table(
     at key milestones so callers can surface build progress.
     """
 
+    from utils.normalization import clean_r2_title as _clean_title
+
     def _progress(step: str, **kw: Any) -> None:
         if progress_callback:
             progress_callback(step, kw)
@@ -1785,9 +1797,40 @@ def build_cache_table(
     placeholders_insert = ", ".join("?" for _ in insert_cols)
     insert_sql = f"INSERT INTO {cache_table} ({', '.join(insert_cols)}) VALUES ({placeholders_insert})"
 
-    count = 0
+    # Pre-pass: clean and deduplicate r2_pdf rows by (pe, cleaned_title).
+    # Multiple budget_lines rows with dirty titles like "1662: F/A-18 Improvement 4,439.845..."
+    # clean to the same title and should merge, keeping the first non-null FY amount per year.
+    r2_pdf_dedup: dict[tuple[str, str], dict] = {}
+    non_r2_pdf: list[dict] = []
     for r in rows:
         d = dict(r)
+        if d.get("exhibit_type") == "r2_pdf":
+            raw = d.get("line_item_title", "")
+            cleaned_code, cleaned_title = _clean_title(raw)
+            if cleaned_code is None and cleaned_title is None:
+                continue
+            clean_title = f"{cleaned_code}: {cleaned_title}" if cleaned_code else (cleaned_title or raw)
+            key = (d["pe_number"], clean_title)
+            if key not in r2_pdf_dedup:
+                d["line_item_title"] = clean_title
+                r2_pdf_dedup[key] = d
+            else:
+                # Merge FY amounts: keep first non-null per year
+                existing = r2_pdf_dedup[key]
+                for yr in year_range:
+                    col = f"fy{yr}"
+                    if existing.get(col) is None and d.get(col) is not None:
+                        existing[col] = d[col]
+                        ref_col = f"fy{yr}_ref"
+                        if d.get(ref_col):
+                            existing[ref_col] = d[ref_col]
+        else:
+            non_r2_pdf.append(d)
+
+    all_rows = non_r2_pdf + list(r2_pdf_dedup.values())
+
+    count = 0
+    for d in all_rows:
         text_fields = [
             d.get("line_item_title"),
             d.get("account_title"),
@@ -1948,9 +1991,14 @@ def build_cache_table(
     pdf_count = 0
     for item in pdf_subelements:
         pe = item["pe_number"]
-        title = item["project_title"]
+        raw_title = item["project_title"]
         if item.get("project_code"):
-            title = f"{item['project_code']}: {title}"
+            raw_title = f"{item['project_code']}: {raw_title}"
+        # Final cleanup: strip trailing amounts, reject junk rows
+        cleaned_code, cleaned_title = _clean_title(raw_title)
+        if cleaned_code is None and cleaned_title is None:
+            continue
+        title = f"{cleaned_code}: {cleaned_title}" if cleaned_code else (cleaned_title or raw_title)
 
         row_kws = item.get("_matched_r2_keywords") or find_matched_keywords(
             [title], keywords
