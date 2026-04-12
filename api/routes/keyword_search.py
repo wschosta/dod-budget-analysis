@@ -955,7 +955,45 @@ def build_keyword_xlsx(
         "cf_red": wb.add_format({"bg_color": "#FFC7CE"}),
     }
 
-    # ── Headers (row 0, 0-indexed) ──
+    # ── Headers: two-row layout with merged FY cells ──
+    # Row 0: fixed column names + merged FY year cells
+    # Row 1: sub-column headers ($K, In Total, Source, Description, Desc Keywords)
+    fmt_merge = wb.add_format({
+        "bold": True, "font_size": 11, "font_color": "#FFFFFF",
+        "bg_color": "#2C3E50", "align": "center", "valign": "vcenter", "border": 1,
+    })
+    fmt_sub = wb.add_format({
+        "bold": True, "font_size": 10, "font_color": "#FFFFFF",
+        "bg_color": "#34495E", "align": "center", "border": 1,
+    })
+
+    # Fixed column headers (merged across rows 0-1)
+    for ci, (h, _) in enumerate(fixed_columns):
+        ws.merge_range(0, ci, 1, ci, h, fmt_merge)
+
+    # FY column groups with merged year header
+    col = fixed_count
+    for yr in active_years:
+        sub_cols = ["($K)"]
+        if include_intotal:
+            sub_cols.append("In Total")
+        if include_source:
+            sub_cols.append("Source")
+        if include_description:
+            sub_cols.append("Description")
+        if include_desc_keywords:
+            sub_cols.append("Desc Keywords")
+        # Merged FY header spanning sub-columns
+        if len(sub_cols) > 1:
+            ws.merge_range(0, col, 0, col + len(sub_cols) - 1, f"FY{yr} ($K)", fmt_merge)
+        else:
+            ws.write(0, col, f"FY{yr} ($K)", fmt_merge)
+        # Sub-column headers in row 1
+        for si, sub in enumerate(sub_cols):
+            ws.write(1, col + si, sub, fmt_sub)
+        col += len(sub_cols)
+
+    # Build flat header list for reference (used by autofilter range)
     headers: list[str] = [h for h, _ in fixed_columns]
     for yr in active_years:
         headers.append(f"FY{yr} ($K)")
@@ -968,11 +1006,8 @@ def build_keyword_xlsx(
         if include_desc_keywords:
             headers.append(f"FY{yr} Desc Keywords")
 
-    for ci, h in enumerate(headers):
-        ws.write(0, ci, h, fmt["header"])
-
-    # ── Data rows (row_num is 1-based for formula references) ──
-    first_data_row = 2
+    # ── Data rows (row_num is 1-based for formula references, data starts row 3) ──
+    first_data_row = 3
     row_num = first_data_row
     for row in items:
         r0 = row_num - 1  # 0-indexed for ws.write
@@ -996,11 +1031,16 @@ def build_keyword_xlsx(
                 ws.write_blank(r0, fc.val - 1, None, fmt["base"])
 
             if fc.intotal:
-                # Per-FY Y/N/P logic based on description keyword matches
+                # Y/N/P logic: title match → Y, desc match → Y (R2) or P (R1 w/o R2 match)
+                has_title_match = bool(row.get("matched_keywords_row") or row.get("matched_keywords_desc"))
                 fy_key = (pe, str(yr))
-                if fy_key in fy_desc_kws and et in ("r2", "r2_pdf"):
+                has_fy_desc_match = fy_key in fy_desc_kws
+
+                if has_title_match:
                     in_total = "Y"
-                elif fy_key in fy_desc_kws and et == "r1":
+                elif has_fy_desc_match and et in ("r2", "r2_pdf"):
+                    in_total = "Y"
+                elif has_fy_desc_match and et == "r1":
                     in_total = "N" if pe in pe_has_r2_match else "P"
                 else:
                     in_total = "N"
@@ -1115,16 +1155,34 @@ def build_keyword_xlsx(
             ws.set_column(fc.desc_kw - 1, fc.desc_kw - 1, 25)
 
     freeze_col = min(5, fixed_count + 1)
-    ws.freeze_panes(1, freeze_col - 1)
-    ws.autofilter(0, 0, max(last_data_row, row_num) - 1, len(headers) - 1)
+    ws.freeze_panes(2, freeze_col - 1)
+    ws.autofilter(1, 0, max(last_data_row, row_num) - 1, len(headers) - 1)
 
     # ── Selected sheet (dynamic FILTER of data sheet, Y or P rows only) ──
     if include_intotal and last_data_row >= first_data_row and active_years:
         ws_sel = wb.add_worksheet("Selected")
 
-        # Same headers as data sheet
-        for ci, h in enumerate(headers):
-            ws_sel.write(0, ci, h, fmt["header"])
+        # Same two-row merged header as data sheet
+        for ci, (h, _) in enumerate(fixed_columns):
+            ws_sel.merge_range(0, ci, 1, ci, h, fmt_merge)
+        sel_col = fixed_count
+        for yr in active_years:
+            sub_cols = ["($K)"]
+            if include_intotal:
+                sub_cols.append("In Total")
+            if include_source:
+                sub_cols.append("Source")
+            if include_description:
+                sub_cols.append("Description")
+            if include_desc_keywords:
+                sub_cols.append("Desc Keywords")
+            if len(sub_cols) > 1:
+                ws_sel.merge_range(0, sel_col, 0, sel_col + len(sub_cols) - 1, f"FY{yr} ($K)", fmt_merge)
+            else:
+                ws_sel.write(0, sel_col, f"FY{yr} ($K)", fmt_merge)
+            for si, sub in enumerate(sub_cols):
+                ws_sel.write(1, sel_col + si, sub, fmt_sub)
+            sel_col += len(sub_cols)
 
         # FILTER formula: show rows where ANY In Total column = "Y" or "P"
         data_range = f"'{sheet_title}'!$A${first_data_row}:${_col_letter(len(headers))}${last_data_row}"
@@ -1135,9 +1193,9 @@ def build_keyword_xlsx(
                 it_checks.append(f'({it_col}="Y")+({it_col}="P")')
         filter_crit = "+".join(it_checks)
         filter_formula = f"=FILTER({data_range},{filter_crit},\"No matching rows\")"
-        ws_sel.write_dynamic_array_formula(1, 0, 1, 0, filter_formula, fmt["base"])
+        ws_sel.write_dynamic_array_formula(2, 0, 2, 0, filter_formula, fmt["base"])
 
-        # Copy column widths from data sheet
+        # Copy column widths + conditional formatting from data sheet
         for ci, (header, _field) in enumerate(fixed_columns):
             ws_sel.set_column(ci, ci, _COL_WIDTH_DEFAULTS.get(header, 14))
         for fc in fy_cols:
@@ -1148,8 +1206,47 @@ def build_keyword_xlsx(
                 ws_sel.set_column(fc.src - 1, fc.src - 1, 30)
             if fc.desc:
                 ws_sel.set_column(fc.desc - 1, fc.desc - 1, 40)
+            if fc.desc_kw:
+                ws_sel.set_column(fc.desc_kw - 1, fc.desc_kw - 1, 25)
 
-        ws_sel.freeze_panes(1, freeze_col - 1)
+        # Conditional formatting on Selected sheet (same as data sheet)
+        if intotal_letters and last_data_row >= first_data_row:
+            sel_r1, sel_r2 = 2, 2000  # generous range for spill
+            for fc in fy_cols:
+                data_cols_0 = [fc.val - 1]
+                if fc.src:
+                    data_cols_0.append(fc.src - 1)
+                if fc.desc:
+                    data_cols_0.append(fc.desc - 1)
+                for c0 in data_cols_0:
+                    ws_sel.conditional_format(sel_r1, c0, sel_r2, c0, {
+                        "type": "formula",
+                        "criteria": f'=${fc.intotal_l}3="Y"',
+                        "format": fmt["cf_bold"],
+                    })
+                    ws_sel.conditional_format(sel_r1, c0, sel_r2, c0, {
+                        "type": "formula",
+                        "criteria": f'=${fc.intotal_l}3="N"',
+                        "format": fmt["cf_italic_gray"],
+                    })
+                if fc.intotal:
+                    ic0 = fc.intotal - 1
+                    for val, key in [("Y", "cf_green"), ("P", "cf_yellow"), ("N", "cf_red")]:
+                        ws_sel.conditional_format(sel_r1, ic0, sel_r2, ic0, {
+                            "type": "formula",
+                            "criteria": f'=${fc.intotal_l}3="{val}"',
+                            "format": fmt[key],
+                        })
+            or_parts = ",".join(f'${lt}3="Y"' for lt in intotal_letters)
+            and_parts = ",".join(f'${lt}3="N"' for lt in intotal_letters)
+            ws_sel.conditional_format(sel_r1, 0, sel_r2, fixed_count - 1, {
+                "type": "formula", "criteria": f"=OR({or_parts})", "format": fmt["cf_bold"],
+            })
+            ws_sel.conditional_format(sel_r1, 0, sel_r2, fixed_count - 1, {
+                "type": "formula", "criteria": f"=AND({and_parts})", "format": fmt["cf_italic_gray"],
+            })
+
+        ws_sel.freeze_panes(2, freeze_col - 1)
 
     # ── Summary sheets ──
     if build_summary and include_intotal:
