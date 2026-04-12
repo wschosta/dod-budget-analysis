@@ -41,6 +41,35 @@ from utils.fuzzy_match import expand_keywords
 
 logger = logging.getLogger(__name__)
 
+# ── Hypersonics preset ────────────────────────────────────────────────────────
+
+_HYPERSONICS_KEYWORDS = [
+    # Generic / cross-program
+    "hypersonic", "boost glide", "glide body", "glide vehicle", "scramjet",
+    # Offensive — Air Force
+    "ARRW", "AGM-183", "HACM", "HCSW",
+    # Offensive — Army
+    "LRHW", "Dark Eagle", "OpFires",
+    # Offensive — Navy / Joint
+    "C-HGB", "CHGB", "conventional prompt strike", "prompt strike",
+    # Offensive — Navy / SM-6 / OASUW
+    "offensive anti", "oasuw", "standard missile 6", "sm-6",
+    "blk ib", "increment ii",
+    # Generic speed / regime
+    "high speed", "mach ",  # trailing space prevents matching "machine"
+    "conventional prompt",
+    # Defensive / tracking
+    "Glide Phase Interceptor", "HBTSS",
+]
+
+_EXTRA_PES = [
+    "0101101F", "0210600A", "0601102F", "0601153N", "0602102F",
+    "0602114N", "0602235N", "0602602F", "0602750N", "0603032F",
+    "0603183D8Z", "0603273F", "0603467E", "0603601F", "0603673N",
+    "0603680D8Z", "0603680F", "0603941D8Z", "0603945D8Z", "0604250D8Z",
+    "0604331D8Z", "0604940D8Z", "0605456A", "0607210D8Z", "0902199D8Z",
+]
+
 router = APIRouter(prefix="/explorer", tags=["explorer"])
 
 # ── Input validation constants ────────────────────────────────────────────────
@@ -578,8 +607,6 @@ def download_explorer_xlsx(
 )
 def get_preset(name: str) -> dict:
     """Return keywords and extra_pes for a named search preset."""
-    from api.routes.hypersonics import _HYPERSONICS_KEYWORDS, _EXTRA_PES
-
     presets = {
         "hypersonics": {
             "keywords": _HYPERSONICS_KEYWORDS,

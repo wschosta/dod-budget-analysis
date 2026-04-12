@@ -352,33 +352,31 @@ _TRAILING_AMOUNTS_RE = re.compile(
     r"(?:\s+(?:[\d,]+\.\d{2,3}|-{1,2}|\*{1,2})\s*)+\s*$"
 )
 
-# Project code with E-prefix: E1662 → 1662
-_E_PREFIX_CODE_RE = re.compile(r"^[Ee](\d{3,5})$")
-
 # Project code extraction: "1662: Title" or "DD4: Title" or "672987: Title"
 # Allow 1-3 letters + 1-6 digits, or just digits, optionally with trailing dot.
 _CODE_COLON_RE = re.compile(r"^([A-Za-z]{0,3}\d{1,6})\.?:\s*(.+)")
 _CODE_SPACE_RE = re.compile(r"^([A-Za-z]{0,3}\d{1,6})\s+(.+)")
 
 
+_STRIP_PREFIXES = frozenset("EePpJjSs")
+
+
 def normalize_r2_project_code(raw_code: str | None) -> str | None:
     """Normalize a project code for dedup grouping.
 
-    Strips E-prefix (E1662 → 1662), P-prefix (P010 → 010), leading zeros,
-    and normalizes dash-separated codes (MED-01 → MED01).
+    Strips known single-letter prefixes on numeric codes (E1662 → 1662,
+    J0951 → 951, S0004 → 4, P010 → 10), trailing letter on numeric codes
+    (0004C → 4), leading zeros, and dash-separated codes (MED-01 → MED01).
     """
     if not raw_code:
         return None
     code = raw_code.strip()
-    # Strip E-prefix (E1662 → 1662)
-    m = _E_PREFIX_CODE_RE.match(code)
-    if m:
-        return m.group(1).lstrip("0") or m.group(1)
-    if code.startswith(("E", "e")) and code[1:].isdigit():
+    # Strip known single-letter prefix on numeric codes (E, P, J, S)
+    if len(code) > 1 and code[0] in _STRIP_PREFIXES and code[1:].isdigit():
         return code[1:].lstrip("0") or code[1:]
-    # Strip P-prefix on numeric codes (P010 → 010, OSD convention)
-    if code.startswith(("P", "p")) and code[1:].isdigit():
-        return code[1:].lstrip("0") or code[1:]
+    # Strip trailing letter on numeric codes (0004C → 4)
+    if len(code) > 1 and code[-1].isalpha() and code[:-1].isdigit():
+        return code[:-1].lstrip("0") or code[:-1]
     # Normalize dashes in alpha-numeric codes (MED-01 → MED01)
     if "-" in code:
         return code.replace("-", "")

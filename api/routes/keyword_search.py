@@ -1,11 +1,7 @@
 """
 Shared keyword-search cache-building logic.
 
-Extracted from hypersonics.py so that both the Hypersonics page and the
-generic Keyword Explorer can reuse the same pivot/cache/PDF-mining pipeline.
-
-All public functions accept ``keywords`` and ``cache_table`` (or similar)
-as parameters — no module-level keyword lists are hard-coded here.
+Provides the pivot/cache/PDF-mining pipeline used by the Keyword Explorer.
 """
 
 from __future__ import annotations
@@ -17,6 +13,7 @@ import sqlite3
 from typing import Any
 
 from utils.database import get_amount_columns
+from utils.normalization import R2_JUNK_TITLES
 from utils.strings import clean_narrative
 from utils.patterns import PE_NUMBER_STRICT_CI, PE_SUFFIX_PATTERN
 
@@ -57,6 +54,10 @@ _ORG_FROM_PATH = [
 _LEVENSHTEIN_THRESHOLD = 0.20
 _HIDDEN_LOOKUP_COL = 200
 _SPILL_MAX_ROW = 2000
+
+# Lowercased version of R2_JUNK_TITLES + "page" — used as fallback filter
+# when clean_r2_title() rejects a title that may still be legitimate.
+_SKIP_RAW_TITLES = frozenset(t.lower() for t in R2_JUNK_TITLES) | {"page"}
 
 
 # ── SQL / JSON helpers ──────────────────────────────────────────────────────
@@ -744,10 +745,14 @@ def annotate_cross_pe_lineages(
 
     if updates:
         conn.executemany(
-            f"UPDATE {cache_table} SET lineage_note = "
-            f"CASE WHEN lineage_note IS NOT NULL AND lineage_note != '' "
-            f"THEN lineage_note || '; ' || ? ELSE ? END "
-            f"WHERE id = ?",
+            f"""UPDATE {cache_table}
+                SET lineage_note = CASE
+                    WHEN lineage_note IS NOT NULL AND lineage_note != ''
+                    THEN lineage_note || '; ' || ?
+                    ELSE ?
+                END
+                WHERE id = ?""",
+            # note twice: once for the append branch, once for the else branch
             [(note, note, row_id) for note, row_id in updates],
         )
         logger.info("Cross-PE lineage: annotated %d R-2 rows", len(updates))
@@ -842,7 +847,7 @@ def cache_rows_to_dicts(
 def load_per_fy_descriptions(
     conn: sqlite3.Connection,
     pe_numbers: list[str] | set[str],
-    min_length: int = 80,
+    min_length: int = 20,
 ) -> dict[tuple[str, str], str]:
     """Return a ``(pe_number, fiscal_year)`` → description text map.
 
@@ -2159,7 +2164,9 @@ def build_cache_table(
         raw = d.get("line_item_title", "")
         cleaned_code, cleaned_title = _clean_title(raw)
         if cleaned_code is None and cleaned_title is None:
-            return
+            if not raw or raw.strip().lower() in _SKIP_RAW_TITLES:
+                return
+            cleaned_title = raw.strip()
         clean_title = f"{cleaned_code}: {cleaned_title}" if cleaned_code else (cleaned_title or raw)
         d["line_item_title"] = clean_title
         d["_project_code"] = normalize_r2_project_code(cleaned_code)
