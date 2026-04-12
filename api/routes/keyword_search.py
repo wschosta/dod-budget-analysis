@@ -858,6 +858,7 @@ _COL_WIDTH_DEFAULTS: dict[str, int] = {
     "Line Item / Sub-Program": 50, "Line Item Title": 50,
     "Budget Activity": 20, "Budget Activity (Normalized)": 20,
     "Appropriation": 30, "Color of Money": 12,
+    "Alternate Titles": 40,
     "Keywords (Row)": 20, "Keywords (Desc)": 20,
     "Description": 60, "In Totals": 10,
 }
@@ -1916,6 +1917,7 @@ def build_cache_table(
         "matched_keywords_row",
         "matched_keywords_desc",
         "description_text",
+        "lineage_note",
     ]
     for yr in year_range:
         insert_cols.extend([f"fy{yr}", f"fy{yr}_ref"])
@@ -2237,6 +2239,7 @@ def build_cache_table(
                 if _is_garbage_description(desc_map.get(d["pe_number"]))
                 else desc_map.get(d["pe_number"])
             ),
+            d.get("_consolidated_titles") or None,
         ]
         for yr in year_range:
             vals.append(d.get(f"fy{yr}"))
