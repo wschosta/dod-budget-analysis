@@ -1797,37 +1797,161 @@ def build_cache_table(
     placeholders_insert = ", ".join("?" for _ in insert_cols)
     insert_sql = f"INSERT INTO {cache_table} ({', '.join(insert_cols)}) VALUES ({placeholders_insert})"
 
-    # Pre-pass: clean and deduplicate r2_pdf rows by (pe, cleaned_title).
-    # Multiple budget_lines rows with dirty titles like "1662: F/A-18 Improvement 4,439.845..."
-    # clean to the same title and should merge, keeping the first non-null FY amount per year.
-    r2_pdf_dedup: dict[tuple[str, str], dict] = {}
-    non_r2_pdf: list[dict] = []
+    # ── Pre-pass: clean, deduplicate, and merge R-2 rows ──
+    #
+    # 1. Clean r2_pdf titles (strip trailing amounts, reject junk)
+    # 2. Exact-title dedup within r2_pdf (merge FY amounts)
+    # 3. Merge r2 + r2_pdf by project code (prefer r2 metadata)
+    # 4. Fuzzy dedup within same project code (Levenshtein < 20%)
+    # 5. Propagate R1 BA/CoM to all R2 rows for the same PE
+
+    from utils.normalization import normalize_r2_project_code
+    from utils.fuzzy_match import _levenshtein_distance
+
+    r1_rows: list[dict] = []      # R-1 level rows (for BA/CoM inheritance)
+    r2_rows: dict[tuple[str, str], dict] = {}  # (pe, project_code) → merged r2 row
+    other_rows: list[dict] = []    # amendment, ogsi, p1, etc.
+
     for r in rows:
         d = dict(r)
-        if d.get("exhibit_type") == "r2_pdf":
+        et = d.get("exhibit_type", "")
+
+        if et in ("r2", "r2_pdf"):
+            # Clean r2_pdf titles; r2 titles pass through clean_r2_title too for normalization
             raw = d.get("line_item_title", "")
             cleaned_code, cleaned_title = _clean_title(raw)
             if cleaned_code is None and cleaned_title is None:
                 continue
             clean_title = f"{cleaned_code}: {cleaned_title}" if cleaned_code else (cleaned_title or raw)
-            key = (d["pe_number"], clean_title)
-            if key not in r2_pdf_dedup:
-                d["line_item_title"] = clean_title
-                r2_pdf_dedup[key] = d
-            else:
-                # Merge FY amounts: keep first non-null per year
-                existing = r2_pdf_dedup[key]
-                for yr in year_range:
-                    col = f"fy{yr}"
-                    if existing.get(col) is None and d.get(col) is not None:
-                        existing[col] = d[col]
-                        ref_col = f"fy{yr}_ref"
-                        if d.get(ref_col):
-                            existing[ref_col] = d[ref_col]
-        else:
-            non_r2_pdf.append(d)
+            d["line_item_title"] = clean_title
+            d["_project_code"] = normalize_r2_project_code(cleaned_code)
+            d["_clean_title_only"] = cleaned_title or clean_title
 
-    all_rows = non_r2_pdf + list(r2_pdf_dedup.values())
+            key = (d["pe_number"], d["_project_code"] or clean_title)
+            if key in r2_rows:
+                existing = r2_rows[key]
+                # Prefer r2 (Excel) metadata over r2_pdf
+                if et == "r2" and existing.get("exhibit_type") == "r2_pdf":
+                    d["exhibit_type"] = "r2"
+                    for yr in year_range:
+                        col = f"fy{yr}"
+                        if d.get(col) is None and existing.get(col) is not None:
+                            d[col] = existing[col]
+                            ref_col = f"fy{yr}_ref"
+                            if existing.get(ref_col):
+                                d[ref_col] = existing[ref_col]
+                    # Track consolidated titles
+                    prev = existing.get("_consolidated", [])
+                    if existing["line_item_title"] != d["line_item_title"]:
+                        prev.append(existing["line_item_title"])
+                    d["_consolidated"] = prev
+                    r2_rows[key] = d
+                else:
+                    # Merge FY amounts into existing (keep first non-null)
+                    for yr in year_range:
+                        col = f"fy{yr}"
+                        if existing.get(col) is None and d.get(col) is not None:
+                            existing[col] = d[col]
+                            ref_col = f"fy{yr}_ref"
+                            if d.get(ref_col):
+                                existing[ref_col] = d[ref_col]
+                    # Track consolidated title
+                    if d["line_item_title"] != existing["line_item_title"]:
+                        existing.setdefault("_consolidated", []).append(d["line_item_title"])
+            else:
+                d["_consolidated"] = []
+                r2_rows[key] = d
+
+        elif et == "r1":
+            r1_rows.append(d)
+            other_rows.append(d)
+        else:
+            other_rows.append(d)
+
+    # Fuzzy dedup: within same (pe, project_code), merge near-duplicates
+    # Group r2_rows by (pe, project_code)
+    code_groups: dict[tuple[str, str | None], list[str]] = {}
+    for key in r2_rows:
+        pe, code = key
+        code_groups.setdefault((pe, code), []).append(key[1])
+
+    merged_r2: dict[tuple[str, str], dict] = {}
+    for (pe, code), _codes in code_groups.items():
+        group_keys = [(pe, code)]  # all keys with this (pe, code)
+        group_rows = [r2_rows[k] for k in group_keys if k in r2_rows]
+
+        # Within this code group, fuzzy-merge by title similarity
+        merged_in_group: list[dict] = []
+        for row in group_rows:
+            title = row.get("_clean_title_only", "")
+            matched = False
+            for existing in merged_in_group:
+                ex_title = existing.get("_clean_title_only", "")
+                shorter = min(len(title), len(ex_title))
+                if shorter == 0:
+                    continue
+                dist = _levenshtein_distance(title.lower(), ex_title.lower())
+                if dist / max(shorter, 1) < 0.20:
+                    # Merge: keep longer title, merge FY amounts
+                    if len(title) > len(ex_title):
+                        existing["line_item_title"] = row["line_item_title"]
+                        existing["_clean_title_only"] = title
+                    for yr in year_range:
+                        col = f"fy{yr}"
+                        if existing.get(col) is None and row.get(col) is not None:
+                            existing[col] = row[col]
+                            ref_col = f"fy{yr}_ref"
+                            if row.get(ref_col):
+                                existing[ref_col] = row[ref_col]
+                    if row["line_item_title"] != existing["line_item_title"]:
+                        existing.setdefault("_consolidated", []).append(row["line_item_title"])
+                    existing["_consolidated"].extend(row.get("_consolidated", []))
+                    matched = True
+                    break
+            if not matched:
+                merged_in_group.append(row)
+
+        for row in merged_in_group:
+            mkey = (row["pe_number"], row["line_item_title"])
+            merged_r2[mkey] = row
+
+    # Propagate R1 BA/CoM to R2 rows
+    r1_ba: dict[str, str] = {}
+    r1_com: dict[str, str] = {}
+    for r1 in r1_rows:
+        pe = r1["pe_number"]
+        ba = normalize_budget_activity(r1.get("budget_activity"), r1.get("budget_activity_title"))
+        com = color_of_money(r1.get("appropriation_title"))
+        if ba and ba != "Unknown":
+            r1_ba[pe] = ba
+        if com and com != "Unknown":
+            r1_com[pe] = com
+
+    for row in merged_r2.values():
+        pe = row["pe_number"]
+        ba_norm = normalize_budget_activity(row.get("budget_activity"), row.get("budget_activity_title"))
+        if not ba_norm or ba_norm == "Unknown":
+            inherited_ba = r1_ba.get(pe)
+            if inherited_ba:
+                row["budget_activity_title"] = inherited_ba
+        com_val = color_of_money(row.get("appropriation_title"))
+        if not com_val or com_val == "Unknown":
+            inherited_com = r1_com.get(pe)
+            if inherited_com:
+                row["_inherited_com"] = inherited_com
+
+    # Format consolidated titles for display
+    for row in merged_r2.values():
+        consolidated = row.pop("_consolidated", [])
+        if consolidated:
+            unique_alts = sorted(set(t for t in consolidated if t != row["line_item_title"]))
+            row["_consolidated_titles"] = "; ".join(unique_alts) if unique_alts else ""
+        else:
+            row["_consolidated_titles"] = ""
+        row.pop("_project_code", None)
+        row.pop("_clean_title_only", None)
+
+    all_rows = other_rows + list(merged_r2.values())
 
     count = 0
     for d in all_rows:
@@ -1838,6 +1962,17 @@ def build_cache_table(
         ]
         row_kws = find_matched_keywords(text_fields, keywords)
 
+        # Use inherited BA/CoM from R1 if available
+        ba_norm = normalize_budget_activity(
+            d.get("budget_activity"), d.get("budget_activity_title")
+        )
+        if (not ba_norm or ba_norm == "Unknown") and d.get("budget_activity_title"):
+            ba_norm = d["budget_activity_title"]  # may have been set by R1 inheritance
+        elif not ba_norm or ba_norm == "Unknown":
+            ba_norm = r1_ba.get(d["pe_number"])
+
+        com_val = d.get("_inherited_com") or color_of_money(d.get("appropriation_title"))
+
         vals = [
             d["pe_number"],
             d.get("organization_name"),
@@ -1845,12 +1980,10 @@ def build_cache_table(
             d.get("line_item_title"),
             d.get("budget_activity"),
             d.get("budget_activity_title"),
-            normalize_budget_activity(
-                d.get("budget_activity"), d.get("budget_activity_title")
-            ),
+            ba_norm,
             d.get("appropriation_title"),
             d.get("account_title"),
-            color_of_money(d.get("appropriation_title")),
+            com_val,
             json.dumps(row_kws) if row_kws else "[]",
             "[]",  # matched_keywords_desc — set per-row only for R-2 sub-elements
             (

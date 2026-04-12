@@ -343,6 +343,7 @@ R2_JUNK_PREFIXES: tuple[str, ...] = (
     "Note:",
     "* ",
     "Quantity of",
+    "Project MDAP",
 )
 
 # Trailing budget amounts: sequences like "4,439.845 101.694 - *" at end of string.
