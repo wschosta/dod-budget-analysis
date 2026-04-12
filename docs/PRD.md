@@ -127,14 +127,15 @@ FastAPI application serving the database through versioned endpoints (`/api/v1`)
 | `/api/v1/facets` | GET | Faceted filter counts with cross-filtering per dimension |
 | `/api/v1/hypersonics` | GET | Pivoted hypersonics PE lines: one row per sub-element, columns for FY2015–FY2026. Filters: service, exhibit, fy_from, fy_to. Includes 25 forced-inclusion PEs via `_EXTRA_PES` (including 9 D8Z Defense-Wide programs). |
 | `/api/v1/hypersonics/download` | GET | CSV download of the pivoted hypersonics table (same filters). |
-| `/api/v1/hypersonics/download/xlsx` | POST | XLSX download with interleaved per-FY triples — `FY{yr} ($K)`, `FY{yr} Source`, `FY{yr} Description` — so each year's funding amount, source document, and narrative appear side-by-side. Descriptions come from `pe_descriptions` (priority: Mission Description > Accomplishments > Acquisition Strategy). Bottom "TOTALS" row uses live `SUMIF(InTotalsRange, "Yes", FYRange)` formulas so the totals react to toggling the "In Totals" marker column. |
+| `/api/v1/hypersonics/download/xlsx` | POST | **Removed** — replaced by explorer preset. Use `POST /api/v1/explorer/download/xlsx` with the Hypersonics Preset instead. |
 | `/api/v1/hypersonics/rebuild` | POST | Rebuild the hypersonics cache table from budget_lines + PDF mining. |
 | `/api/v1/hypersonics/desc/{pe_number}` | GET | Description text for a PE or R-2 project. |
 | `/api/v1/hypersonics/debug` | GET | Pre-flight data quality checks for the hypersonics view. |
 | `/api/v1/explorer/build` | POST | Start async cache build for user-supplied keywords. Returns keyword_set_id. |
 | `/api/v1/explorer/status` | GET | Poll cache build progress (state, progress text, PE count). |
 | `/api/v1/explorer` | GET | PE-level summary + available download columns for a built keyword set. |
-| `/api/v1/explorer/download/xlsx` | POST | XLSX export with user-selected columns in chosen order. Per-FY columns are exposed as `FY{yr} ($K)`, `FY{yr} Source`, and `FY{yr} Description` triples (default layout interleaves them by year). Per-FY descriptions are pulled from `pe_descriptions` using the same priority ordering as the hypersonics export. An "In Totals" marker column is always appended if not selected, and the bottom totals row uses live `SUMIF` formulas keyed off that column. Supports matching-only filter. |
+| `/api/v1/explorer/download/xlsx` | POST | XLSX export using xlsxwriter with dynamic array formulas. Per-FY column groups: `($K)`, `In Total` (Y/N/P with data validation), `Source`, `Description`, `Desc Keywords`. Merged FY header row. Three totals rows (Y/P/Grand Total with SUMIF). Summary sheets (PE Summary, By Service, By Budget Activity, By Color of Money) use FILTER+MAP+LAMBDA spill formulas. Keyword Matrix co-occurrence tab. Selected sheet (dynamic FILTER of Y/P rows). About sheet with methodology. Supports `include_source`, `include_description`, `include_intotal`, `include_desc_keywords` toggles and `extra_pes` parameter. |
+| `/api/v1/explorer/presets/{name}` | GET | Named search presets (e.g. "hypersonics") returning keywords + extra_pes lists. |
 | `/api/v1/feedback` | POST | User feedback submission |
 | `/health` | GET | Health check (DB connectivity) |
 | `/health/detailed` | GET | Uptime, request/error counts, query stats, DB metrics |

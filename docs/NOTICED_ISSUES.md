@@ -699,3 +699,20 @@ are rows without enough context to infer an appropriation code.
 - `BUDGET_TYPE_CASE_EXPR` in `utils/database.py` — shared CASE expression for deriving budget_type from appropriation_code, used by dashboard and aggregations
 - `tests/test_shared_group/test_dynamic_fy_columns.py` — 32-case test suite covering regex validation, label generation, and WHERE clause building with dynamic columns
 - All template FY rendering uses `{% for %}` loops over dynamic data — no hardcoded FY references remain in Round 2 scope
+
+---
+
+## Round 6: R-2 PDF Title Cleanup (2026-04-11)
+
+**[RESOLVED]** R-2 PDF sub-element titles contained embedded budget amounts and junk data.
+
+| # | Issue | Status | Resolution |
+|---|-------|--------|------------|
+| 6.1 | 9,103 R-2 PDF titles had trailing budget amounts embedded (e.g., "1662: F/A-18 Improvement 4,439.845 101.694...") | **[RESOLVED]** | `clean_r2_title()` in `utils/normalization.py` strips trailing amounts via regex `(?:\s+(?:[\d,]+\.\d{2,3}\|-\|\*+)\s*)+$` |
+| 6.2 | 2,051 junk rows (table headers, totals, footnotes) parsed as data | **[RESOLVED]** | Junk title blocklist (`R2_JUNK_TITLES`, `R2_JUNK_PREFIXES`) filters them at parse and cache-build time |
+| 6.3 | Title variants across FYs not consolidated (E1662 vs 1662, plural vs singular) | **[RESOLVED]** | `normalize_r2_project_code()` strips E/P prefixes; Levenshtein + prefix matching merges near-duplicates |
+| 6.4 | R2 + R2_PDF rows for same sub-element not merged | **[RESOLVED]** | Cache builder groups by (PE, project_code), merges with prefix + Levenshtein matching, prefers Excel metadata |
+| 6.5 | R2 rows missing Budget Activity and Color of Money | **[RESOLVED]** | R2 sub-elements inherit BA/CoM from their parent R-1 row |
+| 6.6 | Project codes with 6 digits, 2-letter prefixes (DD4, EF8), or trailing dots not recognized | **[RESOLVED]** | Widened regex in `_CODE_COLON_RE` to `^([A-Za-z]{0,3}\d{1,6})\.?:` |
+
+**Impact:** PE 0204136N reduced from 38 to 15 cache rows. Overall cache reduced 64% (17,155 → 6,160 rows).
