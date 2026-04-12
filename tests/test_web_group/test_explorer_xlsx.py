@@ -72,9 +72,10 @@ class TestExtractColumnValue:
         val = _extract_column_value(row, "In Totals", [2024], None, False)
         assert val == ""
 
-    def test_keywords_list_joined(self):
+    def test_removed_column_returns_empty(self):
+        """Columns removed from _COL_TO_FIELD return empty string."""
         val = _extract_column_value(self._row(), "Keywords (Row)", [2024])
-        assert val == "hypersonic"
+        assert val == ""
 
 
 class TestLoadPerFyDescriptions:

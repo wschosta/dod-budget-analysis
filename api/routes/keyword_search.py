@@ -14,7 +14,6 @@ import json
 import logging
 import re
 import sqlite3
-from collections.abc import Callable
 from typing import Any
 
 from utils.database import get_amount_columns
@@ -874,18 +873,21 @@ def build_keyword_xlsx(
     items: list[dict],
     active_years: list[int],
     desc_by_pe_fy: dict[tuple[str, str], str],
-    is_total_fn: Callable[[dict], bool],
     fixed_columns: list[tuple[str, str]],
     include_source: bool = True,
     include_description: bool = True,
     include_intotal: bool = True,
+    include_desc_keywords: bool = True,
     sheet_title: str = "Results",
     build_summary: bool = True,
     keywords: list[str] | None = None,
+    fy_desc_kws: dict[tuple[str, str], list[str]] | None = None,
+    pe_has_r2_match: set[str] | None = None,
 ) -> bytes:
     """Build a keyword-search XLSX workbook and return it as bytes.
 
     Uses xlsxwriter for proper Excel 365 dynamic array formula support.
+    Y/N/P is computed per-FY based on description keyword matches.
     """
     import io
 
@@ -895,12 +897,18 @@ def build_keyword_xlsx(
     money_fmt_str = sty["money_fmt"]
     fixed_count = len(fixed_columns)
 
+    if fy_desc_kws is None:
+        fy_desc_kws = {}
+    if pe_has_r2_match is None:
+        pe_has_r2_match = set()
+
     # Compute FY column stride and per-year column positions (1-based)
-    fy_stride = 1 + int(include_intotal) + int(include_source) + int(include_description)
+    fy_stride = (1 + int(include_intotal) + int(include_source)
+                 + int(include_description) + int(include_desc_keywords))
 
     class _FyCols:
-        __slots__ = ("val", "intotal", "src", "desc",
-                     "val_l", "intotal_l", "src_l", "desc_l")
+        __slots__ = ("val", "intotal", "src", "desc", "desc_kw",
+                     "val_l", "intotal_l", "src_l", "desc_l", "desc_kw_l")
 
         def __init__(self, fy_idx: int) -> None:
             base = fixed_count + (fy_idx * fy_stride) + 1
@@ -914,10 +922,14 @@ def build_keyword_xlsx(
             if include_source:
                 col += 1
             self.desc = col if include_description else 0
+            if include_description:
+                col += 1
+            self.desc_kw = col if include_desc_keywords else 0
             self.val_l = _col_letter(self.val)
             self.intotal_l = _col_letter(self.intotal) if self.intotal else ""
             self.src_l = _col_letter(self.src) if self.src else ""
             self.desc_l = _col_letter(self.desc) if self.desc else ""
+            self.desc_kw_l = _col_letter(self.desc_kw) if self.desc_kw else ""
 
     fy_cols = [_FyCols(i) for i in range(len(active_years))]
     intotal_letters = [fc.intotal_l for fc in fy_cols if fc.intotal_l]
@@ -953,6 +965,8 @@ def build_keyword_xlsx(
             headers.append(f"FY{yr} Source")
         if include_description:
             headers.append(f"FY{yr} Description")
+        if include_desc_keywords:
+            headers.append(f"FY{yr} Desc Keywords")
 
     for ci, h in enumerate(headers):
         ws.write(0, ci, h, fmt["header"])
@@ -961,8 +975,9 @@ def build_keyword_xlsx(
     first_data_row = 2
     row_num = first_data_row
     for row in items:
-        is_total = is_total_fn(row)
         r0 = row_num - 1  # 0-indexed for ws.write
+        pe = row.get("pe_number", "")
+        et = row.get("exhibit_type", "")
 
         for ci, (_header, field) in enumerate(fixed_columns):
             val = row.get(field, "")
@@ -970,7 +985,6 @@ def build_keyword_xlsx(
                 val = ", ".join(val)
             ws.write(r0, ci, val if val is not None else "", fmt["base"])
 
-        pe = row.get("pe_number", "")
         refs_map = row.get("refs", {}) or {}
         for fi, yr in enumerate(active_years):
             fc = fy_cols[fi]
@@ -982,7 +996,15 @@ def build_keyword_xlsx(
                 ws.write_blank(r0, fc.val - 1, None, fmt["base"])
 
             if fc.intotal:
-                ws.write(r0, fc.intotal - 1, "Y" if is_total else "N", fmt["base"])
+                # Per-FY Y/N/P logic based on description keyword matches
+                fy_key = (pe, str(yr))
+                if fy_key in fy_desc_kws and et in ("r2", "r2_pdf"):
+                    in_total = "Y"
+                elif fy_key in fy_desc_kws and et == "r1":
+                    in_total = "N" if pe in pe_has_r2_match else "P"
+                else:
+                    in_total = "N"
+                ws.write(r0, fc.intotal - 1, in_total, fmt["base"])
 
             if fc.src:
                 source_ref = refs_map.get(f"fy{yr}", "")
@@ -993,6 +1015,10 @@ def build_keyword_xlsx(
                 desc_text = desc_by_pe_fy.get((pe, str(yr)), "")
                 if desc_text:
                     ws.write(r0, fc.desc - 1, desc_text, fmt["desc"])
+
+            if fc.desc_kw:
+                kws = fy_desc_kws.get((pe, str(yr)), [])
+                ws.write(r0, fc.desc_kw - 1, ", ".join(kws) if kws else "", fmt["base"])
 
         row_num += 1
 
@@ -1085,6 +1111,8 @@ def build_keyword_xlsx(
             ws.set_column(fc.src - 1, fc.src - 1, 30)
         if fc.desc:
             ws.set_column(fc.desc - 1, fc.desc - 1, 40)
+        if fc.desc_kw:
+            ws.set_column(fc.desc_kw - 1, fc.desc_kw - 1, 25)
 
     freeze_col = min(5, fixed_count + 1)
     ws.freeze_panes(1, freeze_col - 1)
@@ -1876,6 +1904,33 @@ def build_cache_table(
         else:
             other_rows.append(d)
 
+    # Compute PE-level description keyword matches by scanning ALL pe_descriptions
+    # rows (not just the single desc_map entry). This ensures PEs included via
+    # description matches have their R-1 row marked with matched_keywords_desc.
+    pe_desc_kws: dict[str, list[str]] = {}
+    try:
+        all_pe_nums = sorted({d.get("pe_number") for d in other_rows if d.get("pe_number")}
+                             | {d.get("pe_number", "") for group in r2_by_code.values() for d in group})
+        if all_pe_nums:
+            ph = ", ".join("?" for _ in all_pe_nums)
+            desc_rows = conn.execute(
+                f"SELECT pe_number, description_text FROM pe_descriptions "
+                f"WHERE pe_number IN ({ph}) AND description_text IS NOT NULL",
+                list(all_pe_nums),
+            ).fetchall()
+            for pe_num, desc_text in desc_rows:
+                if pe_num in pe_desc_kws:
+                    continue  # already found keywords for this PE
+                kws = find_matched_keywords([desc_text], desc_keywords)
+                if kws:
+                    pe_desc_kws[pe_num] = kws
+    except sqlite3.OperationalError:
+        pass  # pe_descriptions may not exist
+    for d in other_rows:
+        pe = d.get("pe_number", "")
+        if pe in pe_desc_kws:
+            d["_desc_kws"] = pe_desc_kws[pe]
+
     # Also collect PDF-mined r2 rows (from mine_pdf_subelements) into the same groups
     for item in pdf_subelements:
         raw_title = item["project_title"]
@@ -2004,6 +2059,12 @@ def build_cache_table(
             if inherited_com:
                 row["_inherited_com"] = inherited_com
 
+    # Propagate PE-level description keywords to R2 rows too
+    for row in merged_r2.values():
+        pe = row["pe_number"]
+        if pe in pe_desc_kws and not row.get("_desc_kws"):
+            row["_desc_kws"] = pe_desc_kws[pe]
+
     # Format consolidated titles for display
     for row in merged_r2.values():
         consolidated = row.pop("_consolidated", [])
@@ -2073,7 +2134,7 @@ def build_cache_table(
             d.get("account_title"),
             com_val,
             json.dumps(row_kws) if row_kws else "[]",
-            "[]",  # matched_keywords_desc — set per-row only for R-2 sub-elements
+            json.dumps(d.get("_desc_kws", [])) if d.get("_desc_kws") else "[]",
             (
                 None
                 if _is_garbage_description(desc_map.get(d["pe_number"]))

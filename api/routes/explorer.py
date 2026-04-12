@@ -68,12 +68,10 @@ _ALL_COLUMNS = [
     "Budget Activity (Normalized)",
     "Appropriation",
     "Color of Money",
-    "Keywords (Row)",
-    "Keywords (Desc)",
-    "Description",
 ]
 
-# FY columns are added dynamically based on active years
+# FY columns (including In Total, Source, Description, Desc Keywords)
+# are added dynamically based on active years and toggle options.
 
 _COL_TO_FIELD: dict[str, str] = {
     "PE Number": "pe_number",
@@ -84,9 +82,6 @@ _COL_TO_FIELD: dict[str, str] = {
     "Budget Activity (Normalized)": "budget_activity_norm",
     "Appropriation": "appropriation_title",
     "Color of Money": "color_of_money",
-    "Keywords (Row)": "matched_keywords_row",
-    "Keywords (Desc)": "matched_keywords_desc",
-    "Description": "description_text",
 }
 
 
@@ -468,13 +463,15 @@ def download_explorer_xlsx(
     include_source: bool = Body(True, description="Include FY Source columns"),
     include_description: bool = Body(True, description="Include FY Description columns"),
     include_intotal: bool = Body(True, description="Include per-year In Total (Y/N/P) columns"),
+    include_desc_keywords: bool = Body(True, description="Include per-FY Desc Keywords columns"),
     extra_pes: str = Body("", description="Comma-separated PE numbers (must match build call)"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> Response:
     """Generate XLSX with user-selected fixed columns and FY data.
 
-    FY columns are auto-included for all active years. Toggles control whether
-    Source, Description, and In Total sub-columns appear per year.
+    FY columns are auto-included for all active years. Toggles control which
+    sub-columns appear per year. Y/N/P is computed per-FY based on description
+    keyword matches.
     """
     try:
         keyword_list = _parse_keywords(keywords)
@@ -512,8 +509,26 @@ def download_explorer_xlsx(
         conn, {r.get("pe_number", "") for r in items}
     )
 
-    # Strip any FY-related or "In Totals" columns from the user selection —
-    # FY columns are now auto-generated from active_years + toggles.
+    # Per-FY description keyword matching
+    from api.routes.keyword_search import find_matched_keywords
+    fy_desc_kws: dict[tuple[str, str], list[str]] = {}
+    for (pe, fy), desc_text in desc_by_pe_fy.items():
+        kws = find_matched_keywords([desc_text], keyword_list)
+        if kws:
+            fy_desc_kws[(pe, fy)] = kws
+
+    # Which PEs have R2 rows with keyword matches (title or description)?
+    pe_has_r2_match: set[str] = set()
+    for r in items:
+        if r.get("exhibit_type") in ("r2", "r2_pdf"):
+            pe = r.get("pe_number", "")
+            # Title-level match
+            if r.get("matched_keywords_row") or r.get("matched_keywords_desc"):
+                pe_has_r2_match.add(pe)
+            # Description-level match for any FY
+            elif any((pe, str(yr)) in fy_desc_kws for yr in active_years):
+                pe_has_r2_match.add(pe)
+
     fixed_cols: list[tuple[str, str]] = []
     for col_name in columns:
         field = _COL_TO_FIELD.get(col_name)
@@ -527,11 +542,13 @@ def download_explorer_xlsx(
         items=items,
         active_years=active_years,
         desc_by_pe_fy=desc_by_pe_fy,
-        is_total_fn=lambda r: bool(r.get("matched_keywords_row") or r.get("matched_keywords_desc")),
+        fy_desc_kws=fy_desc_kws,
+        pe_has_r2_match=pe_has_r2_match,
         fixed_columns=fixed_cols,
         include_source=include_source,
         include_description=include_description,
         include_intotal=include_intotal,
+        include_desc_keywords=include_desc_keywords,
         sheet_title="Explorer",
         keywords=keyword_list,
     )

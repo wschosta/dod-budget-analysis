@@ -27,11 +27,10 @@ import io
 import json
 import logging
 import sqlite3
-import time
-from collections import Counter, OrderedDict
+from collections import Counter
 from typing import Any
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response
 
 from api.database import get_db
@@ -40,10 +39,8 @@ from api.routes.keyword_search import (
     FY_START,
     apply_filters,
     build_cache_table,
-    build_keyword_xlsx,
     cache_rows_to_dicts,
     ensure_cache,
-    load_per_fy_descriptions,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,7 +84,7 @@ _HYPERSONICS_KEYWORDS = [
 
     # ── Generic speed / regime ─────────────────────────────────────────────
     "high speed",           # high-speed strike / high-speed weapons
-    "mach",                 # Mach-regime references (broad)
+    "mach ",                # Mach-regime references (trailing space avoids "machine")
     "conventional prompt",  # broader catch for conventional prompt programs
 
     # ── Defensive / tracking ───────────────────────────────────────────────
@@ -100,16 +97,6 @@ _DESC_EXCLUDE = {"glide body", "AGM-183"}
 _DESC_KEYWORDS = [kw for kw in _HYPERSONICS_KEYWORDS if kw not in _DESC_EXCLUDE]
 
 _CACHE_TABLE = "hypersonics_cache"
-
-_XLSX_COL_TO_FIELD: list[tuple[str, str]] = [
-    ("PE Number", "pe_number"),
-    ("Service/Org", "organization_name"),
-    ("Exhibit", "exhibit_type"),
-    ("Line Item / Sub-Program", "line_item_title"),
-    ("Budget Activity", "budget_activity_norm"),
-    ("Color of Money", "color_of_money"),
-]
-
 
 # PEs to always include regardless of keyword matching
 _EXTRA_PES = [
@@ -228,78 +215,6 @@ def download_hypersonics(
         content=csv_bytes,
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="hypersonics_pe_lines.csv"'},
-    )
-
-
-# ── POST /api/v1/hypersonics/download/xlsx ────────────────────────────────────
-
-@router.post(
-    "/download/xlsx",
-    summary="Download selected hypersonics rows as XLSX with formatting",
-    response_class=Response,
-)
-def download_hypersonics_xlsx(
-    show_ids: list[str] = Body(..., description="data-idx values of SHOW-checked rows"),
-    total_ids: list[str] = Body(..., description="data-idx values of TOTAL-checked rows"),
-    conn: sqlite3.Connection = Depends(get_db),
-) -> Response:
-    """Download an XLSX with all SHOW-checked rows.
-
-    TOTAL-checked rows are marked Y; SHOW-only rows are marked N.
-    Three totals rows (Y / P / Grand Total) and a Summary pivot sheet are included.
-    """
-    _ensure_cache(conn)
-
-    year_range = list(range(FY_START, FY_END + 1))
-
-    sql = f"SELECT * FROM {_CACHE_TABLE} ORDER BY pe_number, exhibit_type, line_item_title"
-    all_rows = conn.execute(sql).fetchall()
-    items = cache_rows_to_dicts(all_rows)
-
-    pe_groups: OrderedDict[str, list[dict]] = OrderedDict()
-    for item in items:
-        pe = item["pe_number"]
-        pe_groups.setdefault(pe, []).append(item)
-
-    show_set = set(show_ids)
-    total_set = set(total_ids)
-
-    # Build idx→row mapping, filter to SHOW-checked, tag each row with its data-idx
-    selected: list[dict] = []
-    for pe, children in pe_groups.items():
-        for i, child in enumerate(children):
-            idx = f"{pe}-{i}"
-            if idx in show_set:
-                child["_data_idx"] = idx
-                selected.append(child)
-
-    if not selected:
-        return Response(content=b"No rows selected", media_type="text/plain", status_code=400)
-
-    active_years = [
-        yr for yr in year_range
-        if any(row.get(f"fy{yr}") is not None for row in selected)
-    ]
-
-    desc_by_pe_fy = load_per_fy_descriptions(
-        conn, {row.get("pe_number", "") for row in selected}
-    )
-
-    xlsx_bytes = build_keyword_xlsx(
-        items=selected,
-        active_years=active_years,
-        desc_by_pe_fy=desc_by_pe_fy,
-        is_total_fn=lambda row: row.get("_data_idx", "") in total_set,
-        fixed_columns=_XLSX_COL_TO_FIELD,
-        sheet_title="Hypersonics",
-        build_summary=True,
-        keywords=_HYPERSONICS_KEYWORDS,
-    )
-
-    return Response(
-        content=xlsx_bytes,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="hypersonics_{time.strftime("%Y%m%d_%H%M%S")}.xlsx"'},
     )
 
 
