@@ -125,12 +125,7 @@ FastAPI application serving the database through versioned endpoints (`/api/v1`)
 | `/api/v1/metadata/enrichment` | GET | Enrichment pipeline statistics |
 | `/api/v1/dashboard/summary` | GET | Dashboard summary statistics |
 | `/api/v1/facets` | GET | Faceted filter counts with cross-filtering per dimension |
-| `/api/v1/hypersonics` | GET | Pivoted hypersonics PE lines: one row per sub-element, columns for FY2015–FY2026. Filters: service, exhibit, fy_from, fy_to. Includes 25 forced-inclusion PEs via `_EXTRA_PES` (including 9 D8Z Defense-Wide programs). |
-| `/api/v1/hypersonics/download` | GET | CSV download of the pivoted hypersonics table (same filters). |
-| `/api/v1/hypersonics/download/xlsx` | POST | **Removed** — replaced by explorer preset. Use `POST /api/v1/explorer/download/xlsx` with the Hypersonics Preset instead. |
-| `/api/v1/hypersonics/rebuild` | POST | Rebuild the hypersonics cache table from budget_lines + PDF mining. |
-| `/api/v1/hypersonics/desc/{pe_number}` | GET | Description text for a PE or R-2 project. |
-| `/api/v1/hypersonics/debug` | GET | Pre-flight data quality checks for the hypersonics view. |
+| ~~`/api/v1/hypersonics`~~ | — | **Removed** — replaced by Keyword Explorer with Hypersonics Preset (`/api/v1/explorer/presets/hypersonics`). |
 | `/api/v1/explorer/build` | POST | Start async cache build for user-supplied keywords. Returns keyword_set_id. |
 | `/api/v1/explorer/status` | GET | Poll cache build progress (state, progress text, PE count). |
 | `/api/v1/explorer` | GET | PE-level summary + available download columns for a built keyword set. |
@@ -162,7 +157,7 @@ Server-side rendered HTML using Jinja2 templates with HTMX for dynamic updates.
 | Page | Route | Description |
 |------|-------|-------------|
 | **Explorer** | `/explorer` (also `/`) | **Default landing page.** Generalized keyword search tool. Enter any keywords (comma-separated, max 20) or PE numbers (e.g., `0604030N`) to search budget lines and PE descriptions with fuzzy matching (prefix, acronym expansion, edit-distance). PE numbers entered as keywords are matched directly against `budget_lines` and `pe_index`. Async cache build with progress polling and elapsed-time display. Collapsible PE-level preview table showing match counts. Two-list drag-and-drop column picker for XLSX download with customizable column order. Toggle to filter to directly matching sub-elements only. XLSX export includes totals row for keyword-matched rows and italic styling for non-matching rows. |
-| **Hypersonics** | `/hypersonics` | Pivoted table of all hypersonics-related PE lines and sub-programs, FY2015+. **Async loading screen** with spinner and elapsed timer while data loads; content fetched via `?_content=1` partial and swapped in via JS. One row per unique PE + sub-element; one column per fiscal year showing primary requested/enacted funding ($K). Filter by service, exhibit type, and FY range. 25 forced-inclusion PEs (`_EXTRA_PES`) including 9 D8Z Defense-Wide programs. PDF-only PEs get stub R-1 rows with funding mined from R-2 detail PDFs. CSV and XLSX download; XLSX includes per-FY description columns from `pe_descriptions`. Filter presets with save/load/delete. **Rebuild Cache** button in the filter bar triggers `POST /api/v1/hypersonics/rebuild` and reloads the page with fresh data. |
+| ~~**Hypersonics**~~ | ~~`/hypersonics`~~ | **Removed** — replaced by the Explorer page with the Hypersonics Preset button. The preset loads the same 27 keywords and 25 extra PEs into the Explorer. |
 | **Home (legacy)** | `/home` | Original full-text keyword search with filter sidebar: fiscal year, service/agency (sorted by count), exhibit type, budget type, amount range. Faceted filter counts, HTMX-driven results table. Still accessible but removed from nav. |
 | **Charts** | `/charts` | Budget by service (horizontal bar), stacked budget totals by service & FY, Top-N programs (excludes summary exhibits), multi-entity comparison (2-6 services across all FY columns), budget hierarchy treemap, budget type breakdown (shared doughnut utility). FY selector (newest first) and multi-select service filter. Not in primary nav; accessible via direct URL. |
 | **Dashboard** | `/dashboard` | Summary cards (FY totals, YOY change), budget-by-service bar chart, Top-10 programs, appropriation breakdown. Not in primary nav; accessible via direct URL. |
@@ -192,7 +187,7 @@ Server-side rendered HTML using Jinja2 templates with HTMX for dynamic updates.
 ### 4.3 UI Features
 
 - **Dark mode** with CSS custom properties, `localStorage` persistence, system `prefers-color-scheme` detection
-- **Navigation:** Streamlined nav bar with Hypersonics, Explorer, About, and API Docs links. Legacy pages (Home, Charts, Dashboard, Programs, Consolidated) are still served but not in the primary nav. `/` redirects to `/explorer`.
+- **Navigation:** Streamlined nav bar with Explorer, About, and API Docs links. Legacy pages (Home, Charts, Dashboard, Programs, Consolidated) are still served but not in the primary nav. `/` redirects to `/explorer`.
 - **Download modal** supporting CSV, JSON (NDJSON), and Excel (.xlsx) formats with column subset selection
 - **Responsive design** with mobile, tablet, and desktop breakpoints
 - **Keyboard shortcuts** for navigation
@@ -241,8 +236,7 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 
 ### 5.5 Cache Tables
 
-- **`hypersonics_cache`** — Pivoted cache for hypersonics page. Built by `build_cache_table()` in `api/routes/keyword_search.py`. Columns: pe_number, organization_name, exhibit_type, line_item_title, budget_activity, budget_activity_title, budget_activity_norm, appropriation_title, account_title, color_of_money, matched_keywords_row, matched_keywords_desc, description_text, plus per-FY amount and source reference columns.
-- **`kw_cache_{hash}`** — Per-keyword-set caches for Explorer page. Same schema as hypersonics_cache.
+- **`kw_cache_{hash}`** — Per-keyword-set caches for Explorer page (including the Hypersonics preset). Columns: pe_number, organization_name, exhibit_type, line_item_title, budget_activity, budget_activity_title, budget_activity_norm, appropriation_title, account_title, color_of_money, matched_keywords_row, matched_keywords_desc, description_text, lineage_note, plus per-FY amount and source reference columns.
 - **`explorer_cache_meta`** — Tracks built Explorer caches with keyword_set_id, row_count, and built_at timestamp. Survives process restarts.
 
 ### 5.6 Schema Management

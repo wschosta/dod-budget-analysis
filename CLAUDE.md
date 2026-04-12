@@ -63,8 +63,7 @@ dod-budget-analysis/
 │       ├── facets.py        # GET /api/v1/facets (cross-filtered counts)
 │       ├── feedback.py      # POST /api/v1/feedback
 │       ├── files.py         # GET /api/v1/files/{file_path}
-│       ├── frontend.py      # HTML routes (/, /about, /charts, /compare, /consolidated, /dashboard, /explorer, /hypersonics, /programs)
-│       ├── hypersonics.py   # Hypersonics PE lines pivot view
+│       ├── frontend.py      # HTML routes (/, /about, /charts, /compare, /consolidated, /dashboard, /explorer, /programs)
 │       ├── keyword_search.py # Shared keyword-search cache-building logic
 │       ├── metadata.py      # GET /api/v1/metadata
 │       ├── pe.py            # PE-centric views, funding, sub-elements
