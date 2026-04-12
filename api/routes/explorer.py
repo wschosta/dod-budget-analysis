@@ -35,6 +35,7 @@ from api.routes.keyword_search import (
     build_keyword_xlsx,
     cache_rows_to_dicts,
     load_per_fy_descriptions,
+    lookup_cache_description,
 )
 from utils.fuzzy_match import expand_keywords
 
@@ -660,20 +661,5 @@ def get_description(
 
     kw_id = _keyword_set_id(keyword_list)
     cache_table = _cache_table_name(kw_id)
-
-    try:
-        if project:
-            row = conn.execute(
-                f"SELECT description_text FROM {cache_table} "
-                "WHERE pe_number = ? AND line_item_title = ? AND description_text IS NOT NULL LIMIT 1",
-                [pe_number, project],
-            ).fetchone()
-        else:
-            row = conn.execute(
-                f"SELECT description_text FROM {cache_table} "
-                "WHERE pe_number = ? AND description_text IS NOT NULL LIMIT 1",
-                [pe_number],
-            ).fetchone()
-        return {"description": row[0] if row else None}
-    except sqlite3.OperationalError:
-        return {"description": None}
+    desc = lookup_cache_description(conn, cache_table, pe_number, project=project)
+    return {"description": desc}
