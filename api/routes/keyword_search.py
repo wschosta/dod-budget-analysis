@@ -1,11 +1,9 @@
 """
 Shared keyword-search cache-building logic.
 
-Extracted from hypersonics.py so that both the Hypersonics page and the
-generic Keyword Explorer can reuse the same pivot/cache/PDF-mining pipeline.
-
-All public functions accept ``keywords`` and ``cache_table`` (or similar)
-as parameters — no module-level keyword lists are hard-coded here.
+Provides the pivot/cache/PDF-mining pipeline used by the Keyword Explorer.
+Also hosts the Hypersonics keyword/PE preset constants (formerly in
+hypersonics.py) so that explorer presets can reference them directly.
 """
 
 from __future__ import annotations
@@ -52,6 +50,34 @@ _ORG_FROM_PATH = [
     ("Defense_Wide", "Defense-Wide"),
     ("DARPA", "DARPA"),
     ("SOCOM", "SOCOM"),
+]
+
+# ── Hypersonics preset (formerly in hypersonics.py) ──────────────────────────
+
+_HYPERSONICS_KEYWORDS = [
+    # Generic / cross-program
+    "hypersonic", "boost glide", "glide body", "glide vehicle", "scramjet",
+    # Offensive — Air Force
+    "ARRW", "AGM-183", "HACM", "HCSW",
+    # Offensive — Army
+    "LRHW", "Dark Eagle", "OpFires",
+    # Offensive — Navy / Joint
+    "C-HGB", "CHGB", "conventional prompt strike", "prompt strike",
+    # Offensive — Navy / SM-6 / OASUW
+    "offensive anti", "oasuw", "standard missile 6", "sm-6",
+    "blk ib", "increment ii",
+    # Generic speed / regime
+    "high speed", "mach ", "conventional prompt",
+    # Defensive / tracking
+    "Glide Phase Interceptor", "HBTSS",
+]
+
+_EXTRA_PES = [
+    "0101101F", "0210600A", "0601102F", "0601153N", "0602102F",
+    "0602114N", "0602235N", "0602602F", "0602750N", "0603032F",
+    "0603183D8Z", "0603273F", "0603467E", "0603601F", "0603673N",
+    "0603680D8Z", "0603680F", "0603941D8Z", "0603945D8Z", "0604250D8Z",
+    "0604331D8Z", "0604940D8Z", "0605456A", "0607210D8Z", "0902199D8Z",
 ]
 
 
@@ -724,8 +750,14 @@ def annotate_cross_pe_lineages(
 
     if updates:
         conn.executemany(
-            f"UPDATE {cache_table} SET lineage_note = ? WHERE id = ?",
-            updates,
+            f"""UPDATE {cache_table}
+                SET lineage_note = CASE
+                    WHEN lineage_note IS NOT NULL AND lineage_note != ''
+                    THEN lineage_note || '; ' || ?
+                    ELSE ?
+                END
+                WHERE id = ?""",
+            [(note, note, row_id) for note, row_id in updates],
         )
         logger.info("Cross-PE lineage: annotated %d R-2 rows", len(updates))
 
@@ -781,7 +813,7 @@ def cache_rows_to_dicts(
 def load_per_fy_descriptions(
     conn: sqlite3.Connection,
     pe_numbers: list[str] | set[str],
-    min_length: int = 80,
+    min_length: int = 20,
 ) -> dict[tuple[str, str], str]:
     """Return a ``(pe_number, fiscal_year)`` → description text map.
 
@@ -1972,12 +2004,20 @@ def build_cache_table(
     from utils.normalization import normalize_r2_project_code
     from utils.fuzzy_match import _levenshtein_distance
 
+    _skip_raw_titles = frozenset({
+        "page", "total pe", "total", "total cost", "total pe cost",
+        "total program element", "total program element cost",
+    })
+
     def _add_to_r2_groups(d: dict) -> None:
         """Clean an R-2 row and add it to r2_by_code for merge processing."""
         raw = d.get("line_item_title", "")
         cleaned_code, cleaned_title = _clean_title(raw)
         if cleaned_code is None and cleaned_title is None:
-            return
+            # Fallback: keep raw title if it's not pure junk
+            if not raw or raw.strip().lower() in _skip_raw_titles:
+                return
+            cleaned_title = raw.strip()
         clean_title = f"{cleaned_code}: {cleaned_title}" if cleaned_code else (cleaned_title or raw)
         d["line_item_title"] = clean_title
         d["_project_code"] = normalize_r2_project_code(cleaned_code)

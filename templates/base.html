@@ -47,7 +47,6 @@
       </button>
       <!-- FALCON-7: Nav order — Home > Search > Charts > Programs > About > API Docs -->
       <div class="nav-links">
-        <a href="/hypersonics" {% if request.url.path == "/hypersonics" %}class="active"{% endif %}>Hypersonics</a>
         <a href="/explorer" {% if request.url.path == "/explorer" or request.url.path == "/" %}class="active"{% endif %}>Explorer</a>
         <a href="/about"     {% if request.url.path == "/about" %}class="active"{% endif %}>About</a>
         <a href="/docs"      target="_blank" rel="noopener">API Docs</a>

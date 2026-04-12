@@ -577,7 +577,7 @@ def download_explorer_xlsx(
 )
 def get_preset(name: str) -> dict:
     """Return keywords and extra_pes for a named search preset."""
-    from api.routes.hypersonics import _HYPERSONICS_KEYWORDS, _EXTRA_PES
+    from api.routes.keyword_search import _HYPERSONICS_KEYWORDS, _EXTRA_PES
 
     presets = {
         "hypersonics": {

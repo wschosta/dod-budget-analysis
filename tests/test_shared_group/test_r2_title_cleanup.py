@@ -85,3 +85,29 @@ class TestNormalizeR2ProjectCode:
 
     def test_lowercase_e(self):
         assert normalize_r2_project_code("e62") == "62"
+
+    def test_j_prefix(self):
+        assert normalize_r2_project_code("J0951") == "951"
+
+    def test_s_prefix(self):
+        assert normalize_r2_project_code("S0004") == "4"
+
+    def test_trailing_letter(self):
+        assert normalize_r2_project_code("0004C") == "4"
+
+    def test_p_prefix(self):
+        assert normalize_r2_project_code("P010") == "10"
+
+    def test_two_letter_prefix_unchanged(self):
+        """Two-letter prefixes like AB12 should NOT be stripped."""
+        assert normalize_r2_project_code("AB12") == "AB12"
+
+    def test_d_prefix_preserved(self):
+        """D-prefix is not a known strip prefix (D549 is a real project code)."""
+        assert normalize_r2_project_code("D549") == "D549"
+
+    def test_single_alpha_char(self):
+        assert normalize_r2_project_code("A") == "A"
+
+    def test_dash_code(self):
+        assert normalize_r2_project_code("MED-01") == "MED01"
