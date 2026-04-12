@@ -2,8 +2,6 @@
 Shared keyword-search cache-building logic.
 
 Provides the pivot/cache/PDF-mining pipeline used by the Keyword Explorer.
-Also hosts the Hypersonics keyword/PE preset constants (formerly in
-hypersonics.py) so that explorer presets can reference them directly.
 """
 
 from __future__ import annotations
@@ -15,6 +13,7 @@ import sqlite3
 from typing import Any
 
 from utils.database import get_amount_columns
+from utils.normalization import R2_JUNK_TITLES
 from utils.strings import clean_narrative
 from utils.patterns import PE_NUMBER_STRICT_CI, PE_SUFFIX_PATTERN
 
@@ -52,37 +51,13 @@ _ORG_FROM_PATH = [
     ("SOCOM", "SOCOM"),
 ]
 
-# ── Hypersonics preset (formerly in hypersonics.py) ──────────────────────────
-
-_HYPERSONICS_KEYWORDS = [
-    # Generic / cross-program
-    "hypersonic", "boost glide", "glide body", "glide vehicle", "scramjet",
-    # Offensive — Air Force
-    "ARRW", "AGM-183", "HACM", "HCSW",
-    # Offensive — Army
-    "LRHW", "Dark Eagle", "OpFires",
-    # Offensive — Navy / Joint
-    "C-HGB", "CHGB", "conventional prompt strike", "prompt strike",
-    # Offensive — Navy / SM-6 / OASUW
-    "offensive anti", "oasuw", "standard missile 6", "sm-6",
-    "blk ib", "increment ii",
-    # Generic speed / regime
-    "high speed", "mach ", "conventional prompt",
-    # Defensive / tracking
-    "Glide Phase Interceptor", "HBTSS",
-]
-
-_EXTRA_PES = [
-    "0101101F", "0210600A", "0601102F", "0601153N", "0602102F",
-    "0602114N", "0602235N", "0602602F", "0602750N", "0603032F",
-    "0603183D8Z", "0603273F", "0603467E", "0603601F", "0603673N",
-    "0603680D8Z", "0603680F", "0603941D8Z", "0603945D8Z", "0604250D8Z",
-    "0604331D8Z", "0604940D8Z", "0605456A", "0607210D8Z", "0902199D8Z",
-]
-
 _LEVENSHTEIN_THRESHOLD = 0.20
 _HIDDEN_LOOKUP_COL = 200
 _SPILL_MAX_ROW = 2000
+
+# Lowercased version of R2_JUNK_TITLES + "page" — used as fallback filter
+# when clean_r2_title() rejects a title that may still be legitimate.
+_SKIP_RAW_TITLES = frozenset(t.lower() for t in R2_JUNK_TITLES) | {"page"}
 
 
 # ── SQL / JSON helpers ──────────────────────────────────────────────────────
@@ -777,6 +752,7 @@ def annotate_cross_pe_lineages(
                     ELSE ?
                 END
                 WHERE id = ?""",
+            # note twice: once for the append branch, once for the else branch
             [(note, note, row_id) for note, row_id in updates],
         )
         logger.info("Cross-PE lineage: annotated %d R-2 rows", len(updates))
@@ -2183,18 +2159,12 @@ def build_cache_table(
     from utils.normalization import normalize_r2_project_code
     from utils.fuzzy_match import _levenshtein_distance
 
-    _skip_raw_titles = frozenset({
-        "page", "total pe", "total", "total cost", "total pe cost",
-        "total program element", "total program element cost",
-    })
-
     def _add_to_r2_groups(d: dict) -> None:
         """Clean an R-2 row and add it to r2_by_code for merge processing."""
         raw = d.get("line_item_title", "")
         cleaned_code, cleaned_title = _clean_title(raw)
         if cleaned_code is None and cleaned_title is None:
-            # Fallback: keep raw title if it's not pure junk
-            if not raw or raw.strip().lower() in _skip_raw_titles:
+            if not raw or raw.strip().lower() in _SKIP_RAW_TITLES:
                 return
             cleaned_title = raw.strip()
         clean_title = f"{cleaned_code}: {cleaned_title}" if cleaned_code else (cleaned_title or raw)
