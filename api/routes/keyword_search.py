@@ -1797,121 +1797,185 @@ def build_cache_table(
     placeholders_insert = ", ".join("?" for _ in insert_cols)
     insert_sql = f"INSERT INTO {cache_table} ({', '.join(insert_cols)}) VALUES ({placeholders_insert})"
 
+    # 6b. Mine PDF sub-elements BEFORE the merge pre-pass so r2 and r2_pdf
+    # rows can be merged together.
+    _progress("mining_pdfs", budget_line_rows=len(rows))
+
+    pdf_subelements, discovered_pes = mine_pdf_subelements(
+        conn,
+        matched_pes,
+        keywords,
+        core_pes=bl_pes,
+        fy_start=fy_start,
+    )
+
+    # For PEs discovered via R-2 keyword matches, also load their R-1 budget_lines rows
+    if discovered_pes:
+        disc_placeholders = ", ".join("?" for _ in discovered_pes)
+        disc_sql = f"""
+            SELECT
+                pe_number,
+                MAX(organization_name) AS organization_name,
+                exhibit_type,
+                line_item_title,
+                MAX(budget_activity) AS budget_activity,
+                MAX(budget_activity_title) AS budget_activity_title,
+                MAX(appropriation_title) AS appropriation_title,
+                MAX(account_title) AS account_title,
+                {year_cols_sql}
+            FROM budget_lines
+            WHERE pe_number IN ({disc_placeholders})
+              AND CAST(fiscal_year AS INTEGER) >= {fy_start}
+            GROUP BY pe_number, exhibit_type, line_item_title
+            ORDER BY pe_number, exhibit_type, line_item_title
+        """
+        disc_rows = conn.execute(disc_sql, list(discovered_pes)).fetchall()
+        rows = list(rows) + [dict(r) for r in disc_rows]
+        logger.info(
+            "PDF sub-element mining: discovered %d new PEs, added %d budget_lines rows",
+            len(discovered_pes), len(disc_rows),
+        )
+
     # ── Pre-pass: clean, deduplicate, and merge R-2 rows ──
     #
-    # 1. Clean r2_pdf titles (strip trailing amounts, reject junk)
-    # 2. Exact-title dedup within r2_pdf (merge FY amounts)
-    # 3. Merge r2 + r2_pdf by project code (prefer r2 metadata)
-    # 4. Fuzzy dedup within same project code (Levenshtein < 20%)
-    # 5. Propagate R1 BA/CoM to all R2 rows for the same PE
+    # Collects ALL R-2 rows from both budget_lines (r2_pdf) and PDF mining (r2)
+    # into r2_by_code, then merges by project code with prefix + Levenshtein
+    # matching. This ensures r2 and r2_pdf rows for the same sub-element merge.
 
     from utils.normalization import normalize_r2_project_code
     from utils.fuzzy_match import _levenshtein_distance
 
-    r1_rows: list[dict] = []      # R-1 level rows (for BA/CoM inheritance)
-    r2_rows: dict[tuple[str, str], dict] = {}  # (pe, project_code) → merged r2 row
-    other_rows: list[dict] = []    # amendment, ogsi, p1, etc.
+    def _add_to_r2_groups(d: dict) -> None:
+        """Clean an R-2 row and add it to r2_by_code for merge processing."""
+        raw = d.get("line_item_title", "")
+        cleaned_code, cleaned_title = _clean_title(raw)
+        if cleaned_code is None and cleaned_title is None:
+            return
+        clean_title = f"{cleaned_code}: {cleaned_title}" if cleaned_code else (cleaned_title or raw)
+        d["line_item_title"] = clean_title
+        d["_project_code"] = normalize_r2_project_code(cleaned_code)
+        d["_clean_title_only"] = cleaned_title or clean_title
+        d["_consolidated"] = []
+        key = (d["pe_number"], d["_project_code"] or clean_title)
+        r2_by_code.setdefault(key, []).append(d)
 
+    r1_rows: list[dict] = []
+    r2_by_code: dict[tuple[str, str | None], list[dict]] = {}
+    other_rows: list[dict] = []
+
+    # Collect budget_lines rows (r2_pdf + non-R2 types)
     for r in rows:
         d = dict(r)
         et = d.get("exhibit_type", "")
 
         if et in ("r2", "r2_pdf"):
-            # Clean r2_pdf titles; r2 titles pass through clean_r2_title too for normalization
-            raw = d.get("line_item_title", "")
-            cleaned_code, cleaned_title = _clean_title(raw)
-            if cleaned_code is None and cleaned_title is None:
-                continue
-            clean_title = f"{cleaned_code}: {cleaned_title}" if cleaned_code else (cleaned_title or raw)
-            d["line_item_title"] = clean_title
-            d["_project_code"] = normalize_r2_project_code(cleaned_code)
-            d["_clean_title_only"] = cleaned_title or clean_title
-
-            key = (d["pe_number"], d["_project_code"] or clean_title)
-            if key in r2_rows:
-                existing = r2_rows[key]
-                # Prefer r2 (Excel) metadata over r2_pdf
-                if et == "r2" and existing.get("exhibit_type") == "r2_pdf":
-                    d["exhibit_type"] = "r2"
-                    for yr in year_range:
-                        col = f"fy{yr}"
-                        if d.get(col) is None and existing.get(col) is not None:
-                            d[col] = existing[col]
-                            ref_col = f"fy{yr}_ref"
-                            if existing.get(ref_col):
-                                d[ref_col] = existing[ref_col]
-                    # Track consolidated titles
-                    prev = existing.get("_consolidated", [])
-                    if existing["line_item_title"] != d["line_item_title"]:
-                        prev.append(existing["line_item_title"])
-                    d["_consolidated"] = prev
-                    r2_rows[key] = d
-                else:
-                    # Merge FY amounts into existing (keep first non-null)
-                    for yr in year_range:
-                        col = f"fy{yr}"
-                        if existing.get(col) is None and d.get(col) is not None:
-                            existing[col] = d[col]
-                            ref_col = f"fy{yr}_ref"
-                            if d.get(ref_col):
-                                existing[ref_col] = d[ref_col]
-                    # Track consolidated title
-                    if d["line_item_title"] != existing["line_item_title"]:
-                        existing.setdefault("_consolidated", []).append(d["line_item_title"])
-            else:
-                d["_consolidated"] = []
-                r2_rows[key] = d
-
+            _add_to_r2_groups(d)
         elif et == "r1":
             r1_rows.append(d)
             other_rows.append(d)
         else:
             other_rows.append(d)
 
-    # Fuzzy dedup: within same (pe, project_code), merge near-duplicates
-    # Group r2_rows by (pe, project_code)
-    code_groups: dict[tuple[str, str | None], list[str]] = {}
-    for key in r2_rows:
-        pe, code = key
-        code_groups.setdefault((pe, code), []).append(key[1])
+    # Also collect PDF-mined r2 rows (from mine_pdf_subelements) into the same groups
+    for item in pdf_subelements:
+        raw_title = item["project_title"]
+        if item.get("project_code"):
+            raw_title = f"{item['project_code']}: {raw_title}"
+        r2_desc = item.get("description_text", "")
+        if _is_garbage_description(r2_desc):
+            r2_desc = ""
+        fallback = desc_map.get(item["pe_number"])
+        if _is_garbage_description(fallback):
+            fallback = None
+
+        row_kws = item.get("_matched_r2_keywords") or find_matched_keywords(
+            [raw_title], keywords
+        )
+        desc_kws = find_matched_keywords([r2_desc, raw_title], desc_keywords) if r2_desc else []
+        desc_kws = [kw for kw in desc_kws if kw not in row_kws]
+
+        d = {
+            "pe_number": item["pe_number"],
+            "organization_name": None,
+            "exhibit_type": "r2",
+            "line_item_title": raw_title,
+            "budget_activity": None,
+            "budget_activity_title": None,
+            "appropriation_title": None,
+            "account_title": item.get("pe_title"),
+            "matched_keywords_row": json.dumps(row_kws) if row_kws else "[]",
+            "matched_keywords_desc": json.dumps(desc_kws) if desc_kws else "[]",
+            "description_text": r2_desc if r2_desc else fallback,
+        }
+        fy_refs = item.get("fy_refs", {})
+        for yr in year_range:
+            fy_key = f"fy{yr}"
+            d[f"fy{yr}"] = item["fy_amounts"].get(fy_key)
+            d[f"fy{yr}_ref"] = (
+                fy_refs.get(fy_key)
+                if item["fy_amounts"].get(fy_key) is not None
+                else None
+            )
+        _add_to_r2_groups(d)
+
+    # Fuzzy merge within each (pe, project_code) group.
+    # Uses Levenshtein distance < 20% to merge near-duplicates.
+    # Prefers r2 (Excel) metadata over r2_pdf; keeps longer title.
+    # Keeps rows separate if titles differ substantially (e.g. Mk4A vs Mk4B).
+    def _merge_into(target: dict, source: dict) -> None:
+        """Merge source row into target: FY amounts + consolidated titles."""
+        # Prefer r2 exhibit_type
+        if source.get("exhibit_type") == "r2" and target.get("exhibit_type") != "r2":
+            for k in ("exhibit_type", "organization_name", "budget_activity",
+                       "budget_activity_title", "appropriation_title", "account_title"):
+                if source.get(k):
+                    target[k] = source[k]
+        # Keep longer title
+        if len(source.get("_clean_title_only", "")) > len(target.get("_clean_title_only", "")):
+            target["line_item_title"] = source["line_item_title"]
+            target["_clean_title_only"] = source["_clean_title_only"]
+        # Merge FY amounts (first non-null wins)
+        for yr in year_range:
+            col = f"fy{yr}"
+            if target.get(col) is None and source.get(col) is not None:
+                target[col] = source[col]
+                ref_col = f"fy{yr}_ref"
+                if source.get(ref_col):
+                    target[ref_col] = source[ref_col]
+        # Track consolidated title variants
+        if source["line_item_title"] != target["line_item_title"]:
+            target.setdefault("_consolidated", []).append(source["line_item_title"])
+        target["_consolidated"].extend(source.get("_consolidated", []))
 
     merged_r2: dict[tuple[str, str], dict] = {}
-    for (pe, code), _codes in code_groups.items():
-        group_keys = [(pe, code)]  # all keys with this (pe, code)
-        group_rows = [r2_rows[k] for k in group_keys if k in r2_rows]
+    for (_pe, _code), group in r2_by_code.items():
+        # Sort: r2 (Excel) first so they become the merge target
+        group.sort(key=lambda d: (0 if d.get("exhibit_type") == "r2" else 1))
 
-        # Within this code group, fuzzy-merge by title similarity
-        merged_in_group: list[dict] = []
-        for row in group_rows:
-            title = row.get("_clean_title_only", "")
+        clusters: list[dict] = []
+        for row in group:
+            title = row.get("_clean_title_only", "").lower()
             matched = False
-            for existing in merged_in_group:
-                ex_title = existing.get("_clean_title_only", "")
-                shorter = min(len(title), len(ex_title))
-                if shorter == 0:
+            for existing in clusters:
+                ex_title = existing.get("_clean_title_only", "").lower()
+                if not title or not ex_title:
                     continue
-                dist = _levenshtein_distance(title.lower(), ex_title.lower())
+                # Prefix match: one title starts with the other (truncation)
+                if title.startswith(ex_title) or ex_title.startswith(title):
+                    _merge_into(existing, row)
+                    matched = True
+                    break
+                # Levenshtein: merge if < 20% relative to shorter title
+                shorter = min(len(title), len(ex_title))
+                dist = _levenshtein_distance(title, ex_title)
                 if dist / max(shorter, 1) < 0.20:
-                    # Merge: keep longer title, merge FY amounts
-                    if len(title) > len(ex_title):
-                        existing["line_item_title"] = row["line_item_title"]
-                        existing["_clean_title_only"] = title
-                    for yr in year_range:
-                        col = f"fy{yr}"
-                        if existing.get(col) is None and row.get(col) is not None:
-                            existing[col] = row[col]
-                            ref_col = f"fy{yr}_ref"
-                            if row.get(ref_col):
-                                existing[ref_col] = row[ref_col]
-                    if row["line_item_title"] != existing["line_item_title"]:
-                        existing.setdefault("_consolidated", []).append(row["line_item_title"])
-                    existing["_consolidated"].extend(row.get("_consolidated", []))
+                    _merge_into(existing, row)
                     matched = True
                     break
             if not matched:
-                merged_in_group.append(row)
+                clusters.append(row)
 
-        for row in merged_in_group:
+        for row in clusters:
             mkey = (row["pe_number"], row["line_item_title"])
             merged_r2[mkey] = row
 
@@ -2048,135 +2112,9 @@ def build_cache_table(
 
             _extract_r1_titles_for_stubs(conn, cache_table, pdf_only_pes)
 
-    _progress("mining_pdfs", budget_line_rows=count)
-
-    # 6b. Insert PDF-mined R-2/R-2A sub-elements
-    pdf_subelements, discovered_pes = mine_pdf_subelements(
-        conn,
-        matched_pes,
-        keywords,
-        core_pes=bl_pes,
-        fy_start=fy_start,
-    )
-
-    # For PEs discovered via R-2 keyword matches, also insert R-1 budget_lines rows
-    if discovered_pes:
-        disc_placeholders = ", ".join("?" for _ in discovered_pes)
-        disc_sql = f"""
-            SELECT
-                pe_number,
-                MAX(organization_name) AS organization_name,
-                exhibit_type,
-                line_item_title,
-                MAX(budget_activity) AS budget_activity,
-                MAX(budget_activity_title) AS budget_activity_title,
-                MAX(appropriation_title) AS appropriation_title,
-                MAX(account_title) AS account_title,
-                {year_cols_sql}
-            FROM budget_lines
-            WHERE pe_number IN ({disc_placeholders})
-              AND CAST(fiscal_year AS INTEGER) >= {fy_start}
-            GROUP BY pe_number, exhibit_type, line_item_title
-            ORDER BY pe_number, exhibit_type, line_item_title
-        """
-        disc_rows = conn.execute(disc_sql, list(discovered_pes)).fetchall()
-        disc_desc_map = get_description_map(conn, discovered_pes)
-        for r in disc_rows:
-            d = dict(r)
-            text_fields = [
-                d.get("line_item_title"),
-                d.get("account_title"),
-                d.get("budget_activity_title"),
-            ]
-            row_kws = find_matched_keywords(text_fields, keywords)
-            vals = [
-                d["pe_number"],
-                d.get("organization_name"),
-                d.get("exhibit_type"),
-                d.get("line_item_title"),
-                d.get("budget_activity"),
-                d.get("budget_activity_title"),
-                normalize_budget_activity(
-                    d.get("budget_activity"), d.get("budget_activity_title")
-                ),
-                d.get("appropriation_title"),
-                d.get("account_title"),
-                color_of_money(d.get("appropriation_title")),
-                json.dumps(row_kws) if row_kws else "[]",
-                "[]",  # matched_keywords_desc — set per-row only for R-2 sub-elements
-                (
-                    None
-                    if _is_garbage_description(disc_desc_map.get(d["pe_number"]))
-                    else disc_desc_map.get(d["pe_number"])
-                ),
-            ]
-            for yr in year_range:
-                vals.append(d.get(f"fy{yr}"))
-                vals.append(d.get(f"fy{yr}_ref"))
-            conn.execute(insert_sql, vals)
-            count += 1
-        logger.info(
-            "Cache: added %d R-1 rows for %d discovered PEs",
-            len(disc_rows),
-            len(discovered_pes),
-        )
-
-    pdf_count = 0
-    for item in pdf_subelements:
-        pe = item["pe_number"]
-        raw_title = item["project_title"]
-        if item.get("project_code"):
-            raw_title = f"{item['project_code']}: {raw_title}"
-        # Final cleanup: strip trailing amounts, reject junk rows
-        cleaned_code, cleaned_title = _clean_title(raw_title)
-        if cleaned_code is None and cleaned_title is None:
-            continue
-        title = f"{cleaned_code}: {cleaned_title}" if cleaned_code else (cleaned_title or raw_title)
-
-        row_kws = item.get("_matched_r2_keywords") or find_matched_keywords(
-            [title], keywords
-        )
-        r2_desc = item.get("description_text", "")
-        if _is_garbage_description(r2_desc):
-            r2_desc = ""
-        fallback = desc_map.get(pe)
-        if _is_garbage_description(fallback):
-            fallback = None
-        description = r2_desc if r2_desc else fallback
-        # Check the sub-element's own description for keyword matches
-        desc_kws = (
-            find_matched_keywords([r2_desc, title], desc_keywords) if r2_desc else []
-        )
-        desc_kws = [kw for kw in desc_kws if kw not in row_kws]
-
-        vals = [
-            pe,
-            None,  # organization_name — not in PDF text, filled below
-            "r2",
-            title,
-            None,  # budget_activity
-            None,  # budget_activity_title
-            None,  # budget_activity_norm
-            None,  # appropriation_title
-            item.get("pe_title"),
-            "RDT&E",
-            json.dumps(row_kws) if row_kws else "[]",
-            json.dumps(desc_kws) if desc_kws else "[]",
-            description,
-        ]
-        fy_refs = item.get("fy_refs", {})
-        for yr in year_range:
-            fy_key = f"fy{yr}"
-            vals.append(item["fy_amounts"].get(fy_key))
-            vals.append(
-                fy_refs.get(fy_key)
-                if item["fy_amounts"].get(fy_key) is not None
-                else None
-            )
-
-        conn.execute(insert_sql, vals)
-        pdf_count += 1
-
+    # PDF-mined R-2 rows were already merged into the pre-pass above (r2_by_code).
+    # The back-fill and lineage annotation still run on the combined result.
+    pdf_count = sum(1 for d in merged_r2.values() if d.get("exhibit_type") == "r2")
     if pdf_count:
         # Back-fill organization_name from R-1 rows
         conn.execute(f"""
