@@ -569,7 +569,7 @@ function renderAvailableList(columns) {
   const list = document.getElementById('available-list');
   list.innerHTML = '';
   columns.forEach(col => {
-    const safeCol = col.replace(/'/g, "\\'");
+    const safeCol = col.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
     const actions = `<button onclick="addColumn('${safeCol}')" aria-label="Add ${col} to selected columns" title="Add">+</button>`;
     list.appendChild(_createPickerItem(col, actions, [['dragstart', onAvailDragStart]]));
   });
