@@ -41,6 +41,7 @@ from api.routes.keyword_search import (
     build_cache_table,
     cache_rows_to_dicts,
     ensure_cache,
+    lookup_cache_description,
 )
 
 logger = logging.getLogger(__name__)
@@ -242,29 +243,10 @@ def get_description(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> dict:
     """Return description_text for a PE (R-1 level) or specific R-2 project row."""
-    try:
-        if project:
-            row = conn.execute(
-                f"SELECT description_text FROM {_CACHE_TABLE} "
-                "WHERE pe_number = ? AND line_item_title = ? AND description_text IS NOT NULL LIMIT 1",
-                [pe_number, project],
-            ).fetchone()
-        else:
-            row = conn.execute(
-                f"SELECT description_text FROM {_CACHE_TABLE} "
-                "WHERE pe_number = ? AND exhibit_type = 'r2' AND description_text IS NOT NULL LIMIT 1",
-                [pe_number],
-            ).fetchone()
-            if not row:
-                row = conn.execute(
-                    f"SELECT description_text FROM {_CACHE_TABLE} "
-                    "WHERE pe_number = ? AND description_text IS NOT NULL LIMIT 1",
-                    [pe_number],
-                ).fetchone()
-        return {"description": row[0] if row else None}
-    except sqlite3.OperationalError:
-        logger.warning("OperationalError fetching description for PE %s", pe_number, exc_info=True)
-        return {"description": None}
+    desc = lookup_cache_description(
+        conn, _CACHE_TABLE, pe_number, project=project, prefer_exhibit="r2",
+    )
+    return {"description": desc}
 
 
 # ── GET /api/v1/hypersonics/debug ─────────────────────────────────────────────

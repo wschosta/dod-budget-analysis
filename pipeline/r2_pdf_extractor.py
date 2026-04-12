@@ -25,6 +25,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from utils import get_connection
+from utils.normalization import clean_r2_title
 from utils.patterns import PE_NUMBER as _PE_RE
 
 logger = logging.getLogger(__name__)
@@ -478,7 +479,6 @@ def extract_r2_from_pdfs(
 
         for label, fy_pairs in result["fy_amounts"].items():
             # Clean title: strip trailing amounts, reject junk rows
-            from utils.normalization import clean_r2_title
             cleaned_code, cleaned_label = clean_r2_title(label)
             if cleaned_code is None and cleaned_label is None:
                 continue

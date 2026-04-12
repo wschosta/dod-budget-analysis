@@ -54,6 +54,36 @@ _ORG_FROM_PATH = [
     ("SOCOM", "SOCOM"),
 ]
 
+_LEVENSHTEIN_THRESHOLD = 0.20
+_HIDDEN_LOOKUP_COL = 200
+_SPILL_MAX_ROW = 2000
+
+
+# ── SQL / JSON helpers ──────────────────────────────────────────────────────
+
+
+def _in_clause(params: list | set) -> tuple[str, list]:
+    """Return ``'?,?,?'`` placeholder string and flat param list."""
+    p = list(params)
+    return ", ".join("?" for _ in p), p
+
+
+def _like_clauses(columns: list[str], keywords: list[str]) -> tuple[str, list[str]]:
+    """Build OR-joined ``col LIKE ?`` clauses for keyword search."""
+    clauses = [f"{col} LIKE ?" for col in columns for _ in keywords]
+    params = [f"%{kw}%" for _ in columns for kw in keywords]
+    return " OR ".join(clauses), params
+
+
+def _safe_json_list(val: Any) -> list:
+    """Parse a JSON string to list, returning ``[]`` on failure."""
+    if isinstance(val, list):
+        return val
+    try:
+        return json.loads(val) if val else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
 
 # ── Cache DDL ─────────────────────────────────────────────────────────────────
 
@@ -154,34 +184,28 @@ def collect_matching_pe_numbers_split(
     # (a0) Direct PE number match — detect keywords that look like PE numbers
     pe_keywords = [kw for kw in keywords if PE_NUMBER_STRICT_CI.match(kw.strip())]
     if pe_keywords:
-        pe_placeholders = ", ".join("?" for _ in pe_keywords)
         pe_upper = [pk.strip().upper() for pk in pe_keywords]
+        ph, params = _in_clause(pe_upper)
         rows = conn.execute(
-            f"SELECT DISTINCT pe_number FROM budget_lines WHERE pe_number IN ({pe_placeholders})",
-            pe_upper,
+            f"SELECT DISTINCT pe_number FROM budget_lines WHERE pe_number IN ({ph})",
+            params,
         ).fetchall()
         bl_matched.update(r[0] for r in rows if r[0])
         # Fallback: check pe_index for PDF-only PEs not in budget_lines
         remaining_pes = set(pe_upper) - bl_matched
         if remaining_pes:
             try:
-                rp = ", ".join("?" for _ in remaining_pes)
+                rp, rp_params = _in_clause(remaining_pes)
                 pi_rows = conn.execute(
                     f"SELECT DISTINCT pe_number FROM pe_index WHERE pe_number IN ({rp})",
-                    list(remaining_pes),
+                    rp_params,
                 ).fetchall()
                 bl_matched.update(r[0] for r in pi_rows if r[0])
             except sqlite3.OperationalError:
                 pass  # pe_index table may not exist
 
     # (a) Budget-lines keyword match
-    kw_clauses: list[str] = []
-    kw_params: list[Any] = []
-    for col in search_cols:
-        for kw in keywords:
-            kw_clauses.append(f"{col} LIKE ?")
-            kw_params.append(f"%{kw}%")
-    kw_where = " OR ".join(kw_clauses)
+    kw_where, kw_params = _like_clauses(search_cols, keywords)
     rows = conn.execute(
         f"SELECT DISTINCT pe_number FROM budget_lines WHERE {kw_where}", kw_params
     ).fetchall()
@@ -191,11 +215,9 @@ def collect_matching_pe_numbers_split(
     desc_matched: set[str] = set()
     try:
         conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
-        desc_clauses = ["description_text LIKE ?" for _ in desc_keywords]
-        desc_params = [f"%{kw}%" for kw in desc_keywords]
+        desc_where, desc_params = _like_clauses(["description_text"], desc_keywords)
         rows = conn.execute(
-            "SELECT DISTINCT pe_number FROM pe_descriptions"
-            f" WHERE {' OR '.join(desc_clauses)}",
+            f"SELECT DISTINCT pe_number FROM pe_descriptions WHERE {desc_where}",
             desc_params,
         ).fetchall()
         desc_matched.update(r[0] for r in rows if r[0])
@@ -222,8 +244,7 @@ def get_description_map(
     except sqlite3.OperationalError:
         return {}
 
-    placeholders = ", ".join("?" for _ in pe_numbers)
-    pe_list = list(pe_numbers)
+    ph, pe_list = _in_clause(pe_numbers)
     rows = conn.execute(
         f"SELECT pe_number, description_text, "
         f"CASE "
@@ -232,7 +253,7 @@ def get_description_map(
         f"  WHEN section_header LIKE '%Acquisition Strategy%' THEN 3 "
         f"  ELSE 4 END AS priority "
         f"FROM pe_descriptions "
-        f"WHERE pe_number IN ({placeholders}) AND section_header IS NOT NULL "
+        f"WHERE pe_number IN ({ph}) AND section_header IS NOT NULL "
         f"ORDER BY pe_number, priority",
         pe_list,
     ).fetchall()
@@ -264,13 +285,12 @@ def get_desc_keyword_map(
     except sqlite3.OperationalError:
         return {}
 
-    placeholders = ", ".join("?" for _ in pe_numbers)
-    pe_list = list(pe_numbers)
+    ph, pe_list = _in_clause(pe_numbers)
 
     # Single query: fetch all (pe_number, description_text) pairs
     rows = conn.execute(
         f"SELECT DISTINCT pe_number, description_text FROM pe_descriptions "
-        f"WHERE pe_number IN ({placeholders})",
+        f"WHERE pe_number IN ({ph})",
         pe_list,
     ).fetchall()
 
@@ -736,6 +756,48 @@ def annotate_cross_pe_lineages(
 # ── Query helpers ─────────────────────────────────────────────────────────────
 
 
+def lookup_cache_description(
+    conn: sqlite3.Connection,
+    cache_table: str,
+    pe_number: str,
+    project: str | None = None,
+    prefer_exhibit: str | None = None,
+) -> str | None:
+    """Look up description_text from a cache table. Returns None on miss.
+
+    If *prefer_exhibit* is set (e.g. ``'r2'``), tries that exhibit type first
+    before falling back to any row for the PE.
+    """
+    try:
+        if project:
+            row = conn.execute(
+                f"SELECT description_text FROM {cache_table} "
+                "WHERE pe_number = ? AND line_item_title = ? AND description_text IS NOT NULL LIMIT 1",
+                [pe_number, project],
+            ).fetchone()
+        elif prefer_exhibit:
+            row = conn.execute(
+                f"SELECT description_text FROM {cache_table} "
+                "WHERE pe_number = ? AND exhibit_type = ? AND description_text IS NOT NULL LIMIT 1",
+                [pe_number, prefer_exhibit],
+            ).fetchone()
+            if not row:
+                row = conn.execute(
+                    f"SELECT description_text FROM {cache_table} "
+                    "WHERE pe_number = ? AND description_text IS NOT NULL LIMIT 1",
+                    [pe_number],
+                ).fetchone()
+        else:
+            row = conn.execute(
+                f"SELECT description_text FROM {cache_table} "
+                "WHERE pe_number = ? AND description_text IS NOT NULL LIMIT 1",
+                [pe_number],
+            ).fetchone()
+        return row[0] if row else None
+    except sqlite3.OperationalError:
+        return None
+
+
 def apply_filters(
     service: str | None,
     exhibit: str | None,
@@ -765,11 +827,7 @@ def cache_rows_to_dicts(
     for r in rows:
         d = dict(r)
         for field in ("matched_keywords_row", "matched_keywords_desc"):
-            kw_json = d.get(field, "[]")
-            try:
-                d[field] = json.loads(kw_json) if kw_json else []
-            except (json.JSONDecodeError, TypeError):
-                d[field] = []
+            d[field] = _safe_json_list(d.get(field, "[]"))
         refs: dict[str, str] = {}
         for yr in year_range:
             ref_key = f"fy{yr}_ref"
@@ -802,11 +860,11 @@ def load_per_fy_descriptions(
     except sqlite3.OperationalError:
         return {}
 
-    placeholders = ", ".join("?" for _ in pes)
+    ph, pe_params = _in_clause(pes)
     rows = conn.execute(
         f"SELECT pe_number, fiscal_year, section_header, description_text "
         f"FROM pe_descriptions "
-        f"WHERE pe_number IN ({placeholders}) "
+        f"WHERE pe_number IN ({ph}) "
         f"  AND section_header IS NOT NULL "
         f"ORDER BY pe_number, fiscal_year, "
         f"  CASE "
@@ -814,7 +872,7 @@ def load_per_fy_descriptions(
         f"    WHEN section_header LIKE '%Accomplishments%' THEN 2 "
         f"    WHEN section_header LIKE '%Acquisition Strategy%' THEN 3 "
         f"    ELSE 4 END",
-        pes,
+        pe_params,
     ).fetchall()
 
     result: dict[tuple[str, str], str] = {}
@@ -871,6 +929,100 @@ def _col_letter(one_based: int) -> str:
     """Convert a 1-based column index to an Excel letter (1 → 'A')."""
     from xlsxwriter.utility import xl_col_to_name
     return xl_col_to_name(one_based - 1)
+
+
+def _write_merged_fy_headers(
+    ws: Any,
+    fixed_columns: list[tuple[str, str]],
+    active_years: list[int],
+    fixed_count: int,
+    sub_col_names: list[str],
+    fmt_merge: Any,
+    fmt_sub: Any,
+) -> list[str]:
+    """Write two-row merged FY headers and return the flat header list."""
+    for ci, (h, _) in enumerate(fixed_columns):
+        ws.merge_range(0, ci, 1, ci, h, fmt_merge)
+    col = fixed_count
+    for yr in active_years:
+        if len(sub_col_names) > 1:
+            ws.merge_range(0, col, 0, col + len(sub_col_names) - 1, f"FY{yr} ($K)", fmt_merge)
+        else:
+            ws.write(0, col, f"FY{yr} ($K)", fmt_merge)
+        for si, sub in enumerate(sub_col_names):
+            ws.write(1, col + si, sub, fmt_sub)
+        col += len(sub_col_names)
+    headers: list[str] = [h for h, _ in fixed_columns]
+    for yr in active_years:
+        for sub in sub_col_names:
+            headers.append(f"FY{yr} {sub}" if sub != "($K)" else f"FY{yr} ($K)")
+    return headers
+
+
+def _set_fy_column_widths(
+    ws: Any,
+    fixed_columns: list[tuple[str, str]],
+    fy_cols: list[Any],
+    base_money_fmt: Any | None = None,
+) -> None:
+    """Set column widths for fixed columns and FY column groups."""
+    for ci, (header, _field) in enumerate(fixed_columns):
+        ws.set_column(ci, ci, _COL_WIDTH_DEFAULTS.get(header, 14))
+    for fc in fy_cols:
+        ws.set_column(fc.val - 1, fc.val - 1, 14, base_money_fmt)
+        if fc.intotal:
+            ws.set_column(fc.intotal - 1, fc.intotal - 1, 10)
+        if fc.src:
+            ws.set_column(fc.src - 1, fc.src - 1, 30)
+        if fc.desc:
+            ws.set_column(fc.desc - 1, fc.desc - 1, 40)
+        if fc.desc_kw:
+            ws.set_column(fc.desc_kw - 1, fc.desc_kw - 1, 25)
+
+
+def _apply_fy_conditional_formatting(
+    ws: Any,
+    fy_cols: list[Any],
+    intotal_letters: list[str],
+    fixed_count: int,
+    first_row: int,
+    last_row: int,
+    fmt: dict[str, Any],
+) -> None:
+    """Apply Y/N/P conditional formatting to FY columns and fixed columns."""
+    for fc in fy_cols:
+        data_cols = [fc.val - 1]
+        if fc.src:
+            data_cols.append(fc.src - 1)
+        if fc.desc:
+            data_cols.append(fc.desc - 1)
+        for c0 in data_cols:
+            ws.conditional_format(first_row, c0, last_row, c0, {
+                "type": "formula",
+                "criteria": f'=${fc.intotal_l}{first_row + 1}="Y"',
+                "format": fmt["cf_bold"],
+            })
+            ws.conditional_format(first_row, c0, last_row, c0, {
+                "type": "formula",
+                "criteria": f'=${fc.intotal_l}{first_row + 1}="N"',
+                "format": fmt["cf_italic_gray"],
+            })
+        if fc.intotal:
+            ic0 = fc.intotal - 1
+            for val, key in [("Y", "cf_green"), ("P", "cf_yellow"), ("N", "cf_red")]:
+                ws.conditional_format(first_row, ic0, last_row, ic0, {
+                    "type": "formula",
+                    "criteria": f'=${fc.intotal_l}{first_row + 1}="{val}"',
+                    "format": fmt[key],
+                })
+    or_parts = ",".join(f'${lt}{first_row + 1}="Y"' for lt in intotal_letters)
+    and_parts = ",".join(f'${lt}{first_row + 1}="N"' for lt in intotal_letters)
+    ws.conditional_format(first_row, 0, last_row, fixed_count - 1, {
+        "type": "formula", "criteria": f"=OR({or_parts})", "format": fmt["cf_bold"],
+    })
+    ws.conditional_format(first_row, 0, last_row, fixed_count - 1, {
+        "type": "formula", "criteria": f"=AND({and_parts})", "format": fmt["cf_italic_gray"],
+    })
 
 
 def build_keyword_xlsx(
@@ -960,8 +1112,6 @@ def build_keyword_xlsx(
     }
 
     # ── Headers: two-row layout with merged FY cells ──
-    # Row 0: fixed column names + merged FY year cells
-    # Row 1: sub-column headers ($K, In Total, Source, Description, Desc Keywords)
     fmt_merge = wb.add_format({
         "bold": True, "font_size": 11, "font_color": "#FFFFFF",
         "bg_color": "#2C3E50", "align": "center", "valign": "vcenter", "border": 1,
@@ -971,44 +1121,19 @@ def build_keyword_xlsx(
         "bg_color": "#34495E", "align": "center", "border": 1,
     })
 
-    # Fixed column headers (merged across rows 0-1)
-    for ci, (h, _) in enumerate(fixed_columns):
-        ws.merge_range(0, ci, 1, ci, h, fmt_merge)
+    sub_col_names = ["($K)"]
+    if include_intotal:
+        sub_col_names.append("In Total")
+    if include_source:
+        sub_col_names.append("Source")
+    if include_description:
+        sub_col_names.append("Description")
+    if include_desc_keywords:
+        sub_col_names.append("Desc Keywords")
 
-    # FY column groups with merged year header
-    col = fixed_count
-    for yr in active_years:
-        sub_cols = ["($K)"]
-        if include_intotal:
-            sub_cols.append("In Total")
-        if include_source:
-            sub_cols.append("Source")
-        if include_description:
-            sub_cols.append("Description")
-        if include_desc_keywords:
-            sub_cols.append("Desc Keywords")
-        # Merged FY header spanning sub-columns
-        if len(sub_cols) > 1:
-            ws.merge_range(0, col, 0, col + len(sub_cols) - 1, f"FY{yr} ($K)", fmt_merge)
-        else:
-            ws.write(0, col, f"FY{yr} ($K)", fmt_merge)
-        # Sub-column headers in row 1
-        for si, sub in enumerate(sub_cols):
-            ws.write(1, col + si, sub, fmt_sub)
-        col += len(sub_cols)
-
-    # Build flat header list for reference (used by autofilter range)
-    headers: list[str] = [h for h, _ in fixed_columns]
-    for yr in active_years:
-        headers.append(f"FY{yr} ($K)")
-        if include_intotal:
-            headers.append(f"FY{yr} In Total")
-        if include_source:
-            headers.append(f"FY{yr} Source")
-        if include_description:
-            headers.append(f"FY{yr} Description")
-        if include_desc_keywords:
-            headers.append(f"FY{yr} Desc Keywords")
+    headers = _write_merged_fy_headers(
+        ws, fixed_columns, active_years, fixed_count, sub_col_names, fmt_merge, fmt_sub,
+    )
 
     # ── Data rows (row_num is 1-based for formula references, data starts row 3) ──
     first_data_row = 3
@@ -1081,45 +1206,10 @@ def build_keyword_xlsx(
 
     # ── Conditional formatting ──
     if include_intotal and last_data_row >= first_data_row and active_years:
-        r1 = first_data_row - 1  # 0-indexed first data row
-        r2 = last_data_row - 1   # 0-indexed last data row
-        for fc in fy_cols:
-            data_cols = [fc.val - 1]
-            if fc.src:
-                data_cols.append(fc.src - 1)
-            if fc.desc:
-                data_cols.append(fc.desc - 1)
-            for c0 in data_cols:
-                ws.conditional_format(r1, c0, r2, c0, {
-                    "type": "formula",
-                    "criteria": f'=${fc.intotal_l}{first_data_row}="Y"',
-                    "format": fmt["cf_bold"],
-                })
-                ws.conditional_format(r1, c0, r2, c0, {
-                    "type": "formula",
-                    "criteria": f'=${fc.intotal_l}{first_data_row}="N"',
-                    "format": fmt["cf_italic_gray"],
-                })
-            ic0 = fc.intotal - 1
-            for val, key in [("Y", "cf_green"), ("P", "cf_yellow"), ("N", "cf_red")]:
-                ws.conditional_format(r1, ic0, r2, ic0, {
-                    "type": "formula",
-                    "criteria": f'=${fc.intotal_l}{first_data_row}="{val}"',
-                    "format": fmt[key],
-                })
-
-        or_parts = ",".join(f'${lt}{first_data_row}="Y"' for lt in intotal_letters)
-        and_parts = ",".join(f'${lt}{first_data_row}="N"' for lt in intotal_letters)
-        ws.conditional_format(r1, 0, r2, fixed_count - 1, {
-            "type": "formula",
-            "criteria": f"=OR({or_parts})",
-            "format": fmt["cf_bold"],
-        })
-        ws.conditional_format(r1, 0, r2, fixed_count - 1, {
-            "type": "formula",
-            "criteria": f"=AND({and_parts})",
-            "format": fmt["cf_italic_gray"],
-        })
+        _apply_fy_conditional_formatting(
+            ws, fy_cols, intotal_letters, fixed_count,
+            first_data_row - 1, last_data_row - 1, fmt,
+        )
 
     # ── Totals rows ──
     if include_intotal and last_data_row >= first_data_row and active_years:
@@ -1145,18 +1235,7 @@ def build_keyword_xlsx(
             ws.write_formula(totals_row - 1, fc.val - 1, f"=SUM({vr})", fmt["total_money"])
 
     # ── Column widths ──
-    for ci, (header, _field) in enumerate(fixed_columns):
-        ws.set_column(ci, ci, _COL_WIDTH_DEFAULTS.get(header, 14))
-    for fc in fy_cols:
-        ws.set_column(fc.val - 1, fc.val - 1, 14)
-        if fc.intotal:
-            ws.set_column(fc.intotal - 1, fc.intotal - 1, 10)
-        if fc.src:
-            ws.set_column(fc.src - 1, fc.src - 1, 30)
-        if fc.desc:
-            ws.set_column(fc.desc - 1, fc.desc - 1, 40)
-        if fc.desc_kw:
-            ws.set_column(fc.desc_kw - 1, fc.desc_kw - 1, 25)
+    _set_fy_column_widths(ws, fixed_columns, fy_cols)
 
     freeze_col = min(5, fixed_count + 1)
     ws.freeze_panes(2, freeze_col - 1)
@@ -1166,27 +1245,9 @@ def build_keyword_xlsx(
     if include_intotal and last_data_row >= first_data_row and active_years:
         ws_sel = wb.add_worksheet("Selected")
 
-        # Same two-row merged header as data sheet
-        for ci, (h, _) in enumerate(fixed_columns):
-            ws_sel.merge_range(0, ci, 1, ci, h, fmt_merge)
-        sel_col = fixed_count
-        for yr in active_years:
-            sub_cols = ["($K)"]
-            if include_intotal:
-                sub_cols.append("In Total")
-            if include_source:
-                sub_cols.append("Source")
-            if include_description:
-                sub_cols.append("Description")
-            if include_desc_keywords:
-                sub_cols.append("Desc Keywords")
-            if len(sub_cols) > 1:
-                ws_sel.merge_range(0, sel_col, 0, sel_col + len(sub_cols) - 1, f"FY{yr} ($K)", fmt_merge)
-            else:
-                ws_sel.write(0, sel_col, f"FY{yr} ($K)", fmt_merge)
-            for si, sub in enumerate(sub_cols):
-                ws_sel.write(1, sel_col + si, sub, fmt_sub)
-            sel_col += len(sub_cols)
+        _write_merged_fy_headers(
+            ws_sel, fixed_columns, active_years, fixed_count, sub_col_names, fmt_merge, fmt_sub,
+        )
 
         # FILTER formula: show rows where ANY In Total column = "Y" or "P"
         data_range = f"'{sheet_title}'!$A${first_data_row}:${_col_letter(len(headers))}${last_data_row}"
@@ -1199,56 +1260,11 @@ def build_keyword_xlsx(
         filter_formula = f"=FILTER({data_range},{filter_crit},\"No matching rows\")"
         ws_sel.write_dynamic_array_formula(2, 0, 2, 0, filter_formula, fmt["base"])
 
-        # Copy column widths + conditional formatting from data sheet
-        for ci, (header, _field) in enumerate(fixed_columns):
-            ws_sel.set_column(ci, ci, _COL_WIDTH_DEFAULTS.get(header, 14))
-        for fc in fy_cols:
-            ws_sel.set_column(fc.val - 1, fc.val - 1, 14, fmt["base_money"])
-            if fc.intotal:
-                ws_sel.set_column(fc.intotal - 1, fc.intotal - 1, 10)
-            if fc.src:
-                ws_sel.set_column(fc.src - 1, fc.src - 1, 30)
-            if fc.desc:
-                ws_sel.set_column(fc.desc - 1, fc.desc - 1, 40)
-            if fc.desc_kw:
-                ws_sel.set_column(fc.desc_kw - 1, fc.desc_kw - 1, 25)
-
-        # Conditional formatting on Selected sheet (same as data sheet)
+        _set_fy_column_widths(ws_sel, fixed_columns, fy_cols, base_money_fmt=fmt["base_money"])
         if intotal_letters and last_data_row >= first_data_row:
-            sel_r1, sel_r2 = 2, 2000  # generous range for spill
-            for fc in fy_cols:
-                data_cols_0 = [fc.val - 1]
-                if fc.src:
-                    data_cols_0.append(fc.src - 1)
-                if fc.desc:
-                    data_cols_0.append(fc.desc - 1)
-                for c0 in data_cols_0:
-                    ws_sel.conditional_format(sel_r1, c0, sel_r2, c0, {
-                        "type": "formula",
-                        "criteria": f'=${fc.intotal_l}3="Y"',
-                        "format": fmt["cf_bold"],
-                    })
-                    ws_sel.conditional_format(sel_r1, c0, sel_r2, c0, {
-                        "type": "formula",
-                        "criteria": f'=${fc.intotal_l}3="N"',
-                        "format": fmt["cf_italic_gray"],
-                    })
-                if fc.intotal:
-                    ic0 = fc.intotal - 1
-                    for val, key in [("Y", "cf_green"), ("P", "cf_yellow"), ("N", "cf_red")]:
-                        ws_sel.conditional_format(sel_r1, ic0, sel_r2, ic0, {
-                            "type": "formula",
-                            "criteria": f'=${fc.intotal_l}3="{val}"',
-                            "format": fmt[key],
-                        })
-            or_parts = ",".join(f'${lt}3="Y"' for lt in intotal_letters)
-            and_parts = ",".join(f'${lt}3="N"' for lt in intotal_letters)
-            ws_sel.conditional_format(sel_r1, 0, sel_r2, fixed_count - 1, {
-                "type": "formula", "criteria": f"=OR({or_parts})", "format": fmt["cf_bold"],
-            })
-            ws_sel.conditional_format(sel_r1, 0, sel_r2, fixed_count - 1, {
-                "type": "formula", "criteria": f"=AND({and_parts})", "format": fmt["cf_italic_gray"],
-            })
+            _apply_fy_conditional_formatting(
+                ws_sel, fy_cols, intotal_letters, fixed_count, 2, _SPILL_MAX_ROW, fmt,
+            )
 
         ws_sel.freeze_panes(2, freeze_col - 1)
 
@@ -1261,7 +1277,7 @@ def build_keyword_xlsx(
             wb, items, active_years, sheet_title,
             field_to_col, val_letters, it_letters,
             first_data_row, last_data_row, fmt,
-            keywords=keywords,
+            keywords=keywords, fmt_merge=fmt_merge, fmt_sub=fmt_sub,
         )
 
     # ── Keyword co-occurrence matrix ──
@@ -1284,6 +1300,8 @@ def _build_xlsx_summary(
     last_data_row: int,
     fmt: dict[str, Any] | None = None,
     keywords: list[str] | None = None,
+    fmt_merge: Any | None = None,
+    fmt_sub: Any | None = None,
 ) -> None:
     """Build dynamic Summary sheets using xlsxwriter spill formulas.
 
@@ -1325,16 +1343,18 @@ def _build_xlsx_summary(
         if pe and row.get("exhibit_type") == "r1" and row.get("line_item_title"):
             pe_titles[pe] = row["line_item_title"]
 
-    # Merged header format (centered, no wrap)
-    fmt_merge = wb.add_format({
-        "bold": True, "font_size": 11, "font_color": "#FFFFFF",
-        "bg_color": "#2C3E50", "align": "center", "valign": "vcenter",
-        "border": 1,
-    })
-    fmt_sub = wb.add_format({
-        "bold": True, "font_size": 10, "font_color": "#FFFFFF",
-        "bg_color": "#34495E", "align": "center", "border": 1,
-    })
+    # Reuse caller's format objects if provided; create fallbacks otherwise
+    if fmt_merge is None:
+        fmt_merge = wb.add_format({
+            "bold": True, "font_size": 11, "font_color": "#FFFFFF",
+            "bg_color": "#2C3E50", "align": "center", "valign": "vcenter",
+            "border": 1,
+        })
+    if fmt_sub is None:
+        fmt_sub = wb.add_format({
+            "bold": True, "font_size": 10, "font_color": "#FFFFFF",
+            "bg_color": "#34495E", "align": "center", "border": 1,
+        })
 
     def _write_summary_sheet(
         sheet_name: str,
@@ -1375,7 +1395,7 @@ def _build_xlsx_summary(
             ws.merge_range(0, col, 1, col, "PE Title", fmt_merge)
             ws.write(2, col, "", fmt["total"])
             # Write PE→title lookup table in far-right columns (ZA/ZB)
-            lk_col_pe = 200  # column GS (far right, hidden)
+            lk_col_pe = _HIDDEN_LOOKUP_COL
             lk_col_title = 201
             for ti, (pe, title) in enumerate(sorted(pe_titles.items())):
                 ws.write(ti, lk_col_pe, pe)
@@ -1486,62 +1506,72 @@ def _build_xlsx_summary(
         dim_rng = f"'{ds}'!${dcol}${first_data_row}:${dcol}${last_data_row}"
         _write_summary_sheet(sheet_name, label_col=label, match_rng=dim_rng)
 
-    # ── About sheet (last) ──
+    _build_xlsx_about_sheet(wb, items, ds, keywords)
+
+
+
+def _build_xlsx_about_sheet(
+    wb: Any,
+    items: list[dict],
+    data_sheet_name: str,
+    keywords: list[str] | None,
+) -> None:
+    """Write an About sheet documenting the export methodology."""
     import time as _time
 
-    ws_about = wb.add_worksheet("About")
+    ws = wb.add_worksheet("About")
     fmt_title = wb.add_format({"bold": True, "font_size": 14})
     fmt_section = wb.add_format({"bold": True, "font_size": 12, "bottom": 1})
     fmt_label = wb.add_format({"bold": True, "font_size": 10, "valign": "top"})
     fmt_text = wb.add_format({"font_size": 10, "text_wrap": True, "valign": "top"})
 
     r = 0
-    ws_about.write(r, 0, "DoD Budget Explorer \u2014 Export Documentation", fmt_title)
+    ws.write(r, 0, "DoD Budget Explorer \u2014 Export Documentation", fmt_title)
     r += 1
-    ws_about.write(r, 0, "Generated", fmt_label)
-    ws_about.write(r, 1, _time.strftime("%Y-%m-%d %H:%M:%S"), fmt_text)
+    ws.write(r, 0, "Generated", fmt_label)
+    ws.write(r, 1, _time.strftime("%Y-%m-%d %H:%M:%S"), fmt_text)
     r += 2
 
-    ws_about.write(r, 0, "Search Parameters", fmt_section)
+    ws.write(r, 0, "Search Parameters", fmt_section)
     r += 1
-    ws_about.write(r, 0, "Keywords", fmt_label)
-    ws_about.write(r, 1, ", ".join(keywords) if keywords else "(none)", fmt_text)
+    ws.write(r, 0, "Keywords", fmt_label)
+    ws.write(r, 1, ", ".join(keywords) if keywords else "(none)", fmt_text)
     r += 1
-    ws_about.write(r, 0, "Total rows", fmt_label)
-    ws_about.write(r, 1, len(items), fmt_text)
+    ws.write(r, 0, "Total rows", fmt_label)
+    ws.write(r, 1, len(items), fmt_text)
     r += 1
     matching = sum(1 for row in items if row.get("matched_keywords_row") or row.get("matched_keywords_desc"))
-    ws_about.write(r, 0, "Matching rows", fmt_label)
-    ws_about.write(r, 1, matching, fmt_text)
+    ws.write(r, 0, "Matching rows", fmt_label)
+    ws.write(r, 1, matching, fmt_text)
     r += 1
     unique_pe_count = len({row.get("pe_number") for row in items if row.get("pe_number")})
-    ws_about.write(r, 0, "Unique PEs", fmt_label)
-    ws_about.write(r, 1, unique_pe_count, fmt_text)
+    ws.write(r, 0, "Unique PEs", fmt_label)
+    ws.write(r, 1, unique_pe_count, fmt_text)
     r += 2
 
-    ws_about.write(r, 0, "Data Source", fmt_section)
+    ws.write(r, 0, "Data Source", fmt_section)
     r += 1
-    ws_about.write(r, 0, "DoD Comptroller budget justification documents: Excel R-1/R-2 exhibits "
-                   "and PDF-mined R-2/R-2A sub-element pages. All amounts in thousands of dollars ($K).", fmt_text)
+    ws.write(r, 0, "DoD Comptroller budget justification documents: Excel R-1/R-2 exhibits "
+             "and PDF-mined R-2/R-2A sub-element pages. All amounts in thousands of dollars ($K).", fmt_text)
     r += 2
 
-    ws_about.write(r, 0, "Y/N/P Methodology", fmt_section)
+    ws.write(r, 0, "Y/N/P Methodology", fmt_section)
     r += 1
-    ws_about.write(r, 0, "Y (Yes)", fmt_label)
-    ws_about.write(r, 1, "Row directly matches one or more search keywords. Included in Y totals.", fmt_text)
+    ws.write(r, 0, "Y (Yes)", fmt_label)
+    ws.write(r, 1, "Row directly matches one or more search keywords. Included in Y totals.", fmt_text)
     r += 1
-    ws_about.write(r, 0, "N (No)", fmt_label)
-    ws_about.write(r, 1, "Row included for PE context but does not directly match keywords. Excluded from totals.", fmt_text)
+    ws.write(r, 0, "N (No)", fmt_label)
+    ws.write(r, 1, "Row included for PE context but does not directly match keywords. Excluded from totals.", fmt_text)
     r += 1
-    ws_about.write(r, 0, "P (Possible)", fmt_label)
-    ws_about.write(r, 1, "User-assigned flag for rows that may be relevant. Change N\u2192P in the data sheet "
-                   "and the summary sheets will update automatically.", fmt_text)
+    ws.write(r, 0, "P (Possible)", fmt_label)
+    ws.write(r, 1, "User-assigned flag for rows that may be relevant. Change N\u2192P in the data sheet "
+             "and the summary sheets will update automatically.", fmt_text)
     r += 2
 
-    ws_about.write(r, 0, "Sheet Descriptions", fmt_section)
+    ws.write(r, 0, "Sheet Descriptions", fmt_section)
     r += 1
     sheets_desc = [
-        (ds, "Raw data with per-year In Total (Y/N/P) flags, conditional formatting, "
+        (data_sheet_name, "Raw data with per-year In Total (Y/N/P) flags, conditional formatting, "
          "and data validation. Change flags here to update all summary sheets."),
         ("PE Summary", "Pivot by Program Element. Shows only PEs with non-zero Y+P totals. "
          "Includes PE title lookup. Columns: Y/P/Total per fiscal year."),
@@ -1552,12 +1582,12 @@ def _build_xlsx_summary(
          "keywords appears together in the same row."),
     ]
     for sname, sdesc in sheets_desc:
-        ws_about.write(r, 0, sname, fmt_label)
-        ws_about.write(r, 1, sdesc, fmt_text)
+        ws.write(r, 0, sname, fmt_label)
+        ws.write(r, 1, sdesc, fmt_text)
         r += 1
     r += 1
 
-    ws_about.write(r, 0, "Caveats", fmt_section)
+    ws.write(r, 0, "Caveats", fmt_section)
     r += 1
     caveats = [
         "PDF-mined rows (exhibit_type='r2_pdf') may show 'Unknown' for Budget Activity and Color of Money.",
@@ -1568,12 +1598,11 @@ def _build_xlsx_summary(
         "They require Microsoft 365 or Excel 2021+.",
     ]
     for caveat in caveats:
-        ws_about.write(r, 0, "\u2022 " + caveat, fmt_text)
+        ws.write(r, 0, "\u2022 " + caveat, fmt_text)
         r += 1
 
-    ws_about.set_column(0, 0, 20)
-    ws_about.set_column(1, 1, 80)
-
+    ws.set_column(0, 0, 20)
+    ws.set_column(1, 1, 80)
 
 
 def _build_keyword_matrix(
@@ -1587,8 +1616,6 @@ def _build_keyword_matrix(
     Shows an NxN table: cell (i,j) = number of rows where keyword i AND keyword j
     both appear. Diagonal = total rows matching that keyword alone.
     """
-    import json
-
     if fmt is None:
         sty = xlsx_base_styles()
         fmt = {
@@ -1611,12 +1638,8 @@ def _build_keyword_matrix(
 
     row_kw_sets: list[set[str]] = []
     for row in items:
-        kws_r = row.get("matched_keywords_row", [])
-        kws_d = row.get("matched_keywords_desc", [])
-        if isinstance(kws_r, str):
-            kws_r = json.loads(kws_r) if kws_r else []
-        if isinstance(kws_d, str):
-            kws_d = json.loads(kws_d) if kws_d else []
+        kws_r = _safe_json_list(row.get("matched_keywords_row", []))
+        kws_d = _safe_json_list(row.get("matched_keywords_desc", []))
         combined = {k.lower() for k in kws_r} | {k.lower() for k in kws_d}
         if combined:
             row_kw_sets.append(combined)
@@ -1671,7 +1694,7 @@ def _extract_r1_titles_for_stubs(
     the PDF title differs, log the mismatch but don't overwrite.
     """
     sorted_pes = sorted(pdf_only_pes)
-    placeholders = ", ".join("?" for _ in sorted_pes)
+    ph, pe_params = _in_clause(sorted_pes)
 
     # Batch-fetch all R-1 exhibit pages for the full PE set in one query
     try:
@@ -1680,10 +1703,10 @@ def _extract_r1_titles_for_stubs(
             SELECT ppn.pe_number, pp.page_text
             FROM pdf_pages pp
             JOIN pdf_pe_numbers ppn ON ppn.pdf_page_id = pp.id
-            WHERE ppn.pe_number IN ({placeholders})
+            WHERE ppn.pe_number IN ({ph})
               AND pp.page_text LIKE '%Exhibit R-1%'
             """,
-            sorted_pes,
+            pe_params,
         ).fetchall()
     except sqlite3.OperationalError:
         logger.debug("Cannot query pdf_pe_numbers for R-1 titles (table missing?)")
@@ -1697,8 +1720,8 @@ def _extract_r1_titles_for_stubs(
     # Batch-fetch current cache titles for all PEs
     cache_rows = conn.execute(
         f"SELECT pe_number, line_item_title FROM {cache_table} "
-        f"WHERE pe_number IN ({placeholders}) AND exhibit_type = 'r1'",
-        sorted_pes,
+        f"WHERE pe_number IN ({ph}) AND exhibit_type = 'r1'",
+        pe_params,
     ).fetchall()
     current_titles = {r[0]: r[1] for r in cache_rows}
 
@@ -1770,6 +1793,163 @@ def _aggregate_r2_funding_into_r1_stubs(
         logger.info("R-1 funding aggregated from R-2 sub-elements for %d PEs", result.rowcount)
 
 
+# ── Cache builder helpers ─────────────────────────────────────────────────────
+
+
+def _insert_cache_rows(
+    conn: sqlite3.Connection,
+    all_rows: list[dict[str, Any]],
+    keywords: list[str],
+    desc_map: dict[str, str],
+    r1_ba: dict[str, str],
+    year_range: list[int],
+    insert_sql: str,
+) -> int:
+    """Insert assembled rows into the cache table, computing keyword matches and BA/CoM."""
+    count = 0
+    for d in all_rows:
+        text_fields = [
+            d.get("line_item_title"),
+            d.get("account_title"),
+            d.get("budget_activity_title"),
+        ]
+        row_kws = find_matched_keywords(text_fields, keywords)
+
+        ba_norm = normalize_budget_activity(
+            d.get("budget_activity"), d.get("budget_activity_title")
+        )
+        if (not ba_norm or ba_norm == "Unknown") and d.get("budget_activity_title"):
+            ba_norm = d["budget_activity_title"]
+        elif not ba_norm or ba_norm == "Unknown":
+            ba_norm = r1_ba.get(d["pe_number"]) or ba_norm
+
+        com_val = d.get("_inherited_com") or color_of_money(d.get("appropriation_title"))
+
+        vals = [
+            d["pe_number"],
+            d.get("organization_name"),
+            d.get("exhibit_type"),
+            d.get("line_item_title"),
+            d.get("budget_activity"),
+            d.get("budget_activity_title"),
+            ba_norm,
+            d.get("appropriation_title"),
+            d.get("account_title"),
+            com_val,
+            json.dumps(row_kws) if row_kws else "[]",
+            json.dumps(d.get("_desc_kws", [])) if d.get("_desc_kws") else "[]",
+            (
+                None
+                if _is_garbage_description(desc_map.get(d["pe_number"]))
+                else desc_map.get(d["pe_number"])
+            ),
+            d.get("_consolidated_titles") or None,
+        ]
+        for yr in year_range:
+            vals.append(d.get(f"fy{yr}"))
+            vals.append(d.get(f"fy{yr}_ref"))
+
+        conn.execute(insert_sql, vals)
+        count += 1
+    return count
+
+
+def _insert_stub_pes(
+    conn: sqlite3.Connection,
+    cache_table: str,
+    extra_pes: list[str],
+    matched_pes: set[str],
+    year_range: list[int],
+    insert_sql: str,
+) -> int:
+    """Insert stub R-1 rows for extra PEs that exist only in PDFs."""
+    cached_pes = {
+        r[0]
+        for r in conn.execute(
+            f"SELECT DISTINCT pe_number FROM {cache_table}"
+        ).fetchall()
+    }
+    pdf_only_pes = (set(extra_pes) & matched_pes) - cached_pes
+    if not pdf_only_pes:
+        return 0
+
+    pp, pp_params = _in_clause(pdf_only_pes)
+    pi_meta = conn.execute(
+        f"SELECT pe_number, display_title, organization_name FROM pe_index WHERE pe_number IN ({pp})",
+        pp_params,
+    ).fetchall()
+    pi_map = {r[0]: (r[1], r[2]) for r in pi_meta}
+    stub_desc_map = get_description_map(conn, pdf_only_pes)
+    count = 0
+    for pe in sorted(pdf_only_pes):
+        title, org = pi_map.get(pe, (None, None))
+        desc = stub_desc_map.get(pe)
+        if _is_garbage_description(desc):
+            desc = None
+        vals = [
+            pe, org, "r1", title or pe,
+            None, None, None, None, None, "RDT&E",
+            "[]", "[]", desc,
+        ]
+        for _yr in year_range:
+            vals.extend([None, None])
+        conn.execute(insert_sql, vals)
+        count += 1
+    logger.info("Cache: inserted %d stub rows for PDF-only extra PEs", len(pdf_only_pes))
+    _extract_r1_titles_for_stubs(conn, cache_table, pdf_only_pes)
+    return count
+
+
+def _backfill_organization(
+    conn: sqlite3.Connection,
+    cache_table: str,
+    year_range: list[int],
+) -> None:
+    """Back-fill organization_name from R-1 rows, source paths, and pe_index."""
+    conn.execute(f"""
+        UPDATE {cache_table} AS c
+        SET organization_name = (
+            SELECT r1.organization_name
+            FROM {cache_table} r1
+            WHERE r1.pe_number = c.pe_number
+              AND r1.exhibit_type = 'r1'
+              AND r1.organization_name IS NOT NULL
+            LIMIT 1
+        )
+        WHERE c.exhibit_type = 'r2' AND c.organization_name IS NULL
+    """)
+
+    latest_ref_col = f"fy{year_range[-1]}_ref"
+    fallback_ref_col = (
+        f"fy{year_range[-2]}_ref" if len(year_range) > 1 else latest_ref_col
+    )
+    for path_fragment, org_name in _ORG_FROM_PATH:
+        conn.execute(
+            f"""
+            UPDATE {cache_table}
+            SET organization_name = ?
+            WHERE (organization_name IS NULL OR organization_name = '')
+              AND ({latest_ref_col} LIKE ? OR {fallback_ref_col} LIKE ?)
+            """,
+            [org_name, f"%{path_fragment}%", f"%{path_fragment}%"],
+        )
+
+    try:
+        conn.execute(f"""
+            UPDATE {cache_table}
+            SET organization_name = (
+                SELECT pi.organization_name
+                FROM pe_index pi
+                WHERE pi.pe_number = {cache_table}.pe_number
+                  AND pi.organization_name IS NOT NULL
+                LIMIT 1
+            )
+            WHERE organization_name IS NULL OR organization_name = ''
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+
 # ── Cache builder ─────────────────────────────────────────────────────────────
 
 
@@ -1812,20 +1992,20 @@ def build_cache_table(
     if extra_pes:
         extra_set = set(extra_pes)
         # Check budget_lines first
-        ep_placeholders = ", ".join("?" for _ in extra_set)
+        ep_ph, ep_params = _in_clause(extra_set)
         existing = conn.execute(
-            f"SELECT DISTINCT pe_number FROM budget_lines WHERE pe_number IN ({ep_placeholders})",
-            list(extra_set),
+            f"SELECT DISTINCT pe_number FROM budget_lines WHERE pe_number IN ({ep_ph})",
+            ep_params,
         ).fetchall()
         found_extra = {r[0] for r in existing}
         # Also check pe_index for PDF-only PEs (e.g., D8Z Defense-Wide programs)
         remaining = extra_set - found_extra
         if remaining:
             try:
-                rp = ", ".join("?" for _ in remaining)
+                rp, rp_params = _in_clause(remaining)
                 pi_rows = conn.execute(
                     f"SELECT DISTINCT pe_number FROM pe_index WHERE pe_number IN ({rp})",
-                    list(remaining),
+                    rp_params,
                 ).fetchall()
                 found_extra |= {r[0] for r in pi_rows}
             except sqlite3.OperationalError:
@@ -1854,8 +2034,7 @@ def build_cache_table(
     all_amount_cols = set(get_amount_columns(conn))
 
     # 4. Build pivot query
-    pe_placeholders = ", ".join("?" for _ in matched_pes)
-    pe_params = list(matched_pes)
+    pe_placeholders, pe_params = _in_clause(matched_pes)
 
     year_range = list(range(fy_start, fy_end + 1))
     year_parts: list[str] = []
@@ -1941,7 +2120,7 @@ def build_cache_table(
 
     # For PEs discovered via R-2 keyword matches, also load their R-1 budget_lines rows
     if discovered_pes:
-        disc_placeholders = ", ".join("?" for _ in discovered_pes)
+        disc_ph, disc_params = _in_clause(discovered_pes)
         disc_sql = f"""
             SELECT
                 pe_number,
@@ -1954,12 +2133,12 @@ def build_cache_table(
                 MAX(account_title) AS account_title,
                 {year_cols_sql}
             FROM budget_lines
-            WHERE pe_number IN ({disc_placeholders})
+            WHERE pe_number IN ({disc_ph})
               AND CAST(fiscal_year AS INTEGER) >= {fy_start}
             GROUP BY pe_number, exhibit_type, line_item_title
             ORDER BY pe_number, exhibit_type, line_item_title
         """
-        disc_rows = conn.execute(disc_sql, list(discovered_pes)).fetchall()
+        disc_rows = conn.execute(disc_sql, disc_params).fetchall()
         rows = list(rows) + [dict(r) for r in disc_rows]
         logger.info(
             "PDF sub-element mining: discovered %d new PEs, added %d budget_lines rows",
@@ -2014,11 +2193,11 @@ def build_cache_table(
         all_pe_nums: list[str] = sorted({str(d["pe_number"]) for d in other_rows if d.get("pe_number")}
                              | {d.get("pe_number", "") for group in r2_by_code.values() for d in group})
         if all_pe_nums:
-            ph = ", ".join("?" for _ in all_pe_nums)
+            ph, ph_params = _in_clause(all_pe_nums)
             desc_rows = conn.execute(
                 f"SELECT pe_number, description_text FROM pe_descriptions "
                 f"WHERE pe_number IN ({ph}) AND description_text IS NOT NULL",
-                list(all_pe_nums),
+                ph_params,
             ).fetchall()
             for pe_num, desc_text in desc_rows:
                 if pe_num in pe_desc_kws:
@@ -2125,7 +2304,7 @@ def build_cache_table(
                 # Levenshtein: merge if < 20% relative to shorter title
                 shorter = min(len(title), len(ex_title))
                 dist = _levenshtein_distance(title, ex_title)
-                if dist / max(shorter, 1) < 0.20:
+                if dist / max(shorter, 1) < _LEVENSHTEIN_THRESHOLD:
                     _merge_into(existing, row)
                     matched = True
                     break
@@ -2204,151 +2383,21 @@ def build_cache_table(
 
     all_rows = deduped_other + list(merged_r2.values())
 
-    count = 0
-    for d in all_rows:
-        text_fields = [
-            d.get("line_item_title"),
-            d.get("account_title"),
-            d.get("budget_activity_title"),
-        ]
-        row_kws = find_matched_keywords(text_fields, keywords)
+    # 6. Insert assembled rows into cache table
+    count = _insert_cache_rows(
+        conn, all_rows, keywords, desc_map, r1_ba, year_range, insert_sql,
+    )
 
-        # Use inherited BA/CoM from R1 if available
-        ba_norm = normalize_budget_activity(
-            d.get("budget_activity"), d.get("budget_activity_title")
-        )
-        if (not ba_norm or ba_norm == "Unknown") and d.get("budget_activity_title"):
-            ba_norm = d["budget_activity_title"]  # may have been set by R1 inheritance
-        elif not ba_norm or ba_norm == "Unknown":
-            ba_norm = r1_ba.get(d["pe_number"]) or ba_norm
-
-        com_val = d.get("_inherited_com") or color_of_money(d.get("appropriation_title"))
-
-        vals = [
-            d["pe_number"],
-            d.get("organization_name"),
-            d.get("exhibit_type"),
-            d.get("line_item_title"),
-            d.get("budget_activity"),
-            d.get("budget_activity_title"),
-            ba_norm,
-            d.get("appropriation_title"),
-            d.get("account_title"),
-            com_val,
-            json.dumps(row_kws) if row_kws else "[]",
-            json.dumps(d.get("_desc_kws", [])) if d.get("_desc_kws") else "[]",
-            (
-                None
-                if _is_garbage_description(desc_map.get(d["pe_number"]))
-                else desc_map.get(d["pe_number"])
-            ),
-            d.get("_consolidated_titles") or None,
-        ]
-        for yr in year_range:
-            vals.append(d.get(f"fy{yr}"))
-            vals.append(d.get(f"fy{yr}_ref"))
-
-        conn.execute(insert_sql, vals)
-        count += 1
-
-    # 6a. Insert stub R-1 rows for extra PEs that exist only in PDFs (no budget_lines data).
-    # This ensures they appear in the cache even if the R-2 mining step doesn't find them.
+    # 6a. Insert stub R-1 rows for extra PEs that exist only in PDFs
     if extra_pes:
-        cached_pes = {
-            r[0]
-            for r in conn.execute(
-                f"SELECT DISTINCT pe_number FROM {cache_table}"
-            ).fetchall()
-        }
-        pdf_only_pes = (set(extra_pes) & matched_pes) - cached_pes
-        if pdf_only_pes:
-            # Pull metadata from pe_index
-            pp = ", ".join("?" for _ in pdf_only_pes)
-            pi_meta = conn.execute(
-                f"SELECT pe_number, display_title, organization_name FROM pe_index WHERE pe_number IN ({pp})",
-                list(pdf_only_pes),
-            ).fetchall()
-            pi_map = {r[0]: (r[1], r[2]) for r in pi_meta}
-            stub_desc_map = get_description_map(conn, pdf_only_pes)
-            for pe in sorted(pdf_only_pes):
-                title, org = pi_map.get(pe, (None, None))
-                desc = stub_desc_map.get(pe)
-                if _is_garbage_description(desc):
-                    desc = None
-                vals = [
-                    pe,
-                    org,
-                    "r1",
-                    title or pe,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    "RDT&E",
-                    "[]",
-                    "[]",
-                    desc,
-                ]
-                for yr in year_range:
-                    vals.extend([None, None])
-                conn.execute(insert_sql, vals)
-                count += 1
-            logger.info(
-                "Cache: inserted %d stub rows for PDF-only extra PEs", len(pdf_only_pes)
-            )
+        count += _insert_stub_pes(
+            conn, cache_table, extra_pes, matched_pes, year_range, insert_sql,
+        )
 
-            _extract_r1_titles_for_stubs(conn, cache_table, pdf_only_pes)
-
-    # PDF-mined R-2 rows were already merged into the pre-pass above (r2_by_code).
-    # The back-fill and lineage annotation still run on the combined result.
+    # 6b. Back-fill organization_name from multiple sources
     pdf_count = sum(1 for d in merged_r2.values() if d.get("exhibit_type") == "r2")
     if pdf_count:
-        # Back-fill organization_name from R-1 rows
-        conn.execute(f"""
-            UPDATE {cache_table} AS c
-            SET organization_name = (
-                SELECT r1.organization_name
-                FROM {cache_table} r1
-                WHERE r1.pe_number = c.pe_number
-                  AND r1.exhibit_type = 'r1'
-                  AND r1.organization_name IS NOT NULL
-                LIMIT 1
-            )
-            WHERE c.exhibit_type = 'r2' AND c.organization_name IS NULL
-        """)
-
-        # Fallback: infer organization from source_file path
-        latest_ref_col = f"fy{year_range[-1]}_ref"
-        fallback_ref_col = (
-            f"fy{year_range[-2]}_ref" if len(year_range) > 1 else latest_ref_col
-        )
-        for path_fragment, org_name in _ORG_FROM_PATH:
-            conn.execute(
-                f"""
-                UPDATE {cache_table}
-                SET organization_name = ?
-                WHERE (organization_name IS NULL OR organization_name = '')
-                  AND ({latest_ref_col} LIKE ? OR {fallback_ref_col} LIKE ?)
-                """,
-                [org_name, f"%{path_fragment}%", f"%{path_fragment}%"],
-            )
-
-        # Final fallback: fill from pe_index (enrichment Phase 1)
-        try:
-            conn.execute(f"""
-                UPDATE {cache_table}
-                SET organization_name = (
-                    SELECT pi.organization_name
-                    FROM pe_index pi
-                    WHERE pi.pe_number = {cache_table}.pe_number
-                      AND pi.organization_name IS NOT NULL
-                    LIMIT 1
-                )
-                WHERE organization_name IS NULL OR organization_name = ''
-            """)
-        except sqlite3.OperationalError:
-            pass  # pe_index may not exist if enrichment hasn't run
+        _backfill_organization(conn, cache_table, year_range)
 
     count += pdf_count
     logger.info("Cache: %d R-2 sub-element rows from PDFs", pdf_count)

@@ -550,24 +550,28 @@ function renderColumnPicker(data) {
   renderSelectedList();
 }
 
+function _createPickerItem(col, actions, dragHandlers) {
+  const item = document.createElement('div');
+  item.className = 'picker-item';
+  item.setAttribute('role', 'option');
+  item.setAttribute('draggable', 'true');
+  item.dataset.col = col;
+  item.innerHTML = `
+    <span class="drag-handle" aria-hidden="true">&#9776;</span>
+    <span class="item-label">${col}</span>
+    <span class="item-actions">${actions}</span>
+  `;
+  dragHandlers.forEach(([evt, fn]) => item.addEventListener(evt, fn));
+  return item;
+}
+
 function renderAvailableList(columns) {
   const list = document.getElementById('available-list');
   list.innerHTML = '';
   columns.forEach(col => {
-    const item = document.createElement('div');
-    item.className = 'picker-item';
-    item.setAttribute('role', 'option');
-    item.setAttribute('draggable', 'true');
-    item.dataset.col = col;
-    item.innerHTML = `
-      <span class="drag-handle" aria-hidden="true">&#9776;</span>
-      <span class="item-label">${col}</span>
-      <span class="item-actions">
-        <button onclick="addColumn('${col.replace(/'/g, "\\'")}')" aria-label="Add ${col} to selected columns" title="Add">+</button>
-      </span>
-    `;
-    item.addEventListener('dragstart', onAvailDragStart);
-    list.appendChild(item);
+    const safeCol = col.replace(/'/g, "\\'");
+    const actions = `<button onclick="addColumn('${safeCol}')" aria-label="Add ${col} to selected columns" title="Add">+</button>`;
+    list.appendChild(_createPickerItem(col, actions, [['dragstart', onAvailDragStart]]));
   });
 }
 
@@ -575,25 +579,16 @@ function renderSelectedList() {
   const list = document.getElementById('selected-list');
   list.innerHTML = '';
   selectedColumns.forEach((col, i) => {
-    const item = document.createElement('div');
-    item.className = 'picker-item';
-    item.setAttribute('role', 'option');
-    item.setAttribute('draggable', 'true');
-    item.dataset.col = col;
+    const actions = [
+      `<button onclick="moveColumnUp(${i})" aria-label="Move ${col} up" title="Move up" ${i === 0 ? 'disabled' : ''}>&#9650;</button>`,
+      `<button onclick="moveColumnDown(${i})" aria-label="Move ${col} down" title="Move down" ${i === selectedColumns.length - 1 ? 'disabled' : ''}>&#9660;</button>`,
+      `<button onclick="removeColumn(${i})" aria-label="Remove ${col}" title="Remove">&times;</button>`,
+    ].join('');
+    const item = _createPickerItem(col, actions, [
+      ['dragstart', onSelDragStart], ['dragover', onSelDragOver],
+      ['drop', onSelDrop], ['dragleave', onSelDragLeave],
+    ]);
     item.dataset.idx = i;
-    item.innerHTML = `
-      <span class="drag-handle" aria-hidden="true">&#9776;</span>
-      <span class="item-label">${col}</span>
-      <span class="item-actions">
-        <button onclick="moveColumnUp(${i})" aria-label="Move ${col} up" title="Move up" ${i === 0 ? 'disabled' : ''}>&#9650;</button>
-        <button onclick="moveColumnDown(${i})" aria-label="Move ${col} down" title="Move down" ${i === selectedColumns.length - 1 ? 'disabled' : ''}>&#9660;</button>
-        <button onclick="removeColumn(${i})" aria-label="Remove ${col}" title="Remove">&times;</button>
-      </span>
-    `;
-    item.addEventListener('dragstart', onSelDragStart);
-    item.addEventListener('dragover', onSelDragOver);
-    item.addEventListener('drop', onSelDrop);
-    item.addEventListener('dragleave', onSelDragLeave);
     list.appendChild(item);
   });
 }
