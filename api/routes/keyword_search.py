@@ -724,8 +724,11 @@ def annotate_cross_pe_lineages(
 
     if updates:
         conn.executemany(
-            f"UPDATE {cache_table} SET lineage_note = ? WHERE id = ?",
-            updates,
+            f"UPDATE {cache_table} SET lineage_note = "
+            f"CASE WHEN lineage_note IS NOT NULL AND lineage_note != '' "
+            f"THEN lineage_note || '; ' || ? ELSE ? END "
+            f"WHERE id = ?",
+            [(note, note, row_id) for note, row_id in updates],
         )
         logger.info("Cross-PE lineage: annotated %d R-2 rows", len(updates))
 
