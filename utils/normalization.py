@@ -364,16 +364,24 @@ _CODE_SPACE_RE = re.compile(r"^([A-Za-z]{0,3}\d{1,6})\s+(.+)")
 def normalize_r2_project_code(raw_code: str | None) -> str | None:
     """Normalize a project code for dedup grouping.
 
-    Strips E-prefix (E1662 → 1662) and leading zeros.
+    Strips E-prefix (E1662 → 1662), P-prefix (P010 → 010), leading zeros,
+    and normalizes dash-separated codes (MED-01 → MED01).
     """
     if not raw_code:
         return None
-    m = _E_PREFIX_CODE_RE.match(raw_code)
+    code = raw_code.strip()
+    # Strip E-prefix (E1662 → 1662)
+    m = _E_PREFIX_CODE_RE.match(code)
     if m:
         return m.group(1).lstrip("0") or m.group(1)
-    # Strip E-prefix even with trailing alpha (e.g., E62 → 62)
-    if raw_code.startswith(("E", "e")) and raw_code[1:].isdigit():
-        return raw_code[1:].lstrip("0") or raw_code[1:]
+    if code.startswith(("E", "e")) and code[1:].isdigit():
+        return code[1:].lstrip("0") or code[1:]
+    # Strip P-prefix on numeric codes (P010 → 010, OSD convention)
+    if code.startswith(("P", "p")) and code[1:].isdigit():
+        return code[1:].lstrip("0") or code[1:]
+    # Normalize dashes in alpha-numeric codes (MED-01 → MED01)
+    if "-" in code:
+        return code.replace("-", "")
     return raw_code
 
 

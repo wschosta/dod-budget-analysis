@@ -517,17 +517,24 @@ def download_explorer_xlsx(
         if kws:
             fy_desc_kws[(pe, fy)] = kws
 
-    # Which PEs have R2 rows with keyword matches (title or description)?
+    # Determine which PEs have ANY keyword match (title or description).
+    # PEs with zero matches everywhere are excluded from the export.
+    pes_with_match: set[str] = set()
     pe_has_r2_match: set[str] = set()
     for r in items:
-        if r.get("exhibit_type") in ("r2", "r2_pdf"):
-            pe = r.get("pe_number", "")
-            # Title-level match
-            if r.get("matched_keywords_row") or r.get("matched_keywords_desc"):
+        pe = r.get("pe_number", "")
+        has_title_match = bool(r.get("matched_keywords_row") or r.get("matched_keywords_desc"))
+        has_desc_match = any((pe, str(yr)) in fy_desc_kws for yr in active_years)
+        if has_title_match or has_desc_match:
+            pes_with_match.add(pe)
+            if r.get("exhibit_type") in ("r2", "r2_pdf"):
                 pe_has_r2_match.add(pe)
-            # Description-level match for any FY
-            elif any((pe, str(yr)) in fy_desc_kws for yr in active_years):
-                pe_has_r2_match.add(pe)
+
+    # Filter out PEs with zero matches in all rows and all FY descriptions
+    items = [r for r in items if r.get("pe_number", "") in pes_with_match]
+
+    if not items:
+        return Response(content=b"No matching rows to export", media_type="text/plain", status_code=400)
 
     fixed_cols: list[tuple[str, str]] = []
     for col_name in columns:
