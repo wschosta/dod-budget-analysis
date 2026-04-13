@@ -7,14 +7,11 @@ keyword_xlsx, and keyword_r2.
 from __future__ import annotations
 
 import json
-import logging
 import re
 from typing import Any
 
 from utils.normalization import BA_CANONICAL, R2_JUNK_TITLES
-from utils.patterns import PE_NUMBER_STRICT_CI, PE_SUFFIX_PATTERN  # noqa: F401
-
-logger = logging.getLogger(__name__)
+from utils.patterns import PE_NUMBER_STRICT_CI, PE_SUFFIX_PATTERN  # noqa: F401 (PE_NUMBER_STRICT_CI re-exported)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -28,9 +25,8 @@ PE_TITLE_RE = re.compile(
     rf"PE\s+(\d{{7}}{PE_SUFFIX_PATTERN})\s*[/:]\s*(.+?)(?:\s+\d|$)"
 )
 
-# RDT&E BA categories (BA 01-07) — canonical titles
-# Re-exported from utils.normalization for convenience
-BA_CANONICAL = BA_CANONICAL
+# RDT&E BA categories (BA 01-07) — re-exported from utils.normalization
+# (the module-level import on line 13 already binds the name)
 
 # Levenshtein merge threshold for R-2 dedup
 LEVENSHTEIN_THRESHOLD = 0.20
