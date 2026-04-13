@@ -370,7 +370,7 @@ def step_8_backfill_pe_numbers(conn: sqlite3.Connection, dry_run: bool = False) 
 
     # Update only rows that won't violate the dedup UNIQUE index
     conn.execute("""
-        UPDATE budget_lines
+        UPDATE OR IGNORE budget_lines
         SET pe_number = (
             SELECT pb.pe FROM _pe_backfill pb
             WHERE pb.line_item_title = budget_lines.line_item_title
@@ -391,7 +391,7 @@ def step_8_backfill_pe_numbers(conn: sqlite3.Connection, dry_run: bool = False) 
               ON pb.line_item_title = budget_lines.line_item_title
               AND pb.organization_name = budget_lines.organization_name
               AND pb.fiscal_year = budget_lines.fiscal_year
-            WHERE existing.source_file = budget_lines.source_file
+            WHERE existing.appropriation_code = budget_lines.appropriation_code
               AND existing.fiscal_year = budget_lines.fiscal_year
               AND existing.pe_number = pb.pe
               AND existing.line_item_title = budget_lines.line_item_title
