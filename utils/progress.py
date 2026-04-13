@@ -20,21 +20,21 @@ from utils.common import format_bytes
 
 
 def fmt_time(seconds: float) -> str:
-    """Format *seconds* as a fixed-width 7-char right-justified string.
+    """Format *seconds* as a compact human-readable string.
 
     Examples::
 
-        fmt_time(5)     -> "      5s"   # rjust pads to 7
-        fmt_time(135)   -> "  2m15s"
-        fmt_time(3720)  -> "  1h02m"
+        fmt_time(5)     -> "5s"
+        fmt_time(135)   -> "2m15s"
+        fmt_time(3720)  -> "1h02m"
     """
     if seconds < 60:
-        return f"{seconds:.0f}s".rjust(7)
+        return f"{seconds:.0f}s"
     m, s = divmod(seconds, 60)
     if m < 60:
-        return f"{int(m)}m{int(s):02d}s".rjust(7)
+        return f"{int(m)}m{int(s):02d}s"
     h, m = divmod(int(m), 60)
-    return f"{int(h)}h{int(m):02d}m".rjust(7)
+    return f"{int(h)}h{int(m):02d}m"
 
 
 def log_progress(
@@ -50,8 +50,11 @@ def log_progress(
 
     Format (columns stay aligned as values grow)::
 
-        Build Excel:       1/5,678 (  0.0%) | Elapsed:       5s | ETA:   5m02s |      1 items/s
-        Build Excel:   5,678/5,678 (100.0%) | Elapsed:   5m02s  | ETA:       0s |    120 items/s
+        Build Excel:       1/5,678 (  0.0%) | Elapsed:      5s | ETA:  5m02s |      1 items/s
+        Build Excel:   5,678/5,678 (100.0%) | Elapsed:  5m02s  | ETA:      0s |    120 items/s
+
+    Time, percentage, and rate fields use fixed widths so columns stay
+    aligned even as values grow from seconds into hours.
 
     Args:
         phase_name: Label for the current phase/step.
@@ -75,8 +78,8 @@ def log_progress(
     msg = (
         f"{phase_name}: {f'{completed:,}'.rjust(total_w)}/{total:,} "
         f"({pct:5.1f}%) "
-        f"| Elapsed: {fmt_time(elapsed)} "
-        f"| ETA: {fmt_time(eta_s)} "
+        f"| Elapsed: {fmt_time(elapsed):>7s} "
+        f"| ETA: {fmt_time(eta_s):>7s} "
         f"| {rate:6.0f} items/s"
     )
     if extra:

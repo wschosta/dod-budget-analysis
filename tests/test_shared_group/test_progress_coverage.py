@@ -219,40 +219,31 @@ class TestSilentProgressTracker:
 
 class TestFmtTime:
     def test_zero_seconds(self):
-        assert fmt_time(0).strip() == "0s"
+        assert fmt_time(0) == "0s"
 
     def test_under_one_minute(self):
-        assert fmt_time(45).strip() == "45s"
+        assert fmt_time(45) == "45s"
 
     def test_exact_one_minute(self):
-        result = fmt_time(60).strip()
-        assert result == "1m00s"
+        assert fmt_time(60) == "1m00s"
 
     def test_minutes_and_seconds(self):
-        assert fmt_time(135).strip() == "2m15s"
+        assert fmt_time(135) == "2m15s"
 
     def test_seconds_zero_padded(self):
         # 2 minutes 3 seconds -> "2m03s"
-        assert fmt_time(123).strip() == "2m03s"
+        assert fmt_time(123) == "2m03s"
 
     def test_hours(self):
-        assert fmt_time(3720).strip() == "1h02m"
+        assert fmt_time(3720) == "1h02m"
 
     def test_large_hours(self):
-        assert fmt_time(45000).strip() == "12h30m"
+        assert fmt_time(45000) == "12h30m"
 
-    def test_fixed_width_7_chars(self):
-        # All results should be exactly 7 characters for alignment
-        assert len(fmt_time(5)) == 7
-        assert len(fmt_time(45)) == 7
-        assert len(fmt_time(135)) == 7
-        assert len(fmt_time(3720)) == 7
-
-    def test_right_justified(self):
-        # Short values should be right-justified (leading spaces)
-        result = fmt_time(5)
-        assert result.endswith("5s")
-        assert result[0] == " "
+    def test_compact_no_padding(self):
+        # fmt_time returns compact strings; log_progress handles alignment
+        assert fmt_time(5) == "5s"
+        assert " " not in fmt_time(5)
 
 
 # ── log_progress ────────────────────────────────────────────────────────────

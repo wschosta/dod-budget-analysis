@@ -236,20 +236,20 @@ def _run_step(label: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> 
     try:
         result = fn(*args, **kwargs)
         elapsed = time.monotonic() - t0
-        print(f"\n[{label}] OK -- {fmt_time(elapsed).strip()}", flush=True)
+        print(f"\n[{label}] OK -- {fmt_time(elapsed)}", flush=True)
         _write_progress(label, "completed", elapsed)
-        _completed_steps[label] = f"completed in {fmt_time(elapsed).strip()}"
+        _completed_steps[label] = f"completed in {fmt_time(elapsed)}"
         return True, result
     except KeyboardInterrupt:
         elapsed = time.monotonic() - t0
         _stop_event.set()
-        print(f"\n[{label}] INTERRUPTED -- {fmt_time(elapsed).strip()}", flush=True)
+        print(f"\n[{label}] INTERRUPTED -- {fmt_time(elapsed)}", flush=True)
         _write_progress(label, "interrupted", elapsed)
-        _completed_steps[label] = f"interrupted after {fmt_time(elapsed).strip()}"
+        _completed_steps[label] = f"interrupted after {fmt_time(elapsed)}"
         return False, None
     except Exception as e:
         elapsed = time.monotonic() - t0
-        print(f"\n[{label}] FAILED -- {fmt_time(elapsed).strip()}: {e}", flush=True)
+        print(f"\n[{label}] FAILED -- {fmt_time(elapsed)}: {e}", flush=True)
         _write_progress(label, "failed", elapsed, str(e))
         _completed_steps[label] = f"failed: {e}"
         return False, None

@@ -3277,7 +3277,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 conn.commit()
                 _elapsed = time.time() - _t0
                 logger.info("  FTS5 rebuild complete — %s new pages indexed (%s)",
-                            f"{new_pages:,}", fmt_time(_elapsed).strip())
+                            f"{new_pages:,}", fmt_time(_elapsed))
             else:
                 _recreate_pdf_fts_triggers(conn)
                 conn.commit()
@@ -3400,7 +3400,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     """)
     conn.commit()
     _elapsed = time.time() - _t0
-    logger.info("  Indexes created (%s)", fmt_time(_elapsed).strip())
+    logger.info("  Indexes created (%s)", fmt_time(_elapsed))
 
     # ── Backfill budget_type from appropriation_code ──────────────────────
     # Detail exhibits (r2, p5, amendment, ogsi) often have appropriation_code
@@ -3425,7 +3425,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     _elapsed = time.time() - _t0
     logger.info("  Backfilled budget_type: %s rows (%s -> %s NULL) (%s)",
                 f"{_bt_updated:,}", f"{_bt_before:,}", f"{_bt_after:,}",
-                fmt_time(_elapsed).strip())
+                fmt_time(_elapsed))
     logger.info("Backfilled budget_type for %d rows", _bt_updated)
 
     # ── Deduplicate budget_lines rows ──────────────────────────────────────
@@ -3506,7 +3506,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         logger.warning("  Could not create dedup unique index (non-critical)")
 
     _elapsed = time.time() - _t0
-    logger.info("  Deduplication complete (%s)", fmt_time(_elapsed).strip())
+    logger.info("  Deduplication complete (%s)", fmt_time(_elapsed))
     _progress("index", 1, 1, "Indexes created")
 
     # ── Update data source timestamps ──────────────────────────────────────
