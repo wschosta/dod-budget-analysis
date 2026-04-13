@@ -56,8 +56,7 @@ _HYPERSONICS_KEYWORDS = [
     "offensive anti", "oasuw", "standard missile 6", "sm-6",
     "blk ib", "increment ii",
     # Generic speed / regime
-    "high speed", "mach ",  # trailing space prevents matching "machine"
-    "conventional prompt",
+    "high speed", "mach", "conventional prompt",
     # Defensive / tracking
     "Glide Phase Interceptor", "HBTSS",
 ]
@@ -88,34 +87,23 @@ _build_lock = threading.Lock()
 _build_progress: dict[str, dict[str, Any]] = {}
 _PROGRESS_TTL_SECONDS = 24 * 3600  # evict finished entries after 24 hours
 
-# ── Available columns for XLSX export ─────────────────────────────────────────
+# ── Fixed columns for XLSX export ─────────────────────────────────────────────
 
-_ALL_COLUMNS = [
-    "PE Number",
-    "Service/Org",
-    "Exhibit Type",
-    "Line Item Title",
-    "Alternate Titles",
-    "Budget Activity",
-    "Budget Activity (Normalized)",
-    "Appropriation",
-    "Color of Money",
+_FIXED_COLUMNS: list[tuple[str, str]] = [
+    ("PE Number", "pe_number"),
+    ("Service/Org", "organization_name"),
+    ("Exhibit Type", "exhibit_type"),
+    ("Line Item Title", "line_item_title"),
+    ("Alternate Titles", "lineage_note"),
+    ("Budget Activity", "budget_activity_norm"),
+    ("Appropriation", "appropriation_title"),
+    ("Color of Money", "color_of_money"),
 ]
 
-# FY columns (including In Total, Source, Description, Desc Keywords)
-# are added dynamically based on active years and toggle options.
+# Per-FY sub-columns (($K), In Total, Source, Description, Keywords)
+# are always included for each active fiscal year.
 
-_COL_TO_FIELD: dict[str, str] = {
-    "PE Number": "pe_number",
-    "Service/Org": "organization_name",
-    "Exhibit Type": "exhibit_type",
-    "Line Item Title": "line_item_title",
-    "Alternate Titles": "lineage_note",
-    "Budget Activity": "budget_activity_title",
-    "Budget Activity (Normalized)": "budget_activity_norm",
-    "Appropriation": "appropriation_title",
-    "Color of Money": "color_of_money",
-}
+_COL_TO_FIELD: dict[str, str] = {h: f for h, f in _FIXED_COLUMNS}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -481,7 +469,7 @@ def get_explorer_data(
     # Build available columns list (static + dynamic FY columns).
     # Per-year columns are offered as an interleaved [value, source, description]
     # triple so selecting them in order keeps the output columns grouped by year.
-    available_columns = list(_ALL_COLUMNS)
+    available_columns = [h for h, _f in _FIXED_COLUMNS]
     for yr in active_years:
         available_columns.append(f"FY{yr} ($K)")
         available_columns.append(f"FY{yr} Source")
@@ -516,25 +504,23 @@ def get_explorer_data(
 
 @router.post(
     "/download/xlsx",
-    summary="Download explorer results as XLSX with selected columns",
+    summary="Download explorer results as XLSX",
     response_class=Response,
 )
 def download_explorer_xlsx(
     keywords: str = Body(..., description="Comma-separated keywords"),
-    columns: list[str] = Body(..., description="Ordered list of fixed column names to include"),
     matching_only: bool = Body(False, description="Only include directly matching sub-elements"),
+    include_intotal: bool = Body(True, description="Include per-year In Total (Y/N/P) columns"),
     include_source: bool = Body(True, description="Include FY Source columns"),
     include_description: bool = Body(True, description="Include FY Description columns"),
-    include_intotal: bool = Body(True, description="Include per-year In Total (Y/N/P) columns"),
-    include_desc_keywords: bool = Body(True, description="Include per-FY Desc Keywords columns"),
+    include_desc_keywords: bool = Body(True, description="Include per-FY Keywords columns"),
+    fiscal_years: str = Body("", description="Comma-separated FYs to include (empty = all active)"),
     extra_pes: str = Body("", description="Comma-separated PE numbers (must match build call)"),
     conn: sqlite3.Connection = Depends(get_db),
 ) -> Response:
-    """Generate XLSX with user-selected fixed columns and FY data.
+    """Generate XLSX with fixed columns, optional sub-columns, and user-selected fiscal years.
 
-    FY columns are auto-included for all active years. Toggles control which
-    sub-columns appear per year. Y/N/P is computed per-FY based on description
-    keyword matches.
+    Uses a fixed column layout. Y/N/P is computed per line per FY.
     """
     try:
         keyword_list, pe_list, kw_id = _resolve_keyword_set(keywords, extra_pes)
@@ -554,7 +540,7 @@ def download_explorer_xlsx(
     if matching_only:
         items = [
             r for r in items
-            if r.get("matched_keywords_row") or r.get("matched_keywords_desc")
+            if r.get("matched_keywords_row")
         ]
 
     if not items:
@@ -565,6 +551,18 @@ def download_explorer_xlsx(
         yr for yr in year_range
         if any(r.get(f"fy{yr}") is not None for r in items)
     ]
+
+    # Filter to user-selected fiscal years (if specified)
+    if fiscal_years and fiscal_years.strip():
+        requested_fys = set()
+        for fy in fiscal_years.split(","):
+            fy = fy.strip()
+            try:
+                requested_fys.add(int(fy))
+            except ValueError:
+                pass
+        if requested_fys:
+            active_years = [yr for yr in active_years if yr in requested_fys]
 
     desc_by_pe_fy = load_per_fy_descriptions(
         conn, {r.get("pe_number", "") for r in items}
@@ -578,17 +576,19 @@ def download_explorer_xlsx(
         if kws:
             fy_desc_kws[(pe, fy)] = kws
 
-    # Precompute PEs that have at least one description keyword match (O(1) lookup)
+    # Precompute PEs that have at least one per-FY description keyword match (O(1) lookup)
     pes_with_desc_match = {pe for pe, _fy in fy_desc_kws}
 
-    # Determine which PEs have ANY keyword match (title or description).
-    # PEs with zero matches everywhere are excluded from the export.
-    pes_with_match: set[str] = set()
+    # Determine which PEs have ANY keyword match.
+    # matched_keywords_desc is PE-level (too broad for inclusion filtering);
+    # only row-level title hits and per-FY description hits count.
+    # Extra PEs are always included (user explicitly requested them).
+    pes_with_match: set[str] = set(pe_list) if pe_list else set()
     pe_has_r2_match: set[str] = set()
     for r in items:
         pe = r.get("pe_number", "")
-        has_title_match = bool(r.get("matched_keywords_row") or r.get("matched_keywords_desc"))
-        if has_title_match or pe in pes_with_desc_match:
+        has_row_match = bool(r.get("matched_keywords_row"))
+        if has_row_match or pe in pes_with_desc_match:
             pes_with_match.add(pe)
             if r.get("exhibit_type") in ("r2", "r2_pdf"):
                 pe_has_r2_match.add(pe)
@@ -599,22 +599,13 @@ def download_explorer_xlsx(
     if not items:
         return Response(content=b"No matching rows to export", media_type="text/plain", status_code=400)
 
-    fixed_cols: list[tuple[str, str]] = []
-    for col_name in columns:
-        field = _COL_TO_FIELD.get(col_name)
-        if field:
-            fixed_cols.append((col_name, field))
-
-    if not fixed_cols:
-        fixed_cols = [(h, _COL_TO_FIELD[h]) for h in _ALL_COLUMNS if h in _COL_TO_FIELD]
-
     xlsx_bytes = build_keyword_xlsx(
         items=items,
         active_years=active_years,
         desc_by_pe_fy=desc_by_pe_fy,
         fy_desc_kws=fy_desc_kws,
         pe_has_r2_match=pe_has_r2_match,
-        fixed_columns=fixed_cols,
+        fixed_columns=list(_FIXED_COLUMNS),
         include_source=include_source,
         include_description=include_description,
         include_intotal=include_intotal,

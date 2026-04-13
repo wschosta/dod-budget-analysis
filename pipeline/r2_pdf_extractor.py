@@ -25,7 +25,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from utils import get_connection
-from utils.normalization import clean_r2_title
+from utils.normalization import BA_CANONICAL, clean_r2_title, infer_ba_from_pe
 from utils.patterns import PE_NUMBER as _PE_RE
 
 logger = logging.getLogger(__name__)
@@ -196,6 +196,58 @@ _BARE_YEAR_RE = re.compile(r"(?<!\d)(\d{4})(?!\d)")
 _NULL_AMOUNT_TOKENS: frozenset[str] = frozenset({
     "-", "--", "TBD", "N/A", "Continuing", "CONTINUING", "Complete", "Cost",
 })
+
+# ── Budget Activity and Appropriation from page headers ─────────────────────
+
+# "BUDGET ACTIVITY: 2", "Budget Activity 5: System Dev...", "BA 3 / Advanced..."
+_BA_NUMBER_RE = re.compile(
+    r"(?:BUDGET\s+ACTIVITY|BA)\s*:?\s*(\d)\s*(?:[:/\-]\s*(.+?))?(?:\n|$)",
+    re.IGNORECASE,
+)
+
+# "Appropriation: 0400 / Research, Development, Test & Eval, Defense-Wide"
+# "Appropriation/Budget Activity: 0400 / ..."
+_APPROP_TITLE_RE = re.compile(
+    r"Appropriation\s*(?:/[^:]+)?\s*:\s*\d{4}[A-Z]?\s*[:/]\s*(.+?)(?:\n|$)",
+    re.IGNORECASE,
+)
+
+_HEADER_SCAN_CHARS = 800
+
+
+def parse_r2_header_metadata(text: str) -> dict[str, str | None]:
+    """Extract budget activity and appropriation from R-2 page header text.
+
+    Scans the first *_HEADER_SCAN_CHARS* characters for structured header fields.
+
+    Returns a dict with keys:
+        budget_activity: str | None  (e.g., "03")
+        budget_activity_title: str | None (e.g., "BA 3: Advanced Technology Development")
+        appropriation_title: str | None
+    """
+    header = text[:_HEADER_SCAN_CHARS]
+    result: dict[str, str | None] = {
+        "budget_activity": None,
+        "budget_activity_title": None,
+        "appropriation_title": None,
+    }
+
+    m = _BA_NUMBER_RE.search(header)
+    if m:
+        ba_num = m.group(1).zfill(2)
+        result["budget_activity"] = ba_num
+        # Prefer canonical title, fall back to what's in the header
+        canonical = BA_CANONICAL.get(ba_num)
+        if canonical:
+            result["budget_activity_title"] = canonical
+        elif m.group(2):
+            result["budget_activity_title"] = m.group(2).strip()
+
+    m = _APPROP_TITLE_RE.search(header)
+    if m:
+        result["appropriation_title"] = m.group(1).strip()
+
+    return result
 
 
 def _parse_amount(token: str) -> float | None:
@@ -384,11 +436,22 @@ def parse_r2_cost_table(
     if not fy_amounts:
         return None
 
+    # Extract budget activity and appropriation title from page header
+    header_meta = parse_r2_header_metadata(text)
+
+    # Fall back to PE-number inference if header didn't yield BA
+    if not header_meta["budget_activity"]:
+        ba_num, ba_title = infer_ba_from_pe(pe_number)
+        if ba_num:
+            header_meta["budget_activity"] = ba_num
+            header_meta["budget_activity_title"] = ba_title
+
     return {
         "pe_number": pe_number,
         "approp_code": approp_code,
         "unit_multiplier": unit_multiplier,
         "fy_amounts": fy_amounts,
+        **header_meta,
     }
 
 
@@ -493,6 +556,9 @@ def extract_r2_from_pdfs(
                 "account": approp,
                 "organization_name": org,
                 "line_item_title": label,
+                "budget_activity": result.get("budget_activity"),
+                "budget_activity_title": result.get("budget_activity_title"),
+                "appropriation_title": result.get("appropriation_title"),
                 "budget_type": "RDT&E",
                 "amount_unit": "thousands",
             }

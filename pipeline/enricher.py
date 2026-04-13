@@ -32,8 +32,10 @@ from collections import Counter
 from pathlib import Path
 
 from utils import get_connection
+from utils.normalization import infer_ba_from_pe
 from utils.patterns import PE_NUMBER, FISCAL_YEAR
 from utils.query import make_placeholders
+from pipeline.r2_pdf_extractor import parse_r2_header_metadata
 from utils.pdf_sections import (
     detect_project_boundaries,
     parse_narrative_sections,
@@ -2183,6 +2185,151 @@ def run_phase9(conn: sqlite3.Connection, stop_event: threading.Event | None = No
     return len(insert_buf)
 
 
+# ── Phase 10: R-2 Metadata Backfill ────────────────────────────────────────────
+
+
+def run_phase10(conn: sqlite3.Connection, stop_event: threading.Event | None = None) -> int:
+    """Backfill budget_activity_title and appropriation_title on r2_pdf rows.
+
+    Uses three data sources in priority order:
+      Tier 1: R-1 budget_lines for the same PE (highest confidence)
+      Tier 2: PDF page header text from pdf_pages
+      Tier 3: PE number convention (digits 3-4 encode BA)
+
+    Only updates NULL fields — already-populated values are preserved.
+    Returns total number of rows updated across all tiers.
+    """
+    logger.info("[Phase 10] Backfilling R-2 metadata (BA, appropriation)...")
+
+    total_null = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines "
+        "WHERE exhibit_type = 'r2_pdf' "
+        "  AND (budget_activity_title IS NULL OR appropriation_title IS NULL)"
+    ).fetchone()[0]
+
+    if total_null == 0:
+        logger.info("All r2_pdf rows already have BA/appropriation metadata — skipping.")
+        return 0
+
+    logger.info("  %d r2_pdf rows need metadata backfill.", total_null)
+    updated = 0
+
+    # ── Tier 1: inherit from R-1 rows for the same PE ────────────────────────
+    logger.info("  Tier 1: R-1 cross-reference...")
+
+    conn.execute("""
+        UPDATE budget_lines
+        SET budget_activity_title = CASE
+                WHEN budget_activity_title IS NULL THEN (
+                    SELECT r1.budget_activity_title FROM budget_lines r1
+                    WHERE r1.exhibit_type = 'r1'
+                      AND r1.pe_number = budget_lines.pe_number
+                      AND r1.budget_activity_title IS NOT NULL
+                    ORDER BY r1.fiscal_year DESC LIMIT 1)
+                ELSE budget_activity_title END,
+            appropriation_title = CASE
+                WHEN appropriation_title IS NULL THEN (
+                    SELECT r1.appropriation_title FROM budget_lines r1
+                    WHERE r1.exhibit_type = 'r1'
+                      AND r1.pe_number = budget_lines.pe_number
+                      AND r1.appropriation_title IS NOT NULL
+                    ORDER BY r1.fiscal_year DESC LIMIT 1)
+                ELSE appropriation_title END
+        WHERE exhibit_type = 'r2_pdf'
+          AND (budget_activity_title IS NULL OR appropriation_title IS NULL)
+          AND pe_number IN (
+              SELECT DISTINCT pe_number FROM budget_lines WHERE exhibit_type = 'r1'
+          )
+    """)
+    tier1_changed = conn.execute("SELECT changes()").fetchone()[0]
+
+    logger.info("    Tier 1: %d rows updated from R-1 cross-reference.", tier1_changed)
+    updated += tier1_changed
+    conn.commit()
+
+    if stop_event and stop_event.is_set():
+        return updated
+
+    # ── Tier 2: parse PDF page headers ───────────────────────────────────────
+    logger.info("  Tier 2: PDF header parsing...")
+
+    remaining = conn.execute("""
+        SELECT bl.rowid, pp.page_text
+        FROM budget_lines bl
+        INNER JOIN pdf_pages pp
+          ON bl.source_file = pp.source_file
+          AND CAST(REPLACE(bl.sheet_name, 'page_', '') AS INTEGER) = pp.page_number
+        WHERE bl.exhibit_type = 'r2_pdf'
+          AND (bl.budget_activity_title IS NULL OR bl.appropriation_title IS NULL)
+    """).fetchall()
+
+    ba_updates: list[tuple] = []
+    approp_updates: list[tuple] = []
+    for rowid, page_text in remaining:
+        meta = parse_r2_header_metadata(page_text)
+        if meta["budget_activity_title"]:
+            ba_updates.append((meta["budget_activity_title"], rowid))
+        if meta["appropriation_title"]:
+            approp_updates.append((meta["appropriation_title"], rowid))
+
+    if ba_updates:
+        conn.executemany(
+            "UPDATE budget_lines SET budget_activity_title = ? "
+            "WHERE rowid = ? AND budget_activity_title IS NULL",
+            ba_updates,
+        )
+    if approp_updates:
+        conn.executemany(
+            "UPDATE budget_lines SET appropriation_title = ? "
+            "WHERE rowid = ? AND appropriation_title IS NULL",
+            approp_updates,
+        )
+
+    logger.info("    Tier 2: %d BA updates, %d appropriation updates.",
+                len(ba_updates), len(approp_updates))
+    updated += len(ba_updates) + len(approp_updates)
+    conn.commit()
+
+    if stop_event and stop_event.is_set():
+        return updated
+
+    # ── Tier 3: PE number convention (BA only) ───────────────────────────────
+    logger.info("  Tier 3: PE number inference...")
+
+    still_null = conn.execute(
+        "SELECT rowid, pe_number FROM budget_lines "
+        "WHERE exhibit_type = 'r2_pdf' AND budget_activity_title IS NULL"
+    ).fetchall()
+
+    ba_inferred: list[tuple] = []
+    for rowid, pe in still_null:
+        _ba_num, ba_title = infer_ba_from_pe(pe)
+        if ba_title:
+            ba_inferred.append((ba_title, rowid))
+
+    if ba_inferred:
+        conn.executemany(
+            "UPDATE budget_lines SET budget_activity_title = ? "
+            "WHERE rowid = ? AND budget_activity_title IS NULL",
+            ba_inferred,
+        )
+
+    logger.info("    Tier 3: %d BA updates from PE number inference.", len(ba_inferred))
+    updated += len(ba_inferred)
+    conn.commit()
+
+    # Summary
+    remaining_null = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines "
+        "WHERE exhibit_type = 'r2_pdf' "
+        "  AND (budget_activity_title IS NULL OR appropriation_title IS NULL)"
+    ).fetchone()[0]
+
+    logger.info("  Phase 10 complete: %d total updates. %d rows still missing metadata.",
+                updated, remaining_null)
+    return updated
+
+
 # ── Orchestrator ──────────────────────────────────────────────────────────────
 
 def enrich(
@@ -2235,6 +2382,7 @@ def enrich(
         7: lambda: run_phase7(conn, stop_event=stop_event),
         8: lambda: run_phase8(conn, stop_event=stop_event),
         9: lambda: run_phase9(conn, stop_event=stop_event),
+        10: lambda: run_phase10(conn, stop_event=stop_event),
     }
 
     for phase_num in sorted(_phase_runners):
@@ -2299,8 +2447,8 @@ def main() -> None:
                         help="Path to SQLite database (default: dod_budget.sqlite)")
     parser.add_argument("--with-llm", action="store_true",
                         help="Enable LLM-based tagging (requires ANTHROPIC_API_KEY)")
-    parser.add_argument("--phases", default="1,2,3,4,5,6,7,8,9",
-                        help="Comma-separated phases to run (default: 1,2,3,4,5,6,7,8,9)")
+    parser.add_argument("--phases", default="1,2,3,4,5,6,7,8,9,10",
+                        help="Comma-separated phases to run (default: all 1-10)")
     parser.add_argument("--rebuild", action="store_true",
                         help="Drop and rebuild all enrichment tables")
     args = parser.parse_args()

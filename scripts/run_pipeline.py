@@ -1146,7 +1146,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.enrich_phases:
             phases = {int(p.strip()) for p in args.enrich_phases.split(",")}
         else:
-            phases = {1, 2, 3, 4, 5, 6, 7, 8, 9}
+            phases = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
 
         ok, enrich_result = _run_step(
             "Step 5 / 5 -- Enrich database",

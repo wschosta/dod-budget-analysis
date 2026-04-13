@@ -441,3 +441,43 @@ def clean_r2_title(raw_title: str) -> tuple[str | None, str | None]:
 
     # No code found — return title as-is
     return None, s
+
+
+# ---------------------------------------------------------------------------
+# Budget Activity inference from PE number
+# ---------------------------------------------------------------------------
+# RDT&E PE numbers encode the Budget Activity in digits 3-4:
+#   0601xxx = BA 1 (Basic Research), 0602xxx = BA 2, ... 0607xxx = BA 7.
+
+BA_CANONICAL: dict[str, str] = {
+    "01": "BA 1: Basic Research",
+    "02": "BA 2: Applied Research",
+    "03": "BA 3: Advanced Technology Development",
+    "04": "BA 4: Advanced Component Dev & Prototypes",
+    "05": "BA 5: System Development & Demonstration",
+    "06": "BA 6: RDT&E Management Support",
+    "07": "BA 7: Operational Systems Development",
+}
+
+
+def infer_ba_from_pe(pe_number: str | None) -> tuple[str | None, str | None]:
+    """Infer Budget Activity from PE number digits 3-4.
+
+    RDT&E PEs use the convention ``06xxyyy`` where ``xx`` is the BA number.
+    Returns ``(ba_number, ba_title)`` or ``(None, None)`` if not inferrable.
+
+    >>> infer_ba_from_pe("0603273F")
+    ('03', 'BA 3: Advanced Technology Development')
+    >>> infer_ba_from_pe("0305116BB")
+    (None, None)
+    """
+    if not pe_number or len(pe_number) < 4:
+        return None, None
+    prefix = pe_number[:2]
+    if prefix != "06":
+        return None, None
+    ba_digits = pe_number[2:4]
+    title = BA_CANONICAL.get(ba_digits)
+    if title:
+        return ba_digits, title
+    return None, None
