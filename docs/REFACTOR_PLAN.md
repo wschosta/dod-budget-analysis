@@ -512,24 +512,288 @@ not by the pipeline build (which stores descriptions separately via enricher.py)
 
 ---
 
-## What This Plan Does NOT Cover
+## Phase 3: Consolidate Organization Mapping
 
-These are separate follow-up tasks:
+Organization name inference is spread across 4 locations with overlapping
+but inconsistent mappings.
 
-1. **Extract org mapping**: `_ORG_FROM_PATH` (keyword_helpers) vs
-   `_ORG_FROM_FILE` (r2_pdf_extractor) — overlapping but different scope.
-   Could unify into `utils/organization.py`.
+### Current state
 
-2. **Exhibit type constants**: `"r1"`, `"r2"`, `"r2_pdf"` appear as raw
-   strings in 11+ locations. Could define in `keyword_helpers.py` or a
-   shared constants module.
+| Location | What | Entries | Used by |
+|---|---|---|---|
+| `utils/normalization.py` `ORG_NORMALIZE` | Code → canonical name (A → Army, DARPA → DARPA) | 78 | `pipeline/builder.py`, `pipeline/db_validator.py`, `scripts/repair_database.py` |
+| `utils/normalization.py` `_ORG_ALIASES_LOWER` | Lowercase + historical renames (dss → DCSA, tma → DHA) | 82 | `pipeline/validator.py` |
+| `pipeline/r2_pdf_extractor.py` `_ORG_FROM_FILE` | Filename fragment → org (RDTE_DARPA → DARPA) | 50 | `extract_r2_from_pdfs`, `scripts/repair_database.py` |
+| `api/routes/keyword_search.py` `_ORG_FROM_PATH` | Filename fragment → org (US_Army → Army) | 6 | `_backfill_organization()` |
 
-3. **`build_cache_table()` decomposition**: At 480 lines, it's still large
-   after extraction. The R-2 merge pre-pass (~200 lines) could become its
-   own function. Defer until the extraction is stable.
+Plus `r2_pdf_extractor.py` has 3 more layers:
+- `_AGENCY_NAME_MAP` (28 entries) — full agency names from R-2 headers
+- `_R2_AGENCY_RE` + `_OLDER_AGENCY_RE` — regexes for header text
+- `_DEPT_FROM_TEXT` (10 entries) — substring fallback for department names
+- `infer_org()` — orchestrator function using all of the above
 
-4. **Performance**: Levenshtein memoization, PDF mining computed column,
-   explorer aggregation query — all independent of this restructure.
+### Problem
+
+- `_ORG_FROM_PATH` (keyword_search) is a strict subset of `_ORG_FROM_FILE`
+  (r2_pdf_extractor). Both are `(fragment, org)` tuples searched against
+  source_file paths.
+- `_backfill_organization()` in keyword_search reimplements a simpler version
+  of the same path-scanning logic that `infer_org()` does.
+- If a new agency is added to one list, it's easy to miss the other.
+
+### Target: `utils/organization.py`
+
+```python
+"""Centralized organization name inference and normalization."""
+
+# Re-export the code→name map (already in utils/normalization.py — don't move)
+from utils.normalization import ORG_NORMALIZE, normalize_org_name, normalize_org_loose
+
+# Filename fragment → org (superset of both _ORG_FROM_FILE and _ORG_FROM_PATH)
+ORG_FROM_FILE: list[tuple[str, str]] = [...]  # 50 entries from r2_pdf_extractor
+
+# Full agency name → org code (from R-2 page headers)
+AGENCY_NAME_MAP: dict[str, str] = {...}  # 28 entries from r2_pdf_extractor
+
+# Regex patterns for R-2 header agency extraction
+R2_AGENCY_RE = re.compile(...)
+OLDER_AGENCY_RE = re.compile(...)
+
+# Substring fallback patterns
+DEPT_FROM_TEXT: list[tuple[str, str]] = [...]
+
+def infer_org_from_path(source_file: str) -> str | None:
+    """Infer org from source_file path fragments. Fast, high confidence."""
+
+def infer_org(source_file: str, page_text: str | None = None) -> str | None:
+    """Full org inference: path first, then page header text, then substring."""
+```
+
+### Execution
+
+1. Create `utils/organization.py` with the unified mappings and `infer_org()`
+2. Update `r2_pdf_extractor.py`: delete local mappings, import from `utils/organization`
+3. Update `keyword_search.py` `_backfill_organization()`: replace `_ORG_FROM_PATH`
+   loop with `infer_org_from_path()` call
+4. Update `scripts/repair_database.py`: import `infer_org` from `utils/organization`
+   instead of from `r2_pdf_extractor`
+5. Delete `_ORG_FROM_PATH` from `keyword_search.py`
+
+### Net effect
+
+- Delete ~6 lines (`_ORG_FROM_PATH`)
+- Delete ~120 lines from `r2_pdf_extractor.py` (mappings + `infer_org`)
+- Create ~150 lines in `utils/organization.py` (mostly moved code)
+- Single source of truth for all org inference
+
+---
+
+## Phase 4: Exhibit Type Constants
+
+Raw strings `"r1"`, `"r2"`, `"r2_pdf"` appear in 30+ locations across the
+codebase. Most are comparison checks (`== "r1"`, `in ("r2", "r2_pdf")`).
+
+### Current usage (non-test, non-pipeline-builder)
+
+**`api/routes/keyword_search.py`** — 11 occurrences:
+- Lines 1188, 1368, 2216, 2218, 2272, 2300 (×2), 2327, 2400, 2433, 1924
+
+**`api/routes/explorer.py`** — 2 occurrences:
+- Lines 452, 593
+
+**`pipeline/r2_pdf_extractor.py`** — 1 occurrence:
+- Line 552 (`"r2_pdf"`)
+
+**`pipeline/builder.py`** — 10+ occurrences (exhibit type definitions, the
+canonical source — these stay as string literals since they define the mapping)
+
+**`pipeline/enricher.py`**, **`utils/config.py`** — a few each
+
+### Approach: Constants in `utils/config.py`
+
+`utils/config.py` already defines `CORE_SUMMARY_TYPES` and `DETAIL_EXHIBIT_KEYS`
+with these same strings. Add named constants alongside them:
+
+```python
+# utils/config.py  (add near existing exhibit type sets)
+
+# Exhibit type constants for comparison checks
+EXHIBIT_R1 = "r1"
+EXHIBIT_R2 = "r2"
+EXHIBIT_R2_PDF = "r2_pdf"
+EXHIBIT_R3 = "r3"
+EXHIBIT_R4 = "r4"
+EXHIBIT_P1 = "p1"
+EXHIBIT_O1 = "o1"
+
+# Grouped sets (already exist, just reference the new constants)
+R2_TYPES = frozenset({EXHIBIT_R2, EXHIBIT_R2_PDF})
+RDT_E_TYPES = frozenset({EXHIBIT_R1, EXHIBIT_R2, EXHIBIT_R2_PDF, EXHIBIT_R3, EXHIBIT_R4})
+```
+
+### Scope
+
+Only update the **api/** layer and **keyword_search** code. The pipeline
+code (`builder.py`, `exhibit_catalog.py`) uses these strings in exhibit
+type definitions and column mappings where string literals are appropriate.
+
+### Example changes
+
+```python
+# Before:
+if row.get("exhibit_type") == "r1":
+if r.get("exhibit_type") in ("r2", "r2_pdf"):
+
+# After:
+from utils.config import EXHIBIT_R1, R2_TYPES
+if row.get("exhibit_type") == EXHIBIT_R1:
+if r.get("exhibit_type") in R2_TYPES:
+```
+
+### Execution
+
+1. Add constants + `R2_TYPES` set to `utils/config.py`
+2. Update `api/routes/keyword_search.py` (11 occurrences)
+3. Update `api/routes/explorer.py` (2 occurrences)
+4. Run tests — purely mechanical, no logic changes
+
+### Net effect
+
+Zero line count change, but eliminates a class of typo bugs (e.g., `"r2pdf"`
+vs `"r2_pdf"`) and makes exhibit types greppable/refactorable.
+
+---
+
+## Phase 5: Performance Optimizations
+
+These are independent of the structural refactoring and can be done in any
+order. Ordered by estimated impact.
+
+### 5a. Batch INSERT in cache builder (DONE)
+
+**Status**: Already implemented in this branch.
+
+Switched `_insert_cache_rows` from per-row `conn.execute()` to
+`conn.executemany()`. Estimated 4-10x speedup on cache builds with
+5,000+ rows.
+
+### 5b. Levenshtein memoization in R-2 merge
+
+**File**: `keyword_search.py:2340-2345` (inside `build_cache_table`)
+**Impact**: HIGH for large keyword sets (500+ R-2 rows)
+
+The fuzzy merge loop calls `_levenshtein_distance(title, ex_title)` inside
+an O(n²) nested loop per (PE, project_code) group. With 10 rows per group
+and 50 groups, that's ~2,500 calls. Titles repeat across fiscal years so
+many calls are redundant.
+
+**Fix**: Add a per-build memo dict:
+```python
+_lev_cache: dict[tuple[str, str], int] = {}
+
+# In the inner loop:
+key = (title, ex_title) if title <= ex_title else (ex_title, title)
+if key not in _lev_cache:
+    _lev_cache[key] = _levenshtein_distance(title, ex_title)
+dist = _lev_cache[key]
+```
+
+Also gate the Levenshtein call behind a length-similarity pre-check — if
+the two strings differ in length by more than the threshold allows, skip:
+```python
+if abs(len(title) - len(ex_title)) > max(len(title), len(ex_title)) * _LEVENSHTEIN_THRESHOLD:
+    continue  # impossible to be within threshold
+```
+
+**Estimated saving**: 50-70% fewer Levenshtein calls, ~1-2s on large builds.
+
+### 5c. PDF mining: add `is_r2_cost` computed column
+
+**File**: `keyword_search.py:628-639` (`mine_pdf_subelements` query)
+**Impact**: MEDIUM-HIGH for large databases (100k+ pdf_pages)
+
+The current query does triple `LIKE '%...%'` on the `page_text` column,
+which forces a full table scan on every keyword search build.
+
+**Fix** (schema change — requires pipeline rebuild):
+```sql
+-- In pipeline/schema.py, add to pdf_pages:
+ALTER TABLE pdf_pages ADD COLUMN is_r2_cost BOOLEAN DEFAULT 0;
+CREATE INDEX idx_pdf_pages_r2_cost ON pdf_pages(is_r2_cost, fiscal_year);
+
+-- Populated during builder.py or as a post-build step:
+UPDATE pdf_pages SET is_r2_cost = 1
+WHERE (page_text LIKE '%Exhibit R-2,%' OR page_text LIKE '%Exhibit R-2A%')
+  AND page_text LIKE '%COST%Millions%'
+  AND source_file LIKE '%detail%';
+```
+
+Then the mining query becomes:
+```sql
+SELECT source_file, page_number, page_text, fiscal_year
+FROM pdf_pages
+WHERE is_r2_cost = 1 AND fiscal_year >= ?
+ORDER BY fiscal_year DESC, source_file, page_number
+```
+
+**Estimated saving**: 2-5s per keyword search build (index scan vs full scan).
+
+**Prerequisite**: Database rebuild (already happens when pipeline changes land).
+
+### 5d. Explorer summary: aggregate query instead of full row load
+
+**File**: `explorer.py:430-480` (`get_explorer_data`)
+**Impact**: MEDIUM for large caches (10k+ rows)
+
+Currently loads ALL cache rows into Python to build a PE-level summary.
+Could use a SQL aggregate query instead:
+
+```sql
+SELECT
+    pe_number,
+    MAX(CASE WHEN exhibit_type = 'r1' THEN line_item_title END) AS pe_title,
+    MAX(organization_name) AS service,
+    COUNT(*) AS total_sub_elements,
+    SUM(CASE WHEN matched_keywords_row != '[]' THEN 1 ELSE 0 END) AS matching
+FROM {cache_table}
+GROUP BY pe_number
+ORDER BY pe_number
+```
+
+Active years can be computed with a separate lightweight query:
+```sql
+SELECT DISTINCT 'fy' || col FROM (
+    SELECT CASE WHEN fy2015 IS NOT NULL THEN 2015 END AS col
+    UNION ALL SELECT CASE WHEN fy2016 IS NOT NULL THEN 2016 END
+    ...
+) WHERE col IS NOT NULL
+```
+
+**Estimated saving**: 300-500ms per explorer page load on 10k-row caches.
+Removes the need to parse JSON for every row just to count matches.
+
+### 5e. JSON parse caching in `cache_rows_to_dicts` (DONE)
+
+**Status**: Already implemented in this branch.
+
+Added a per-call `json_cache` dict that deduplicates `json.loads()` calls
+for `matched_keywords_row` and `matched_keywords_desc` columns, since many
+rows share identical keyword lists.
+
+---
+
+## Phasing Summary
+
+| Phase | What | Depends on | Est. lines saved |
+|---|---|---|---|
+| **1** | Split keyword_search.py → 4 modules | — | 0 (reorganization) |
+| **2** | Unify R-2 parsers | Phase 1 (keyword_r2 exists) | ~175 |
+| **3** | Consolidate org mapping | Phase 2 (infer_org moves) | ~25 |
+| **4** | Exhibit type constants | Phase 1 (keyword_helpers exists) | 0 (safety) |
+| **5a-e** | Performance | Independent | varies |
+
+Phases 1-4 are sequential. Phase 5 items are independent of each other
+and of Phases 1-4 (except 5c requires a pipeline rebuild).
 
 ---
 
