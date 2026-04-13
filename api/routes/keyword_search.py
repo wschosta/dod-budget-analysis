@@ -8,165 +8,38 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import sqlite3
 from itertools import groupby
 from typing import Any
 
+from utils.config import EXHIBIT_R1, EXHIBIT_R2, R2_TYPES
 from utils.database import get_amount_columns
-from utils.normalization import BA_CANONICAL, R2_JUNK_TITLES
-from utils.strings import clean_narrative
-from utils.patterns import PE_NUMBER_STRICT_CI, PE_SUFFIX_PATTERN
+from utils.organization import ORG_FROM_FILE
 
-logger = logging.getLogger(__name__)
-
-# ── Constants ─────────────────────────────────────────────────────────────────
-
-SEARCH_COLS = ["line_item_title", "account_title", "budget_activity_title"]
-
-FY_START = 2015
-FY_END = 2026
-
-# Regex to extract PE number and title from PDF exhibit header lines
-_PE_TITLE_RE = re.compile(
-    rf"PE\s+(\d{{7}}{PE_SUFFIX_PATTERN})\s*[/:]\s*(.+?)(?:\s+\d|$)"
+from api.routes.keyword_helpers import (
+    FY_END,
+    FY_START,
+    LEVENSHTEIN_THRESHOLD,
+    PE_NUMBER_STRICT_CI,
+    SEARCH_COLS,
+    SKIP_RAW_TITLES,
+    cache_ddl,
+    color_of_money,
+    find_matched_keywords,
+    in_clause,
+    is_garbage_description,
+    like_clauses,
+    normalize_budget_activity,
+    safe_json_list,
+)
+from api.routes.keyword_r2 import (
+    _aggregate_r2_funding_into_r1_stubs,
+    _extract_r1_titles_for_stubs,
+    annotate_cross_pe_lineages,
+    mine_pdf_subelements,
 )
 
-
-_ORG_FROM_PATH = [
-    ("US_Army", "Army"),
-    ("US_Air_Force", "Air Force"),
-    ("US_Navy", "Navy"),
-    ("Defense_Wide", "Defense-Wide"),
-    ("DARPA", "DARPA"),
-    ("SOCOM", "SOCOM"),
-]
-
-_LEVENSHTEIN_THRESHOLD = 0.20
-_HIDDEN_LOOKUP_COL = 200
-_SPILL_MAX_ROW = 2000
-
-# Lowercased version of R2_JUNK_TITLES + "page" — used as fallback filter
-# when clean_r2_title() rejects a title that may still be legitimate.
-_SKIP_RAW_TITLES = frozenset(t.lower() for t in R2_JUNK_TITLES) | {"page"}
-
-
-# ── SQL / JSON helpers ──────────────────────────────────────────────────────
-
-
-def _in_clause(params: list | set) -> tuple[str, list]:
-    """Return ``'?,?,?'`` placeholder string and flat param list."""
-    p = list(params)
-    return ", ".join("?" for _ in p), p
-
-
-def _like_clauses(columns: list[str], keywords: list[str]) -> tuple[str, list[str]]:
-    """Build OR-joined ``col LIKE ?`` clauses for keyword search."""
-    clauses = [f"{col} LIKE ?" for col in columns for _ in keywords]
-    params = [f"%{kw}%" for _ in columns for kw in keywords]
-    return " OR ".join(clauses), params
-
-
-def _safe_json_list(val: Any) -> list:
-    """Parse a JSON string to list, returning ``[]`` on failure."""
-    if isinstance(val, list):
-        return val
-    try:
-        return json.loads(val) if val else []
-    except (json.JSONDecodeError, TypeError):
-        return []
-
-
-# ── Cache DDL ─────────────────────────────────────────────────────────────────
-
-
-def cache_ddl(table_name: str, fy_start: int = FY_START, fy_end: int = FY_END) -> str:
-    """Return the CREATE TABLE DDL for a keyword-search cache table."""
-    fy_cols = "\n".join(
-        f"    fy{yr} REAL, fy{yr}_ref TEXT," for yr in range(fy_start, fy_end + 1)
-    )
-    # Remove trailing comma from last FY line
-    fy_cols = fy_cols.rstrip(",")
-    return f"""
-CREATE TABLE IF NOT EXISTS {table_name} (
-    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-    pe_number               TEXT NOT NULL,
-    organization_name       TEXT,
-    exhibit_type            TEXT,
-    line_item_title         TEXT,
-    budget_activity         TEXT,
-    budget_activity_title   TEXT,
-    budget_activity_norm    TEXT,
-    appropriation_title     TEXT,
-    account_title           TEXT,
-    color_of_money          TEXT,
-    matched_keywords_row    TEXT,
-    matched_keywords_desc   TEXT,
-    description_text        TEXT,
-    lineage_note            TEXT,
-{fy_cols}
-);
-"""
-
-
-# ── Normalization helpers ─────────────────────────────────────────────────────
-
-
-def normalize_budget_activity(ba_number: str | None, ba_title: str | None) -> str:
-    """Map budget_activity number to canonical BA label, falling back to title."""
-    if ba_number and ba_number.strip() in BA_CANONICAL:
-        return BA_CANONICAL[ba_number.strip()]
-    if ba_title:
-        return ba_title.strip()
-    return "Unknown"
-
-
-def color_of_money(approp_title: str | None) -> str:
-    """Map appropriation title to a standard color-of-money category."""
-    if not approp_title:
-        return "Unknown"
-    t = approp_title.upper()
-    if any(k in t for k in ("RDT", "RESEARCH", "DEVELOPMENT", "R&D")):
-        return "RDT&E"
-    if "PROCURE" in t:
-        return "Procurement"
-    if any(k in t for k in ("OPER", "MAINT", "O&M")):
-        return "O&M"
-    if any(k in t for k in ("MILCON", "CONSTRUCTION")):
-        return "MILCON"
-    if any(k in t for k in ("MILPERS", "PERSONNEL")):
-        return "Military Personnel"
-    return approp_title
-
-
-# ── Keyword matching ─────────────────────────────────────────────────────────
-
-
-def find_matched_keywords(
-    text_fields: list[str | None],
-    keywords: list[str],
-) -> list[str]:
-    """Return which of *keywords* match (case-insensitive) in *text_fields*.
-
-    Uses word-boundary matching to avoid false positives like
-    "mach" matching "machine".
-    """
-    combined = " ".join((t or "") for t in text_fields).lower()
-    if not combined.strip():
-        return []
-    matched = []
-    for kw in keywords:
-        kw_lower = kw.lower().strip()
-        if not kw_lower:
-            continue
-        # Fast substring pre-filter, then word-boundary regex to reject
-        # false positives like "mach" in "machine"
-        if kw_lower in combined and re.search(
-            r"(?<!\w)" + re.escape(kw_lower) + r"(?!\w)", combined
-        ):
-            matched.append(kw)
-    return matched
-
+logger = logging.getLogger(__name__)
 
 # ── PE discovery ──────────────────────────────────────────────────────────────
 
@@ -192,7 +65,7 @@ def collect_matching_pe_numbers_split(
     pe_keywords = [kw for kw in keywords if PE_NUMBER_STRICT_CI.match(kw.strip())]
     if pe_keywords:
         pe_upper = [pk.strip().upper() for pk in pe_keywords]
-        ph, params = _in_clause(pe_upper)
+        ph, params = in_clause(pe_upper)
         rows = conn.execute(
             f"SELECT DISTINCT pe_number FROM budget_lines WHERE pe_number IN ({ph})",
             params,
@@ -202,7 +75,7 @@ def collect_matching_pe_numbers_split(
         remaining_pes = set(pe_upper) - bl_matched
         if remaining_pes:
             try:
-                rp, rp_params = _in_clause(remaining_pes)
+                rp, rp_params = in_clause(remaining_pes)
                 pi_rows = conn.execute(
                     f"SELECT DISTINCT pe_number FROM pe_index WHERE pe_number IN ({rp})",
                     rp_params,
@@ -212,7 +85,7 @@ def collect_matching_pe_numbers_split(
                 pass  # pe_index table may not exist
 
     # (a) Budget-lines keyword match
-    kw_where, kw_params = _like_clauses(search_cols, keywords)
+    kw_where, kw_params = like_clauses(search_cols, keywords)
     rows = conn.execute(
         f"SELECT DISTINCT pe_number FROM budget_lines WHERE {kw_where}", kw_params
     ).fetchall()
@@ -222,7 +95,7 @@ def collect_matching_pe_numbers_split(
     desc_matched: set[str] = set()
     try:
         conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
-        desc_where, desc_params = _like_clauses(["description_text"], desc_keywords)
+        desc_where, desc_params = like_clauses(["description_text"], desc_keywords)
         rows = conn.execute(
             f"SELECT DISTINCT pe_number FROM pe_descriptions WHERE {desc_where}",
             desc_params,
@@ -251,7 +124,7 @@ def get_description_map(
     except sqlite3.OperationalError:
         return {}
 
-    ph, pe_list = _in_clause(pe_numbers)
+    ph, pe_list = in_clause(pe_numbers)
     rows = conn.execute(
         f"SELECT pe_number, description_text, "
         f"CASE "
@@ -275,494 +148,6 @@ def get_description_map(
         if text.strip():
             result[pe] = text
     return result
-
-
-def get_desc_keyword_map(
-    conn: sqlite3.Connection,
-    pe_numbers: set[str],
-    desc_keywords: list[str],
-) -> dict[str, list[str]]:
-    """Build PE → list of desc_keywords that match in pe_descriptions (via SQL LIKE)."""
-    if not pe_numbers or not desc_keywords:
-        return {}
-    try:
-        conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
-    except sqlite3.OperationalError:
-        return {}
-
-    ph, pe_list = _in_clause(pe_numbers)
-
-    # Single query: fetch all (pe_number, description_text) pairs
-    rows = conn.execute(
-        f"SELECT DISTINCT pe_number, description_text FROM pe_descriptions "
-        f"WHERE pe_number IN ({ph})",
-        pe_list,
-    ).fetchall()
-
-    # Application-side keyword matching
-    result: dict[str, list[str]] = {}
-    for pe, desc_text in rows:
-        if not desc_text:
-            continue
-        desc_lower = desc_text.lower()
-        for kw in desc_keywords:
-            if kw.lower() in desc_lower:
-                result.setdefault(pe, [])
-                if kw not in result[pe]:
-                    result[pe].append(kw)
-
-    return result
-
-
-def _is_garbage_description(text: str | None) -> bool:
-    """Detect R-1 page header text or other artifacts masquerading as descriptions."""
-    if not text:
-        return True
-    stripped = text.strip()
-    if len(stripped) < 80:
-        return True
-    garbage_markers = [
-        "Exhibit R-1",
-        "President's Budget",
-        "Total Obligational Authority",
-        "R D T & E Program Exhibit",
-        "RDT&E PROGRAM EXHIBIT",
-    ]
-    for marker in garbage_markers:
-        if marker in stripped[:300]:
-            return True
-    return False
-
-
-# ── R-2 PDF parsing ──────────────────────────────────────────────────────────
-
-
-def parse_r2_cost_block(
-    page_text: str,
-    source_file: str,
-    fiscal_year: str,
-) -> list[dict[str, Any]]:
-    """Parse R-2/R-2A COST block from a PDF page to extract project-level funding.
-
-    Returns a list of dicts with keys:
-        pe_number, project_code, project_title, source_file, fiscal_year,
-        fy_amounts: {fyXXXX: amount_in_thousands}
-    """
-    lines = page_text.split("\n")
-    results: list[dict[str, Any]] = []
-
-    # 1. Extract PE number from header line
-    pe_number = None
-    pe_title = None
-    for line in lines[:10]:
-        m = _PE_TITLE_RE.search(line)
-        if m:
-            pe_number = m.group(1)
-            pe_title = m.group(2).strip()
-            break
-    if not pe_number:
-        return []
-
-    # 2. Find the COST block and parse FY column headers
-    cost_idx = None
-    for i, line in enumerate(lines):
-        if "COST" in line and "Millions" in line:
-            cost_idx = i
-            break
-    if cost_idx is None:
-        return []
-
-    fy_header_line = lines[cost_idx + 1] if cost_idx + 1 < len(lines) else ""
-
-    _fy_m = re.search(r"(\d{4})", fiscal_year or "")
-    budget_year = int(_fy_m.group(1)) if _fy_m else None
-
-    col_fy_map: list[int | None] = []
-    col_tokens = re.finditer(
-        r"(?:FY\s+\d{4}|Years|Base|OOC|OCO|Total|Complete|Cost)\b",
-        fy_header_line,
-        re.IGNORECASE,
-    )
-    for m in col_tokens:
-        tok = m.group().strip()
-        fy_m = re.match(r"FY\s+(\d{4})", tok, re.IGNORECASE)
-        tok_upper = tok.upper()
-        if tok_upper == "YEARS":
-            col_fy_map.append(None)
-            continue
-        elif fy_m:
-            col_fy_map.append(int(fy_m.group(1)))
-        elif tok_upper == "BASE":
-            col_fy_map.append(None)
-        elif tok_upper in ("OOC", "OCO"):
-            col_fy_map.append(None)
-        elif tok_upper == "TOTAL":
-            if budget_year:
-                col_fy_map.append(budget_year)
-            else:
-                col_fy_map.append(None)
-        elif tok_upper in ("COMPLETE", "COST"):
-            col_fy_map.append(None)
-
-    if not col_fy_map:
-        return []
-
-    # 3. Parse project rows after the header
-    num_pattern = re.compile(r"[\d,]+\.\d{3}|(?<!\w)-(?!\w)|0\.000")
-
-    for i in range(cost_idx + 2, min(cost_idx + 15, len(lines))):
-        line = lines[i].strip()
-        if not line:
-            continue
-        if any(
-            line.startswith(s)
-            for s in (
-                "Quantity of RDT&E",
-                "A. Mission",
-                "B. Accomplishments",
-                "Note",
-                "Program MDAP",
-            )
-        ):
-            break
-
-        if "Total Program Element" in line:
-            continue
-
-        nums_in_line = num_pattern.findall(line)
-        if not nums_in_line:
-            if results:
-                results[-1]["project_title"] += " " + line.strip()
-            continue
-
-        first_num_pos = re.search(r"\s[\d,]+\.\d{2,3}|\s-\s|\s-$", line)
-        if first_num_pos:
-            prefix = line[: first_num_pos.start()].strip()
-        else:
-            prefix = line.strip()
-
-        # Clean the extracted title: strip any remaining trailing amounts,
-        # normalize project codes, and reject junk rows.
-        from utils.normalization import clean_r2_title
-        project_code, project_title = clean_r2_title(prefix)
-        if project_code is None and project_title is None:
-            continue  # junk row (table header/footer/total)
-        if project_title is None:
-            project_title = prefix
-
-        all_nums = num_pattern.findall(line)
-
-        fy_amounts: dict[str, float] = {}
-        for j, val_str in enumerate(all_nums):
-            if j >= len(col_fy_map):
-                break
-            fy_year = col_fy_map[j]
-            if fy_year is None:
-                continue
-            if val_str == "-":
-                continue
-            try:
-                amount_millions = float(val_str.replace(",", ""))
-                fy_amounts[f"fy{fy_year}"] = amount_millions * 1000.0
-            except ValueError:
-                continue
-
-        if fy_amounts:
-            results.append(
-                {
-                    "pe_number": pe_number,
-                    "pe_title": pe_title,
-                    "project_code": project_code,
-                    "project_title": project_title,
-                    "source_file": source_file,
-                    "fiscal_year": fiscal_year,
-                    "fy_amounts": fy_amounts,
-                    "description_text": "",
-                }
-            )
-
-    # 4. Extract description text from Section A and Section B
-    desc_parts: list[str] = []
-    in_section_a = False
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("A. Mission Description"):
-            in_section_a = True
-            continue
-        if in_section_a:
-            if re.match(r"^[B-Z]\.\s", stripped):
-                break
-            if stripped:
-                desc_parts.append(stripped)
-    section_a_text = " ".join(desc_parts).strip()
-
-    project_descs: dict[str, str] = {}
-    current_title = None
-    current_desc_parts: list[str] = []
-    in_section_b = False
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("B. Accomplishments") or stripped.startswith(
-            "C. Accomplishments"
-        ):
-            in_section_b = True
-            continue
-        if not in_section_b:
-            continue
-        if re.match(r"^[C-Z]\.\s(?!Accomplishments)", stripped):
-            break
-        if stripped.startswith("Title:"):
-            if current_title and current_desc_parts:
-                project_descs[current_title] = " ".join(current_desc_parts).strip()
-            title_text = stripped[len("Title:") :].strip()
-            title_text = re.sub(r"\s+[\d,.]+\s*$", "", title_text).strip()
-            current_title = title_text
-            current_desc_parts = []
-        elif stripped.startswith("Description:") and current_title:
-            current_desc_parts.append(stripped[len("Description:") :].strip())
-        elif current_title and current_desc_parts and not stripped.startswith("FY "):
-            if not re.match(r"^(Accomplishments|Congressional|Title:)", stripped):
-                current_desc_parts.append(stripped)
-    if current_title and current_desc_parts:
-        project_descs[current_title] = " ".join(current_desc_parts).strip()
-
-    for item in results:
-        parts = []
-        if section_a_text:
-            parts.append(section_a_text)
-        proj_title = item["project_title"]
-        for desc_title, desc_text in project_descs.items():
-            if proj_title.lower().startswith(
-                desc_title[:20].lower()
-            ) or desc_title.lower().startswith(proj_title[:20].lower()):
-                parts.append(f"[{desc_title}] {desc_text}")
-                break
-        raw_desc = "\n\n".join(parts) if parts else ""
-        item["description_text"] = clean_narrative(raw_desc) if raw_desc else ""
-
-    return results
-
-
-def consolidate_r2_timeseries(
-    items: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Collapse multiple budget-submission rows into one golden row per project."""
-    from utils.normalization import normalize_r2_project_code
-
-    groups: dict[tuple[str, str | None], list[dict[str, Any]]] = {}
-    for item in items:
-        raw_code = item.get("project_code")
-        norm_code = normalize_r2_project_code(raw_code)
-        # Fallback: extract code from title if none parsed
-        if norm_code is None:
-            m = re.match(r"^[Ee]?(\d{3,5})\s+", item.get("project_title", ""))
-            if m:
-                norm_code = m.group(1).lstrip("0") or m.group(1)
-        key = (item["pe_number"], norm_code)
-        groups.setdefault(key, []).append(item)
-
-    results: list[dict[str, Any]] = []
-    for (pe, proj_code), group in groups.items():
-
-        def _doc_fy(item: dict[str, Any]) -> int:
-            m = re.search(r"(\d{4})", item.get("fiscal_year", ""))
-            return int(m.group(1)) if m else 0
-
-        group.sort(key=_doc_fy, reverse=True)
-
-        golden_amounts: dict[str, float] = {}
-        golden_refs: dict[str, str] = {}
-        for item in group:
-            for fy_key, amount in item["fy_amounts"].items():
-                if fy_key not in golden_amounts:
-                    golden_amounts[fy_key] = amount
-                    golden_refs[fy_key] = item["source_file"]
-
-        latest = group[0]
-        best_desc = ""
-        for item in group:
-            desc = item.get("description_text", "")
-            if len(desc) > len(best_desc):
-                best_desc = desc
-        results.append(
-            {
-                "pe_number": pe,
-                "pe_title": latest.get("pe_title"),
-                "project_code": proj_code,
-                "project_title": latest["project_title"],
-                "source_file": latest["source_file"],
-                "fiscal_year": latest["fiscal_year"],
-                "fy_amounts": golden_amounts,
-                "fy_refs": golden_refs,
-                "description_text": best_desc,
-            }
-        )
-
-    return results
-
-
-def mine_pdf_subelements(
-    conn: sqlite3.Connection,
-    pe_numbers: set[str],
-    keywords: list[str],
-    core_pes: set[str] | None = None,
-    fy_start: int = FY_START,
-) -> tuple[list[dict[str, Any]], set[str]]:
-    """Mine R-2/R-2A sub-element data from pdf_pages for the given PE numbers.
-
-    Returns (consolidated_rows, discovered_pes).
-    """
-    if not pe_numbers:
-        return [], set()
-
-    try:
-        conn.execute("SELECT 1 FROM pdf_pages LIMIT 0")
-    except sqlite3.OperationalError:
-        return [], set()
-
-    if core_pes is None:
-        core_pes = pe_numbers
-
-    fy_min_str = f"FY {fy_start}"
-
-    rows = conn.execute(
-        """
-        SELECT source_file, page_number, page_text, fiscal_year
-        FROM pdf_pages
-        WHERE (page_text LIKE '%Exhibit R-2,%' OR page_text LIKE '%Exhibit R-2A%')
-          AND page_text LIKE '%COST%Millions%'
-          AND source_file LIKE '%detail%'
-          AND fiscal_year >= ?
-        ORDER BY fiscal_year DESC, source_file, page_number
-        """,
-        [fy_min_str],
-    ).fetchall()
-
-    logger.info(
-        "PDF sub-element mining: scanning %d R-2/R-2A pages for %d PEs",
-        len(rows),
-        len(pe_numbers),
-    )
-
-    seen: set[tuple[str, str | None, str]] = set()
-    raw_items: list[dict[str, Any]] = []
-    discovered_pes: set[str] = set()
-
-    for r in rows:
-        source_file, page_number, page_text, fiscal_year = r
-        parsed = parse_r2_cost_block(page_text, source_file, fiscal_year)
-        for item in parsed:
-            pe = item["pe_number"]
-            key = (pe, item.get("project_code"), fiscal_year)
-            if key in seen:
-                continue
-
-            if pe in pe_numbers:
-                seen.add(key)
-                raw_items.append(item)
-            else:
-                text_fields = [
-                    item.get("project_title", ""),
-                    item.get("description_text", ""),
-                    item.get("pe_title", ""),
-                ]
-                matched = find_matched_keywords(text_fields, keywords)
-                if matched:
-                    item["_matched_r2_keywords"] = matched
-                    seen.add(key)
-                    raw_items.append(item)
-                    discovered_pes.add(pe)
-
-    if discovered_pes:
-        logger.info(
-            "PDF sub-element mining: discovered %d new PEs via R-2 keyword matches: %s",
-            len(discovered_pes),
-            ", ".join(sorted(discovered_pes)),
-        )
-
-    logger.info(
-        "PDF sub-element mining: %d raw rows before consolidation", len(raw_items)
-    )
-
-    consolidated = consolidate_r2_timeseries(raw_items)
-
-    for item in consolidated:
-        if not item.get("_matched_r2_keywords"):
-            text_fields = [
-                item.get("project_title", ""),
-                item.get("description_text", ""),
-                item.get("pe_title", ""),
-            ]
-            matched = find_matched_keywords(text_fields, keywords)
-            if matched:
-                item["_matched_r2_keywords"] = matched
-
-    logger.info(
-        "PDF sub-element mining: %d final project rows (%d discovered PEs)",
-        len(consolidated),
-        len(discovered_pes),
-    )
-    return consolidated, discovered_pes
-
-
-def normalize_program_name(title: str) -> str:
-    """Extract a canonical short name for cross-PE matching."""
-    s = re.sub(r"^[A-Z0-9]+:\s*", "", title)
-    s = re.sub(r"\s*\([^)]*\)\s*", " ", s)
-    return " ".join(s.lower().split())
-
-
-def annotate_cross_pe_lineages(
-    conn: sqlite3.Connection,
-    cache_table: str,
-) -> None:
-    """Detect R-2 projects that migrated across PEs and annotate with lineage_note."""
-    rows = conn.execute(f"""
-        SELECT id, pe_number, line_item_title
-        FROM {cache_table}
-        WHERE exhibit_type = 'r2'
-    """).fetchall()
-
-    if not rows:
-        return
-
-    from collections import defaultdict
-
-    name_groups: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
-    for row_id, pe, title in rows:
-        # Skip Congressional Adds (9999) — intentionally multi-PE, not migrations
-        if title and title.startswith("9999"):
-            continue
-        norm = normalize_program_name(title)
-        if norm:
-            name_groups[norm].append((row_id, pe, title))
-
-    updates: list[tuple[str, int]] = []
-    for norm_name, members in name_groups.items():
-        pe_set = {pe for _, pe, _ in members}
-        if len(pe_set) < 2:
-            continue
-        sorted_members = sorted(members, key=lambda x: x[1])
-        for row_id, pe, title in sorted_members:
-            other_pes = sorted(p for p in pe_set if p != pe)
-            if not other_pes:
-                continue
-            note = "Also in PE " + ", ".join(other_pes)
-            updates.append((note, row_id))
-
-    if updates:
-        conn.executemany(
-            f"""UPDATE {cache_table}
-                SET lineage_note = CASE
-                    WHEN lineage_note IS NOT NULL AND lineage_note != ''
-                    THEN lineage_note || '; ' || ?
-                    ELSE ?
-                END
-                WHERE id = ?""",
-            # note twice: once for the append branch, once for the else branch
-            [(note, note, row_id) for note, row_id in updates],
-        )
-        logger.info("Cross-PE lineage: annotated %d R-2 rows", len(updates))
 
 
 # ── Query helpers ─────────────────────────────────────────────────────────────
@@ -810,24 +195,6 @@ def lookup_cache_description(
         return None
 
 
-def apply_filters(
-    service: str | None,
-    exhibit: str | None,
-    fy_from: int | None,
-    fy_to: int | None,
-) -> tuple[str, list[Any]]:
-    """Build WHERE fragments for cache table filters."""
-    parts: list[str] = []
-    params: list[Any] = []
-    if service:
-        parts.append("organization_name LIKE ?")
-        params.append(f"%{service}%")
-    if exhibit:
-        parts.append("exhibit_type = ?")
-        params.append(exhibit)
-    return (" AND ".join(parts), params) if parts else ("", [])
-
-
 def cache_rows_to_dicts(
     rows: list[sqlite3.Row],
     fy_start: int = FY_START,
@@ -844,7 +211,7 @@ def cache_rows_to_dicts(
         for field in ("matched_keywords_row", "matched_keywords_desc"):
             raw = d.get(field, "[]")
             if raw not in json_cache:
-                json_cache[raw] = _safe_json_list(raw)
+                json_cache[raw] = safe_json_list(raw)
             d[field] = json_cache[raw]
         refs: dict[str, str] = {}
         for ref_key, fy_label in zip(ref_keys, fy_labels):
@@ -877,7 +244,7 @@ def load_per_fy_descriptions(
     except sqlite3.OperationalError:
         return {}
 
-    ph, pe_params = _in_clause(pes)
+    ph, pe_params = in_clause(pes)
     rows = conn.execute(
         f"SELECT pe_number, fiscal_year, section_header, description_text "
         f"FROM pe_descriptions "
@@ -905,921 +272,6 @@ def load_per_fy_descriptions(
         result[key] = text
     return result
 
-
-# ── Shared XLSX styles ───────────────────────────────────────────────────────
-
-
-def xlsx_base_styles() -> dict[str, Any]:
-    """Return xlsxwriter format property dicts for shared XLSX styling.
-
-    Returns raw dicts — consumers call ``wb.add_format(props)`` to create
-    workbook-bound Format objects (xlsxwriter formats are per-workbook).
-    """
-    return {
-        "header": {"bold": True, "font_size": 11, "font_color": "#FFFFFF",
-                   "bg_color": "#2C3E50", "text_wrap": True, "align": "center"},
-        "base": {"font_size": 10},
-        "italic": {"italic": True, "font_color": "#888888", "font_size": 10},
-        "total": {"bold": True, "font_size": 11},
-        "source": {"font_size": 9, "font_color": "#666666", "valign": "top"},
-        "desc": {"font_size": 9, "font_color": "#444444", "valign": "top"},
-        "money_fmt": "$#,##0",
-    }
-
-
-# ── Shared XLSX workbook builder ─────────────────────────────────────────────
-
-# Default column widths keyed by header name.
-_COL_WIDTH_DEFAULTS: dict[str, int] = {
-    "PE Number": 14, "Service/Org": 14,
-    "Exhibit": 8, "Exhibit Type": 8,
-    "Line Item / Sub-Program": 50, "Line Item Title": 50,
-    "Budget Activity": 20, "Budget Activity (Normalized)": 20,
-    "Appropriation": 30, "Color of Money": 12,
-    "Alternate Titles": 40,
-    "Keywords (Row)": 20, "Keywords (Desc)": 20,
-    "Description": 60, "In Totals": 10,
-}
-
-
-def _col_letter(one_based: int) -> str:
-    """Convert a 1-based column index to an Excel letter (1 → 'A')."""
-    from xlsxwriter.utility import xl_col_to_name
-    return xl_col_to_name(one_based - 1)
-
-
-def _write_merged_fy_headers(
-    ws: Any,
-    fixed_columns: list[tuple[str, str]],
-    active_years: list[int],
-    fixed_count: int,
-    sub_col_names: list[str],
-    fmt_merge: Any,
-    fmt_sub: Any,
-) -> list[str]:
-    """Write two-row merged FY headers and return the flat header list."""
-    for ci, (h, _) in enumerate(fixed_columns):
-        ws.merge_range(0, ci, 1, ci, h, fmt_merge)
-    col = fixed_count
-    for yr in active_years:
-        if len(sub_col_names) > 1:
-            ws.merge_range(0, col, 0, col + len(sub_col_names) - 1, f"FY{yr} ($K)", fmt_merge)
-        else:
-            ws.write(0, col, f"FY{yr} ($K)", fmt_merge)
-        for si, sub in enumerate(sub_col_names):
-            ws.write(1, col + si, sub, fmt_sub)
-        col += len(sub_col_names)
-    headers: list[str] = [h for h, _ in fixed_columns]
-    for yr in active_years:
-        for sub in sub_col_names:
-            headers.append(f"FY{yr} {sub}" if sub != "($K)" else f"FY{yr} ($K)")
-    return headers
-
-
-def _set_fy_column_widths(
-    ws: Any,
-    fixed_columns: list[tuple[str, str]],
-    fy_cols: list[Any],
-    base_money_fmt: Any | None = None,
-) -> None:
-    """Set column widths for fixed columns and FY column groups."""
-    for ci, (header, _field) in enumerate(fixed_columns):
-        ws.set_column(ci, ci, _COL_WIDTH_DEFAULTS.get(header, 14))
-    for fc in fy_cols:
-        ws.set_column(fc.val - 1, fc.val - 1, 14, base_money_fmt)
-        if fc.intotal:
-            ws.set_column(fc.intotal - 1, fc.intotal - 1, 10)
-        if fc.src:
-            ws.set_column(fc.src - 1, fc.src - 1, 30)
-        if fc.desc:
-            ws.set_column(fc.desc - 1, fc.desc - 1, 40)
-        if fc.desc_kw:
-            ws.set_column(fc.desc_kw - 1, fc.desc_kw - 1, 25)
-
-
-def _apply_fy_conditional_formatting(
-    ws: Any,
-    fy_cols: list[Any],
-    intotal_letters: list[str],
-    fixed_count: int,
-    first_row: int,
-    last_row: int,
-    fmt: dict[str, Any],
-) -> None:
-    """Apply Y/N/P conditional formatting to FY columns and fixed columns."""
-    for fc in fy_cols:
-        data_cols = [fc.val - 1]
-        if fc.src:
-            data_cols.append(fc.src - 1)
-        if fc.desc:
-            data_cols.append(fc.desc - 1)
-        for c0 in data_cols:
-            ws.conditional_format(first_row, c0, last_row, c0, {
-                "type": "formula",
-                "criteria": f'=${fc.intotal_l}{first_row + 1}="Y"',
-                "format": fmt["cf_bold"],
-            })
-            ws.conditional_format(first_row, c0, last_row, c0, {
-                "type": "formula",
-                "criteria": f'=${fc.intotal_l}{first_row + 1}="N"',
-                "format": fmt["cf_italic_gray"],
-            })
-        if fc.intotal:
-            ic0 = fc.intotal - 1
-            for val, key in [("Y", "cf_green"), ("P", "cf_yellow"), ("N", "cf_red")]:
-                ws.conditional_format(first_row, ic0, last_row, ic0, {
-                    "type": "formula",
-                    "criteria": f'=${fc.intotal_l}{first_row + 1}="{val}"',
-                    "format": fmt[key],
-                })
-    or_parts = ",".join(f'${lt}{first_row + 1}="Y"' for lt in intotal_letters)
-    and_parts = ",".join(f'${lt}{first_row + 1}="N"' for lt in intotal_letters)
-    ws.conditional_format(first_row, 0, last_row, fixed_count - 1, {
-        "type": "formula", "criteria": f"=OR({or_parts})", "format": fmt["cf_bold"],
-    })
-    ws.conditional_format(first_row, 0, last_row, fixed_count - 1, {
-        "type": "formula", "criteria": f"=AND({and_parts})", "format": fmt["cf_italic_gray"],
-    })
-
-
-def build_keyword_xlsx(
-    items: list[dict],
-    active_years: list[int],
-    desc_by_pe_fy: dict[tuple[str, str], str],
-    fixed_columns: list[tuple[str, str]],
-    include_source: bool = True,
-    include_description: bool = True,
-    include_intotal: bool = True,
-    include_desc_keywords: bool = True,
-    sheet_title: str = "Results",
-    build_summary: bool = True,
-    keywords: list[str] | None = None,
-    fy_desc_kws: dict[tuple[str, str], list[str]] | None = None,
-    pe_has_r2_match: set[str] | None = None,
-) -> bytes:
-    """Build a keyword-search XLSX workbook and return it as bytes.
-
-    Uses xlsxwriter for proper Excel 365 dynamic array formula support.
-    Y/N/P is computed per-FY based on description keyword matches.
-    """
-    import io
-
-    import xlsxwriter
-
-    sty = xlsx_base_styles()
-    money_fmt_str = sty["money_fmt"]
-    fixed_count = len(fixed_columns)
-
-    if fy_desc_kws is None:
-        fy_desc_kws = {}
-    if pe_has_r2_match is None:
-        pe_has_r2_match = set()
-
-    # Compute FY column stride and per-year column positions (1-based)
-    fy_stride = (1 + int(include_intotal) + int(include_source)
-                 + int(include_description) + int(include_desc_keywords))
-
-    class _FyCols:
-        __slots__ = ("val", "intotal", "src", "desc", "desc_kw",
-                     "val_l", "intotal_l", "src_l", "desc_l", "desc_kw_l")
-
-        def __init__(self, fy_idx: int) -> None:
-            base = fixed_count + (fy_idx * fy_stride) + 1
-            col = base
-            self.val = col
-            col += 1
-            self.intotal = col if include_intotal else 0
-            if include_intotal:
-                col += 1
-            self.src = col if include_source else 0
-            if include_source:
-                col += 1
-            self.desc = col if include_description else 0
-            if include_description:
-                col += 1
-            self.desc_kw = col if include_desc_keywords else 0
-            self.val_l = _col_letter(self.val)
-            self.intotal_l = _col_letter(self.intotal) if self.intotal else ""
-            self.src_l = _col_letter(self.src) if self.src else ""
-            self.desc_l = _col_letter(self.desc) if self.desc else ""
-            self.desc_kw_l = _col_letter(self.desc_kw) if self.desc_kw else ""
-
-    fy_cols = [_FyCols(i) for i in range(len(active_years))]
-    intotal_letters = [fc.intotal_l for fc in fy_cols if fc.intotal_l]
-
-    # ── Build workbook ──
-    buf = io.BytesIO()
-    wb = xlsxwriter.Workbook(buf, {"in_memory": True})
-    ws = wb.add_worksheet(sheet_title)
-
-    # Create all Format objects once (xlsxwriter formats are workbook-bound)
-    fmt = {
-        "header": wb.add_format(sty["header"]),
-        "base": wb.add_format(sty["base"]),
-        "base_money": wb.add_format({**sty["base"], "num_format": money_fmt_str}),
-        "total": wb.add_format(sty["total"]),
-        "total_money": wb.add_format({**sty["total"], "num_format": money_fmt_str}),
-        "source": wb.add_format(sty["source"]),
-        "desc": wb.add_format(sty["desc"]),
-        "cf_bold": wb.add_format({"bold": True}),
-        "cf_italic_gray": wb.add_format({"italic": True, "font_color": "#888888"}),
-        "cf_green": wb.add_format({"bg_color": "#C6EFCE"}),
-        "cf_yellow": wb.add_format({"bg_color": "#FFEB9C"}),
-        "cf_red": wb.add_format({"bg_color": "#FFC7CE"}),
-    }
-
-    # ── Headers: two-row layout with merged FY cells ──
-    fmt_merge = wb.add_format({
-        "bold": True, "font_size": 11, "font_color": "#FFFFFF",
-        "bg_color": "#2C3E50", "align": "center", "valign": "vcenter", "border": 1,
-    })
-    fmt_sub = wb.add_format({
-        "bold": True, "font_size": 10, "font_color": "#FFFFFF",
-        "bg_color": "#34495E", "align": "center", "border": 1,
-    })
-
-    sub_col_names = ["($K)"]
-    if include_intotal:
-        sub_col_names.append("In Total")
-    if include_source:
-        sub_col_names.append("Source")
-    if include_description:
-        sub_col_names.append("Description")
-    if include_desc_keywords:
-        sub_col_names.append("Keywords")
-
-    headers = _write_merged_fy_headers(
-        ws, fixed_columns, active_years, fixed_count, sub_col_names, fmt_merge, fmt_sub,
-    )
-
-    # ── Data rows (row_num is 1-based for formula references, data starts row 3) ──
-    first_data_row = 3
-    row_num = first_data_row
-    for row in items:
-        r0 = row_num - 1  # 0-indexed for ws.write
-        pe = row.get("pe_number", "")
-        et = row.get("exhibit_type", "")
-
-        for ci, (_header, field) in enumerate(fixed_columns):
-            val = row.get(field, "")
-            if isinstance(val, list):
-                val = ", ".join(val)
-            ws.write(r0, ci, val if val is not None else "", fmt["base"])
-
-        refs_map = row.get("refs", {}) or {}
-
-        # Pass 1: compute Y/N/P per FY
-        fy_codes: list[str] = []
-        if include_intotal:
-            # Only row-level title/field matches count as direct hits.
-            # matched_keywords_desc is PE-level (set on all rows in a PE)
-            # and is too broad for Y/N/P — it feeds the Desc Keywords column instead.
-            has_row_kw = bool(row.get("matched_keywords_row"))
-            for fi, yr in enumerate(active_years):
-                amount = row.get(f"fy{yr}")
-                has_src = bool(refs_map.get(f"fy{yr}"))
-                if amount is None or (amount == 0 and not has_src):
-                    fy_codes.append("")
-                    continue
-                has_fy_kw = (pe, str(yr)) in fy_desc_kws
-                has_match = has_row_kw or has_fy_kw
-                if not has_match:
-                    fy_codes.append("N")
-                elif et == "r1" and pe in pe_has_r2_match:
-                    # R1 is summary — cap at P when R2 subs have matches
-                    # to avoid double-counting (R1 total includes R2 dollars)
-                    fy_codes.append("P")
-                else:
-                    fy_codes.append("Y")
-            # If any FY is Y, promote remaining N's to P (but leave blanks alone)
-            if "Y" in fy_codes:
-                fy_codes = ["P" if c == "N" else c for c in fy_codes]
-
-        # Pass 2: write all FY columns
-        for fi, yr in enumerate(active_years):
-            fc = fy_cols[fi]
-
-            amount = row.get(f"fy{yr}")
-            has_source = bool(refs_map.get(f"fy{yr}"))
-            # Skip $0 with no source — likely an artifact, not real data
-            if amount is not None and (amount != 0 or has_source):
-                ws.write_number(r0, fc.val - 1, amount, fmt["base_money"])
-
-            if fc.intotal and fy_codes[fi]:
-                ws.write(r0, fc.intotal - 1, fy_codes[fi], fmt["base"])
-
-            if fc.src:
-                source_ref = refs_map.get(f"fy{yr}", "")
-                if source_ref:
-                    ws.write(r0, fc.src - 1, source_ref, fmt["source"])
-
-            if fc.desc:
-                desc_text = desc_by_pe_fy.get((pe, str(yr)), "")
-                if desc_text:
-                    ws.write(r0, fc.desc - 1, desc_text, fmt["desc"])
-
-            if fc.desc_kw:
-                kws = fy_desc_kws.get((pe, str(yr)), [])
-                ws.write(r0, fc.desc_kw - 1, ", ".join(kws) if kws else "", fmt["base"])
-
-        row_num += 1
-
-    last_data_row = row_num - 1
-
-    # ── Data validation (Y/N/P dropdown) ──
-    if include_intotal and last_data_row >= first_data_row:
-        for fc in fy_cols:
-            ws.data_validation(
-                first_data_row - 1, fc.intotal - 1,
-                last_data_row - 1, fc.intotal - 1,
-                {"validate": "list", "source": ["Y", "N", "P"],
-                 "error_message": "Please enter Y, N, or P",
-                 "error_title": "Invalid value"},
-            )
-
-    # ── Conditional formatting ──
-    if include_intotal and last_data_row >= first_data_row and active_years:
-        _apply_fy_conditional_formatting(
-            ws, fy_cols, intotal_letters, fixed_count,
-            first_data_row - 1, last_data_row - 1, fmt,
-        )
-
-    # ── Totals rows ──
-    if include_intotal and last_data_row >= first_data_row and active_years:
-        y_row, p_row, grand_row = row_num, row_num + 1, row_num + 2
-        ws.write(y_row - 1, 0, "Y TOTALS", fmt["total"])
-        ws.write(p_row - 1, 0, "P TOTALS", fmt["total"])
-        ws.write(grand_row - 1, 0, "GRAND TOTAL", fmt["total"])
-        for fc in fy_cols:
-            val_rng = f"${fc.val_l}${first_data_row}:${fc.val_l}${last_data_row}"
-            it_rng = f"${fc.intotal_l}${first_data_row}:${fc.intotal_l}${last_data_row}"
-            for tr, label, criteria in [(y_row, "Y Sum", "Y"), (p_row, "P Sum", "P")]:
-                ws.write(tr - 1, fc.intotal - 1, label, fmt["total"])
-                ws.write_formula(tr - 1, fc.val - 1,
-                                 f'=SUMIF({it_rng},"{criteria}",{val_rng})', fmt["total_money"])
-            ws.write(grand_row - 1, fc.intotal - 1, "Grand Sum", fmt["total"])
-            ws.write_formula(grand_row - 1, fc.val - 1,
-                             f"={fc.val_l}{y_row}+{fc.val_l}{p_row}", fmt["total_money"])
-    elif last_data_row >= first_data_row and active_years:
-        totals_row = row_num
-        ws.write(totals_row - 1, 0, "TOTALS", fmt["total"])
-        for fc in fy_cols:
-            vr = f"${fc.val_l}${first_data_row}:${fc.val_l}${last_data_row}"
-            ws.write_formula(totals_row - 1, fc.val - 1, f"=SUM({vr})", fmt["total_money"])
-
-    # ── Column widths ──
-    _set_fy_column_widths(ws, fixed_columns, fy_cols)
-
-    freeze_col = min(5, fixed_count + 1)
-    ws.freeze_panes(2, freeze_col - 1)
-    ws.autofilter(1, 0, max(last_data_row, row_num) - 1, len(headers) - 1)
-
-    # ── Selected sheet (dynamic FILTER of data sheet, Y or P rows only) ──
-    if include_intotal and last_data_row >= first_data_row and active_years:
-        ws_sel = wb.add_worksheet("Selected")
-
-        _write_merged_fy_headers(
-            ws_sel, fixed_columns, active_years, fixed_count, sub_col_names, fmt_merge, fmt_sub,
-        )
-
-        # FILTER formula: show rows where ANY In Total column = "Y" or "P"
-        data_range = f"'{sheet_title}'!$A${first_data_row}:${_col_letter(len(headers))}${last_data_row}"
-        it_checks = []
-        for fc in fy_cols:
-            if fc.intotal:
-                it_col = f"'{sheet_title}'!${fc.intotal_l}${first_data_row}:${fc.intotal_l}${last_data_row}"
-                it_checks.append(f'({it_col}="Y")+({it_col}="P")')
-        filter_crit = "+".join(it_checks)
-        filter_formula = f"=FILTER({data_range},{filter_crit},\"No matching rows\")"
-        ws_sel.write_dynamic_array_formula(2, 0, 2, 0, filter_formula, fmt["base"])
-
-        _set_fy_column_widths(ws_sel, fixed_columns, fy_cols, base_money_fmt=fmt["base_money"])
-        if intotal_letters and last_data_row >= first_data_row:
-            _apply_fy_conditional_formatting(
-                ws_sel, fy_cols, intotal_letters, fixed_count, 2, _SPILL_MAX_ROW, fmt,
-            )
-
-        ws_sel.freeze_panes(2, freeze_col - 1)
-
-    # ── Summary sheets ──
-    if build_summary and include_intotal:
-        field_to_col = {field: _col_letter(ci) for ci, (_h, field) in enumerate(fixed_columns, 1)}
-        val_letters = [fc.val_l for fc in fy_cols]
-        it_letters = [fc.intotal_l for fc in fy_cols]
-        _build_xlsx_summary(
-            wb, items, active_years, sheet_title,
-            field_to_col, val_letters, it_letters,
-            first_data_row, last_data_row, fmt,
-            keywords=keywords, fmt_merge=fmt_merge, fmt_sub=fmt_sub,
-        )
-
-    # ── Keyword co-occurrence matrix ──
-    if keywords and len(keywords) > 1:
-        _build_keyword_matrix(wb, items, keywords, fmt)
-
-    wb.close()
-    return buf.getvalue()
-
-
-def _build_xlsx_summary(
-    wb: Any,
-    items: list[dict],
-    active_years: list[int],
-    data_sheet_name: str,
-    field_to_col: dict[str, str],
-    val_letters: list[str],
-    intotal_letters: list[str],
-    first_data_row: int,
-    last_data_row: int,
-    fmt: dict[str, Any] | None = None,
-    keywords: list[str] | None = None,
-    fmt_merge: Any | None = None,
-    fmt_sub: Any | None = None,
-) -> None:
-    """Build dynamic Summary sheets using xlsxwriter spill formulas.
-
-    Creates PE Summary, dimension breakdowns (By Service, etc.), Keyword Matrix
-    (if keywords provided), and an About sheet with methodology documentation.
-    """
-    ds = data_sheet_name
-    pe_col = field_to_col.get("pe_number", "A")
-    n_years = len(active_years)
-
-    pr = f"'{ds}'!${pe_col}${first_data_row}:${pe_col}${last_data_row}"
-    vr = [f"'{ds}'!${val_letters[yi]}${first_data_row}:${val_letters[yi]}${last_data_row}" for yi in range(n_years)]
-    ir = [f"'{ds}'!${intotal_letters[yi]}${first_data_row}:${intotal_letters[yi]}${last_data_row}" for yi in range(n_years)]
-
-    if fmt is None:
-        sty = xlsx_base_styles()
-        fmt = {
-            "header": wb.add_format(sty["header"]),
-            "base": wb.add_format(sty["base"]),
-            "base_money": wb.add_format({**sty["base"], "num_format": sty["money_fmt"]}),
-            "total": wb.add_format(sty["total"]),
-            "total_money": wb.add_format({**sty["total"], "num_format": sty["money_fmt"]}),
-        }
-
-    # Pre-compute PE→title map for PE Summary sheet (single pass, R-1 wins)
-    pe_titles: dict[str, str] = {}
-    for row in items:
-        pe = row.get("pe_number", "")
-        if not pe:
-            continue
-        if row.get("exhibit_type") == "r1" and row.get("line_item_title"):
-            pe_titles[pe] = row["line_item_title"]
-        elif pe not in pe_titles:
-            pe_titles[pe] = row.get("line_item_title", pe)
-
-    # Reuse caller's format objects if provided; create fallbacks otherwise
-    if fmt_merge is None:
-        fmt_merge = wb.add_format({
-            "bold": True, "font_size": 11, "font_color": "#FFFFFF",
-            "bg_color": "#2C3E50", "align": "center", "valign": "vcenter",
-            "border": 1,
-        })
-    if fmt_sub is None:
-        fmt_sub = wb.add_format({
-            "bold": True, "font_size": 10, "font_color": "#FFFFFF",
-            "bg_color": "#34495E", "align": "center", "border": 1,
-        })
-
-    def _write_summary_sheet(
-        sheet_name: str,
-        label_col: str = "PE Number",
-        match_rng: str | None = None,
-        include_title: bool = False,
-    ) -> None:
-        """Write a summary sheet with merged FY headers and Y/P/Total column groups.
-
-        Layout:
-        Row 0: Label | (PE Title) |    FY2024 ($K)     |    FY2025 ($K)     |      Row Total      |
-        Row 1:       |            |  Y  |  P  | Total  |  Y  |  P  | Total  |  Y  |  P  | Total  |
-        Row 2: Total |            | $xx | $xx |  $xx   | ... (SUMPRODUCT)   | $xx | $xx |  $xx   |
-        Row 3+: (spill data)
-        """
-        ws = wb.add_worksheet(sheet_name)
-        mr = match_rng or pr
-        unique_expr = f"SORT(UNIQUE({mr}))"
-
-        sumifs_y_all = "+".join(f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"Y\")" for yi in range(n_years))
-        sumifs_p_all = "+".join(f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"P\")" for yi in range(n_years))
-        filtered = (
-            f"FILTER({unique_expr},"
-            f"MAP({unique_expr},LAMBDA(_xlpm.v,{sumifs_y_all}+{sumifs_p_all}))<>0,"
-            f"\"(none)\")"
-        )
-
-        # Column A: label (PE Number or dimension name)
-        col = 0
-        ws.merge_range(0, col, 1, col, label_col, fmt_merge)
-        ws.write(2, col, "Total", fmt["total"])
-        ws.write_dynamic_array_formula(3, col, 3, col, f"={filtered}", fmt["base"])
-        ws.set_column(col, col, 16, fmt["base"])
-        col += 1
-
-        # Column B: PE Title (only for PE Summary)
-        if include_title:
-            ws.merge_range(0, col, 1, col, "PE Title", fmt_merge)
-            ws.write(2, col, "", fmt["total"])
-            # Write PE→title lookup table in far-right columns (ZA/ZB)
-            lk_col_pe = _HIDDEN_LOOKUP_COL
-            lk_col_title = 201
-            for ti, (pe, title) in enumerate(sorted(pe_titles.items())):
-                ws.write(ti, lk_col_pe, pe)
-                ws.write(ti, lk_col_title, title)
-            lk_count = len(pe_titles)
-            # INDEX/MATCH formula to look up title from PE in column A
-            pe_lk = f"${_col_letter(lk_col_pe + 1)}$1:${_col_letter(lk_col_pe + 1)}${lk_count}"
-            ti_lk = f"${_col_letter(lk_col_title + 1)}$1:${_col_letter(lk_col_title + 1)}${lk_count}"
-            ws.write_dynamic_array_formula(
-                3, col, 3, col,
-                f"=MAP({filtered},LAMBDA(_xlpm.v,IFERROR(INDEX({ti_lk},MATCH(_xlpm.v,{pe_lk},0)),_xlpm.v)))",
-                fmt["base"],
-            )
-            ws.set_column(col, col, 40, fmt["base"])
-            # Hide lookup columns
-            ws.set_column(lk_col_pe, lk_col_title, None, None, {"hidden": True})
-            col += 1
-
-        # FY year groups: each gets 3 columns (Y, P, Total) with merged header
-        row_tot_y = []
-        row_tot_p = []
-
-        for yi in range(n_years):
-            yr = active_years[yi]
-
-            # Merged FY header across 3 columns
-            ws.merge_range(0, col, 0, col + 2, f"FY{yr} ($K)", fmt_merge)
-
-            for ci, (sub_label, crit) in enumerate([("Y", "Y"), ("P", "P"), ("Total", None)]):
-                c = col + ci
-                ws.write(1, c, sub_label, fmt_sub)
-
-                if crit:
-                    ws.write_formula(2, c,
-                                     f'=SUMPRODUCT(({ir[yi]}="{crit}")*{vr[yi]})',
-                                     fmt["total_money"])
-                    formula = (
-                        f"=MAP({filtered},"
-                        f"LAMBDA(_xlpm.v,SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"{crit}\")))"
-                    )
-                    if crit == "Y":
-                        row_tot_y.append(f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"Y\")")
-                    else:
-                        row_tot_p.append(f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"P\")")
-                else:
-                    ws.write_formula(2, c,
-                                     f'=SUMPRODUCT(({ir[yi]}="Y")*{vr[yi]})+SUMPRODUCT(({ir[yi]}="P")*{vr[yi]})',
-                                     fmt["total_money"])
-                    formula = (
-                        f"=MAP({filtered},"
-                        f"LAMBDA(_xlpm.v,"
-                        f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"Y\")"
-                        f"+SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"P\")))"
-                    )
-
-                ws.write_dynamic_array_formula(3, c, 3, c, formula, fmt["base_money"])
-                ws.set_column(c, c, 14, fmt["base_money"])  # default format for spill rows
-
-            col += 3
-
-        # Row Total group: Y, P, Total (same 3-column pattern)
-        ws.merge_range(0, col, 0, col + 2, "Row Total ($K)", fmt_merge)
-
-        for ci, (sub_label, parts_y, parts_p) in enumerate([
-            ("Y", row_tot_y, []),
-            ("P", [], row_tot_p),
-            ("Total", row_tot_y, row_tot_p),
-        ]):
-            c = col + ci
-            ws.write(1, c, sub_label, fmt_sub)
-
-            if sub_label == "Y":
-                sp = "+".join(f'SUMPRODUCT(({ir[yi]}="Y")*{vr[yi]})' for yi in range(n_years))
-                sumifs = "+".join(parts_y)
-            elif sub_label == "P":
-                sp = "+".join(f'SUMPRODUCT(({ir[yi]}="P")*{vr[yi]})' for yi in range(n_years))
-                sumifs = "+".join(parts_p)
-            else:
-                sp = "+".join(
-                    f'SUMPRODUCT(({ir[yi]}="Y")*{vr[yi]})+SUMPRODUCT(({ir[yi]}="P")*{vr[yi]})'
-                    for yi in range(n_years)
-                )
-                sumifs = "+".join(row_tot_y) + "+" + "+".join(row_tot_p)
-
-            ws.write_formula(2, c, f"={sp}", fmt["total_money"])
-            ws.write_dynamic_array_formula(
-                3, c, 3, c,
-                f"=MAP({filtered},LAMBDA(_xlpm.v,{sumifs}))",
-                fmt["base_money"],
-            )
-            ws.set_column(c, c, 14, fmt["base_money"])
-
-        ws.freeze_panes(3, 1)
-
-    # PE Summary (with title column)
-    _write_summary_sheet("PE Summary", include_title=True)
-
-    # Dimension summaries
-    svc_col = field_to_col.get("organization_name")
-    ba_col = field_to_col.get("budget_activity_norm") or field_to_col.get("budget_activity_title")
-    com_col = field_to_col.get("color_of_money")
-
-    for sheet_name, label, dcol in [
-        ("By Service", "Service/Agency", svc_col),
-        ("By Budget Activity", "Budget Activity", ba_col),
-        ("By Color of Money", "Color of Money", com_col),
-    ]:
-        if not dcol:
-            continue  # dimension column not in selected columns
-        dim_rng = f"'{ds}'!${dcol}${first_data_row}:${dcol}${last_data_row}"
-        _write_summary_sheet(sheet_name, label_col=label, match_rng=dim_rng)
-
-    _build_xlsx_about_sheet(wb, items, ds, keywords)
-
-
-
-def _build_xlsx_about_sheet(
-    wb: Any,
-    items: list[dict],
-    data_sheet_name: str,
-    keywords: list[str] | None,
-) -> None:
-    """Write an About sheet documenting the export methodology."""
-    import time as _time
-
-    ws = wb.add_worksheet("About")
-    fmt_title = wb.add_format({"bold": True, "font_size": 14})
-    fmt_section = wb.add_format({"bold": True, "font_size": 12, "bottom": 1})
-    fmt_label = wb.add_format({"bold": True, "font_size": 10, "valign": "top"})
-    fmt_text = wb.add_format({"font_size": 10, "text_wrap": True, "valign": "top"})
-
-    r = 0
-    ws.write(r, 0, "DoD Budget Explorer \u2014 Export Documentation", fmt_title)
-    r += 1
-    ws.write(r, 0, "Generated", fmt_label)
-    ws.write(r, 1, _time.strftime("%Y-%m-%d %H:%M:%S"), fmt_text)
-    r += 2
-
-    ws.write(r, 0, "Search Parameters", fmt_section)
-    r += 1
-    ws.write(r, 0, "Keywords", fmt_label)
-    ws.write(r, 1, ", ".join(keywords) if keywords else "(none)", fmt_text)
-    r += 1
-    ws.write(r, 0, "Total rows", fmt_label)
-    ws.write(r, 1, len(items), fmt_text)
-    r += 1
-    matching = sum(1 for row in items if row.get("matched_keywords_row") or row.get("matched_keywords_desc"))
-    ws.write(r, 0, "Matching rows", fmt_label)
-    ws.write(r, 1, matching, fmt_text)
-    r += 1
-    unique_pe_count = len({row.get("pe_number") for row in items if row.get("pe_number")})
-    ws.write(r, 0, "Unique PEs", fmt_label)
-    ws.write(r, 1, unique_pe_count, fmt_text)
-    r += 2
-
-    ws.write(r, 0, "Data Source", fmt_section)
-    r += 1
-    ws.write(r, 0, "DoD Comptroller budget justification documents: Excel R-1/R-2 exhibits "
-             "and PDF-mined R-2/R-2A sub-element pages. All amounts in thousands of dollars ($K).", fmt_text)
-    r += 2
-
-    ws.write(r, 0, "Y/N/P Methodology", fmt_section)
-    r += 1
-    ws.write(r, 0, "Y (Yes)", fmt_label)
-    ws.write(r, 1, "Row directly matches one or more search keywords. Included in Y totals.", fmt_text)
-    r += 1
-    ws.write(r, 0, "N (No)", fmt_label)
-    ws.write(r, 1, "Row included for PE context but does not directly match keywords. Excluded from totals.", fmt_text)
-    r += 1
-    ws.write(r, 0, "P (Possible)", fmt_label)
-    ws.write(r, 1, "User-assigned flag for rows that may be relevant. Change N\u2192P in the data sheet "
-             "and the summary sheets will update automatically.", fmt_text)
-    r += 2
-
-    ws.write(r, 0, "Sheet Descriptions", fmt_section)
-    r += 1
-    sheets_desc = [
-        (data_sheet_name, "Raw data with per-year In Total (Y/N/P) flags, conditional formatting, "
-         "and data validation. Change flags here to update all summary sheets."),
-        ("PE Summary", "Pivot by Program Element. Shows only PEs with non-zero Y+P totals. "
-         "Includes PE title lookup. Columns: Y/P/Total per fiscal year."),
-        ("By Service", "Pivot by Service/Agency (Army, Navy, Air Force, etc.)."),
-        ("By Budget Activity", "Pivot by Budget Activity category."),
-        ("By Color of Money", "Pivot by appropriation type (RDT&E, Procurement, etc.)."),
-        ("Keyword Matrix", "NxN co-occurrence table showing how often each pair of search "
-         "keywords appears together in the same row."),
-    ]
-    for sname, sdesc in sheets_desc:
-        ws.write(r, 0, sname, fmt_label)
-        ws.write(r, 1, sdesc, fmt_text)
-        r += 1
-    r += 1
-
-    ws.write(r, 0, "Caveats", fmt_section)
-    r += 1
-    caveats = [
-        "PDF-mined rows (exhibit_type='r2_pdf') may show 'Unknown' for Budget Activity and Color of Money.",
-        "Amounts are in thousands of dollars ($K). Multiply by 1,000 for actual dollar values.",
-        "Non-matching rows (N) are included because their parent PE matched a keyword. "
-        "They provide context but are excluded from Y totals.",
-        "Summary sheets use Excel 365 dynamic array formulas (FILTER, MAP, LAMBDA). "
-        "They require Microsoft 365 or Excel 2021+.",
-    ]
-    for caveat in caveats:
-        ws.write(r, 0, "\u2022 " + caveat, fmt_text)
-        r += 1
-
-    ws.set_column(0, 0, 20)
-    ws.set_column(1, 1, 80)
-
-
-def _build_keyword_matrix(
-    wb: Any,
-    items: list[dict],
-    keywords: list[str],
-    fmt: dict[str, Any] | None = None,
-) -> None:
-    """Build a keyword co-occurrence matrix sheet.
-
-    Shows an NxN table: cell (i,j) = number of rows where keyword i AND keyword j
-    both appear. Diagonal = total rows matching that keyword alone.
-    """
-    if fmt is None:
-        sty = xlsx_base_styles()
-        fmt = {
-            "header": wb.add_format(sty["header"]),
-            "base": wb.add_format(sty["base"]),
-            "total": wb.add_format(sty["total"]),
-        }
-
-    ws = wb.add_worksheet("Keyword Matrix")
-
-    fmt_header_rot = wb.add_format({
-        "bold": True, "font_size": 11, "font_color": "#FFFFFF",
-        "bg_color": "#2C3E50", "align": "center", "rotation": 90,
-    })
-    fmt_center = wb.add_format({"font_size": 10, "align": "center"})
-    fmt_diag = wb.add_format({"bold": True, "font_size": 11, "bg_color": "#D6E4F0", "align": "center"})
-
-    kw_lower = [kw.lower() for kw in keywords]
-    kw_display = list(keywords)
-
-    row_kw_sets: list[set[str]] = []
-    for row in items:
-        kws_r = _safe_json_list(row.get("matched_keywords_row", []))
-        kws_d = _safe_json_list(row.get("matched_keywords_desc", []))
-        combined = {k.lower() for k in kws_r} | {k.lower() for k in kws_d}
-        if combined:
-            row_kw_sets.append(combined)
-
-    n = len(kw_lower)
-    matrix = [[0] * n for _ in range(n)]
-    for kw_set in row_kw_sets:
-        present = [i for i in range(n) if kw_lower[i] in kw_set]
-        for i in present:
-            for j in present:
-                matrix[i][j] += 1
-
-    active = [i for i in range(n) if matrix[i][i] > 0]
-    if not active:
-        ws.write(0, 0, "No keyword matches found.", fmt["base"])
-        return
-
-    ws.write(0, 0, "Keyword", fmt["header"])
-    for ci, idx in enumerate(active):
-        ws.write(0, 1 + ci, kw_display[idx], fmt_header_rot)
-    ws.write(0, 1 + len(active), "Total", fmt["header"])
-
-    for ri, idx_i in enumerate(active):
-        ws.write(1 + ri, 0, kw_display[idx_i], fmt["base"])
-        for ci, idx_j in enumerate(active):
-            val = matrix[idx_i][idx_j]
-            cell_fmt = fmt_diag if idx_i == idx_j else fmt_center
-            ws.write(1 + ri, 1 + ci, val if val > 0 else "", cell_fmt)
-        ws.write(1 + ri, 1 + len(active), matrix[idx_i][idx_i], fmt["total"])
-
-    ws.set_column(0, 0, 28)
-    ws.set_column(1, len(active) + 1, 6)
-    ws.freeze_panes(1, 1)
-
-
-# ── R-1 stub enrichment helpers ──────────────────────────────────────────────
-
-
-def _extract_r1_titles_for_stubs(
-    conn: sqlite3.Connection,
-    cache_table: str,
-    pdf_only_pes: set[str],
-) -> None:
-    """Extract real R-1 titles from PDF pages for stub rows.
-
-    For each PDF-only PE, query pdf_pages (joined with pdf_pe_numbers) for
-    pages whose text contains 'Exhibit R-1'. Parse the PE title from the
-    first ~10 lines using the standard ``PE <number> / <title>`` pattern
-    and UPDATE the stub row's line_item_title.
-
-    If the PE already has a non-PE-number title (e.g. from pe_index), and
-    the PDF title differs, log the mismatch but don't overwrite.
-    """
-    sorted_pes = sorted(pdf_only_pes)
-    ph, pe_params = _in_clause(sorted_pes)
-
-    # Batch-fetch all R-1 exhibit pages for the full PE set in one query
-    try:
-        rows = conn.execute(
-            f"""
-            SELECT ppn.pe_number, pp.page_text
-            FROM pdf_pages pp
-            JOIN pdf_pe_numbers ppn ON ppn.pdf_page_id = pp.id
-            WHERE ppn.pe_number IN ({ph})
-              AND pp.page_text LIKE '%Exhibit R-1%'
-            """,
-            pe_params,
-        ).fetchall()
-    except sqlite3.OperationalError:
-        logger.debug("Cannot query pdf_pe_numbers for R-1 titles (table missing?)")
-        return
-
-    # Group page texts by PE
-    pe_pages: dict[str, list[str]] = {}
-    for pe_num, page_text in rows:
-        pe_pages.setdefault(pe_num, []).append(page_text)
-
-    # Batch-fetch current cache titles for all PEs
-    cache_rows = conn.execute(
-        f"SELECT pe_number, line_item_title FROM {cache_table} "
-        f"WHERE pe_number IN ({ph}) AND exhibit_type = 'r1'",
-        pe_params,
-    ).fetchall()
-    current_titles = {r[0]: r[1] for r in cache_rows}
-
-    update_batch: list[tuple[str, str, str]] = []
-    for pe in sorted_pes:
-        pages = pe_pages.get(pe, [])
-        pdf_title = None
-        for page_text in pages:
-            for line in page_text.split("\n")[:10]:
-                m = _PE_TITLE_RE.search(line)
-                if m and m.group(1) == pe:
-                    pdf_title = m.group(2).strip()
-                    break
-            if pdf_title:
-                break
-
-        if not pdf_title:
-            continue
-
-        current_title = current_titles.get(pe)
-        if current_title == pe:
-            update_batch.append((pdf_title, pe, pe))
-            logger.debug("R-1 title for %s set from PDF: %s", pe, pdf_title)
-        elif current_title and current_title != pdf_title:
-            logger.info(
-                "R-1 title mismatch for %s: cache='%s', pdf='%s'",
-                pe,
-                current_title,
-                pdf_title,
-            )
-
-    if update_batch:
-        conn.executemany(
-            f"UPDATE {cache_table} SET line_item_title = ? "
-            f"WHERE pe_number = ? AND exhibit_type = 'r1' AND line_item_title = ?",
-            update_batch,
-        )
-
-
-def _aggregate_r2_funding_into_r1_stubs(
-    conn: sqlite3.Connection,
-    cache_table: str,
-    year_range: list[int],
-) -> None:
-    """Sum R-2 sub-element funding into R-1 stub rows with NULL amounts.
-
-    Only updates stub rows (where the FY amounts are NULL), preserving any
-    R-1 rows that already have budget_lines-sourced funding data.
-    """
-    fy_cols = [f"fy{yr}" for yr in year_range]
-    null_check = " AND ".join(f"stub.{col} IS NULL" for col in fy_cols)
-
-    # Aggregate all FY columns in one pass via CTE, then UPDATE-FROM
-    sum_cols = ", ".join(f"SUM({col}) AS {col}" for col in fy_cols)
-    set_sql = ", ".join(f"{col} = sums.{col}" for col in fy_cols)
-
-    result = conn.execute(
-        f"WITH sums AS ("
-        f"  SELECT pe_number, {sum_cols} FROM {cache_table} "
-        f"  WHERE exhibit_type = 'r2' GROUP BY pe_number"
-        f") "
-        f"UPDATE {cache_table} AS stub SET {set_sql} "
-        f"FROM sums "
-        f"WHERE stub.pe_number = sums.pe_number "
-        f"AND stub.exhibit_type = 'r1' AND ({null_check})"
-    )
-
-    if result.rowcount:
-        logger.info("R-1 funding aggregated from R-2 sub-elements for %d PEs", result.rowcount)
 
 
 # ── Cache builder helpers ─────────────────────────────────────────────────────
@@ -1869,10 +321,10 @@ def _insert_cache_rows(
             json.dumps(d.get("_desc_kws", [])) if d.get("_desc_kws") else "[]",
             # Prefer row-level description (R-2 project-specific); fall back to PE-level
             d.get("description_text")
-            if d.get("description_text") and not _is_garbage_description(d["description_text"])
+            if d.get("description_text") and not is_garbage_description(d["description_text"])
             else (
                 None
-                if _is_garbage_description(desc_map.get(d["pe_number"]))
+                if is_garbage_description(desc_map.get(d["pe_number"]))
                 else desc_map.get(d["pe_number"])
             ),
             d.get("_consolidated_titles") or None,
@@ -1907,7 +359,7 @@ def _insert_stub_pes(
     if not pdf_only_pes:
         return 0
 
-    pp, pp_params = _in_clause(pdf_only_pes)
+    pp, pp_params = in_clause(pdf_only_pes)
     pi_meta = conn.execute(
         f"SELECT pe_number, display_title, organization_name FROM pe_index WHERE pe_number IN ({pp})",
         pp_params,
@@ -1918,12 +370,12 @@ def _insert_stub_pes(
     for pe in sorted(pdf_only_pes):
         title, org = pi_map.get(pe, (None, None))
         desc = stub_desc_map.get(pe)
-        if _is_garbage_description(desc):
+        if is_garbage_description(desc):
             desc = None
         vals = [
-            pe, org, "r1", title or pe,
+            pe, org, EXHIBIT_R1, title or pe,
             None, None, None, None, None, "RDT&E",
-            "[]", "[]", desc,
+            "[]", "[]", desc, None,  # None = lineage_note
         ]
         for _yr in year_range:
             vals.extend([None, None])
@@ -1957,16 +409,26 @@ def _backfill_organization(
     fallback_ref_col = (
         f"fy{year_range[-2]}_ref" if len(year_range) > 1 else latest_ref_col
     )
-    for path_fragment, org_name in _ORG_FROM_PATH:
-        conn.execute(
-            f"""
-            UPDATE {cache_table}
-            SET organization_name = ?
-            WHERE (organization_name IS NULL OR organization_name = '')
-              AND ({latest_ref_col} LIKE ? OR {fallback_ref_col} LIKE ?)
-            """,
-            [org_name, f"%{path_fragment}%", f"%{path_fragment}%"],
+    # Build a single CASE-WHEN UPDATE instead of 65+ individual UPDATE statements.
+    # Each WHEN clause checks if the ref column contains the path fragment.
+    # Order matters: first match wins (same priority as the original loop).
+    case_parts: list[str] = []
+    for path_fragment, org_name in ORG_FROM_FILE:
+        escaped_frag = path_fragment.replace("'", "''")
+        escaped_org = org_name.replace("'", "''")
+        case_parts.append(
+            f"WHEN {latest_ref_col} LIKE '%{escaped_frag}%' "
+            f"OR {fallback_ref_col} LIKE '%{escaped_frag}%' "
+            f"THEN '{escaped_org}'"
         )
+    if case_parts:
+        case_sql = " ".join(case_parts)
+        conn.execute(f"""
+            UPDATE {cache_table}
+            SET organization_name = CASE {case_sql} END
+            WHERE (organization_name IS NULL OR organization_name = '')
+              AND (CASE {case_sql} END) IS NOT NULL
+        """)
 
     try:
         conn.execute(f"""
@@ -2026,7 +488,7 @@ def build_cache_table(
     if extra_pes:
         extra_set = set(extra_pes)
         # Check budget_lines first
-        ep_ph, ep_params = _in_clause(extra_set)
+        ep_ph, ep_params = in_clause(extra_set)
         existing = conn.execute(
             f"SELECT DISTINCT pe_number FROM budget_lines WHERE pe_number IN ({ep_ph})",
             ep_params,
@@ -2036,7 +498,7 @@ def build_cache_table(
         remaining = extra_set - found_extra
         if remaining:
             try:
-                rp, rp_params = _in_clause(remaining)
+                rp, rp_params = in_clause(remaining)
                 pi_rows = conn.execute(
                     f"SELECT DISTINCT pe_number FROM pe_index WHERE pe_number IN ({rp})",
                     rp_params,
@@ -2068,7 +530,7 @@ def build_cache_table(
     all_amount_cols = set(get_amount_columns(conn))
 
     # 4. Build pivot query
-    pe_placeholders, pe_params = _in_clause(matched_pes)
+    pe_placeholders, pe_params = in_clause(matched_pes)
 
     year_range = list(range(fy_start, fy_end + 1))
     year_parts: list[str] = []
@@ -2147,13 +609,12 @@ def build_cache_table(
         conn,
         matched_pes,
         keywords,
-        core_pes=bl_pes,
         fy_start=fy_start,
     )
 
     # For PEs discovered via R-2 keyword matches, also load their R-1 budget_lines rows
     if discovered_pes:
-        disc_ph, disc_params = _in_clause(discovered_pes)
+        disc_ph, disc_params = in_clause(discovered_pes)
         disc_sql = f"""
             SELECT
                 pe_number,
@@ -2187,13 +648,15 @@ def build_cache_table(
     from utils.normalization import normalize_r2_project_code
     from utils.fuzzy_match import _levenshtein_distance
 
+    _lev_cache: dict[tuple[str, str], int] = {}
+
     def _add_to_r2_groups(d: dict) -> None:
         """Clean an R-2 row and add it to r2_by_code for merge processing."""
         raw = d.get("line_item_title", "")
         cleaned_code, cleaned_title = _clean_title(raw)
         if cleaned_code is None and cleaned_title is None:
             raw_lower = raw.strip().lower()
-            if not raw or raw_lower in _SKIP_RAW_TITLES or raw_lower.startswith("total program element"):
+            if not raw or raw_lower in SKIP_RAW_TITLES or raw_lower.startswith("total program element"):
                 return
             cleaned_title = raw.strip()
         clean_title = f"{cleaned_code}: {cleaned_title}" if cleaned_code else (cleaned_title or raw)
@@ -2213,9 +676,9 @@ def build_cache_table(
         d = dict(r)
         et = d.get("exhibit_type", "")
 
-        if et in ("r2", "r2_pdf"):
+        if et in R2_TYPES:
             _add_to_r2_groups(d)
-        elif et == "r1":
+        elif et == EXHIBIT_R1:
             r1_rows.append(d)
             other_rows.append(d)
         else:
@@ -2229,7 +692,7 @@ def build_cache_table(
         all_pe_nums: list[str] = sorted({str(d["pe_number"]) for d in other_rows if d.get("pe_number")}
                              | {d.get("pe_number", "") for group in r2_by_code.values() for d in group})
         if all_pe_nums:
-            ph, ph_params = _in_clause(all_pe_nums)
+            ph, ph_params = in_clause(all_pe_nums)
             desc_rows = conn.execute(
                 f"SELECT pe_number, description_text FROM pe_descriptions "
                 f"WHERE pe_number IN ({ph}) AND description_text IS NOT NULL",
@@ -2254,10 +717,10 @@ def build_cache_table(
         if item.get("project_code"):
             raw_title = f"{item['project_code']}: {raw_title}"
         r2_desc = item.get("description_text", "")
-        if _is_garbage_description(r2_desc):
+        if is_garbage_description(r2_desc):
             r2_desc = ""
         fallback = desc_map.get(item["pe_number"])
-        if _is_garbage_description(fallback):
+        if is_garbage_description(fallback):
             fallback = None
 
         row_kws = item.get("_matched_r2_keywords") or find_matched_keywords(
@@ -2269,7 +732,7 @@ def build_cache_table(
         d = {
             "pe_number": item["pe_number"],
             "organization_name": None,
-            "exhibit_type": "r2",
+            "exhibit_type": EXHIBIT_R2,
             "line_item_title": raw_title,
             "budget_activity": None,
             "budget_activity_title": None,
@@ -2297,7 +760,7 @@ def build_cache_table(
     def _merge_into(target: dict[str, Any], source: dict[str, Any]) -> None:
         """Merge source row into target: FY amounts + consolidated titles."""
         # Prefer r2 exhibit_type
-        if source.get("exhibit_type") == "r2" and target.get("exhibit_type") != "r2":
+        if source.get("exhibit_type") == EXHIBIT_R2 and target.get("exhibit_type") != EXHIBIT_R2:
             for k in ("exhibit_type", "organization_name", "budget_activity",
                        "budget_activity_title", "appropriation_title", "account_title"):
                 if source.get(k):
@@ -2306,6 +769,7 @@ def build_cache_table(
         if len(source.get("_clean_title_only", "")) > len(target.get("_clean_title_only", "")):
             target["line_item_title"] = source["line_item_title"]
             target["_clean_title_only"] = source["_clean_title_only"]
+            target["_title_lower"] = source.get("_title_lower", source.get("_clean_title_only", "").lower())
         # Merge FY amounts (first non-null wins) and back-fill missing refs
         for yr in year_range:
             col = f"fy{yr}"
@@ -2324,14 +788,15 @@ def build_cache_table(
     merged_r2: dict[tuple[str, str], dict] = {}
     for (_pe, _code), group in r2_by_code.items():
         # Sort: r2 (Excel) first so they become the merge target
-        group.sort(key=lambda d: (0 if d.get("exhibit_type") == "r2" else 1))
+        group.sort(key=lambda d: (0 if d.get("exhibit_type") == EXHIBIT_R2 else 1))
 
         clusters: list[dict[str, Any]] = []
         for row in group:
             title = row.get("_clean_title_only", "").lower()
+            row["_title_lower"] = title
             matched = False
             for existing in clusters:
-                ex_title = existing.get("_clean_title_only", "").lower()
+                ex_title = existing["_title_lower"]
                 if not title or not ex_title:
                     continue
                 # Prefix match: one title starts with the other (truncation)
@@ -2341,8 +806,14 @@ def build_cache_table(
                     break
                 # Levenshtein: merge if < 20% relative to shorter title
                 shorter = min(len(title), len(ex_title))
-                dist = _levenshtein_distance(title, ex_title)
-                if dist / max(shorter, 1) < _LEVENSHTEIN_THRESHOLD:
+                # Skip if length difference alone exceeds threshold
+                if abs(len(title) - len(ex_title)) > max(shorter, 1) * LEVENSHTEIN_THRESHOLD:
+                    continue
+                lev_key = (title, ex_title) if title <= ex_title else (ex_title, title)
+                if lev_key not in _lev_cache:
+                    _lev_cache[lev_key] = _levenshtein_distance(title, ex_title)
+                dist = _lev_cache[lev_key]
+                if dist / max(shorter, 1) < LEVENSHTEIN_THRESHOLD:
                     _merge_into(existing, row)
                     matched = True
                     break
@@ -2391,13 +862,14 @@ def build_cache_table(
         row["_consolidated_titles"] = "; ".join(unique_alts) if unique_alts else None
         row.pop("_project_code", None)
         row.pop("_clean_title_only", None)
+        row.pop("_title_lower", None)
 
     # Dedup R1 rows: same PE may have variant titles across FYs.
     # Keep the longest title, merge FY amounts.
     r1_dedup: dict[str, dict[str, Any]] = {}
     deduped_other: list[dict[str, Any]] = []
     for d in other_rows:
-        if d.get("exhibit_type") == "r1":
+        if d.get("exhibit_type") == EXHIBIT_R1:
             pe = d["pe_number"]
             if pe in r1_dedup:
                 existing = r1_dedup[pe]
@@ -2430,7 +902,7 @@ def build_cache_table(
         )
 
     # 6b. Back-fill organization_name from multiple sources
-    pdf_count = sum(1 for d in merged_r2.values() if d.get("exhibit_type") == "r2")
+    pdf_count = sum(1 for d in merged_r2.values() if d.get("exhibit_type") == EXHIBIT_R2)
     if pdf_count:
         _backfill_organization(conn, cache_table, year_range)
 
@@ -2465,36 +937,3 @@ def build_cache_table(
     )
     _progress("done", row_count=count, pe_count=len(matched_pes))
     return count
-
-
-def ensure_cache(
-    conn: sqlite3.Connection,
-    cache_table: str,
-    keywords: list[str],
-    desc_keywords: list[str],
-    fy_start: int = FY_START,
-    fy_end: int = FY_END,
-    progress_callback: Any | None = None,
-    extra_pes: list[str] | None = None,
-) -> bool:
-    """Ensure cache table exists and is populated. Returns True if data available."""
-    try:
-        n = conn.execute(f"SELECT COUNT(*) FROM {cache_table}").fetchone()[0]
-        if n > 0:
-            return True
-    except sqlite3.OperationalError:
-        pass
-    logger.info("%s not found or empty — rebuilding...", cache_table)
-    return (
-        build_cache_table(
-            conn,
-            cache_table,
-            keywords,
-            desc_keywords,
-            fy_start=fy_start,
-            fy_end=fy_end,
-            progress_callback=progress_callback,
-            extra_pes=extra_pes,
-        )
-        > 0
-    )

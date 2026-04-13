@@ -64,7 +64,10 @@ dod-budget-analysis/
 │       ├── feedback.py      # POST /api/v1/feedback
 │       ├── files.py         # GET /api/v1/files/{file_path}
 │       ├── frontend.py      # HTML routes (/, /about, /charts, /compare, /consolidated, /dashboard, /explorer, /programs)
-│       ├── keyword_search.py # Shared keyword-search cache-building logic
+│       ├── keyword_helpers.py # Shared constants, SQL utils, normalization
+│       ├── keyword_r2.py    # R-2 PDF parsing, mining, lineage detection
+│       ├── keyword_search.py # Cache builder orchestrator
+│       ├── keyword_xlsx.py  # XLSX workbook generation
 │       ├── metadata.py      # GET /api/v1/metadata
 │       ├── pe.py            # PE-centric views, funding, sub-elements
 │       ├── reference.py     # GET /api/v1/reference/{type}

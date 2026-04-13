@@ -43,11 +43,11 @@ from utils.normalization import (  # noqa: E402
 )
 from utils.patterns import PE_NUMBER as _PE_RE  # noqa: E402
 from utils.pdf_sections import strip_exhibit_headers  # noqa: E402
-from pipeline.r2_pdf_extractor import (  # noqa: E402
-    infer_org as _r2_infer_org,
+from pipeline.r2_cost_parser import (  # noqa: E402
     SKIP_LINE_LABELS as _R2_SKIP_LABELS,
     SKIP_LABEL_PREFIXES as _R2_SKIP_PREFIXES,
 )
+from utils.organization import infer_org as _r2_infer_org  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
