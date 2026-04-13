@@ -434,7 +434,7 @@ def get_explorer_data(
                 MAX(line_item_title) AS any_title,
                 MAX(organization_name) AS service,
                 COUNT(*) AS total_sub_elements,
-                SUM(CASE WHEN matched_keywords_row != '[]' THEN 1 ELSE 0 END) AS matching
+                SUM(CASE WHEN matched_keywords_row != '[]' OR matched_keywords_desc != '[]' THEN 1 ELSE 0 END) AS matching
             FROM {cache_table}
             GROUP BY pe_number
             ORDER BY pe_number
