@@ -27,6 +27,16 @@ SUMMARY_EXHIBIT_KEYS = CORE_SUMMARY_TYPES | frozenset({
 })
 DETAIL_EXHIBIT_KEYS = frozenset({"p5", "r2", "r3", "r4"})
 
+# ── Exhibit type constants (for comparison checks) ────────────────────────────
+# Use these instead of raw strings to prevent typos and enable grep/refactor.
+
+EXHIBIT_R1 = "r1"
+EXHIBIT_R2 = "r2"
+EXHIBIT_R2_PDF = "r2_pdf"
+EXHIBIT_R3 = "r3"
+
+R2_TYPES = frozenset({EXHIBIT_R2, EXHIBIT_R2_PDF})
+
 # Short exhibit type keys that are summary-level but too short for safe
 # substring matching in filenames (e.g. "oco" is a substring of "socom").
 # Used for exact-match classification only.

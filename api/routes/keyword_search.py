@@ -12,6 +12,7 @@ import sqlite3
 from itertools import groupby
 from typing import Any
 
+from utils.config import EXHIBIT_R1, EXHIBIT_R2, R2_TYPES
 from utils.database import get_amount_columns
 from utils.organization import ORG_FROM_FILE
 
@@ -372,7 +373,7 @@ def _insert_stub_pes(
         if is_garbage_description(desc):
             desc = None
         vals = [
-            pe, org, "r1", title or pe,
+            pe, org, EXHIBIT_R1, title or pe,
             None, None, None, None, None, "RDT&E",
             "[]", "[]", desc, None,  # None = lineage_note
         ]
@@ -663,9 +664,9 @@ def build_cache_table(
         d = dict(r)
         et = d.get("exhibit_type", "")
 
-        if et in ("r2", "r2_pdf"):
+        if et in R2_TYPES:
             _add_to_r2_groups(d)
-        elif et == "r1":
+        elif et == EXHIBIT_R1:
             r1_rows.append(d)
             other_rows.append(d)
         else:
@@ -719,7 +720,7 @@ def build_cache_table(
         d = {
             "pe_number": item["pe_number"],
             "organization_name": None,
-            "exhibit_type": "r2",
+            "exhibit_type": EXHIBIT_R2,
             "line_item_title": raw_title,
             "budget_activity": None,
             "budget_activity_title": None,
@@ -747,7 +748,7 @@ def build_cache_table(
     def _merge_into(target: dict[str, Any], source: dict[str, Any]) -> None:
         """Merge source row into target: FY amounts + consolidated titles."""
         # Prefer r2 exhibit_type
-        if source.get("exhibit_type") == "r2" and target.get("exhibit_type") != "r2":
+        if source.get("exhibit_type") == EXHIBIT_R2 and target.get("exhibit_type") != EXHIBIT_R2:
             for k in ("exhibit_type", "organization_name", "budget_activity",
                        "budget_activity_title", "appropriation_title", "account_title"):
                 if source.get(k):
@@ -774,7 +775,7 @@ def build_cache_table(
     merged_r2: dict[tuple[str, str], dict] = {}
     for (_pe, _code), group in r2_by_code.items():
         # Sort: r2 (Excel) first so they become the merge target
-        group.sort(key=lambda d: (0 if d.get("exhibit_type") == "r2" else 1))
+        group.sort(key=lambda d: (0 if d.get("exhibit_type") == EXHIBIT_R2 else 1))
 
         clusters: list[dict[str, Any]] = []
         for row in group:
@@ -847,7 +848,7 @@ def build_cache_table(
     r1_dedup: dict[str, dict[str, Any]] = {}
     deduped_other: list[dict[str, Any]] = []
     for d in other_rows:
-        if d.get("exhibit_type") == "r1":
+        if d.get("exhibit_type") == EXHIBIT_R1:
             pe = d["pe_number"]
             if pe in r1_dedup:
                 existing = r1_dedup[pe]
@@ -880,7 +881,7 @@ def build_cache_table(
         )
 
     # 6b. Back-fill organization_name from multiple sources
-    pdf_count = sum(1 for d in merged_r2.values() if d.get("exhibit_type") == "r2")
+    pdf_count = sum(1 for d in merged_r2.values() if d.get("exhibit_type") == EXHIBIT_R2)
     if pdf_count:
         _backfill_organization(conn, cache_table, year_range)
 

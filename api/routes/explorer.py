@@ -29,6 +29,7 @@ from fastapi.responses import Response
 
 from api.database import get_db
 from api.routes.keyword_helpers import FY_END, FY_START, find_matched_keywords
+from utils.config import EXHIBIT_R1, R2_TYPES
 from api.routes.keyword_search import (
     build_cache_table,
     cache_rows_to_dicts,
@@ -448,7 +449,7 @@ def get_explorer_data(
     pe_summary: list[dict] = []
     for pe, children in pe_groups.items():
         # Find PE title from R-1 row or first child
-        r1_titles = [c["line_item_title"] for c in children if c.get("exhibit_type") == "r1"]
+        r1_titles = [c["line_item_title"] for c in children if c.get("exhibit_type") == EXHIBIT_R1]
         title = r1_titles[-1] if r1_titles else (children[0].get("line_item_title") or pe)
         service = next((c.get("organization_name") for c in children if c.get("organization_name")), "")
 
@@ -588,7 +589,7 @@ def download_explorer_xlsx(
         has_row_match = bool(r.get("matched_keywords_row"))
         if has_row_match or pe in pes_with_desc_match:
             pes_with_match.add(pe)
-            if r.get("exhibit_type") in ("r2", "r2_pdf"):
+            if r.get("exhibit_type") in R2_TYPES:
                 pe_has_r2_match.add(pe)
 
     # Filter out PEs with zero matches in all rows and all FY descriptions

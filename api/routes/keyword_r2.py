@@ -58,7 +58,9 @@ def _convert_parsed_table(
         project_code, project_title = clean_r2_title(label)
         if project_code is None and project_title is None:
             continue
-        display_label = f"{project_code}: {project_title}" if project_code else (project_title or label)
+        # Keep project_title as the clean title (without code prefix).
+        # Downstream consumers prepend the code when building display labels.
+        clean_title = project_title or label
 
         fy_amounts: dict[str, float] = {}
         for fy_year, amount in fy_pairs:
@@ -72,7 +74,7 @@ def _convert_parsed_table(
             "pe_number": pe_number,
             "pe_title": pe_title,
             "project_code": project_code,
-            "project_title": display_label,
+            "project_title": clean_title,
             "source_file": source_file,
             "fiscal_year": fiscal_year,
             "fy_amounts": fy_amounts,
