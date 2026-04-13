@@ -10,6 +10,7 @@ import json
 import logging
 import re
 import sqlite3
+from itertools import groupby
 from typing import Any
 
 from utils.database import get_amount_columns
@@ -265,8 +266,6 @@ def get_description_map(
     ).fetchall()
 
     # Group by PE, take top 3 per PE
-    from itertools import groupby
-
     result: dict[str, str] = {}
     for pe, group in groupby(rows, key=lambda r: r[0]):
         texts = [r[1] for r in group if r[1]][:3]
@@ -836,17 +835,22 @@ def cache_rows_to_dicts(
 ) -> list[dict]:
     """Convert cache rows to dicts with refs nested structure."""
     year_range = list(range(fy_start, fy_end + 1))
+    ref_keys = [f"fy{yr}_ref" for yr in year_range]
+    fy_labels = [f"fy{yr}" for yr in year_range]
+    json_cache: dict[str, list] = {}
     result: list[dict] = []
     for r in rows:
         d = dict(r)
         for field in ("matched_keywords_row", "matched_keywords_desc"):
-            d[field] = _safe_json_list(d.get(field, "[]"))
+            raw = d.get(field, "[]")
+            if raw not in json_cache:
+                json_cache[raw] = _safe_json_list(raw)
+            d[field] = json_cache[raw]
         refs: dict[str, str] = {}
-        for yr in year_range:
-            ref_key = f"fy{yr}_ref"
+        for ref_key, fy_label in zip(ref_keys, fy_labels):
             val = d.pop(ref_key, None)
             if val:
-                refs[f"fy{yr}"] = val
+                refs[fy_label] = val
         d["refs"] = refs
         result.append(d)
     return result
@@ -1355,22 +1359,16 @@ def _build_xlsx_summary(
             "total_money": wb.add_format({**sty["total"], "num_format": sty["money_fmt"]}),
         }
 
-    # Pre-compute PE→title map for PE Summary sheet
+    # Pre-compute PE→title map for PE Summary sheet (single pass, R-1 wins)
     pe_titles: dict[str, str] = {}
     for row in items:
         pe = row.get("pe_number", "")
-        if not pe or pe in pe_titles:
+        if not pe:
             continue
-        # Prefer R-1 title; will be overwritten by later R-1 rows (last wins)
-        if row.get("exhibit_type") == "r1":
-            pe_titles[pe] = row.get("line_item_title", pe)
+        if row.get("exhibit_type") == "r1" and row.get("line_item_title"):
+            pe_titles[pe] = row["line_item_title"]
         elif pe not in pe_titles:
             pe_titles[pe] = row.get("line_item_title", pe)
-    # Second pass: R-1 titles overwrite any R-2 fallbacks
-    for row in items:
-        pe = row.get("pe_number", "")
-        if pe and row.get("exhibit_type") == "r1" and row.get("line_item_title"):
-            pe_titles[pe] = row["line_item_title"]
 
     # Reuse caller's format objects if provided; create fallbacks otherwise
     if fmt_merge is None:
@@ -1837,7 +1835,7 @@ def _insert_cache_rows(
     insert_sql: str,
 ) -> int:
     """Insert assembled rows into the cache table, computing keyword matches and BA/CoM."""
-    count = 0
+    batch: list[list] = []
     for d in all_rows:
         text_fields = [
             d.get("line_item_title"),
@@ -1883,9 +1881,11 @@ def _insert_cache_rows(
             vals.append(d.get(f"fy{yr}"))
             vals.append(d.get(f"fy{yr}_ref"))
 
-        conn.execute(insert_sql, vals)
-        count += 1
-    return count
+        batch.append(vals)
+
+    if batch:
+        conn.executemany(insert_sql, batch)
+    return len(batch)
 
 
 def _insert_stub_pes(
@@ -2108,7 +2108,6 @@ def build_cache_table(
         WHERE pe_number IN ({pe_placeholders})
           AND CAST(fiscal_year AS INTEGER) >= {fy_start}
         GROUP BY pe_number, exhibit_type, line_item_title
-        HAVING COUNT(*) > 0
         ORDER BY pe_number, exhibit_type, line_item_title
     """
 
@@ -2173,7 +2172,7 @@ def build_cache_table(
             ORDER BY pe_number, exhibit_type, line_item_title
         """
         disc_rows = conn.execute(disc_sql, disc_params).fetchall()
-        rows = list(rows) + [dict(r) for r in disc_rows]
+        rows = list(rows) + list(disc_rows)
         logger.info(
             "PDF sub-element mining: discovered %d new PEs, added %d budget_lines rows",
             len(discovered_pes), len(disc_rows),
@@ -2307,14 +2306,16 @@ def build_cache_table(
         if len(source.get("_clean_title_only", "")) > len(target.get("_clean_title_only", "")):
             target["line_item_title"] = source["line_item_title"]
             target["_clean_title_only"] = source["_clean_title_only"]
-        # Merge FY amounts (first non-null wins)
+        # Merge FY amounts (first non-null wins) and back-fill missing refs
         for yr in year_range:
             col = f"fy{yr}"
+            ref_col = f"fy{yr}_ref"
             if target.get(col) is None and source.get(col) is not None:
                 target[col] = source[col]
-                ref_col = f"fy{yr}_ref"
                 if source.get(ref_col):
                     target[ref_col] = source[ref_col]
+            elif target.get(col) is not None and not target.get(ref_col) and source.get(ref_col):
+                target[ref_col] = source[ref_col]
         # Track consolidated title variants
         if source["line_item_title"] != target["line_item_title"]:
             target.setdefault("_consolidated", []).append(source["line_item_title"])
@@ -2383,14 +2384,11 @@ def build_cache_table(
         if pe in pe_desc_kws and not row.get("_desc_kws"):
             row["_desc_kws"] = pe_desc_kws[pe]
 
-    # Format consolidated titles for display
+    # Format consolidated titles for display (None when no alternates)
     for row in merged_r2.values():
         consolidated = row.pop("_consolidated", [])
-        if consolidated:
-            unique_alts = sorted(set(t for t in consolidated if t != row["line_item_title"]))
-            row["_consolidated_titles"] = "; ".join(unique_alts) if unique_alts else ""
-        else:
-            row["_consolidated_titles"] = ""
+        unique_alts = sorted(set(t for t in consolidated if t != row["line_item_title"]))
+        row["_consolidated_titles"] = "; ".join(unique_alts) if unique_alts else None
         row.pop("_project_code", None)
         row.pop("_clean_title_only", None)
 

@@ -85,6 +85,7 @@ _KEYWORD_RE = re.compile(r"^[a-zA-Z0-9\s\-/&.]+$")
 # Protected by a lock for thread safety (BackgroundTasks run in threads).
 _build_lock = threading.Lock()
 _build_progress: dict[str, dict[str, Any]] = {}
+_PROGRESS_TTL_SECONDS = 24 * 3600  # evict finished entries after 24 hours
 
 # ── Fixed columns for XLSX export ─────────────────────────────────────────────
 
@@ -147,6 +148,26 @@ def _parse_keywords(raw: str) -> list[str]:
     return cleaned
 
 
+def _parse_extra_pes(raw: str) -> list[str]:
+    """Parse comma-separated PE numbers into an uppercase list."""
+    if not raw:
+        return []
+    return [pe.strip().upper() for pe in raw.split(",") if pe.strip()]
+
+
+def _resolve_keyword_set(
+    keywords: str, extra_pes: str = ""
+) -> tuple[list[str], list[str] | None, str]:
+    """Parse keywords + extra PEs and return (keyword_list, pe_list, kw_id).
+
+    Raises ValueError if keywords fail validation.
+    """
+    keyword_list = _parse_keywords(keywords)
+    pe_list = _parse_extra_pes(extra_pes) or None
+    kw_id = _keyword_set_id(keyword_list, pe_list)
+    return keyword_list, pe_list, kw_id
+
+
 def _ensure_meta_table(conn: sqlite3.Connection) -> None:
     """Create the explorer_cache_meta table if it doesn't exist."""
     conn.execute("""
@@ -175,6 +196,17 @@ def _prune_old_caches(conn: sqlite3.Connection) -> None:
         conn.execute("DELETE FROM explorer_cache_meta WHERE keyword_set_id = ?", [kw_id])
     conn.commit()
     logger.info("Pruned %d old explorer caches", len(rows) - MAX_CACHE_TABLES)
+
+
+def _prune_stale_progress() -> None:
+    """Remove finished entries from _build_progress older than TTL (call under lock)."""
+    cutoff = time.time() - _PROGRESS_TTL_SECONDS
+    stale = [
+        k for k, v in _build_progress.items()
+        if v.get("state") in ("ready", "error") and v.get("_ts", 0) < cutoff
+    ]
+    for k in stale:
+        del _build_progress[k]
 
 
 def _do_build(
@@ -230,6 +262,7 @@ def _do_build(
                 "state": "ready",
                 "progress": "done",
                 "row_count": row_count,
+                "_ts": time.time(),
             }
     except Exception as e:
         logger.exception("Explorer cache build failed for %s", kw_id)
@@ -237,6 +270,7 @@ def _do_build(
             _build_progress[kw_id] = {
                 "state": "error",
                 "progress": str(e),
+                "_ts": time.time(),
             }
 
 
@@ -254,14 +288,15 @@ def start_build(
 ) -> dict:
     """Kick off a background cache build and return immediately."""
     try:
-        keyword_list = _parse_keywords(keywords)
+        keyword_list, pe_list, kw_id = _resolve_keyword_set(keywords, extra_pes)
     except ValueError as e:
         return {"error": str(e)}
 
-    pe_list = [pe.strip().upper() for pe in extra_pes.split(",") if pe.strip()] if extra_pes else []
-
     expanded = expand_keywords(keyword_list)
-    kw_id = _keyword_set_id(keyword_list, pe_list or None)
+
+    # Evict stale progress entries to prevent unbounded memory growth
+    with _build_lock:
+        _prune_stale_progress()
 
     # Check if cache already exists and is fresh
     _ensure_meta_table(conn)
@@ -284,6 +319,7 @@ def start_build(
                     "state": "ready",
                     "progress": "done",
                     "row_count": meta[1],
+                    "_ts": time.time(),
                 }
             return {
                 "keyword_set_id": kw_id,
@@ -338,12 +374,9 @@ def build_status(
     completed builds survive process restarts / uvicorn reloads.
     """
     try:
-        keyword_list = _parse_keywords(keywords)
+        keyword_list, pe_list, kw_id = _resolve_keyword_set(keywords, extra_pes)
     except ValueError as e:
         return {"state": "error", "progress": str(e)}
-
-    pe_list = [pe.strip().upper() for pe in extra_pes.split(",") if pe.strip()] if extra_pes else []
-    kw_id = _keyword_set_id(keyword_list, pe_list or None)
 
     with _build_lock:
         status = _build_progress.get(kw_id)
@@ -360,7 +393,7 @@ def build_status(
     ).fetchone()
     if meta is not None:
         # Refresh in-memory state so subsequent polls are fast
-        ready = {"state": "ready", "progress": "done", "row_count": meta[0]}
+        ready = {"state": "ready", "progress": "done", "row_count": meta[0], "_ts": time.time()}
         with _build_lock:
             _build_progress[kw_id] = ready
         return {"keyword_set_id": kw_id, **ready}
@@ -385,12 +418,10 @@ def get_explorer_data(
 ) -> dict:
     """Return PE-level summary of cached results plus available download columns."""
     try:
-        keyword_list = _parse_keywords(keywords)
+        keyword_list, pe_list, kw_id = _resolve_keyword_set(keywords, extra_pes)
     except ValueError as e:
         return {"error": str(e)}
 
-    pe_list = [pe.strip().upper() for pe in extra_pes.split(",") if pe.strip()] if extra_pes else []
-    kw_id = _keyword_set_id(keyword_list, pe_list or None)
     cache_table = _cache_table_name(kw_id)
     expanded = expand_keywords(keyword_list)
 
@@ -492,12 +523,10 @@ def download_explorer_xlsx(
     Uses a fixed column layout. Y/N/P is computed per line per FY.
     """
     try:
-        keyword_list = _parse_keywords(keywords)
+        keyword_list, pe_list, kw_id = _resolve_keyword_set(keywords, extra_pes)
     except ValueError as e:
         return Response(content=str(e).encode(), media_type="text/plain", status_code=400)
 
-    pe_list = [pe.strip().upper() for pe in extra_pes.split(",") if pe.strip()] if extra_pes else []
-    kw_id = _keyword_set_id(keyword_list, pe_list or None)
     cache_table = _cache_table_name(kw_id)
 
     try:
@@ -547,18 +576,19 @@ def download_explorer_xlsx(
         if kws:
             fy_desc_kws[(pe, fy)] = kws
 
+    # Precompute PEs that have at least one per-FY description keyword match (O(1) lookup)
+    pes_with_desc_match = {pe for pe, _fy in fy_desc_kws}
+
     # Determine which PEs have ANY keyword match.
     # matched_keywords_desc is PE-level (too broad for inclusion filtering);
     # only row-level title hits and per-FY description hits count.
     # Extra PEs are always included (user explicitly requested them).
-    extra_pe_set = {pe.strip().upper() for pe in extra_pes.split(",") if pe.strip()} if extra_pes else set()
-    pes_with_match: set[str] = set(extra_pe_set)
+    pes_with_match: set[str] = set(pe_list) if pe_list else set()
     pe_has_r2_match: set[str] = set()
     for r in items:
         pe = r.get("pe_number", "")
         has_row_match = bool(r.get("matched_keywords_row"))
-        has_fy_match = any((pe, str(yr)) in fy_desc_kws for yr in active_years)
-        if has_row_match or has_fy_match:
+        if has_row_match or pe in pes_with_desc_match:
             pes_with_match.add(pe)
             if r.get("exhibit_type") in ("r2", "r2_pdf"):
                 pe_has_r2_match.add(pe)
@@ -674,11 +704,9 @@ def get_description(
 ) -> dict:
     """Return description_text for a PE from the explorer cache."""
     try:
-        keyword_list = _parse_keywords(keywords)
+        keyword_list, _, kw_id = _resolve_keyword_set(keywords)
     except ValueError:
         return {"description": None}
-
-    kw_id = _keyword_set_id(keyword_list)
     cache_table = _cache_table_name(kw_id)
     desc = lookup_cache_description(conn, cache_table, pe_number, project=project)
     return {"description": desc}
