@@ -1,9 +1,9 @@
-"""R-2 PDF parsing, sub-element mining, and R-1 stub enrichment.
+"""R-2 sub-element mining, consolidation, and R-1 stub enrichment.
 
-Extracted from keyword_search.py. Contains:
-- parse_r2_cost_block: Parse R-2 COST tables from PDF page text
-- consolidate_r2_timeseries: Merge multi-year R-2 rows per project
+Uses the shared parser from pipeline.r2_cost_parser for COST table parsing.
+Contains:
 - mine_pdf_subelements: Discover and mine R-2 sub-elements from pdf_pages
+- consolidate_r2_timeseries: Merge multi-year R-2 rows per project
 - annotate_cross_pe_lineages: Detect programs that migrated across PEs
 - R-1 stub enrichment helpers
 """
@@ -22,162 +22,79 @@ from api.routes.keyword_helpers import (
     find_matched_keywords,
     in_clause,
 )
+from pipeline.r2_cost_parser import parse_r2_cost_table
 from utils.normalization import clean_r2_title, normalize_r2_project_code
 from utils.strings import clean_narrative
 
 logger = logging.getLogger(__name__)
 
 
-# ── R-2 PDF parsing ──────────────────────────────────────────────────────────
+# ── R-2 PDF parsing (adapter over shared parser) ─────────────────────────────
 
 
-def parse_r2_cost_block(
-    page_text: str,
+def _convert_parsed_table(
+    result: dict[str, Any],
     source_file: str,
     fiscal_year: str,
+    page_text: str,
 ) -> list[dict[str, Any]]:
-    """Parse R-2/R-2A COST block from a PDF page to extract project-level funding.
+    """Convert parse_r2_cost_table output to mine_pdf_subelements item format.
 
-    Returns a list of dicts with keys:
-        pe_number, project_code, project_title, source_file, fiscal_year,
-        fy_amounts: {fyXXXX: amount_in_thousands}
+    Handles unit conversion, title cleanup, and description extraction.
     """
-    lines = page_text.split("\n")
-    results: list[dict[str, Any]] = []
+    pe_number = result["pe_number"]
+    mult = result["unit_multiplier"]
+    items: list[dict[str, Any]] = []
 
-    # 1. Extract PE number from header line
-    pe_number = None
+    # Extract PE title from header (parse_r2_cost_table doesn't capture it)
     pe_title = None
-    for line in lines[:10]:
+    for line in page_text.split("\n")[:10]:
         m = PE_TITLE_RE.search(line)
-        if m:
-            pe_number = m.group(1)
+        if m and m.group(1) == pe_number:
             pe_title = m.group(2).strip()
             break
-    if not pe_number:
-        return []
 
-    # 2. Find the COST block and parse FY column headers
-    cost_idx = None
-    for i, line in enumerate(lines):
-        if "COST" in line and "Millions" in line:
-            cost_idx = i
-            break
-    if cost_idx is None:
-        return []
-
-    fy_header_line = lines[cost_idx + 1] if cost_idx + 1 < len(lines) else ""
-
-    _fy_m = re.search(r"(\d{4})", fiscal_year or "")
-    budget_year = int(_fy_m.group(1)) if _fy_m else None
-
-    col_fy_map: list[int | None] = []
-    col_tokens = re.finditer(
-        r"(?:FY\s+\d{4}|Years|Base|OOC|OCO|Total|Complete|Cost)\b",
-        fy_header_line,
-        re.IGNORECASE,
-    )
-    for m in col_tokens:
-        tok = m.group().strip()
-        fy_m = re.match(r"FY\s+(\d{4})", tok, re.IGNORECASE)
-        tok_upper = tok.upper()
-        if tok_upper == "YEARS":
-            col_fy_map.append(None)
-            continue
-        elif fy_m:
-            col_fy_map.append(int(fy_m.group(1)))
-        elif tok_upper == "BASE":
-            col_fy_map.append(None)
-        elif tok_upper in ("OOC", "OCO"):
-            col_fy_map.append(None)
-        elif tok_upper == "TOTAL":
-            if budget_year:
-                col_fy_map.append(budget_year)
-            else:
-                col_fy_map.append(None)
-        elif tok_upper in ("COMPLETE", "COST"):
-            col_fy_map.append(None)
-
-    if not col_fy_map:
-        return []
-
-    # 3. Parse project rows after the header
-    num_pattern = re.compile(r"[\d,]+\.\d{3}|(?<!\w)-(?!\w)|0\.000")
-
-    for i in range(cost_idx + 2, min(cost_idx + 15, len(lines))):
-        line = lines[i].strip()
-        if not line:
-            continue
-        if any(
-            line.startswith(s)
-            for s in (
-                "Quantity of RDT&E",
-                "A. Mission",
-                "B. Accomplishments",
-                "Note",
-                "Program MDAP",
-            )
-        ):
-            break
-
-        if "Total Program Element" in line:
-            continue
-
-        nums_in_line = num_pattern.findall(line)
-        if not nums_in_line:
-            if results:
-                results[-1]["project_title"] += " " + line.strip()
-            continue
-
-        first_num_pos = re.search(r"\s[\d,]+\.\d{2,3}|\s-\s|\s-$", line)
-        if first_num_pos:
-            prefix = line[: first_num_pos.start()].strip()
-        else:
-            prefix = line.strip()
-
-        # Clean the extracted title: strip any remaining trailing amounts,
-        # normalize project codes, and reject junk rows.
-        project_code, project_title = clean_r2_title(prefix)
+    for label, fy_pairs in result["fy_amounts"].items():
+        project_code, project_title = clean_r2_title(label)
         if project_code is None and project_title is None:
-            continue  # junk row (table header/footer/total)
-        if project_title is None:
-            project_title = prefix
-
-        all_nums = num_pattern.findall(line)
+            continue
+        display_label = f"{project_code}: {project_title}" if project_code else (project_title or label)
 
         fy_amounts: dict[str, float] = {}
-        for j, val_str in enumerate(all_nums):
-            if j >= len(col_fy_map):
-                break
-            fy_year = col_fy_map[j]
-            if fy_year is None:
-                continue
-            if val_str == "-":
-                continue
-            try:
-                amount_millions = float(val_str.replace(",", ""))
-                fy_amounts[f"fy{fy_year}"] = amount_millions * 1000.0
-            except ValueError:
-                continue
+        for fy_year, amount in fy_pairs:
+            if amount is not None:
+                fy_amounts[f"fy{fy_year}"] = amount * mult
 
-        if fy_amounts:
-            results.append(
-                {
-                    "pe_number": pe_number,
-                    "pe_title": pe_title,
-                    "project_code": project_code,
-                    "project_title": project_title,
-                    "source_file": source_file,
-                    "fiscal_year": fiscal_year,
-                    "fy_amounts": fy_amounts,
-                    "description_text": "",
-                }
-            )
+        if not fy_amounts:
+            continue
 
-    # 4. Extract description text from Section A and Section B
+        items.append({
+            "pe_number": pe_number,
+            "pe_title": pe_title,
+            "project_code": project_code,
+            "project_title": display_label,
+            "source_file": source_file,
+            "fiscal_year": fiscal_year,
+            "fy_amounts": fy_amounts,
+            "description_text": "",
+        })
+
+    # Extract description text from Section A and B
+    _extract_r2_descriptions(page_text, items)
+    return items
+
+
+def _extract_r2_descriptions(
+    page_text: str,
+    items: list[dict[str, Any]],
+) -> None:
+    """Extract Section A/B descriptions from R-2 page text and attach to items (in-place)."""
+    page_lines = page_text.split("\n")
+
+    # Section A: Mission Description (shared across all projects)
     desc_parts: list[str] = []
     in_section_a = False
-    for i, line in enumerate(lines):
+    for line in page_lines:
         stripped = line.strip()
         if stripped.startswith("A. Mission Description"):
             in_section_a = True
@@ -189,15 +106,14 @@ def parse_r2_cost_block(
                 desc_parts.append(stripped)
     section_a_text = " ".join(desc_parts).strip()
 
+    # Section B: per-project Accomplishments
     project_descs: dict[str, str] = {}
-    current_title = None
+    current_title: str | None = None
     current_desc_parts: list[str] = []
     in_section_b = False
-    for i, line in enumerate(lines):
+    for line in page_lines:
         stripped = line.strip()
-        if stripped.startswith("B. Accomplishments") or stripped.startswith(
-            "C. Accomplishments"
-        ):
+        if stripped.startswith("B. Accomplishments") or stripped.startswith("C. Accomplishments"):
             in_section_b = True
             continue
         if not in_section_b:
@@ -207,33 +123,29 @@ def parse_r2_cost_block(
         if stripped.startswith("Title:"):
             if current_title and current_desc_parts:
                 project_descs[current_title] = " ".join(current_desc_parts).strip()
-            title_text = stripped[len("Title:") :].strip()
+            title_text = stripped[len("Title:"):].strip()
             title_text = re.sub(r"\s+[\d,.]+\s*$", "", title_text).strip()
             current_title = title_text
             current_desc_parts = []
         elif stripped.startswith("Description:") and current_title:
-            current_desc_parts.append(stripped[len("Description:") :].strip())
+            current_desc_parts.append(stripped[len("Description:"):].strip())
         elif current_title and current_desc_parts and not stripped.startswith("FY "):
             if not re.match(r"^(Accomplishments|Congressional|Title:)", stripped):
                 current_desc_parts.append(stripped)
     if current_title and current_desc_parts:
         project_descs[current_title] = " ".join(current_desc_parts).strip()
 
-    for item in results:
+    for item in items:
         parts = []
         if section_a_text:
             parts.append(section_a_text)
         proj_title = item["project_title"]
         for desc_title, desc_text in project_descs.items():
-            if proj_title.lower().startswith(
-                desc_title[:20].lower()
-            ) or desc_title.lower().startswith(proj_title[:20].lower()):
+            if proj_title.lower().startswith(desc_title[:20].lower()) or desc_title.lower().startswith(proj_title[:20].lower()):
                 parts.append(f"[{desc_title}] {desc_text}")
                 break
         raw_desc = "\n\n".join(parts) if parts else ""
         item["description_text"] = clean_narrative(raw_desc) if raw_desc else ""
-
-    return results
 
 
 def consolidate_r2_timeseries(
@@ -336,7 +248,10 @@ def mine_pdf_subelements(
 
     for r in rows:
         source_file, page_number, page_text, fiscal_year = r
-        parsed = parse_r2_cost_block(page_text, source_file, fiscal_year)
+        result = parse_r2_cost_table(page_text)
+        if not result:
+            continue
+        parsed = _convert_parsed_table(result, source_file, fiscal_year, page_text)
         for item in parsed:
             pe = item["pe_number"]
             key = (pe, item.get("project_code"), fiscal_year)
