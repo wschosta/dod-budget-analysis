@@ -638,6 +638,8 @@ def build_cache_table(
     from utils.normalization import normalize_r2_project_code
     from utils.fuzzy_match import _levenshtein_distance
 
+    _lev_cache: dict[tuple[str, str], int] = {}
+
     def _add_to_r2_groups(d: dict) -> None:
         """Clean an R-2 row and add it to r2_by_code for merge processing."""
         raw = d.get("line_item_title", "")
@@ -792,7 +794,13 @@ def build_cache_table(
                     break
                 # Levenshtein: merge if < 20% relative to shorter title
                 shorter = min(len(title), len(ex_title))
-                dist = _levenshtein_distance(title, ex_title)
+                # Skip if length difference alone exceeds threshold
+                if abs(len(title) - len(ex_title)) > max(shorter, 1) * LEVENSHTEIN_THRESHOLD:
+                    continue
+                lev_key = (title, ex_title) if title <= ex_title else (ex_title, title)
+                if lev_key not in _lev_cache:
+                    _lev_cache[lev_key] = _levenshtein_distance(title, ex_title)
+                dist = _lev_cache[lev_key]
                 if dist / max(shorter, 1) < LEVENSHTEIN_THRESHOLD:
                     _merge_into(existing, row)
                     matched = True

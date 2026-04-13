@@ -29,7 +29,7 @@ from fastapi.responses import Response
 
 from api.database import get_db
 from api.routes.keyword_helpers import FY_END, FY_START, find_matched_keywords
-from utils.config import EXHIBIT_R1, R2_TYPES
+from utils.config import R2_TYPES
 from api.routes.keyword_search import (
     build_cache_table,
     cache_rows_to_dicts,
@@ -425,46 +425,45 @@ def get_explorer_data(
     cache_table = _cache_table_name(kw_id)
     expanded = expand_keywords(keyword_list)
 
-    # Try to read from cache
+    # Build PE-level summary via SQL aggregate (avoids loading all rows)
     try:
-        sql = f"SELECT * FROM {cache_table} ORDER BY pe_number, exhibit_type, line_item_title"
-        raw_rows = conn.execute(sql).fetchall()
+        pe_rows = conn.execute(f"""
+            SELECT
+                pe_number,
+                MAX(CASE WHEN exhibit_type = 'r1' THEN line_item_title END) AS r1_title,
+                MAX(line_item_title) AS any_title,
+                MAX(organization_name) AS service,
+                COUNT(*) AS total_sub_elements,
+                SUM(CASE WHEN matched_keywords_row != '[]' THEN 1 ELSE 0 END) AS matching
+            FROM {cache_table}
+            GROUP BY pe_number
+            ORDER BY pe_number
+        """).fetchall()
     except sqlite3.OperationalError:
         return {"error": "Cache not built yet. Call POST /build first."}
 
-    items = cache_rows_to_dicts(raw_rows)
-
-    # Build PE-level summary
-    pe_groups: dict[str, list[dict]] = {}
-    for row in items:
-        pe = row["pe_number"]
-        pe_groups.setdefault(pe, []).append(row)
-
-    year_range = list(range(FY_START, FY_END + 1))
-    active_years = [
-        yr for yr in year_range
-        if any(r.get(f"fy{yr}") is not None for r in items)
-    ] if items else []
+    total_rows = sum(r[4] for r in pe_rows)
 
     pe_summary: list[dict] = []
-    for pe, children in pe_groups.items():
-        # Find PE title from R-1 row or first child
-        r1_titles = [c["line_item_title"] for c in children if c.get("exhibit_type") == EXHIBIT_R1]
-        title = r1_titles[-1] if r1_titles else (children[0].get("line_item_title") or pe)
-        service = next((c.get("organization_name") for c in children if c.get("organization_name")), "")
-
-        # Count matching sub-elements (those with any keyword match)
-        matching = sum(
-            1 for c in children
-            if c.get("matched_keywords_row") or c.get("matched_keywords_desc")
-        )
+    for r in pe_rows:
         pe_summary.append({
-            "pe_number": pe,
-            "pe_title": title,
-            "service": service,
-            "total_sub_elements": len(children),
-            "matching_sub_elements": matching,
+            "pe_number": r[0],
+            "pe_title": r[1] or r[2] or r[0],
+            "service": r[3] or "",
+            "total_sub_elements": r[4],
+            "matching_sub_elements": r[5],
         })
+
+    # Detect active years (which FY columns have any non-null data)
+    year_range = list(range(FY_START, FY_END + 1))
+    active_years = []
+    if pe_rows:
+        for yr in year_range:
+            has_data = conn.execute(
+                f"SELECT 1 FROM {cache_table} WHERE fy{yr} IS NOT NULL LIMIT 1"
+            ).fetchone()
+            if has_data:
+                active_years.append(yr)
 
     # Build available columns list (static + dynamic FY columns).
     # Per-year columns are offered as an interleaved [value, source, description]
@@ -493,7 +492,7 @@ def get_explorer_data(
         "expanded_keywords": expanded,
         "pe_summary": pe_summary,
         "total_pes": len(pe_summary),
-        "total_rows": len(items),
+        "total_rows": total_rows,
         "active_years": active_years,
         "available_columns": available_columns,
         "default_columns": default_columns,
