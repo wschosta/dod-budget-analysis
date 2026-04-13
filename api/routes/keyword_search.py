@@ -194,24 +194,6 @@ def lookup_cache_description(
         return None
 
 
-def apply_filters(
-    service: str | None,
-    exhibit: str | None,
-    fy_from: int | None,
-    fy_to: int | None,
-) -> tuple[str, list[Any]]:
-    """Build WHERE fragments for cache table filters."""
-    parts: list[str] = []
-    params: list[Any] = []
-    if service:
-        parts.append("organization_name LIKE ?")
-        params.append(f"%{service}%")
-    if exhibit:
-        parts.append("exhibit_type = ?")
-        params.append(exhibit)
-    return (" AND ".join(parts), params) if parts else ("", [])
-
-
 def cache_rows_to_dicts(
     rows: list[sqlite3.Row],
     fy_start: int = FY_START,
@@ -392,7 +374,7 @@ def _insert_stub_pes(
         vals = [
             pe, org, "r1", title or pe,
             None, None, None, None, None, "RDT&E",
-            "[]", "[]", desc,
+            "[]", "[]", desc, None,  # None = lineage_note
         ]
         for _yr in year_range:
             vals.extend([None, None])
@@ -933,36 +915,3 @@ def build_cache_table(
     )
     _progress("done", row_count=count, pe_count=len(matched_pes))
     return count
-
-
-def ensure_cache(
-    conn: sqlite3.Connection,
-    cache_table: str,
-    keywords: list[str],
-    desc_keywords: list[str],
-    fy_start: int = FY_START,
-    fy_end: int = FY_END,
-    progress_callback: Any | None = None,
-    extra_pes: list[str] | None = None,
-) -> bool:
-    """Ensure cache table exists and is populated. Returns True if data available."""
-    try:
-        n = conn.execute(f"SELECT COUNT(*) FROM {cache_table}").fetchone()[0]
-        if n > 0:
-            return True
-    except sqlite3.OperationalError:
-        pass
-    logger.info("%s not found or empty — rebuilding...", cache_table)
-    return (
-        build_cache_table(
-            conn,
-            cache_table,
-            keywords,
-            desc_keywords,
-            fy_start=fy_start,
-            fy_end=fy_end,
-            progress_callback=progress_callback,
-            extra_pes=extra_pes,
-        )
-        > 0
-    )

@@ -295,7 +295,6 @@ def mine_pdf_subelements(
     conn: sqlite3.Connection,
     pe_numbers: set[str],
     keywords: list[str],
-    core_pes: set[str] | None = None,
     fy_start: int = FY_START,
 ) -> tuple[list[dict[str, Any]], set[str]]:
     """Mine R-2/R-2A sub-element data from pdf_pages for the given PE numbers.
@@ -309,9 +308,6 @@ def mine_pdf_subelements(
         conn.execute("SELECT 1 FROM pdf_pages LIMIT 0")
     except sqlite3.OperationalError:
         return [], set()
-
-    if core_pes is None:
-        core_pes = pe_numbers
 
     fy_min_str = f"FY {fy_start}"
 
