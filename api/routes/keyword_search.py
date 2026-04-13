@@ -14,17 +14,14 @@ from typing import Any
 
 from utils.database import get_amount_columns
 
-# Re-exports (preserve existing import paths for explorer.py and tests)
-from api.routes.keyword_helpers import (  # noqa: F401
-    BA_CANONICAL,
+from api.routes.keyword_helpers import (
     FY_END,
     FY_START,
     LEVENSHTEIN_THRESHOLD,
     ORG_FROM_PATH,
-    PE_TITLE_RE,
+    PE_NUMBER_STRICT_CI,
     SEARCH_COLS,
     SKIP_RAW_TITLES,
-    PE_NUMBER_STRICT_CI,
     cache_ddl,
     color_of_money,
     find_matched_keywords,
@@ -34,17 +31,11 @@ from api.routes.keyword_helpers import (  # noqa: F401
     normalize_budget_activity,
     safe_json_list,
 )
-from api.routes.keyword_xlsx import build_keyword_xlsx, xlsx_base_styles  # noqa: F401
-from api.routes.keyword_r2 import (  # noqa: F401
-    annotate_cross_pe_lineages,
-    consolidate_r2_timeseries,
-    mine_pdf_subelements,
-    normalize_program_name,
-    parse_r2_cost_block,
-)
 from api.routes.keyword_r2 import (
     _aggregate_r2_funding_into_r1_stubs,
     _extract_r1_titles_for_stubs,
+    annotate_cross_pe_lineages,
+    mine_pdf_subelements,
 )
 
 logger = logging.getLogger(__name__)
@@ -155,43 +146,6 @@ def get_description_map(
             text = text[:2000] + "…"
         if text.strip():
             result[pe] = text
-    return result
-
-
-def get_desc_keyword_map(
-    conn: sqlite3.Connection,
-    pe_numbers: set[str],
-    desc_keywords: list[str],
-) -> dict[str, list[str]]:
-    """Build PE → list of desc_keywords that match in pe_descriptions (via SQL LIKE)."""
-    if not pe_numbers or not desc_keywords:
-        return {}
-    try:
-        conn.execute("SELECT 1 FROM pe_descriptions LIMIT 0")
-    except sqlite3.OperationalError:
-        return {}
-
-    ph, pe_list = in_clause(pe_numbers)
-
-    # Single query: fetch all (pe_number, description_text) pairs
-    rows = conn.execute(
-        f"SELECT DISTINCT pe_number, description_text FROM pe_descriptions "
-        f"WHERE pe_number IN ({ph})",
-        pe_list,
-    ).fetchall()
-
-    # Application-side keyword matching
-    result: dict[str, list[str]] = {}
-    for pe, desc_text in rows:
-        if not desc_text:
-            continue
-        desc_lower = desc_text.lower()
-        for kw in desc_keywords:
-            if kw.lower() in desc_lower:
-                result.setdefault(pe, [])
-                if kw not in result[pe]:
-                    result[pe].append(kw)
-
     return result
 
 
@@ -662,7 +616,6 @@ def build_cache_table(
         conn,
         matched_pes,
         keywords,
-        core_pes=bl_pes,
         fy_start=fy_start,
     )
 

@@ -28,15 +28,14 @@ from fastapi import APIRouter, BackgroundTasks, Body, Depends, Query
 from fastapi.responses import Response
 
 from api.database import get_db
+from api.routes.keyword_helpers import FY_END, FY_START, find_matched_keywords
 from api.routes.keyword_search import (
-    FY_END,
-    FY_START,
     build_cache_table,
-    build_keyword_xlsx,
     cache_rows_to_dicts,
     load_per_fy_descriptions,
     lookup_cache_description,
 )
+from api.routes.keyword_xlsx import build_keyword_xlsx
 from utils.fuzzy_match import expand_keywords
 
 logger = logging.getLogger(__name__)
@@ -569,7 +568,6 @@ def download_explorer_xlsx(
     )
 
     # Per-FY description keyword matching
-    from api.routes.keyword_search import find_matched_keywords
     fy_desc_kws: dict[tuple[str, str], list[str]] = {}
     for (pe, fy), desc_text in desc_by_pe_fy.items():
         kws = find_matched_keywords([desc_text], keyword_list)
