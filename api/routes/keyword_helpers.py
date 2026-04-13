@@ -31,10 +31,6 @@ LEVENSHTEIN_THRESHOLD = 0.20
 # Lowercased version of R2_JUNK_TITLES + "page" — used as fallback filter
 SKIP_RAW_TITLES = frozenset(t.lower() for t in R2_JUNK_TITLES) | {"page"}
 
-# XLSX layout constants
-HIDDEN_LOOKUP_COL = 200
-SPILL_MAX_ROW = 2000
-
 # Organization name from source_file path fragments (API-side fallback)
 ORG_FROM_PATH = [
     ("US_Army", "Army"),

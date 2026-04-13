@@ -9,11 +9,11 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from api.routes.keyword_helpers import (
-    HIDDEN_LOOKUP_COL,
-    SPILL_MAX_ROW,
-    safe_json_list,
-)
+from api.routes.keyword_helpers import safe_json_list
+
+# XLSX layout constants (used only by this module)
+HIDDEN_LOOKUP_COL = 200
+SPILL_MAX_ROW = 2000
 
 # ── Shared XLSX styles ───────────────────────────────────────────────────────
 
