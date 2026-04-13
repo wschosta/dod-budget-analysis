@@ -22,6 +22,7 @@ Usage:
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 # Ensure the project root is on sys.path so package imports work
@@ -83,11 +84,17 @@ def main():
         sys.exit(1)
 
     from pipeline.staging import stage_all_files, load_staging_to_db, needs_restaging
+    from utils.progress import log_progress
+
+    _stage_starts: dict[str, float] = {}
 
     def _print_progress(phase, current, total, detail=""):
         if total > 0:
-            pct = current / total * 100
-            print(f"  [{phase}] {current}/{total} ({pct:.0f}%) {detail}")
+            if current <= 1 or phase not in _stage_starts:
+                _stage_starts[phase] = time.monotonic()
+            short = detail[:60] + "..." if len(detail) > 63 else detail
+            line = log_progress(phase, current, total, _stage_starts[phase], extra=short)
+            print(f"  {line}")
         else:
             print(f"  [{phase}] {detail}")
 
