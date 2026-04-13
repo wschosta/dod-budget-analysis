@@ -13,7 +13,7 @@ import sqlite3
 from typing import Any
 
 from utils.database import get_amount_columns
-from utils.normalization import R2_JUNK_TITLES
+from utils.normalization import BA_CANONICAL, R2_JUNK_TITLES
 from utils.strings import clean_narrative
 from utils.patterns import PE_NUMBER_STRICT_CI, PE_SUFFIX_PATTERN
 
@@ -31,16 +31,6 @@ _PE_TITLE_RE = re.compile(
     rf"PE\s+(\d{{7}}{PE_SUFFIX_PATTERN})\s*[/:]\s*(.+?)(?:\s+\d|$)"
 )
 
-# RDT&E BA categories (BA 01-07) — canonical titles
-BA_CANONICAL: dict[str, str] = {
-    "01": "BA 1: Basic Research",
-    "02": "BA 2: Applied Research",
-    "03": "BA 3: Advanced Technology Development",
-    "04": "BA 4: Advanced Component Dev & Prototypes",
-    "05": "BA 5: System Development & Demonstration",
-    "06": "BA 6: RDT&E Management Support",
-    "07": "BA 7: Operational Systems Development",
-}
 
 _ORG_FROM_PATH = [
     ("US_Army", "Army"),
@@ -155,11 +145,26 @@ def find_matched_keywords(
     text_fields: list[str | None],
     keywords: list[str],
 ) -> list[str]:
-    """Return which of *keywords* match (case-insensitive substring) in *text_fields*."""
+    """Return which of *keywords* match (case-insensitive) in *text_fields*.
+
+    Uses word-boundary matching to avoid false positives like
+    "mach" matching "machine".
+    """
     combined = " ".join((t or "") for t in text_fields).lower()
     if not combined.strip():
         return []
-    return [kw for kw in keywords if kw.lower() in combined]
+    matched = []
+    for kw in keywords:
+        kw_lower = kw.lower().strip()
+        if not kw_lower:
+            continue
+        # Fast substring pre-filter, then word-boundary regex to reject
+        # false positives like "mach" in "machine"
+        if kw_lower in combined and re.search(
+            r"(?<!\w)" + re.escape(kw_lower) + r"(?!\w)", combined
+        ):
+            matched.append(kw)
+    return matched
 
 
 # ── PE discovery ──────────────────────────────────────────────────────────────
@@ -726,6 +731,9 @@ def annotate_cross_pe_lineages(
 
     name_groups: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
     for row_id, pe, title in rows:
+        # Skip Congressional Adds (9999) — intentionally multi-PE, not migrations
+        if title and title.startswith("9999"):
+            continue
         norm = normalize_program_name(title)
         if norm:
             name_groups[norm].append((row_id, pe, title))
@@ -1134,7 +1142,7 @@ def build_keyword_xlsx(
     if include_description:
         sub_col_names.append("Description")
     if include_desc_keywords:
-        sub_col_names.append("Desc Keywords")
+        sub_col_names.append("Keywords")
 
     headers = _write_merged_fy_headers(
         ws, fixed_columns, active_years, fixed_count, sub_col_names, fmt_merge, fmt_sub,
@@ -1155,30 +1163,46 @@ def build_keyword_xlsx(
             ws.write(r0, ci, val if val is not None else "", fmt["base"])
 
         refs_map = row.get("refs", {}) or {}
+
+        # Pass 1: compute Y/N/P per FY
+        fy_codes: list[str] = []
+        if include_intotal:
+            # Only row-level title/field matches count as direct hits.
+            # matched_keywords_desc is PE-level (set on all rows in a PE)
+            # and is too broad for Y/N/P — it feeds the Desc Keywords column instead.
+            has_row_kw = bool(row.get("matched_keywords_row"))
+            for fi, yr in enumerate(active_years):
+                amount = row.get(f"fy{yr}")
+                has_src = bool(refs_map.get(f"fy{yr}"))
+                if amount is None or (amount == 0 and not has_src):
+                    fy_codes.append("")
+                    continue
+                has_fy_kw = (pe, str(yr)) in fy_desc_kws
+                has_match = has_row_kw or has_fy_kw
+                if not has_match:
+                    fy_codes.append("N")
+                elif et == "r1" and pe in pe_has_r2_match:
+                    # R1 is summary — cap at P when R2 subs have matches
+                    # to avoid double-counting (R1 total includes R2 dollars)
+                    fy_codes.append("P")
+                else:
+                    fy_codes.append("Y")
+            # If any FY is Y, promote remaining N's to P (but leave blanks alone)
+            if "Y" in fy_codes:
+                fy_codes = ["P" if c == "N" else c for c in fy_codes]
+
+        # Pass 2: write all FY columns
         for fi, yr in enumerate(active_years):
             fc = fy_cols[fi]
 
             amount = row.get(f"fy{yr}")
-            if amount is not None:
+            has_source = bool(refs_map.get(f"fy{yr}"))
+            # Skip $0 with no source — likely an artifact, not real data
+            if amount is not None and (amount != 0 or has_source):
                 ws.write_number(r0, fc.val - 1, amount, fmt["base_money"])
-            else:
-                ws.write_blank(r0, fc.val - 1, None, fmt["base"])
 
-            if fc.intotal:
-                # Y/N/P logic: title match → Y, desc match → Y (R2) or P (R1 w/o R2 match)
-                has_title_match = bool(row.get("matched_keywords_row") or row.get("matched_keywords_desc"))
-                fy_key = (pe, str(yr))
-                has_fy_desc_match = fy_key in fy_desc_kws
-
-                if has_title_match:
-                    in_total = "Y"
-                elif has_fy_desc_match and et in ("r2", "r2_pdf"):
-                    in_total = "Y"
-                elif has_fy_desc_match and et == "r1":
-                    in_total = "N" if pe in pe_has_r2_match else "P"
-                else:
-                    in_total = "N"
-                ws.write(r0, fc.intotal - 1, in_total, fmt["base"])
+            if fc.intotal and fy_codes[fi]:
+                ws.write(r0, fc.intotal - 1, fy_codes[fi], fmt["base"])
 
             if fc.src:
                 source_ref = refs_map.get(f"fy{yr}", "")
@@ -1499,15 +1523,17 @@ def _build_xlsx_summary(
     _write_summary_sheet("PE Summary", include_title=True)
 
     # Dimension summaries
-    svc_col = field_to_col.get("organization_name", "B")
-    ba_col = field_to_col.get("budget_activity_norm", field_to_col.get("budget_activity_title", "E"))
-    com_col = field_to_col.get("color_of_money", "F")
+    svc_col = field_to_col.get("organization_name")
+    ba_col = field_to_col.get("budget_activity_norm") or field_to_col.get("budget_activity_title")
+    com_col = field_to_col.get("color_of_money")
 
     for sheet_name, label, dcol in [
         ("By Service", "Service/Agency", svc_col),
         ("By Budget Activity", "Budget Activity", ba_col),
         ("By Color of Money", "Color of Money", com_col),
     ]:
+        if not dcol:
+            continue  # dimension column not in selected columns
         dim_rng = f"'{ds}'!${dcol}${first_data_row}:${dcol}${last_data_row}"
         _write_summary_sheet(sheet_name, label_col=label, match_rng=dim_rng)
 
@@ -1843,7 +1869,10 @@ def _insert_cache_rows(
             com_val,
             json.dumps(row_kws) if row_kws else "[]",
             json.dumps(d.get("_desc_kws", [])) if d.get("_desc_kws") else "[]",
-            (
+            # Prefer row-level description (R-2 project-specific); fall back to PE-level
+            d.get("description_text")
+            if d.get("description_text") and not _is_garbage_description(d["description_text"])
+            else (
                 None
                 if _is_garbage_description(desc_map.get(d["pe_number"]))
                 else desc_map.get(d["pe_number"])
@@ -2164,7 +2193,8 @@ def build_cache_table(
         raw = d.get("line_item_title", "")
         cleaned_code, cleaned_title = _clean_title(raw)
         if cleaned_code is None and cleaned_title is None:
-            if not raw or raw.strip().lower() in _SKIP_RAW_TITLES:
+            raw_lower = raw.strip().lower()
+            if not raw or raw_lower in _SKIP_RAW_TITLES or raw_lower.startswith("total program element"):
                 return
             cleaned_title = raw.strip()
         clean_title = f"{cleaned_code}: {cleaned_title}" if cleaned_code else (cleaned_title or raw)

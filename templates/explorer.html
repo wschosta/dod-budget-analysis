@@ -226,24 +226,9 @@ details[open] .pe-toggle .toggle-icon { transform: rotate(90deg); }
       </details>
     </div>
 
-    <!-- 3b. Column picker -->
-    <div class="column-picker">
-      <h3>Download Columns</h3>
-      <div class="picker-layout">
-        <div class="picker-list" id="available-cols">
-          <h4>Available Columns</h4>
-          <div id="available-list" role="listbox" aria-label="Available columns"></div>
-        </div>
-        <div class="picker-list" id="selected-cols">
-          <h4>Selected Columns (drag to reorder)</h4>
-          <div id="selected-list" role="listbox" aria-label="Selected columns for download"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 3c. FY column toggles + download -->
+    <!-- 3b. Download options -->
     <div class="download-area">
-      <div style="display:flex; flex-wrap:wrap; gap:1rem; margin-bottom:0.5rem;">
+      <div style="display:flex; flex-wrap:wrap; gap:1rem; align-items:center; margin-bottom:0.5rem;">
         <label class="filter-toggle">
           <input type="checkbox" id="matching-only"> Only matching sub-elements
         </label>
@@ -257,7 +242,13 @@ details[open] .pe-toggle .toggle-icon { transform: rotate(90deg); }
           <input type="checkbox" id="include-description" checked> Description columns
         </label>
         <label class="filter-toggle">
-          <input type="checkbox" id="include-desc-keywords" checked> Desc Keywords
+          <input type="checkbox" id="include-keywords" checked> Keywords
+        </label>
+        <label style="font-weight:500;">
+          Fiscal Years:
+          <select id="fy-picker" multiple size="1" style="min-width:200px; padding:0.3rem;">
+          </select>
+          <small style="color:var(--muted);">(Ctrl+click to select multiple; empty = all)</small>
         </label>
       </div>
       <button class="btn btn-primary btn-download" onclick="downloadXlsx()">&#8681; Download XLSX</button>
@@ -498,7 +489,7 @@ function onBuildReady() {
     }
 
     renderPreview(data);
-    renderColumnPicker(data);
+    renderFYPicker(data);
     document.getElementById('results-area').style.display = 'block';
   });
 }
@@ -539,144 +530,19 @@ function renderPreview(data) {
 }
 
 /* ── Column picker ──────────────────────────────────────── */
-let selectedColumns = [];
 
-function renderColumnPicker(data) {
-  // FY columns are now auto-generated — only show fixed/static columns in the picker
-  const isFyCol = c => /^FY\d{4}\s/.test(c) || c === 'In Totals';
-  const fixedCols = data.available_columns.filter(c => !isFyCol(c));
-  selectedColumns = [...fixedCols];
-  renderAvailableList(fixedCols);
-  renderSelectedList();
-}
-
-function _createPickerItem(col, actions, dragHandlers) {
-  const item = document.createElement('div');
-  item.className = 'picker-item';
-  item.setAttribute('role', 'option');
-  item.setAttribute('draggable', 'true');
-  item.dataset.col = col;
-  item.innerHTML = `
-    <span class="drag-handle" aria-hidden="true">&#9776;</span>
-    <span class="item-label">${col}</span>
-    <span class="item-actions">${actions}</span>
-  `;
-  dragHandlers.forEach(([evt, fn]) => item.addEventListener(evt, fn));
-  return item;
-}
-
-function renderAvailableList(columns) {
-  const list = document.getElementById('available-list');
-  list.innerHTML = '';
-  columns.forEach(col => {
-    const safeCol = col.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
-    const actions = `<button onclick="addColumn('${safeCol}')" aria-label="Add ${col} to selected columns" title="Add">+</button>`;
-    list.appendChild(_createPickerItem(col, actions, [['dragstart', onAvailDragStart]]));
+function renderFYPicker(data) {
+  const picker = document.getElementById('fy-picker');
+  picker.innerHTML = '';
+  const years = data.active_years || [];
+  picker.size = Math.min(years.length, 6);
+  years.forEach(yr => {
+    const opt = document.createElement('option');
+    opt.value = yr;
+    opt.textContent = `FY${yr}`;
+    picker.appendChild(opt);
   });
 }
-
-function renderSelectedList() {
-  const list = document.getElementById('selected-list');
-  list.innerHTML = '';
-  selectedColumns.forEach((col, i) => {
-    const actions = [
-      `<button onclick="moveColumnUp(${i})" aria-label="Move ${col} up" title="Move up" ${i === 0 ? 'disabled' : ''}>&#9650;</button>`,
-      `<button onclick="moveColumnDown(${i})" aria-label="Move ${col} down" title="Move down" ${i === selectedColumns.length - 1 ? 'disabled' : ''}>&#9660;</button>`,
-      `<button onclick="removeColumn(${i})" aria-label="Remove ${col}" title="Remove">&times;</button>`,
-    ].join('');
-    const item = _createPickerItem(col, actions, [
-      ['dragstart', onSelDragStart], ['dragover', onSelDragOver],
-      ['drop', onSelDrop], ['dragleave', onSelDragLeave],
-    ]);
-    item.dataset.idx = i;
-    list.appendChild(item);
-  });
-}
-
-function addColumn(col) {
-  selectedColumns.push(col);
-  renderSelectedList();
-}
-
-function removeColumn(idx) {
-  selectedColumns.splice(idx, 1);
-  renderSelectedList();
-}
-
-function moveColumnUp(idx) {
-  if (idx <= 0) return;
-  [selectedColumns[idx - 1], selectedColumns[idx]] = [selectedColumns[idx], selectedColumns[idx - 1]];
-  renderSelectedList();
-}
-
-function moveColumnDown(idx) {
-  if (idx >= selectedColumns.length - 1) return;
-  [selectedColumns[idx], selectedColumns[idx + 1]] = [selectedColumns[idx + 1], selectedColumns[idx]];
-  renderSelectedList();
-}
-
-/* ── Drag and drop ──────────────────────────────────────── */
-let dragData = null;
-
-function onAvailDragStart(e) {
-  dragData = { type: 'available', col: e.currentTarget.dataset.col };
-  e.currentTarget.classList.add('dragging');
-  e.dataTransfer.effectAllowed = 'copy';
-}
-
-function onSelDragStart(e) {
-  dragData = { type: 'selected', idx: parseInt(e.currentTarget.dataset.idx) };
-  e.currentTarget.classList.add('dragging');
-  e.dataTransfer.effectAllowed = 'move';
-}
-
-function onSelDragOver(e) {
-  e.preventDefault();
-  e.currentTarget.classList.add('drop-zone-highlight');
-}
-
-function onSelDragLeave(e) {
-  e.currentTarget.classList.remove('drop-zone-highlight');
-}
-
-function onSelDrop(e) {
-  e.preventDefault();
-  e.currentTarget.classList.remove('drop-zone-highlight');
-  const targetIdx = parseInt(e.currentTarget.dataset.idx);
-
-  if (dragData.type === 'available') {
-    // Insert from available at target position
-    selectedColumns.splice(targetIdx, 0, dragData.col);
-  } else if (dragData.type === 'selected') {
-    // Reorder within selected
-    const fromIdx = dragData.idx;
-    if (fromIdx === targetIdx) return;
-    const [item] = selectedColumns.splice(fromIdx, 1);
-    const adjustedTarget = fromIdx < targetIdx ? targetIdx - 1 : targetIdx;
-    selectedColumns.splice(adjustedTarget, 0, item);
-  }
-  dragData = null;
-  renderSelectedList();
-}
-
-// Allow dropping on the selected list container (for appending)
-document.getElementById('selected-list').addEventListener('dragover', e => {
-  e.preventDefault();
-});
-document.getElementById('selected-list').addEventListener('drop', e => {
-  if (e.target === document.getElementById('selected-list') && dragData) {
-    if (dragData.type === 'available') {
-      selectedColumns.push(dragData.col);
-    }
-    dragData = null;
-    renderSelectedList();
-  }
-});
-
-document.addEventListener('dragend', () => {
-  document.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging'));
-  dragData = null;
-});
 
 /* ── Download ───────────────────────────────────────────── */
 function downloadXlsx() {
@@ -693,21 +559,18 @@ function downloadXlsx() {
   const includeIntotal = document.getElementById('include-intotal').checked;
   const includeSource = document.getElementById('include-source').checked;
   const includeDescription = document.getElementById('include-description').checked;
-  const includeDescKeywords = document.getElementById('include-desc-keywords').checked;
+  const includeKeywords = document.getElementById('include-keywords').checked;
   const dlPes = (document.getElementById('extra-pes-input').value || '').trim();
 
-  // Show row count and estimated size while generating
-  const rowCount = explorerData ? (explorerData.pe_summary || []).reduce((s, p) => s + (p.total_sub_elements || 0), 0) : 0;
-  const colCount = 1 + (includeIntotal ? 1 : 0) + (includeSource ? 1 : 0) + (includeDescription ? 1 : 0) + (includeDescKeywords ? 1 : 0);
-  const estKB = Math.round(rowCount * colCount * 0.5);
-  const estMB = (estKB / 1024).toFixed(1);
-  const sizeHint = estKB > 1024 ? `~${estMB} MB` : `~${estKB} KB`;
-  btn.textContent = `⏳ Generating ${rowCount.toLocaleString()} rows (${sizeHint})…`;
+  // Collect selected fiscal years from multi-select
+  const fyPicker = document.getElementById('fy-picker');
+  const selectedFYs = Array.from(fyPicker.selectedOptions).map(o => o.value).join(',');
 
+  btn.textContent = '⏳ Generating…';
   const t0 = Date.now();
   const tickTimer = setInterval(() => {
     const elapsed = ((Date.now() - t0) / 1000).toFixed(0);
-    btn.textContent = `⏳ Generating… ${elapsed}s (${sizeHint})`;
+    btn.textContent = `⏳ Generating… ${elapsed}s`;
   }, 1000);
 
   fetch('/api/v1/explorer/download/xlsx', {
@@ -715,12 +578,12 @@ function downloadXlsx() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       keywords: currentKeywords.join(','),
-      columns: selectedColumns,
       matching_only: matchingOnly,
+      include_intotal: includeIntotal,
       include_source: includeSource,
       include_description: includeDescription,
-      include_intotal: includeIntotal,
-      include_desc_keywords: includeDescKeywords,
+      include_desc_keywords: includeKeywords,
+      fiscal_years: selectedFYs,
       extra_pes: dlPes,
     }),
   })

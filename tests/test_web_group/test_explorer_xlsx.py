@@ -148,21 +148,18 @@ class TestDefaultColumnsInterleaved:
     """Regression test: default column layout should interleave FY value/source/desc."""
 
     def test_default_order_triples(self):
-        from api.routes.explorer import _ALL_COLUMNS
+        from api.routes.explorer import _FIXED_COLUMNS
 
         # Simulate the default_columns construction with two active years
         active_years = [2024, 2025]
-        default_columns = [
-            "PE Number", "Service/Org", "Exhibit Type", "Line Item Title",
-            "Color of Money",
-        ]
+        default_columns = [h for h, _f in _FIXED_COLUMNS]
         for yr in active_years:
             default_columns.append(f"FY{yr} ($K)")
             default_columns.append(f"FY{yr} Source")
             default_columns.append(f"FY{yr} Description")
 
         # Available columns should include all three FY variants
-        available_columns = list(_ALL_COLUMNS)
+        available_columns = [h for h, _f in _FIXED_COLUMNS]
         for yr in active_years:
             available_columns.append(f"FY{yr} ($K)")
             available_columns.append(f"FY{yr} Source")
