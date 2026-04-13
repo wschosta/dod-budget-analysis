@@ -38,6 +38,7 @@ from utils.normalization import (
     ORG_NORMALIZE as ORG_MAP,
     parse_appropriation as _parse_appropriation_util,
 )
+from utils.progress import fmt_time
 from utils.strings import normalize_fiscal_year as _normalize_fy_value
 from utils.patterns import PE_NUMBER
 
@@ -2470,13 +2471,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     if _excluded_display:
         logger.info("Excluded %d *_display* Excel files (base file exists)",
                     len(_excluded_display))
-        print(f"  Excluded {len(_excluded_display)} *_display* Excel files "
-              f"(duplicate formatting variants)", flush=True)
     if _kept_display:
         logger.info("Kept %d *_display* Excel files (no base file available)",
                     len(_kept_display))
-        print(f"  Kept {len(_kept_display)} *_display* Excel files "
-              f"(no base file for these FYs)", flush=True)
 
     # Exclude *a.xlsx alternate Comptroller files (e.g. r1a.xlsx, p1a.xlsx).
     # These contain identical data to the base files and create duplicate rows.
@@ -2486,8 +2483,6 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     if _alt_count:
         logger.info("Excluded %d *a.xlsx alternate files (duplicate data)",
                     _alt_count)
-        print(f"  Excluded {_alt_count} *a.xlsx alternate files "
-              f"(duplicate data variants)", flush=True)
 
     # Legacy .xls support: convert to .xlsx on-the-fly if xlrd is available.
     # FY1998-2009 era documents use the older OLE2 .xls format that openpyxl
@@ -3259,8 +3254,6 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 _t0 = time.time()
                 logger.info("  Rebuilding full-text search indexes (%s pages)...",
                             f"{final_page_count:,}")
-                print(f"  Rebuilding full-text search indexes "
-                      f"({final_page_count:,} pages)...", flush=True)
                 # FTS5 'rebuild' command repopulates the index from the content
                 # table in a single optimized pass — faster than DELETE+INSERT.
                 conn.execute("INSERT INTO pdf_pages_fts(pdf_pages_fts) VALUES('rebuild')")
@@ -3283,14 +3276,12 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                 """)
                 conn.commit()
                 _elapsed = time.time() - _t0
-                logger.info("  FTS5 rebuild complete and triggers recreated (%.1fs)", _elapsed)
-                print(f"  FTS5 rebuild complete — {new_pages:,} new pages indexed "
-                      f"({_elapsed:.1f}s)", flush=True)
+                logger.info("  FTS5 rebuild complete — %s new pages indexed (%s)",
+                            f"{new_pages:,}", fmt_time(_elapsed))
             else:
                 _recreate_pdf_fts_triggers(conn)
                 conn.commit()
                 logger.info("  Skipped FTS5 rebuild (no new pages added)")
-                print("  FTS5 rebuild skipped (no new pages)", flush=True)
 
     # If stopped gracefully during PDF loop, close and exit cleanly
     if _pdf_stopped:
@@ -3300,18 +3291,17 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
 
     if skipped_pdf:
         logger.info("  Skipped %d unchanged PDF file(s)", skipped_pdf)
-        print(f"  PDF phase: {processed_pdf:,} processed, "
-              f"{skipped_pdf:,} unchanged (skipped), "
-              f"{total_pdf_pages:,} pages extracted", flush=True)
+        logger.info("  PDF phase: %s processed, %s unchanged (skipped), %s pages extracted",
+                    f"{processed_pdf:,}", f"{skipped_pdf:,}", f"{total_pdf_pages:,}")
     else:
-        print(f"  PDF phase: {processed_pdf:,} files, "
-              f"{total_pdf_pages:,} pages extracted", flush=True)
+        logger.info("  PDF phase: %s files, %s pages extracted",
+                    f"{processed_pdf:,}", f"{total_pdf_pages:,}")
     logger.info("  Ingested PDF pages: %s", f"{total_pdf_pages:,}")
     if num_workers > 1:
         logger.info("  Workers used: %d", num_workers)
 
     # ── Detect removed files ───────────────────────────────────────────────
-    print("  Detecting removed files...", end="", flush=True)
+    logger.info("  Detecting removed files...")
     all_current = {str(f.relative_to(docs_dir)) for f in xlsx_files}
     all_current |= {str(f.relative_to(docs_dir)) for f in pdf_files}
 
@@ -3329,15 +3319,13 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     if removed_count:
         conn.commit()
         logger.info("  Cleaned up %d removed file(s)", removed_count)
-        print(f" removed {removed_count} stale file(s)", flush=True)
     else:
-        print(" none found", flush=True)
+        logger.info("  No stale files found")
 
     # ── Create indexes ─────────────────────────────────────────────────────
     _t0 = time.time()
     _progress("index", 0, 1, "Creating indexes...")
-    logger.info("Creating indexes...")
-    print("  Creating database indexes...", end="", flush=True)
+    logger.info("  Creating database indexes...")
     conn.executescript("""
         CREATE INDEX IF NOT EXISTS idx_bl_exhibit ON budget_lines(exhibit_type);
         CREATE INDEX IF NOT EXISTS idx_bl_org ON budget_lines(organization_name);
@@ -3412,7 +3400,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     """)
     conn.commit()
     _elapsed = time.time() - _t0
-    print(f" done ({_elapsed:.1f}s)", flush=True)
+    logger.info("  Indexes created (%s)", fmt_time(_elapsed))
 
     # ── Backfill budget_type from appropriation_code ──────────────────────
     # Detail exhibits (r2, p5, amendment, ogsi) often have appropriation_code
@@ -3435,8 +3423,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         "SELECT COUNT(*) FROM budget_lines WHERE budget_type IS NULL"
     ).fetchone()[0]
     _elapsed = time.time() - _t0
-    print(f"  Backfilled budget_type: {_bt_updated:,} rows "
-          f"({_bt_before:,} -> {_bt_after:,} NULL) ({_elapsed:.1f}s)", flush=True)
+    logger.info("  Backfilled budget_type: %s rows (%s -> %s NULL) (%s)",
+                f"{_bt_updated:,}", f"{_bt_before:,}", f"{_bt_after:,}",
+                fmt_time(_elapsed))
     logger.info("Backfilled budget_type for %d rows", _bt_updated)
 
     # ── Deduplicate budget_lines rows ──────────────────────────────────────
@@ -3445,9 +3434,6 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     _t0 = time.time()
     _progress("index", 0, 1, "Deduplicating budget_lines...")
     logger.info("Deduplicating budget_lines...")
-    total_before_dedup = conn.execute("SELECT COUNT(*) FROM budget_lines").fetchone()[0]
-    print(f"  Deduplicating budget_lines ({total_before_dedup:,} rows)...",
-          end="", flush=True)
     dup_count = conn.execute("""
         DELETE FROM budget_lines WHERE id NOT IN (
             SELECT id FROM (
@@ -3468,14 +3454,13 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         )
     """).rowcount
     if dup_count:
-        logger.info("  Removed %d duplicate budget_lines rows", dup_count)
-        print(f" removed {dup_count:,} duplicates", end="", flush=True)
+        logger.info("  Removed %s duplicate budget_lines rows", f"{dup_count:,}")
         # Rebuild FTS index after deduplication
         conn.execute(
             "INSERT INTO budget_lines_fts(budget_lines_fts) VALUES('rebuild')"
         )
     else:
-        print(" no duplicates found", end="", flush=True)
+        logger.info("  No duplicates found")
     conn.commit()
 
     # ── Reconcile ingested_files row_count after deduplication ────────────
@@ -3504,8 +3489,8 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             "(%d xlsx, %d pdf) after deduplication",
             _total_updated, _xlsx_updated, _pdf_updated,
         )
-        print(f"  Reconciled row_count for {_total_updated:,} ingested_files "
-              f"({_xlsx_updated:,} xlsx, {_pdf_updated:,} pdf)", flush=True)
+        logger.info("  Reconciled row_count for %s ingested_files (%s xlsx, %s pdf)",
+                    f"{_total_updated:,}", f"{_xlsx_updated:,}", f"{_pdf_updated:,}")
 
     # Create a unique index to prevent future duplicates
     try:
@@ -3521,7 +3506,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
         logger.warning("  Could not create dedup unique index (non-critical)")
 
     _elapsed = time.time() - _t0
-    print(f" ({_elapsed:.1f}s)", flush=True)
+    logger.info("  Deduplication complete (%s)", fmt_time(_elapsed))
     _progress("index", 1, 1, "Indexes created")
 
     # ── Update data source timestamps ──────────────────────────────────────
@@ -3564,16 +3549,16 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     logger.info("  Excel files:        %d", len(xlsx_files))
     logger.info("  PDF files:          %d", len(pdf_files))
 
-    print("\n  -- Build Summary ------------------------------------------------", flush=True)
-    print(f"  Database:       {db_path.name} ({db_size:.1f} MB)", flush=True)
-    print(f"  Budget lines:   {total_lines:,}", flush=True)
-    print(f"  PDF pages:      {total_pages:,}", flush=True)
-    print(f"  Excel files:    {len(xlsx_files):,} "
-          f"({len(xlsx_files) - skipped_xlsx:,} processed, "
-          f"{skipped_xlsx:,} skipped)", flush=True)
-    print(f"  PDF files:      {len(pdf_files):,} "
-          f"({processed_pdf:,} processed, "
-          f"{skipped_pdf:,} skipped)", flush=True)
+    logger.info("  -- Build Summary ------------------------------------------------")
+    logger.info("  Database:       %s (%.1f MB)", db_path.name, db_size)
+    logger.info("  Budget lines:   %s", f"{total_lines:,}")
+    logger.info("  PDF pages:      %s", f"{total_pages:,}")
+    logger.info("  Excel files:    %s (%s processed, %s skipped)",
+                f"{len(xlsx_files):,}",
+                f"{len(xlsx_files) - skipped_xlsx:,}", f"{skipped_xlsx:,}")
+    logger.info("  PDF files:      %s (%s processed, %s skipped)",
+                f"{len(pdf_files):,}",
+                f"{processed_pdf:,}", f"{skipped_pdf:,}")
 
     if not rebuild:
         new_files = (len(xlsx_files) - skipped_xlsx) + (len(pdf_files) - skipped_pdf)

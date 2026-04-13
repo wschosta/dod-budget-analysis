@@ -1,15 +1,92 @@
 """Progress tracking utilities for DoD budget tools.
 
-Provides abstract base class and concrete implementations for:
-- Terminal progress tracking with progress bars
-- File operation progress
-- Summary statistics
+Provides:
+- ``fmt_time`` / ``log_progress`` — lightweight, fixed-width progress
+  logging used by the pipeline enricher, builder, and CLI scripts.
+- Abstract base class and concrete implementations for progress bars,
+  file operation progress, and summary statistics.
 """
 
+from __future__ import annotations
+
+import logging
 import time
 from abc import ABC, abstractmethod
 
 from utils.common import format_bytes
+
+
+# ── Shared progress-line helpers ─────────────────────────────────────────────
+
+
+def fmt_time(seconds: float) -> str:
+    """Format *seconds* as a compact human-readable string.
+
+    Examples::
+
+        fmt_time(5)     -> "5s"
+        fmt_time(135)   -> "2m15s"
+        fmt_time(3720)  -> "1h02m"
+    """
+    if seconds < 60:
+        return f"{seconds:.0f}s"
+    m, s = divmod(seconds, 60)
+    if m < 60:
+        return f"{int(m)}m{int(s):02d}s"
+    h, m = divmod(int(m), 60)
+    return f"{int(h)}h{int(m):02d}m"
+
+
+def log_progress(
+    phase_name: str,
+    completed: int,
+    total: int,
+    start_time: float,
+    *,
+    logger: logging.Logger | None = None,
+    extra: str = "",
+) -> str:
+    """Build and optionally log a fixed-width progress line.
+
+    Format (columns stay aligned as values grow)::
+
+        Build Excel:       1/5,678 (  0.0%) | Elapsed:      5s | ETA:  5m02s |      1 items/s
+        Build Excel:   5,678/5,678 (100.0%) | Elapsed:  5m02s  | ETA:      0s |    120 items/s
+
+    Time, percentage, and rate fields use fixed widths so columns stay
+    aligned even as values grow from seconds into hours.
+
+    Args:
+        phase_name: Label for the current phase/step.
+        completed:  Items finished so far.
+        total:      Total items expected.
+        start_time: ``time.monotonic()`` value captured when the phase began.
+        logger:     If provided the line is emitted at ``INFO`` level.
+        extra:      Optional suffix (e.g. a filename) appended after the rate.
+
+    Returns:
+        The formatted string (useful when the caller prints directly).
+    """
+    if total <= 0:
+        return ""
+    elapsed = time.monotonic() - start_time
+    pct = completed / total * 100
+    rate = completed / elapsed if elapsed > 0 else 0
+    eta_s = (total - completed) / rate if rate > 0 else 0
+
+    total_w = len(f"{total:,}")
+    msg = (
+        f"{phase_name}: {f'{completed:,}'.rjust(total_w)}/{total:,} "
+        f"({pct:5.1f}%) "
+        f"| Elapsed: {fmt_time(elapsed):>7s} "
+        f"| ETA: {fmt_time(eta_s):>7s} "
+        f"| {rate:6.0f} items/s"
+    )
+    if extra:
+        msg += f"  {extra}"
+    if logger is not None:
+        logger.info("%s", msg)
+    return msg
 
 
 class ProgressTracker(ABC):

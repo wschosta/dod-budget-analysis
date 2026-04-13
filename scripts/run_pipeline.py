@@ -54,6 +54,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 from pipeline.logging import PipelineLogger, StepReport  # noqa: E402
+from utils.progress import fmt_time, log_progress  # noqa: E402
 
 # Download step uses subprocess as a fallback when direct import fails
 STEP_DOWNLOAD = HERE / "dod_budget_downloader.py"
@@ -163,24 +164,34 @@ def _cleanup_backup(backup: Path | None) -> None:
             pass
 
 
+_phase_starts: dict[str, float] = {}
+_last_progress_print: float = 0.0
+_PROGRESS_INTERVAL = 0.5  # seconds — throttle progress output
+
+_cli_logger = logging.getLogger("pipeline.cli")
+
+
 def _build_progress(phase: str, current: int, total: int, detail: str = "",
                      metrics: dict | None = None) -> None:
-    """Progress callback for build_database() — prints live file-by-file status."""
+    """Progress callback for build_database() — standardised progress line."""
+    global _last_progress_print
     if phase == "scan":
         if total > 0:
             print(f"  Scanning... {total} files found", flush=True)
         else:
             print(f"  {detail}", flush=True)
     elif phase in ("excel", "pdf"):
-        label = "Excel" if phase == "excel" else "PDF"
-        pct = (current / total * 100) if total > 0 else 0
-        eta = ""
-        if metrics and metrics.get("eta_sec", 0) > 0:
-            eta_min = metrics["eta_sec"] / 60
-            eta = f"  ETA: {eta_min:.0f}m" if eta_min >= 1 else f"  ETA: {metrics['eta_sec']:.0f}s"
-        # Truncate detail (filename) to keep output clean
+        now = time.monotonic()
+        if current <= 1 or phase not in _phase_starts:
+            _phase_starts[phase] = now
+            _last_progress_print = 0.0  # reset so first item always prints
+        if current != total and now - _last_progress_print < _PROGRESS_INTERVAL:
+            return
+        _last_progress_print = now
+        label = "Build Excel" if phase == "excel" else "Build PDF"
         short_detail = detail[:60] + "..." if len(detail) > 63 else detail
-        print(f"  [{label}] {current}/{total} ({pct:.0f}%){eta}  {short_detail}", flush=True)
+        line = log_progress(label, current, total, _phase_starts[phase], extra=short_detail)
+        print(f"  {line}", flush=True)
     elif phase == "index":
         print(f"  {detail}", flush=True)
     elif phase == "done":
@@ -196,17 +207,25 @@ def _build_progress(phase: str, current: int, total: int, detail: str = "",
 
 def _staging_progress(phase: str, current: int, total: int, detail: str = "") -> None:
     """Progress callback for stage_all_files() and load_staging_to_db()."""
+    global _last_progress_print
     if phase == "scan":
         if total > 0:
             print(f"  Scanning... {total} files", flush=True)
         elif detail:
             print(f"  {detail}", flush=True)
     elif phase in ("excel", "pdf", "load_excel", "load_pdf"):
+        now = time.monotonic()
+        if current <= 1 or phase not in _phase_starts:
+            _phase_starts[phase] = now
+            _last_progress_print = 0.0
+        if current != total and now - _last_progress_print < _PROGRESS_INTERVAL:
+            return
+        _last_progress_print = now
         label = {"excel": "Stage Excel", "pdf": "Stage PDF",
                  "load_excel": "Load Excel", "load_pdf": "Load PDF"}.get(phase, phase)
-        pct = (current / total * 100) if total > 0 else 0
         short_detail = detail[:60] + "..." if len(detail) > 63 else detail
-        print(f"  [{label}] {current}/{total} ({pct:.0f}%)  {short_detail}", flush=True)
+        line = log_progress(label, current, total, _phase_starts[phase], extra=short_detail)
+        print(f"  {line}", flush=True)
     elif phase == "index":
         print(f"  {detail}", flush=True)
     elif phase == "done":
@@ -232,20 +251,20 @@ def _run_step(label: str, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> 
     try:
         result = fn(*args, **kwargs)
         elapsed = time.monotonic() - t0
-        print(f"\n[{label}] OK -- {elapsed:.1f}s", flush=True)
+        print(f"\n[{label}] OK -- {fmt_time(elapsed)}", flush=True)
         _write_progress(label, "completed", elapsed)
-        _completed_steps[label] = f"completed in {elapsed:.1f}s"
+        _completed_steps[label] = f"completed in {fmt_time(elapsed)}"
         return True, result
     except KeyboardInterrupt:
         elapsed = time.monotonic() - t0
         _stop_event.set()
-        print(f"\n[{label}] INTERRUPTED -- {elapsed:.1f}s", flush=True)
+        print(f"\n[{label}] INTERRUPTED -- {fmt_time(elapsed)}", flush=True)
         _write_progress(label, "interrupted", elapsed)
-        _completed_steps[label] = f"interrupted after {elapsed:.1f}s"
+        _completed_steps[label] = f"interrupted after {fmt_time(elapsed)}"
         return False, None
     except Exception as e:
         elapsed = time.monotonic() - t0
-        print(f"\n[{label}] FAILED -- {elapsed:.1f}s: {e}", flush=True)
+        print(f"\n[{label}] FAILED -- {fmt_time(elapsed)}: {e}", flush=True)
         _write_progress(label, "failed", elapsed, str(e))
         _completed_steps[label] = f"failed: {e}"
         return False, None

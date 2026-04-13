@@ -29,6 +29,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
+# Ensure the project root is on sys.path so package imports work
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from utils.progress import fmt_time  # noqa: E402
+
 # REFRESH-004: Path for the progress file polled by external monitors
 _PROGRESS_FILE = Path("logs/refresh_progress.json")
 
@@ -273,7 +280,7 @@ class RefreshWorkflow:
             from pipeline.enricher import enrich  # noqa: PLC0415
             enrich(self.db_path, phases={1, 2, 3, 4, 5}, rebuild=True)
             elapsed = time.time() - t0
-            self.log(f"Enrichment complete in {elapsed:.1f}s", "ok")
+            self.log(f"Enrichment complete in {fmt_time(elapsed)}", "ok")
 
             # LION-107: Post-enrichment integrity checks
             import sqlite3
@@ -313,7 +320,7 @@ class RefreshWorkflow:
             conn.close()
             self.results["enrich"] = "completed"
             self._write_progress("stage_5_enrich", "completed",
-                                 f"{elapsed:.1f}s, {tag_count} tags")
+                                 f"{fmt_time(elapsed)}, {tag_count} tags")
             return True
 
         except Exception as e:
@@ -472,7 +479,7 @@ class RefreshWorkflow:
         for stage, result in self.results.items():
             icon = "OK" if result == "completed" else "skip" if result == "skipped" else "FAIL"
             print(f"  [{icon}] {stage:15s}: {result}")
-        self.log(f"Total time: {elapsed:.1f}s")
+        self.log(f"Total time: {fmt_time(elapsed)}")
         self.log("")
 
         # REFRESH-002: Send webhook notification if --notify was supplied
@@ -486,7 +493,7 @@ class RefreshWorkflow:
             self._clear_progress()
         else:
             self._write_progress("done", "failed",
-                                 f"Workflow failed after {elapsed:.1f}s")
+                                 f"Workflow failed after {fmt_time(elapsed)}")
 
         return 0 if success else 1
 
