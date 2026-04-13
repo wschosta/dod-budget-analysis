@@ -28,6 +28,16 @@ from utils.strings import clean_narrative
 
 logger = logging.getLogger(__name__)
 
+# Pre-compiled regexes used in hot loops
+_CODE_FROM_TITLE_RE = re.compile(r"^[Ee]?(\d{3,5})\s+")
+_FY_4DIGIT_RE = re.compile(r"(\d{4})")
+_SECTION_BZ_RE = re.compile(r"^[B-Z]\.\s")
+_SECTION_CZ_NON_ACCOMPLISHMENTS_RE = re.compile(r"^[C-Z]\.\s(?!Accomplishments)")
+_TRAILING_NUMS_RE = re.compile(r"\s+[\d,.]+\s*$")
+_SECTION_HEADER_RE = re.compile(r"^(Accomplishments|Congressional|Title:)")
+_CODE_PREFIX_RE = re.compile(r"^[A-Z0-9]+:\s*")
+_PARENS_RE = re.compile(r"\s*\([^)]*\)\s*")
+
 
 # ── R-2 PDF parsing (adapter over shared parser) ─────────────────────────────
 
@@ -102,7 +112,7 @@ def _extract_r2_descriptions(
             in_section_a = True
             continue
         if in_section_a:
-            if re.match(r"^[B-Z]\.\s", stripped):
+            if _SECTION_BZ_RE.match(stripped):
                 break
             if stripped:
                 desc_parts.append(stripped)
@@ -120,19 +130,19 @@ def _extract_r2_descriptions(
             continue
         if not in_section_b:
             continue
-        if re.match(r"^[C-Z]\.\s(?!Accomplishments)", stripped):
+        if _SECTION_CZ_NON_ACCOMPLISHMENTS_RE.match(stripped):
             break
         if stripped.startswith("Title:"):
             if current_title and current_desc_parts:
                 project_descs[current_title] = " ".join(current_desc_parts).strip()
             title_text = stripped[len("Title:"):].strip()
-            title_text = re.sub(r"\s+[\d,.]+\s*$", "", title_text).strip()
+            title_text = _TRAILING_NUMS_RE.sub("", title_text).strip()
             current_title = title_text
             current_desc_parts = []
         elif stripped.startswith("Description:") and current_title:
             current_desc_parts.append(stripped[len("Description:"):].strip())
         elif current_title and current_desc_parts and not stripped.startswith("FY "):
-            if not re.match(r"^(Accomplishments|Congressional|Title:)", stripped):
+            if not _SECTION_HEADER_RE.match(stripped):
                 current_desc_parts.append(stripped)
     if current_title and current_desc_parts:
         project_descs[current_title] = " ".join(current_desc_parts).strip()
@@ -160,14 +170,14 @@ def consolidate_r2_timeseries(
         norm_code = normalize_r2_project_code(raw_code)
         # Fallback: extract code from title if none parsed
         if norm_code is None:
-            m = re.match(r"^[Ee]?(\d{3,5})\s+", item.get("project_title", ""))
+            m = _CODE_FROM_TITLE_RE.match(item.get("project_title", ""))
             if m:
                 norm_code = m.group(1).lstrip("0") or m.group(1)
         key = (item["pe_number"], norm_code)
         groups.setdefault(key, []).append(item)
 
     def _doc_fy(item: dict[str, Any]) -> int:
-        m = re.search(r"(\d{4})", item.get("fiscal_year", ""))
+        m = _FY_4DIGIT_RE.search(item.get("fiscal_year", ""))
         return int(m.group(1)) if m else 0
 
     results: list[dict[str, Any]] = []
@@ -310,8 +320,8 @@ def mine_pdf_subelements(
 
 def normalize_program_name(title: str) -> str:
     """Extract a canonical short name for cross-PE matching."""
-    s = re.sub(r"^[A-Z0-9]+:\s*", "", title)
-    s = re.sub(r"\s*\([^)]*\)\s*", " ", s)
+    s = _CODE_PREFIX_RE.sub("", title)
+    s = _PARENS_RE.sub(" ", s)
     return " ".join(s.lower().split())
 
 

@@ -121,6 +121,19 @@ def color_of_money(approp_title: str | None) -> str:
 
 # ── Keyword matching ─────────────────────────────────────────────────────────
 
+# Module-level cache: lowercased keyword → compiled word-boundary regex.
+# Avoids re-compiling the same pattern thousands of times per cache build.
+_KW_REGEX_CACHE: dict[str, re.Pattern[str]] = {}
+
+
+def _get_kw_regex(kw_lower: str) -> re.Pattern[str]:
+    """Return a compiled word-boundary regex for *kw_lower* (cached)."""
+    pat = _KW_REGEX_CACHE.get(kw_lower)
+    if pat is None:
+        pat = re.compile(r"(?<!\w)" + re.escape(kw_lower) + r"(?!\w)")
+        _KW_REGEX_CACHE[kw_lower] = pat
+    return pat
+
 
 def find_matched_keywords(
     text_fields: list[str | None],
@@ -139,9 +152,7 @@ def find_matched_keywords(
         kw_lower = kw.lower().strip()
         if not kw_lower:
             continue
-        if kw_lower in combined and re.search(
-            r"(?<!\w)" + re.escape(kw_lower) + r"(?!\w)", combined
-        ):
+        if kw_lower in combined and _get_kw_regex(kw_lower).search(combined):
             matched.append(kw)
     return matched
 

@@ -409,16 +409,26 @@ def _backfill_organization(
     fallback_ref_col = (
         f"fy{year_range[-2]}_ref" if len(year_range) > 1 else latest_ref_col
     )
+    # Build a single CASE-WHEN UPDATE instead of 65+ individual UPDATE statements.
+    # Each WHEN clause checks if the ref column contains the path fragment.
+    # Order matters: first match wins (same priority as the original loop).
+    case_parts: list[str] = []
     for path_fragment, org_name in ORG_FROM_FILE:
-        conn.execute(
-            f"""
-            UPDATE {cache_table}
-            SET organization_name = ?
-            WHERE (organization_name IS NULL OR organization_name = '')
-              AND ({latest_ref_col} LIKE ? OR {fallback_ref_col} LIKE ?)
-            """,
-            [org_name, f"%{path_fragment}%", f"%{path_fragment}%"],
+        escaped_frag = path_fragment.replace("'", "''")
+        escaped_org = org_name.replace("'", "''")
+        case_parts.append(
+            f"WHEN {latest_ref_col} LIKE '%{escaped_frag}%' "
+            f"OR {fallback_ref_col} LIKE '%{escaped_frag}%' "
+            f"THEN '{escaped_org}'"
         )
+    if case_parts:
+        case_sql = " ".join(case_parts)
+        conn.execute(f"""
+            UPDATE {cache_table}
+            SET organization_name = CASE {case_sql} END
+            WHERE (organization_name IS NULL OR organization_name = '')
+              AND (CASE {case_sql} END) IS NOT NULL
+        """)
 
     try:
         conn.execute(f"""
@@ -759,6 +769,7 @@ def build_cache_table(
         if len(source.get("_clean_title_only", "")) > len(target.get("_clean_title_only", "")):
             target["line_item_title"] = source["line_item_title"]
             target["_clean_title_only"] = source["_clean_title_only"]
+            target["_title_lower"] = source.get("_title_lower", source.get("_clean_title_only", "").lower())
         # Merge FY amounts (first non-null wins) and back-fill missing refs
         for yr in year_range:
             col = f"fy{yr}"
@@ -782,9 +793,10 @@ def build_cache_table(
         clusters: list[dict[str, Any]] = []
         for row in group:
             title = row.get("_clean_title_only", "").lower()
+            row["_title_lower"] = title
             matched = False
             for existing in clusters:
-                ex_title = existing.get("_clean_title_only", "").lower()
+                ex_title = existing["_title_lower"]
                 if not title or not ex_title:
                     continue
                 # Prefix match: one title starts with the other (truncation)
@@ -850,6 +862,7 @@ def build_cache_table(
         row["_consolidated_titles"] = "; ".join(unique_alts) if unique_alts else None
         row.pop("_project_code", None)
         row.pop("_clean_title_only", None)
+        row.pop("_title_lower", None)
 
     # Dedup R1 rows: same PE may have variant titles across FYs.
     # Keep the longest title, merge FY amounts.

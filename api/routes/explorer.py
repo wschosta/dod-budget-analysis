@@ -105,6 +105,11 @@ _FIXED_COLUMNS: list[tuple[str, str]] = [
 
 _COL_TO_FIELD: dict[str, str] = {h: f for h, f in _FIXED_COLUMNS}
 
+# Pre-compiled patterns for FY column name parsing in _extract_column_value
+_FY_AMOUNT_COL_RE = re.compile(r"FY(\d{4})\s*\(\$K\)")
+_FY_SOURCE_COL_RE = re.compile(r"FY(\d{4})\s*Source")
+_FY_DESC_COL_RE = re.compile(r"FY(\d{4})\s*Description")
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -454,16 +459,17 @@ def get_explorer_data(
             "matching_sub_elements": r[5],
         })
 
-    # Detect active years (which FY columns have any non-null data)
+    # Detect active years (which FY columns have any non-null data) — single query
     year_range = list(range(FY_START, FY_END + 1))
     active_years = []
     if pe_rows:
-        for yr in year_range:
-            has_data = conn.execute(
-                f"SELECT 1 FROM {cache_table} WHERE fy{yr} IS NOT NULL LIMIT 1"
-            ).fetchone()
-            if has_data:
-                active_years.append(yr)
+        checks = ", ".join(
+            f"MAX(CASE WHEN fy{yr} IS NOT NULL THEN 1 ELSE 0 END) AS has_{yr}"
+            for yr in year_range
+        )
+        fy_check_row = conn.execute(f"SELECT {checks} FROM {cache_table}").fetchone()
+        if fy_check_row:
+            active_years = [yr for i, yr in enumerate(year_range) if fy_check_row[i]]
 
     # Build available columns list (static + dynamic FY columns).
     # Per-year columns are offered as an interleaved [value, source, description]
@@ -665,19 +671,19 @@ def _extract_column_value(
         return val if val is not None else ""
 
     # FY amount columns: "FY2024 ($K)"
-    m = re.match(r"FY(\d{4})\s*\(\$K\)", col_name)
+    m = _FY_AMOUNT_COL_RE.match(col_name)
     if m:
         yr = int(m.group(1))
         return row.get(f"fy{yr}")
 
     # FY source columns: "FY2024 Source"
-    m = re.match(r"FY(\d{4})\s*Source", col_name)
+    m = _FY_SOURCE_COL_RE.match(col_name)
     if m:
         yr = int(m.group(1))
         return row.get("refs", {}).get(f"fy{yr}", "")
 
     # FY description columns: "FY2024 Description"
-    m = re.match(r"FY(\d{4})\s*Description", col_name)
+    m = _FY_DESC_COL_RE.match(col_name)
     if m:
         yr = int(m.group(1))
         if desc_by_pe_fy is None:
