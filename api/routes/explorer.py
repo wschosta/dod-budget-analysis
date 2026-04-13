@@ -102,17 +102,7 @@ _FIXED_COLUMNS: list[tuple[str, str]] = [
 # Per-FY sub-columns (($K), In Total, Source, Description, Keywords)
 # are always included for each active fiscal year.
 
-_COL_TO_FIELD: dict[str, str] = {
-    "PE Number": "pe_number",
-    "Service/Org": "organization_name",
-    "Exhibit Type": "exhibit_type",
-    "Line Item Title": "line_item_title",
-    "Alternate Titles": "lineage_note",
-    "Budget Activity": "budget_activity_title",
-    "Budget Activity (Normalized)": "budget_activity_norm",
-    "Appropriation": "appropriation_title",
-    "Color of Money": "color_of_money",
-}
+_COL_TO_FIELD: dict[str, str] = {h: f for h, f in _FIXED_COLUMNS}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

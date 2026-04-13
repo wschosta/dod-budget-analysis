@@ -158,8 +158,11 @@ def find_matched_keywords(
         kw_lower = kw.lower().strip()
         if not kw_lower:
             continue
-        # Word-boundary match: keyword must not be surrounded by word chars
-        if re.search(r"(?<!\w)" + re.escape(kw_lower) + r"(?!\w)", combined):
+        # Fast substring pre-filter, then word-boundary regex to reject
+        # false positives like "mach" in "machine"
+        if kw_lower in combined and re.search(
+            r"(?<!\w)" + re.escape(kw_lower) + r"(?!\w)", combined
+        ):
             matched.append(kw)
     return matched
 
