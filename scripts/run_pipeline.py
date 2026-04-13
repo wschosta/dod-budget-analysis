@@ -165,21 +165,30 @@ def _cleanup_backup(backup: Path | None) -> None:
 
 
 _phase_starts: dict[str, float] = {}
+_last_progress_print: float = 0.0
+_PROGRESS_INTERVAL = 0.5  # seconds — throttle progress output
+
 _cli_logger = logging.getLogger("pipeline.cli")
 
 
 def _build_progress(phase: str, current: int, total: int, detail: str = "",
                      metrics: dict | None = None) -> None:
     """Progress callback for build_database() — standardised progress line."""
+    global _last_progress_print
     if phase == "scan":
         if total > 0:
             print(f"  Scanning... {total} files found", flush=True)
         else:
             print(f"  {detail}", flush=True)
     elif phase in ("excel", "pdf"):
-        label = "Build Excel" if phase == "excel" else "Build PDF"
+        # Throttle: only print every _PROGRESS_INTERVAL seconds (or first/last)
+        now = time.monotonic()
         if current <= 1 or phase not in _phase_starts:
-            _phase_starts[phase] = time.monotonic()
+            _phase_starts[phase] = now
+        if current != total and now - _last_progress_print < _PROGRESS_INTERVAL:
+            return
+        _last_progress_print = now
+        label = "Build Excel" if phase == "excel" else "Build PDF"
         short_detail = detail[:60] + "..." if len(detail) > 63 else detail
         line = log_progress(label, current, total, _phase_starts[phase], extra=short_detail)
         print(f"  {line}", flush=True)
@@ -198,16 +207,21 @@ def _build_progress(phase: str, current: int, total: int, detail: str = "",
 
 def _staging_progress(phase: str, current: int, total: int, detail: str = "") -> None:
     """Progress callback for stage_all_files() and load_staging_to_db()."""
+    global _last_progress_print
     if phase == "scan":
         if total > 0:
             print(f"  Scanning... {total} files", flush=True)
         elif detail:
             print(f"  {detail}", flush=True)
     elif phase in ("excel", "pdf", "load_excel", "load_pdf"):
+        now = time.monotonic()
+        if current <= 1 or phase not in _phase_starts:
+            _phase_starts[phase] = now
+        if current != total and now - _last_progress_print < _PROGRESS_INTERVAL:
+            return
+        _last_progress_print = now
         label = {"excel": "Stage Excel", "pdf": "Stage PDF",
                  "load_excel": "Load Excel", "load_pdf": "Load PDF"}.get(phase, phase)
-        if current <= 1 or phase not in _phase_starts:
-            _phase_starts[phase] = time.monotonic()
         short_detail = detail[:60] + "..." if len(detail) > 63 else detail
         line = log_progress(label, current, total, _phase_starts[phase], extra=short_detail)
         print(f"  {line}", flush=True)

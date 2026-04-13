@@ -87,11 +87,17 @@ def main():
     from utils.progress import log_progress
 
     _stage_starts: dict[str, float] = {}
+    _last_print: float = 0.0
 
     def _print_progress(phase, current, total, detail=""):
+        nonlocal _last_print
         if total > 0:
+            now = time.monotonic()
             if current <= 1 or phase not in _stage_starts:
-                _stage_starts[phase] = time.monotonic()
+                _stage_starts[phase] = now
+            if current != total and now - _last_print < 0.5:
+                return
+            _last_print = now
             short = detail[:60] + "..." if len(detail) > 63 else detail
             line = log_progress(phase, current, total, _stage_starts[phase], extra=short)
             print(f"  {line}")
