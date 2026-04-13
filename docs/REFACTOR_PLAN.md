@@ -314,27 +314,221 @@ python -c "from api.routes.keyword_helpers import FY_START"
 
 ---
 
+## Phase 2: Unify R-2 Cost Table Parsers
+
+Two functions parse the same R-2 COST block data with different approaches
+and different output formats. They should share a single low-level parser.
+
+### The Two Parsers
+
+#### `parse_r2_cost_block()` — keyword_search.py:340-545 (205 lines)
+- **Called by**: `mine_pdf_subelements()` (on-demand, per keyword search)
+- **Input**: `(page_text, source_file, fiscal_year)`
+- **Output**: `list[dict]` with `pe_number, project_code, project_title,
+  source_file, fiscal_year, fy_amounts: {fyXXXX: amount_in_K}, description_text`
+- **Also extracts**: Section A (Mission Description) + Section B (Accomplishments)
+  narrative text per project
+- **FY header parsing**: Regex token scanning, maps "Total" → budget_year
+- **Amount parsing**: `[\d,]+\.\d{3}` regex, inline in main loop
+- **Title cleanup**: Calls `clean_r2_title()` from utils/normalization
+- **Skips**: Hardcoded `startswith()` checks (not shared constants)
+
+#### `parse_r2_cost_table()` — pipeline/r2_pdf_extractor.py:315-455 (140 lines)
+- **Called by**: `extract_r2_from_pdfs()` (pipeline build, batch over all pages)
+- **Input**: `(text)` only
+- **Output**: `dict | None` with `pe_number, approp_code, unit_multiplier,
+  fy_amounts: {label: [(fy_year, amount|None), ...]}, budget_activity,
+  budget_activity_title, appropriation_title`
+- **Does NOT extract**: narrative descriptions
+- **FY header parsing**: Compiled regexes (`_FY_4DIGIT_RE`, `_FY_2DIGIT_RE`,
+  `_BARE_YEAR_RE`) with 2-digit year support and wider header scan area
+- **Amount parsing**: Right-to-left token scanner with `_parse_amount()` helper
+  and `_NULL_AMOUNT_TOKENS` (handles "Continuing", "TBD", "--", etc.)
+- **Title cleanup**: Calls `clean_r2_title()` post-parse in the caller
+- **Skips**: `SKIP_LINE_LABELS` + `SKIP_LABEL_PREFIXES` (shared constants)
+- **Also extracts**: BA/appropriation from page header via `parse_r2_header_metadata()`
+
+### What Overlaps vs. What Diverges
+
+| Capability | `parse_r2_cost_block` | `parse_r2_cost_table` |
+|---|---|---|
+| PE number extraction | `_PE_TITLE_RE` (PE + title) | `_PE_RE` (PE only) |
+| COST header detection | Hardcoded `"COST" in line and "Millions" in line` | `_COST_HEADER_RE` regex (handles Thousands, $'s) |
+| FY column parsing | Simple token scan | 3-stage regex (4-digit, 2-digit, bare year) |
+| Amount parsing | `[\d,]+\.\d{3}` regex, left-to-right | Right-to-left token scanner with null handling |
+| Unit multiplier | Hardcoded ×1000 (assumes Millions) | Detects Millions vs Thousands |
+| Null amounts | Skips `"-"` only | `_NULL_AMOUNT_TOKENS` (-, --, TBD, Continuing, etc.) |
+| Skip rows | Hardcoded `startswith()` checks | `SKIP_LINE_LABELS` + `SKIP_LABEL_PREFIXES` |
+| Description extraction | Yes (Section A + B) | No |
+| BA/Appropriation | No | Yes (via `parse_r2_header_metadata`) |
+| Org inference | No (done by caller) | No (done by caller) |
+
+**Bottom line**: `parse_r2_cost_table` is strictly more robust on the table-parsing
+side (better FY detection, null handling, unit detection). `parse_r2_cost_block`
+is the only one that extracts narrative descriptions.
+
+### Unification Strategy
+
+Create a shared low-level parser that both callers use, with description
+extraction as an opt-in layer.
+
+#### New shared module: `pipeline/r2_cost_parser.py`
+
+```
+pipeline/r2_cost_parser.py  (~250 lines)
+├── Constants (moved from r2_pdf_extractor)
+│   ├── _COST_HEADER_RE
+│   ├── _FY_4DIGIT_RE, _FY_2DIGIT_RE, _BARE_YEAR_RE
+│   ├── _NULL_AMOUNT_TOKENS
+│   ├── SKIP_LINE_LABELS, SKIP_LABEL_PREFIXES
+│   └── _parse_amount()
+│
+├── parse_r2_cost_table(text)  →  dict | None     (moved from r2_pdf_extractor)
+│   Returns: pe_number, unit_multiplier, fy_labels, rows: [(label, [(fy, amount)])]
+│   Pure text parsing — no DB, no org inference, no description extraction
+│
+└── parse_r2_header_metadata(text)  →  dict        (moved from r2_pdf_extractor)
+    Returns: budget_activity, budget_activity_title, appropriation_title
+```
+
+#### Updated callers
+
+**`pipeline/r2_pdf_extractor.py`** (pipeline build):
+```python
+from pipeline.r2_cost_parser import parse_r2_cost_table, parse_r2_header_metadata
+# No changes to extract_r2_from_pdfs() — it already calls parse_r2_cost_table()
+# Just moves the function to the shared module
+```
+
+**`api/routes/keyword_r2.py`** (or keyword_search.py until Phase 1 is done):
+- Delete `parse_r2_cost_block()` entirely (205 lines)
+- Replace `mine_pdf_subelements()` internals to call the shared parser:
+
+```python
+from pipeline.r2_cost_parser import parse_r2_cost_table
+
+def mine_pdf_subelements(...):
+    for r in rows:
+        source_file, page_number, page_text, fiscal_year = r
+        result = parse_r2_cost_table(page_text)
+        if not result:
+            continue
+        pe = result["pe_number"]
+        mult = result["unit_multiplier"]
+
+        for label, fy_pairs in result["fy_amounts"].items():
+            # Convert to the format mine_pdf_subelements expects
+            fy_amounts = {}
+            for fy_year, amount in fy_pairs:
+                if amount is not None:
+                    fy_amounts[f"fy{fy_year}"] = amount * mult
+            if not fy_amounts:
+                continue
+
+            items.append({
+                "pe_number": pe,
+                "project_code": ...,  # from clean_r2_title(label)
+                "project_title": ...,
+                "source_file": source_file,
+                "fiscal_year": fiscal_year,
+                "fy_amounts": fy_amounts,
+                "description_text": "",  # filled by _extract_descriptions() below
+            })
+
+    # Description extraction stays as a separate post-pass
+    _extract_descriptions(items, page_texts)
+```
+
+#### Description extraction becomes a standalone function
+
+The Section A / Section B narrative extraction (keyword_search.py:480-538)
+moves to a new function:
+
+```python
+def extract_r2_descriptions(
+    page_text: str,
+    projects: list[dict],
+) -> None:
+    """Extract Section A/B descriptions and attach to project dicts (in-place)."""
+    # Section A: Mission Description (shared across all projects)
+    # Section B: per-project Accomplishments
+    # Existing logic from parse_r2_cost_block lines 480-538
+```
+
+This function is only called by `mine_pdf_subelements` (the explorer path),
+not by the pipeline build (which stores descriptions separately via enricher.py).
+
+### Execution Order
+
+#### Step 1: Create `pipeline/r2_cost_parser.py`
+- Move `parse_r2_cost_table`, `parse_r2_header_metadata`, and all their
+  constants/helpers from `pipeline/r2_pdf_extractor.py`
+- Add re-exports in `r2_pdf_extractor.py` for backward compat
+- Run tests (especially `test_r2_pdf_extractor.py`)
+
+#### Step 2: Update `r2_pdf_extractor.py` to import from shared module
+- Replace local definitions with imports
+- Keep `extract_r2_from_pdfs()`, `infer_org()`, and CLI in r2_pdf_extractor
+- Run tests
+
+#### Step 3: Rewrite `parse_r2_cost_block()` to use shared parser
+- Delete the 205-line function
+- Update `mine_pdf_subelements()` to call `parse_r2_cost_table()`
+  + adapter code to convert output format
+- Extract description logic into `extract_r2_descriptions()`
+- Run tests (especially `test_explorer_xlsx.py`, `test_explorer_pe_search.py`)
+
+#### Step 4: Delete dead code
+- Remove old constants from keyword_search that are now in r2_cost_parser
+  (hardcoded skip checks, amount regex, etc.)
+- Run full suite
+
+### What Stays Separate
+
+| Concern | Location | Reason |
+|---|---|---|
+| `infer_org()` + org mappings | `r2_pdf_extractor.py` | Pipeline-specific, uses file path patterns unique to the download layout |
+| `_ORG_FROM_PATH` | `keyword_search.py` | API-side fallback, simpler mapping (6 entries vs 50) |
+| `consolidate_r2_timeseries()` | `keyword_search.py` / `keyword_r2.py` | Only used by explorer cache builder, not pipeline |
+| `extract_r2_from_pdfs()` + CLI | `r2_pdf_extractor.py` | Pipeline entry point, handles DB writes |
+
+### Risk Assessment
+
+| Risk | Mitigation |
+|---|---|
+| Pipeline build regression | Run `extract_r2_from_pdfs` with `--dry-run` before and after; compare row counts |
+| Explorer cache differences | Rebuild a cache with known keywords; diff the row counts and amounts |
+| Description extraction regression | `mine_pdf_subelements` tests already cover this path |
+| Import cycle pipeline↔api | `r2_cost_parser` is in `pipeline/`, imported by both — no cycle |
+
+### Net effect
+
+- Delete ~205 lines (`parse_r2_cost_block`)
+- Create ~250 lines (`pipeline/r2_cost_parser.py`, mostly moved code)
+- Add ~30 lines adapter code in `mine_pdf_subelements`
+- **Net**: ~175 fewer lines, single source of truth for R-2 table parsing,
+  and the explorer gets the pipeline's more robust parser (2-digit FY support,
+  Thousands unit detection, null amount handling) for free.
+
+---
+
 ## What This Plan Does NOT Cover
 
 These are separate follow-up tasks:
 
-1. **Unify R-2 parsers**: `parse_r2_cost_block()` (keyword_r2) and
-   `parse_r2_cost_table()` (pipeline/r2_pdf_extractor) parse the same data.
-   Consolidating requires changing pipeline code and re-running the build.
-
-2. **Extract org mapping**: `_ORG_FROM_PATH` (keyword_helpers) vs
+1. **Extract org mapping**: `_ORG_FROM_PATH` (keyword_helpers) vs
    `_ORG_FROM_FILE` (r2_pdf_extractor) — overlapping but different scope.
    Could unify into `utils/organization.py`.
 
-3. **Exhibit type constants**: `"r1"`, `"r2"`, `"r2_pdf"` appear as raw
+2. **Exhibit type constants**: `"r1"`, `"r2"`, `"r2_pdf"` appear as raw
    strings in 11+ locations. Could define in `keyword_helpers.py` or a
    shared constants module.
 
-4. **`build_cache_table()` decomposition**: At 480 lines, it's still large
+3. **`build_cache_table()` decomposition**: At 480 lines, it's still large
    after extraction. The R-2 merge pre-pass (~200 lines) could become its
    own function. Defer until the extraction is stable.
 
-5. **Performance**: Levenshtein memoization, PDF mining computed column,
+4. **Performance**: Levenshtein memoization, PDF mining computed column,
    explorer aggregation query — all independent of this restructure.
 
 ---
