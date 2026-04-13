@@ -1181,7 +1181,9 @@ def build_keyword_xlsx(
                 has_match = has_row_kw or has_fy_kw
                 if not has_match:
                     fy_codes.append("N")
-                elif et == "r1" and pe not in pe_has_r2_match:
+                elif et == "r1" and pe in pe_has_r2_match:
+                    # R1 is summary — cap at P when R2 subs have matches
+                    # to avoid double-counting (R1 total includes R2 dollars)
                     fy_codes.append("P")
                 else:
                     fy_codes.append("Y")
