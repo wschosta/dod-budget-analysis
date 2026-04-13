@@ -11,10 +11,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from pipeline.r2_pdf_extractor import (
     parse_r2_cost_table,
+    parse_r2_header_metadata,
     infer_org,
     SKIP_LINE_LABELS,
     SKIP_LABEL_PREFIXES,
 )
+from utils.normalization import infer_ba_from_pe
 
 
 # ── Sample R-2 cost table text ──────────────────────────────────────────────
@@ -191,3 +193,65 @@ class TestInferOrg:
             page_text="DEPARTMENT OF THE NAVY\nR-2 Budget",
         )
         assert result == "Army"
+
+
+# ── parse_r2_header_metadata ─────────────────────────────────────────────────
+
+
+class TestParseR2HeaderMetadata:
+    def test_budget_activity_number(self):
+        text = "BUDGET ACTIVITY: 5\nSome other text"
+        result = parse_r2_header_metadata(text)
+        assert result["budget_activity"] == "05"
+        assert result["budget_activity_title"] == "BA 5: System Development & Demonstration"
+
+    def test_ba_with_title(self):
+        text = "Budget Activity 3: Advanced Technology Development\nMore text"
+        result = parse_r2_header_metadata(text)
+        assert result["budget_activity"] == "03"
+        assert result["budget_activity_title"] == "BA 3: Advanced Technology Development"
+
+    def test_ba_slash_format(self):
+        text = "BA 2 / Applied Research\nBody text"
+        result = parse_r2_header_metadata(text)
+        assert result["budget_activity"] == "02"
+
+    def test_appropriation_title(self):
+        text = "Appropriation: 0400 / Research, Development, Test & Eval, Defense-Wide\nMore"
+        result = parse_r2_header_metadata(text)
+        assert result["appropriation_title"] == "Research, Development, Test & Eval, Defense-Wide"
+
+    def test_no_metadata_returns_nones(self):
+        text = "Just some random page text without any budget headers."
+        result = parse_r2_header_metadata(text)
+        assert result["budget_activity"] is None
+        assert result["budget_activity_title"] is None
+        assert result["appropriation_title"] is None
+
+    def test_only_scans_first_800_chars(self):
+        text = "A" * 900 + "\nBUDGET ACTIVITY: 7"
+        result = parse_r2_header_metadata(text)
+        assert result["budget_activity"] is None
+
+
+# ── infer_ba_from_pe ─────────────────────────────────────────────────────────
+
+
+class TestInferBaFromPe:
+    def test_ba1_basic_research(self):
+        assert infer_ba_from_pe("0601103A") == ("01", "BA 1: Basic Research")
+
+    def test_ba3_advanced_tech(self):
+        assert infer_ba_from_pe("0603273F") == ("03", "BA 3: Advanced Technology Development")
+
+    def test_ba7_operational(self):
+        assert infer_ba_from_pe("0607131F") == ("07", "BA 7: Operational Systems Development")
+
+    def test_non_rdte_returns_none(self):
+        assert infer_ba_from_pe("0305116BB") == (None, None)
+
+    def test_none_input(self):
+        assert infer_ba_from_pe(None) == (None, None)
+
+    def test_short_pe(self):
+        assert infer_ba_from_pe("06") == (None, None)
