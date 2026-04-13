@@ -181,10 +181,10 @@ def _build_progress(phase: str, current: int, total: int, detail: str = "",
         else:
             print(f"  {detail}", flush=True)
     elif phase in ("excel", "pdf"):
-        # Throttle: only print every _PROGRESS_INTERVAL seconds (or first/last)
         now = time.monotonic()
         if current <= 1 or phase not in _phase_starts:
             _phase_starts[phase] = now
+            _last_progress_print = 0.0  # reset so first item always prints
         if current != total and now - _last_progress_print < _PROGRESS_INTERVAL:
             return
         _last_progress_print = now
@@ -217,6 +217,7 @@ def _staging_progress(phase: str, current: int, total: int, detail: str = "") ->
         now = time.monotonic()
         if current <= 1 or phase not in _phase_starts:
             _phase_starts[phase] = now
+            _last_progress_print = 0.0
         if current != total and now - _last_progress_print < _PROGRESS_INTERVAL:
             return
         _last_progress_print = now

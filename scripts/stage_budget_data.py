@@ -86,6 +86,7 @@ def main():
     from pipeline.staging import stage_all_files, load_staging_to_db, needs_restaging
     from utils.progress import log_progress
 
+    _THROTTLE_INTERVAL = 0.5  # seconds between progress updates
     _stage_starts: dict[str, float] = {}
     _last_print: float = 0.0
 
@@ -95,7 +96,8 @@ def main():
             now = time.monotonic()
             if current <= 1 or phase not in _stage_starts:
                 _stage_starts[phase] = now
-            if current != total and now - _last_print < 0.5:
+                _last_print = 0.0
+            if current != total and now - _last_print < _THROTTLE_INTERVAL:
                 return
             _last_print = now
             short = detail[:60] + "..." if len(detail) > 63 else detail
