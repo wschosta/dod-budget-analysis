@@ -31,16 +31,6 @@ LEVENSHTEIN_THRESHOLD = 0.20
 # Lowercased version of R2_JUNK_TITLES + "page" — used as fallback filter
 SKIP_RAW_TITLES = frozenset(t.lower() for t in R2_JUNK_TITLES) | {"page"}
 
-# Organization name from source_file path fragments (API-side fallback)
-ORG_FROM_PATH = [
-    ("US_Army", "Army"),
-    ("US_Air_Force", "Air Force"),
-    ("US_Navy", "Navy"),
-    ("Defense_Wide", "Defense-Wide"),
-    ("DARPA", "DARPA"),
-    ("SOCOM", "SOCOM"),
-]
-
 
 # ── SQL / JSON helpers ────────────────────────────────────────────────────────
 

@@ -13,12 +13,12 @@ from itertools import groupby
 from typing import Any
 
 from utils.database import get_amount_columns
+from utils.organization import ORG_FROM_FILE
 
 from api.routes.keyword_helpers import (
     FY_END,
     FY_START,
     LEVENSHTEIN_THRESHOLD,
-    ORG_FROM_PATH,
     PE_NUMBER_STRICT_CI,
     SEARCH_COLS,
     SKIP_RAW_TITLES,
@@ -408,7 +408,7 @@ def _backfill_organization(
     fallback_ref_col = (
         f"fy{year_range[-2]}_ref" if len(year_range) > 1 else latest_ref_col
     )
-    for path_fragment, org_name in ORG_FROM_PATH:
+    for path_fragment, org_name in ORG_FROM_FILE:
         conn.execute(
             f"""
             UPDATE {cache_table}
