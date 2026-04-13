@@ -58,6 +58,8 @@ from utils.progress import (
     TerminalProgressTracker,
     SilentProgressTracker,
     FileProgressTracker,
+    fmt_time,  # noqa: F401 — re-exported
+    log_progress,  # noqa: F401 — re-exported
 )
 
 # HTTP utilities

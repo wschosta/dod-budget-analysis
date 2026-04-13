@@ -4,9 +4,15 @@ Additional progress tracker tests — coverage gap fill
 Tests for ProgressTracker base class counter logic and the public methods
 mark_completed/mark_skipped/mark_failed, plus TerminalProgressTracker.update()
 and FileProgressTracker.add_bytes().
+
+Also covers the shared ``fmt_time`` and ``log_progress`` helper functions
+used for standardised CLI progress lines.
 """
+import logging
 import sys
+import time
 from pathlib import Path
+from unittest import mock
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -15,6 +21,8 @@ from utils.progress import (
     TerminalProgressTracker,
     SilentProgressTracker,
     FileProgressTracker,
+    fmt_time,
+    log_progress,
 )
 
 
@@ -204,3 +212,102 @@ class TestSilentProgressTracker:
         pt.finish()
         output = capsys.readouterr().out
         assert output == ""
+
+
+# ── fmt_time ────────────────────────────────────────────────────────────────
+
+
+class TestFmtTime:
+    def test_zero_seconds(self):
+        assert fmt_time(0) == "0s"
+
+    def test_under_one_minute(self):
+        assert fmt_time(45) == "45s"
+
+    def test_exact_one_minute(self):
+        assert fmt_time(60) == "1m00s"
+
+    def test_minutes_and_seconds(self):
+        assert fmt_time(135) == "2m15s"
+
+    def test_seconds_zero_padded(self):
+        # 2 minutes 3 seconds -> "2m03s"
+        assert fmt_time(123) == "2m03s"
+
+    def test_hours(self):
+        assert fmt_time(3720) == "1h02m"
+
+    def test_large_hours(self):
+        assert fmt_time(45000) == "12h30m"
+
+    def test_compact_no_padding(self):
+        # fmt_time returns compact strings; log_progress handles alignment
+        assert fmt_time(5) == "5s"
+        assert " " not in fmt_time(5)
+
+
+# ── log_progress ────────────────────────────────────────────────────────────
+
+
+class TestLogProgress:
+    def test_basic_format_contains_expected_parts(self):
+        start = time.monotonic() - 10
+        result = log_progress("Test", 50, 100, start)
+        assert "50/100" in result
+        assert "50.0%" in result
+        assert "Elapsed:" in result
+        assert "ETA:" in result
+        assert "items/s" in result
+
+    def test_returns_empty_string_on_zero_total(self):
+        assert log_progress("Test", 0, 0, time.monotonic()) == ""
+
+    def test_returns_empty_string_on_negative_total(self):
+        assert log_progress("Test", 0, -1, time.monotonic()) == ""
+
+    def test_phase_name_appears_in_output(self):
+        start = time.monotonic() - 1
+        result = log_progress("Build Excel", 5, 10, start)
+        assert result.startswith("Build Excel:")
+
+    def test_comma_separated_thousands(self):
+        start = time.monotonic() - 1
+        result = log_progress("Phase", 1234, 5678, start)
+        assert "1,234" in result
+        assert "5,678" in result
+
+    def test_completed_right_justified_to_total_width(self):
+        start = time.monotonic() - 1
+        result = log_progress("X", 5, 5678, start)
+        # "5" should be right-justified to match width of "5,678" (5 chars)
+        assert "    5/5,678" in result
+
+    def test_extra_suffix_appended(self):
+        start = time.monotonic() - 1
+        result = log_progress("Phase", 5, 10, start, extra="file.xlsx")
+        assert "file.xlsx" in result
+
+    def test_logs_to_logger_when_provided(self):
+        test_logger = logging.getLogger("test_log_progress")
+        with mock.patch.object(test_logger, "info") as mock_info:
+            start = time.monotonic() - 1
+            log_progress("Phase", 10, 20, start, logger=test_logger)
+            mock_info.assert_called_once()
+
+    def test_no_logging_when_logger_is_none(self):
+        # Should not raise and should return the string
+        start = time.monotonic() - 1
+        result = log_progress("Phase", 5, 10, start, logger=None)
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_percentage_fixed_width(self):
+        start = time.monotonic() - 1
+        result = log_progress("X", 1, 1000, start)
+        # Should have leading space for small percentages: "  0.1%"
+        assert "0.1%" in result
+
+    def test_100_percent(self):
+        start = time.monotonic() - 1
+        result = log_progress("X", 100, 100, start)
+        assert "100.0%" in result

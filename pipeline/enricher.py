@@ -34,6 +34,7 @@ from pathlib import Path
 from utils import get_connection
 from utils.normalization import infer_ba_from_pe
 from utils.patterns import PE_NUMBER, FISCAL_YEAR
+from utils.progress import log_progress
 from utils.query import make_placeholders
 from pipeline.r2_pdf_extractor import parse_r2_header_metadata
 from utils.pdf_sections import (
@@ -325,42 +326,14 @@ def _ensure_pe_index_source_column(conn: sqlite3.Connection) -> None:
         logger.info("  Added 'source' column to pe_index (upgrade).")
 
 
-def _fmt_time(s: float) -> str:
-    """Format seconds as a compact elapsed/ETA string."""
-    if s < 60:
-        return f"{s:.0f}s"
-    m, s = divmod(s, 60)
-    return f"{int(m)}m{int(s)}s"
-
-
 def _log_progress(
     phase_name: str,
     completed: int,
     total: int,
     start_time: float,
 ) -> None:
-    """Log a uniform progress line for an enrichment phase.
-
-    Format:
-        Phase X: {completed}/{total} ({pct:.1f}%) | Elapsed: {elapsed} | ETA: {eta} | {rate:.0f} items/s
-    """
-    if total <= 0:
-        return
-    elapsed = time.monotonic() - start_time
-    pct = completed / total * 100
-    rate = completed / elapsed if elapsed > 0 else 0
-    eta_s = (total - completed) / rate if rate > 0 else 0
-
-    logger.info(
-        "%s: %s/%s (%.1f%%) | Elapsed: %s | ETA: %s | %.0f items/s",
-        phase_name,
-        f"{completed:,}",
-        f"{total:,}",
-        pct,
-        _fmt_time(elapsed),
-        _fmt_time(eta_s),
-        rate,
-    )
+    """Delegate to the shared ``log_progress`` in :mod:`utils.progress`."""
+    log_progress(phase_name, completed, total, start_time, logger=logger)
 
 
 def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
