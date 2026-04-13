@@ -25,9 +25,6 @@ PE_TITLE_RE = re.compile(
     rf"PE\s+(\d{{7}}{PE_SUFFIX_PATTERN})\s*[/:]\s*(.+?)(?:\s+\d|$)"
 )
 
-# RDT&E BA categories (BA 01-07) — re-exported from utils.normalization
-# (the module-level import on line 13 already binds the name)
-
 # Levenshtein merge threshold for R-2 dedup
 LEVENSHTEIN_THRESHOLD = 0.20
 

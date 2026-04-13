@@ -22,6 +22,7 @@ from api.routes.keyword_helpers import (
     find_matched_keywords,
     in_clause,
 )
+from utils.normalization import clean_r2_title, normalize_r2_project_code
 from utils.strings import clean_narrative
 
 logger = logging.getLogger(__name__)
@@ -136,7 +137,6 @@ def parse_r2_cost_block(
 
         # Clean the extracted title: strip any remaining trailing amounts,
         # normalize project codes, and reject junk rows.
-        from utils.normalization import clean_r2_title
         project_code, project_title = clean_r2_title(prefix)
         if project_code is None and project_title is None:
             continue  # junk row (table header/footer/total)
@@ -240,8 +240,6 @@ def consolidate_r2_timeseries(
     items: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Collapse multiple budget-submission rows into one golden row per project."""
-    from utils.normalization import normalize_r2_project_code
-
     groups: dict[tuple[str, str | None], list[dict[str, Any]]] = {}
     for item in items:
         raw_code = item.get("project_code")
@@ -254,13 +252,12 @@ def consolidate_r2_timeseries(
         key = (item["pe_number"], norm_code)
         groups.setdefault(key, []).append(item)
 
+    def _doc_fy(item: dict[str, Any]) -> int:
+        m = re.search(r"(\d{4})", item.get("fiscal_year", ""))
+        return int(m.group(1)) if m else 0
+
     results: list[dict[str, Any]] = []
     for (pe, proj_code), group in groups.items():
-
-        def _doc_fy(item: dict[str, Any]) -> int:
-            m = re.search(r"(\d{4})", item.get("fiscal_year", ""))
-            return int(m.group(1)) if m else 0
-
         group.sort(key=_doc_fy, reverse=True)
 
         golden_amounts: dict[str, float] = {}
@@ -419,7 +416,6 @@ def annotate_cross_pe_lineages(
     if not rows:
         return
 
-
     name_groups: dict[str, list[tuple[int, str, str]]] = defaultdict(list)
     for row_id, pe, title in rows:
         # Skip Congressional Adds (9999) — intentionally multi-PE, not migrations
@@ -455,7 +451,6 @@ def annotate_cross_pe_lineages(
             [(note, note, row_id) for note, row_id in updates],
         )
         logger.info("Cross-PE lineage: annotated %d R-2 rows", len(updates))
-
 
 
 # ── R-1 stub enrichment helpers ──────────────────────────────────────────────

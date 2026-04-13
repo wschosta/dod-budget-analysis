@@ -15,7 +15,6 @@ from api.routes.keyword_helpers import (
     safe_json_list,
 )
 
-
 # ── Shared XLSX styles ───────────────────────────────────────────────────────
 
 
@@ -26,8 +25,14 @@ def xlsx_base_styles() -> dict[str, Any]:
     workbook-bound Format objects (xlsxwriter formats are per-workbook).
     """
     return {
-        "header": {"bold": True, "font_size": 11, "font_color": "#FFFFFF",
-                   "bg_color": "#2C3E50", "text_wrap": True, "align": "center"},
+        "header": {
+            "bold": True,
+            "font_size": 11,
+            "font_color": "#FFFFFF",
+            "bg_color": "#2C3E50",
+            "text_wrap": True,
+            "align": "center",
+        },
         "base": {"font_size": 10},
         "italic": {"italic": True, "font_color": "#888888", "font_size": 10},
         "total": {"bold": True, "font_size": 11},
@@ -41,20 +46,28 @@ def xlsx_base_styles() -> dict[str, Any]:
 
 # Default column widths keyed by header name.
 _COL_WIDTH_DEFAULTS: dict[str, int] = {
-    "PE Number": 14, "Service/Org": 14,
-    "Exhibit": 8, "Exhibit Type": 8,
-    "Line Item / Sub-Program": 50, "Line Item Title": 50,
-    "Budget Activity": 20, "Budget Activity (Normalized)": 20,
-    "Appropriation": 30, "Color of Money": 12,
+    "PE Number": 14,
+    "Service/Org": 14,
+    "Exhibit": 8,
+    "Exhibit Type": 8,
+    "Line Item / Sub-Program": 50,
+    "Line Item Title": 50,
+    "Budget Activity": 20,
+    "Budget Activity (Normalized)": 20,
+    "Appropriation": 30,
+    "Color of Money": 12,
     "Alternate Titles": 40,
-    "Keywords (Row)": 20, "Keywords (Desc)": 20,
-    "Description": 60, "In Totals": 10,
+    "Keywords (Row)": 20,
+    "Keywords (Desc)": 20,
+    "Description": 60,
+    "In Totals": 10,
 }
 
 
 def _col_letter(one_based: int) -> str:
     """Convert a 1-based column index to an Excel letter (1 → 'A')."""
     from xlsxwriter.utility import xl_col_to_name
+
     return xl_col_to_name(one_based - 1)
 
 
@@ -73,7 +86,9 @@ def _write_merged_fy_headers(
     col = fixed_count
     for yr in active_years:
         if len(sub_col_names) > 1:
-            ws.merge_range(0, col, 0, col + len(sub_col_names) - 1, f"FY{yr} ($K)", fmt_merge)
+            ws.merge_range(
+                0, col, 0, col + len(sub_col_names) - 1, f"FY{yr} ($K)", fmt_merge
+            )
         else:
             ws.write(0, col, f"FY{yr} ($K)", fmt_merge)
         for si, sub in enumerate(sub_col_names):
@@ -124,32 +139,66 @@ def _apply_fy_conditional_formatting(
         if fc.desc:
             data_cols.append(fc.desc - 1)
         for c0 in data_cols:
-            ws.conditional_format(first_row, c0, last_row, c0, {
-                "type": "formula",
-                "criteria": f'=${fc.intotal_l}{first_row + 1}="Y"',
-                "format": fmt["cf_bold"],
-            })
-            ws.conditional_format(first_row, c0, last_row, c0, {
-                "type": "formula",
-                "criteria": f'=${fc.intotal_l}{first_row + 1}="N"',
-                "format": fmt["cf_italic_gray"],
-            })
+            ws.conditional_format(
+                first_row,
+                c0,
+                last_row,
+                c0,
+                {
+                    "type": "formula",
+                    "criteria": f'=${fc.intotal_l}{first_row + 1}="Y"',
+                    "format": fmt["cf_bold"],
+                },
+            )
+            ws.conditional_format(
+                first_row,
+                c0,
+                last_row,
+                c0,
+                {
+                    "type": "formula",
+                    "criteria": f'=${fc.intotal_l}{first_row + 1}="N"',
+                    "format": fmt["cf_italic_gray"],
+                },
+            )
         if fc.intotal:
             ic0 = fc.intotal - 1
             for val, key in [("Y", "cf_green"), ("P", "cf_yellow"), ("N", "cf_red")]:
-                ws.conditional_format(first_row, ic0, last_row, ic0, {
-                    "type": "formula",
-                    "criteria": f'=${fc.intotal_l}{first_row + 1}="{val}"',
-                    "format": fmt[key],
-                })
+                ws.conditional_format(
+                    first_row,
+                    ic0,
+                    last_row,
+                    ic0,
+                    {
+                        "type": "formula",
+                        "criteria": f'=${fc.intotal_l}{first_row + 1}="{val}"',
+                        "format": fmt[key],
+                    },
+                )
     or_parts = ",".join(f'${lt}{first_row + 1}="Y"' for lt in intotal_letters)
     and_parts = ",".join(f'${lt}{first_row + 1}="N"' for lt in intotal_letters)
-    ws.conditional_format(first_row, 0, last_row, fixed_count - 1, {
-        "type": "formula", "criteria": f"=OR({or_parts})", "format": fmt["cf_bold"],
-    })
-    ws.conditional_format(first_row, 0, last_row, fixed_count - 1, {
-        "type": "formula", "criteria": f"=AND({and_parts})", "format": fmt["cf_italic_gray"],
-    })
+    ws.conditional_format(
+        first_row,
+        0,
+        last_row,
+        fixed_count - 1,
+        {
+            "type": "formula",
+            "criteria": f"=OR({or_parts})",
+            "format": fmt["cf_bold"],
+        },
+    )
+    ws.conditional_format(
+        first_row,
+        0,
+        last_row,
+        fixed_count - 1,
+        {
+            "type": "formula",
+            "criteria": f"=AND({and_parts})",
+            "format": fmt["cf_italic_gray"],
+        },
+    )
 
 
 def build_keyword_xlsx(
@@ -186,12 +235,27 @@ def build_keyword_xlsx(
         pe_has_r2_match = set()
 
     # Compute FY column stride and per-year column positions (1-based)
-    fy_stride = (1 + int(include_intotal) + int(include_source)
-                 + int(include_description) + int(include_desc_keywords))
+    fy_stride = (
+        1
+        + int(include_intotal)
+        + int(include_source)
+        + int(include_description)
+        + int(include_desc_keywords)
+    )
 
     class _FyCols:
-        __slots__ = ("val", "intotal", "src", "desc", "desc_kw",
-                     "val_l", "intotal_l", "src_l", "desc_l", "desc_kw_l")
+        __slots__ = (
+            "val",
+            "intotal",
+            "src",
+            "desc",
+            "desc_kw",
+            "val_l",
+            "intotal_l",
+            "src_l",
+            "desc_l",
+            "desc_kw_l",
+        )
 
         def __init__(self, fy_idx: int) -> None:
             base = fixed_count + (fy_idx * fy_stride) + 1
@@ -239,14 +303,27 @@ def build_keyword_xlsx(
     }
 
     # ── Headers: two-row layout with merged FY cells ──
-    fmt_merge = wb.add_format({
-        "bold": True, "font_size": 11, "font_color": "#FFFFFF",
-        "bg_color": "#2C3E50", "align": "center", "valign": "vcenter", "border": 1,
-    })
-    fmt_sub = wb.add_format({
-        "bold": True, "font_size": 10, "font_color": "#FFFFFF",
-        "bg_color": "#34495E", "align": "center", "border": 1,
-    })
+    fmt_merge = wb.add_format(
+        {
+            "bold": True,
+            "font_size": 11,
+            "font_color": "#FFFFFF",
+            "bg_color": "#2C3E50",
+            "align": "center",
+            "valign": "vcenter",
+            "border": 1,
+        }
+    )
+    fmt_sub = wb.add_format(
+        {
+            "bold": True,
+            "font_size": 10,
+            "font_color": "#FFFFFF",
+            "bg_color": "#34495E",
+            "align": "center",
+            "border": 1,
+        }
+    )
 
     sub_col_names = ["($K)"]
     if include_intotal:
@@ -259,7 +336,13 @@ def build_keyword_xlsx(
         sub_col_names.append("Keywords")
 
     headers = _write_merged_fy_headers(
-        ws, fixed_columns, active_years, fixed_count, sub_col_names, fmt_merge, fmt_sub,
+        ws,
+        fixed_columns,
+        active_years,
+        fixed_count,
+        sub_col_names,
+        fmt_merge,
+        fmt_sub,
     )
 
     # ── Data rows (row_num is 1-based for formula references, data starts row 3) ──
@@ -340,18 +423,28 @@ def build_keyword_xlsx(
     if include_intotal and last_data_row >= first_data_row:
         for fc in fy_cols:
             ws.data_validation(
-                first_data_row - 1, fc.intotal - 1,
-                last_data_row - 1, fc.intotal - 1,
-                {"validate": "list", "source": ["Y", "N", "P"],
-                 "error_message": "Please enter Y, N, or P",
-                 "error_title": "Invalid value"},
+                first_data_row - 1,
+                fc.intotal - 1,
+                last_data_row - 1,
+                fc.intotal - 1,
+                {
+                    "validate": "list",
+                    "source": ["Y", "N", "P"],
+                    "error_message": "Please enter Y, N, or P",
+                    "error_title": "Invalid value",
+                },
             )
 
     # ── Conditional formatting ──
     if include_intotal and last_data_row >= first_data_row and active_years:
         _apply_fy_conditional_formatting(
-            ws, fy_cols, intotal_letters, fixed_count,
-            first_data_row - 1, last_data_row - 1, fmt,
+            ws,
+            fy_cols,
+            intotal_letters,
+            fixed_count,
+            first_data_row - 1,
+            last_data_row - 1,
+            fmt,
         )
 
     # ── Totals rows ──
@@ -365,17 +458,27 @@ def build_keyword_xlsx(
             it_rng = f"${fc.intotal_l}${first_data_row}:${fc.intotal_l}${last_data_row}"
             for tr, label, criteria in [(y_row, "Y Sum", "Y"), (p_row, "P Sum", "P")]:
                 ws.write(tr - 1, fc.intotal - 1, label, fmt["total"])
-                ws.write_formula(tr - 1, fc.val - 1,
-                                 f'=SUMIF({it_rng},"{criteria}",{val_rng})', fmt["total_money"])
+                ws.write_formula(
+                    tr - 1,
+                    fc.val - 1,
+                    f'=SUMIF({it_rng},"{criteria}",{val_rng})',
+                    fmt["total_money"],
+                )
             ws.write(grand_row - 1, fc.intotal - 1, "Grand Sum", fmt["total"])
-            ws.write_formula(grand_row - 1, fc.val - 1,
-                             f"={fc.val_l}{y_row}+{fc.val_l}{p_row}", fmt["total_money"])
+            ws.write_formula(
+                grand_row - 1,
+                fc.val - 1,
+                f"={fc.val_l}{y_row}+{fc.val_l}{p_row}",
+                fmt["total_money"],
+            )
     elif last_data_row >= first_data_row and active_years:
         totals_row = row_num
         ws.write(totals_row - 1, 0, "TOTALS", fmt["total"])
         for fc in fy_cols:
             vr = f"${fc.val_l}${first_data_row}:${fc.val_l}${last_data_row}"
-            ws.write_formula(totals_row - 1, fc.val - 1, f"=SUM({vr})", fmt["total_money"])
+            ws.write_formula(
+                totals_row - 1, fc.val - 1, f"=SUM({vr})", fmt["total_money"]
+            )
 
     # ── Column widths ──
     _set_fy_column_widths(ws, fixed_columns, fy_cols)
@@ -389,7 +492,13 @@ def build_keyword_xlsx(
         ws_sel = wb.add_worksheet("Selected")
 
         _write_merged_fy_headers(
-            ws_sel, fixed_columns, active_years, fixed_count, sub_col_names, fmt_merge, fmt_sub,
+            ws_sel,
+            fixed_columns,
+            active_years,
+            fixed_count,
+            sub_col_names,
+            fmt_merge,
+            fmt_sub,
         )
 
         # FILTER formula: show rows where ANY In Total column = "Y" or "P"
@@ -400,27 +509,46 @@ def build_keyword_xlsx(
                 it_col = f"'{sheet_title}'!${fc.intotal_l}${first_data_row}:${fc.intotal_l}${last_data_row}"
                 it_checks.append(f'({it_col}="Y")+({it_col}="P")')
         filter_crit = "+".join(it_checks)
-        filter_formula = f"=FILTER({data_range},{filter_crit},\"No matching rows\")"
+        filter_formula = f'=FILTER({data_range},{filter_crit},"No matching rows")'
         ws_sel.write_dynamic_array_formula(2, 0, 2, 0, filter_formula, fmt["base"])
 
-        _set_fy_column_widths(ws_sel, fixed_columns, fy_cols, base_money_fmt=fmt["base_money"])
+        _set_fy_column_widths(
+            ws_sel, fixed_columns, fy_cols, base_money_fmt=fmt["base_money"]
+        )
         if intotal_letters and last_data_row >= first_data_row:
             _apply_fy_conditional_formatting(
-                ws_sel, fy_cols, intotal_letters, fixed_count, 2, SPILL_MAX_ROW, fmt,
+                ws_sel,
+                fy_cols,
+                intotal_letters,
+                fixed_count,
+                2,
+                SPILL_MAX_ROW,
+                fmt,
             )
 
         ws_sel.freeze_panes(2, freeze_col - 1)
 
     # ── Summary sheets ──
     if build_summary and include_intotal:
-        field_to_col = {field: _col_letter(ci) for ci, (_h, field) in enumerate(fixed_columns, 1)}
+        field_to_col = {
+            field: _col_letter(ci) for ci, (_h, field) in enumerate(fixed_columns, 1)
+        }
         val_letters = [fc.val_l for fc in fy_cols]
         it_letters = [fc.intotal_l for fc in fy_cols]
         _build_xlsx_summary(
-            wb, items, active_years, sheet_title,
-            field_to_col, val_letters, it_letters,
-            first_data_row, last_data_row, fmt,
-            keywords=keywords, fmt_merge=fmt_merge, fmt_sub=fmt_sub,
+            wb,
+            items,
+            active_years,
+            sheet_title,
+            field_to_col,
+            val_letters,
+            it_letters,
+            first_data_row,
+            last_data_row,
+            fmt,
+            keywords=keywords,
+            fmt_merge=fmt_merge,
+            fmt_sub=fmt_sub,
         )
 
     # ── Keyword co-occurrence matrix ──
@@ -456,17 +584,27 @@ def _build_xlsx_summary(
     n_years = len(active_years)
 
     pr = f"'{ds}'!${pe_col}${first_data_row}:${pe_col}${last_data_row}"
-    vr = [f"'{ds}'!${val_letters[yi]}${first_data_row}:${val_letters[yi]}${last_data_row}" for yi in range(n_years)]
-    ir = [f"'{ds}'!${intotal_letters[yi]}${first_data_row}:${intotal_letters[yi]}${last_data_row}" for yi in range(n_years)]
+    vr = [
+        f"'{ds}'!${val_letters[yi]}${first_data_row}:${val_letters[yi]}${last_data_row}"
+        for yi in range(n_years)
+    ]
+    ir = [
+        f"'{ds}'!${intotal_letters[yi]}${first_data_row}:${intotal_letters[yi]}${last_data_row}"
+        for yi in range(n_years)
+    ]
 
     if fmt is None:
         sty = xlsx_base_styles()
         fmt = {
             "header": wb.add_format(sty["header"]),
             "base": wb.add_format(sty["base"]),
-            "base_money": wb.add_format({**sty["base"], "num_format": sty["money_fmt"]}),
+            "base_money": wb.add_format(
+                {**sty["base"], "num_format": sty["money_fmt"]}
+            ),
             "total": wb.add_format(sty["total"]),
-            "total_money": wb.add_format({**sty["total"], "num_format": sty["money_fmt"]}),
+            "total_money": wb.add_format(
+                {**sty["total"], "num_format": sty["money_fmt"]}
+            ),
         }
 
     # Pre-compute PE→title map for PE Summary sheet (single pass, R-1 wins)
@@ -482,16 +620,28 @@ def _build_xlsx_summary(
 
     # Reuse caller's format objects if provided; create fallbacks otherwise
     if fmt_merge is None:
-        fmt_merge = wb.add_format({
-            "bold": True, "font_size": 11, "font_color": "#FFFFFF",
-            "bg_color": "#2C3E50", "align": "center", "valign": "vcenter",
-            "border": 1,
-        })
+        fmt_merge = wb.add_format(
+            {
+                "bold": True,
+                "font_size": 11,
+                "font_color": "#FFFFFF",
+                "bg_color": "#2C3E50",
+                "align": "center",
+                "valign": "vcenter",
+                "border": 1,
+            }
+        )
     if fmt_sub is None:
-        fmt_sub = wb.add_format({
-            "bold": True, "font_size": 10, "font_color": "#FFFFFF",
-            "bg_color": "#34495E", "align": "center", "border": 1,
-        })
+        fmt_sub = wb.add_format(
+            {
+                "bold": True,
+                "font_size": 10,
+                "font_color": "#FFFFFF",
+                "bg_color": "#34495E",
+                "align": "center",
+                "border": 1,
+            }
+        )
 
     def _write_summary_sheet(
         sheet_name: str,
@@ -511,12 +661,16 @@ def _build_xlsx_summary(
         mr = match_rng or pr
         unique_expr = f"SORT(UNIQUE({mr}))"
 
-        sumifs_y_all = "+".join(f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"Y\")" for yi in range(n_years))
-        sumifs_p_all = "+".join(f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"P\")" for yi in range(n_years))
+        sumifs_y_all = "+".join(
+            f'SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},"Y")' for yi in range(n_years)
+        )
+        sumifs_p_all = "+".join(
+            f'SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},"P")' for yi in range(n_years)
+        )
         filtered = (
             f"FILTER({unique_expr},"
             f"MAP({unique_expr},LAMBDA(_xlpm.v,{sumifs_y_all}+{sumifs_p_all}))<>0,"
-            f"\"(none)\")"
+            f'"(none)")'
         )
 
         # Column A: label (PE Number or dimension name)
@@ -542,7 +696,10 @@ def _build_xlsx_summary(
             pe_lk = f"${_col_letter(lk_col_pe + 1)}$1:${_col_letter(lk_col_pe + 1)}${lk_count}"
             ti_lk = f"${_col_letter(lk_col_title + 1)}$1:${_col_letter(lk_col_title + 1)}${lk_count}"
             ws.write_dynamic_array_formula(
-                3, col, 3, col,
+                3,
+                col,
+                3,
+                col,
                 f"=MAP({filtered},LAMBDA(_xlpm.v,IFERROR(INDEX({ti_lk},MATCH(_xlpm.v,{pe_lk},0)),_xlpm.v)))",
                 fmt["base"],
             )
@@ -561,54 +718,70 @@ def _build_xlsx_summary(
             # Merged FY header across 3 columns
             ws.merge_range(0, col, 0, col + 2, f"FY{yr} ($K)", fmt_merge)
 
-            for ci, (sub_label, crit) in enumerate([("Y", "Y"), ("P", "P"), ("Total", None)]):
+            for ci, (sub_label, crit) in enumerate(
+                [("Y", "Y"), ("P", "P"), ("Total", None)]
+            ):
                 c = col + ci
                 ws.write(1, c, sub_label, fmt_sub)
 
                 if crit:
-                    ws.write_formula(2, c,
-                                     f'=SUMPRODUCT(({ir[yi]}="{crit}")*{vr[yi]})',
-                                     fmt["total_money"])
+                    ws.write_formula(
+                        2,
+                        c,
+                        f'=SUMPRODUCT(({ir[yi]}="{crit}")*{vr[yi]})',
+                        fmt["total_money"],
+                    )
                     formula = (
                         f"=MAP({filtered},"
-                        f"LAMBDA(_xlpm.v,SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"{crit}\")))"
+                        f'LAMBDA(_xlpm.v,SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},"{crit}")))'
                     )
                     if crit == "Y":
-                        row_tot_y.append(f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"Y\")")
+                        row_tot_y.append(f'SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},"Y")')
                     else:
-                        row_tot_p.append(f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"P\")")
+                        row_tot_p.append(f'SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},"P")')
                 else:
-                    ws.write_formula(2, c,
-                                     f'=SUMPRODUCT(({ir[yi]}="Y")*{vr[yi]})+SUMPRODUCT(({ir[yi]}="P")*{vr[yi]})',
-                                     fmt["total_money"])
+                    ws.write_formula(
+                        2,
+                        c,
+                        f'=SUMPRODUCT(({ir[yi]}="Y")*{vr[yi]})+SUMPRODUCT(({ir[yi]}="P")*{vr[yi]})',
+                        fmt["total_money"],
+                    )
                     formula = (
                         f"=MAP({filtered},"
                         f"LAMBDA(_xlpm.v,"
-                        f"SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"Y\")"
-                        f"+SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},\"P\")))"
+                        f'SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},"Y")'
+                        f'+SUMIFS({vr[yi]},{mr},_xlpm.v,{ir[yi]},"P")))'
                     )
 
                 ws.write_dynamic_array_formula(3, c, 3, c, formula, fmt["base_money"])
-                ws.set_column(c, c, 14, fmt["base_money"])  # default format for spill rows
+                ws.set_column(
+                    c, c, 14, fmt["base_money"]
+                )  # default format for spill rows
 
             col += 3
 
         # Row Total group: Y, P, Total (same 3-column pattern)
         ws.merge_range(0, col, 0, col + 2, "Row Total ($K)", fmt_merge)
 
-        for ci, (sub_label, parts_y, parts_p) in enumerate([
-            ("Y", row_tot_y, []),
-            ("P", [], row_tot_p),
-            ("Total", row_tot_y, row_tot_p),
-        ]):
+        for ci, (sub_label, parts_y, parts_p) in enumerate(
+            [
+                ("Y", row_tot_y, []),
+                ("P", [], row_tot_p),
+                ("Total", row_tot_y, row_tot_p),
+            ]
+        ):
             c = col + ci
             ws.write(1, c, sub_label, fmt_sub)
 
             if sub_label == "Y":
-                sp = "+".join(f'SUMPRODUCT(({ir[yi]}="Y")*{vr[yi]})' for yi in range(n_years))
+                sp = "+".join(
+                    f'SUMPRODUCT(({ir[yi]}="Y")*{vr[yi]})' for yi in range(n_years)
+                )
                 sumifs = "+".join(parts_y)
             elif sub_label == "P":
-                sp = "+".join(f'SUMPRODUCT(({ir[yi]}="P")*{vr[yi]})' for yi in range(n_years))
+                sp = "+".join(
+                    f'SUMPRODUCT(({ir[yi]}="P")*{vr[yi]})' for yi in range(n_years)
+                )
                 sumifs = "+".join(parts_p)
             else:
                 sp = "+".join(
@@ -619,7 +792,10 @@ def _build_xlsx_summary(
 
             ws.write_formula(2, c, f"={sp}", fmt["total_money"])
             ws.write_dynamic_array_formula(
-                3, c, 3, c,
+                3,
+                c,
+                3,
+                c,
                 f"=MAP({filtered},LAMBDA(_xlpm.v,{sumifs}))",
                 fmt["base_money"],
             )
@@ -632,7 +808,9 @@ def _build_xlsx_summary(
 
     # Dimension summaries
     svc_col = field_to_col.get("organization_name")
-    ba_col = field_to_col.get("budget_activity_norm") or field_to_col.get("budget_activity_title")
+    ba_col = field_to_col.get("budget_activity_norm") or field_to_col.get(
+        "budget_activity_title"
+    )
     com_col = field_to_col.get("color_of_money")
 
     for sheet_name, label, dcol in [
@@ -646,7 +824,6 @@ def _build_xlsx_summary(
         _write_summary_sheet(sheet_name, label_col=label, match_rng=dim_rng)
 
     _build_xlsx_about_sheet(wb, items, ds, keywords)
-
 
 
 def _build_xlsx_about_sheet(
@@ -678,46 +855,84 @@ def _build_xlsx_about_sheet(
     ws.write(r, 0, "Total rows", fmt_label)
     ws.write(r, 1, len(items), fmt_text)
     r += 1
-    matching = sum(1 for row in items if row.get("matched_keywords_row") or row.get("matched_keywords_desc"))
+    matching = sum(
+        1
+        for row in items
+        if row.get("matched_keywords_row") or row.get("matched_keywords_desc")
+    )
     ws.write(r, 0, "Matching rows", fmt_label)
     ws.write(r, 1, matching, fmt_text)
     r += 1
-    unique_pe_count = len({row.get("pe_number") for row in items if row.get("pe_number")})
+    unique_pe_count = len(
+        {row.get("pe_number") for row in items if row.get("pe_number")}
+    )
     ws.write(r, 0, "Unique PEs", fmt_label)
     ws.write(r, 1, unique_pe_count, fmt_text)
     r += 2
 
     ws.write(r, 0, "Data Source", fmt_section)
     r += 1
-    ws.write(r, 0, "DoD Comptroller budget justification documents: Excel R-1/R-2 exhibits "
-             "and PDF-mined R-2/R-2A sub-element pages. All amounts in thousands of dollars ($K).", fmt_text)
+    ws.write(
+        r,
+        0,
+        "DoD Comptroller budget justification documents: Excel R-1/R-2 exhibits "
+        "and PDF-mined R-2/R-2A sub-element pages. All amounts in thousands of dollars ($K).",
+        fmt_text,
+    )
     r += 2
 
     ws.write(r, 0, "Y/N/P Methodology", fmt_section)
     r += 1
     ws.write(r, 0, "Y (Yes)", fmt_label)
-    ws.write(r, 1, "Row directly matches one or more search keywords. Included in Y totals.", fmt_text)
+    ws.write(
+        r,
+        1,
+        "Row directly matches one or more search keywords. Included in Y totals.",
+        fmt_text,
+    )
     r += 1
     ws.write(r, 0, "N (No)", fmt_label)
-    ws.write(r, 1, "Row included for PE context but does not directly match keywords. Excluded from totals.", fmt_text)
+    ws.write(
+        r,
+        1,
+        "Row included for PE context but does not directly match keywords. Excluded from totals.",
+        fmt_text,
+    )
     r += 1
     ws.write(r, 0, "P (Possible)", fmt_label)
-    ws.write(r, 1, "User-assigned flag for rows that may be relevant. Change N\u2192P in the data sheet "
-             "and the summary sheets will update automatically.", fmt_text)
+    ws.write(
+        r,
+        1,
+        "User-assigned flag for rows that may be relevant. Change N\u2192P in the data sheet "
+        "and the summary sheets will update automatically.",
+        fmt_text,
+    )
     r += 2
 
     ws.write(r, 0, "Sheet Descriptions", fmt_section)
     r += 1
     sheets_desc = [
-        (data_sheet_name, "Raw data with per-year In Total (Y/N/P) flags, conditional formatting, "
-         "and data validation. Change flags here to update all summary sheets."),
-        ("PE Summary", "Pivot by Program Element. Shows only PEs with non-zero Y+P totals. "
-         "Includes PE title lookup. Columns: Y/P/Total per fiscal year."),
+        (
+            data_sheet_name,
+            "Raw data with per-year In Total (Y/N/P) flags, conditional formatting, "
+            "and data validation. Change flags here to update all summary sheets.",
+        ),
+        (
+            "PE Summary",
+            "Pivot by Program Element. Shows only PEs with non-zero Y+P totals. "
+            "Includes PE title lookup. Columns: Y/P/Total per fiscal year.",
+        ),
         ("By Service", "Pivot by Service/Agency (Army, Navy, Air Force, etc.)."),
         ("By Budget Activity", "Pivot by Budget Activity category."),
-        ("By Color of Money", "Pivot by appropriation type (RDT&E, Procurement, etc.)."),
-        ("Keyword Matrix", "NxN co-occurrence table showing how often each pair of search "
-         "keywords appears together in the same row."),
+        (
+            "By Color of Money",
+            "Pivot by appropriation type (RDT&E, Procurement, etc.).",
+        ),
+        (
+            "Keyword Matrix",
+            "NxN co-occurrence table showing how often each pair of search "
+            "keywords appears together in the same row.",
+        ),
     ]
     for sname, sdesc in sheets_desc:
         ws.write(r, 0, sname, fmt_label)
@@ -764,12 +979,20 @@ def _build_keyword_matrix(
 
     ws = wb.add_worksheet("Keyword Matrix")
 
-    fmt_header_rot = wb.add_format({
-        "bold": True, "font_size": 11, "font_color": "#FFFFFF",
-        "bg_color": "#2C3E50", "align": "center", "rotation": 90,
-    })
+    fmt_header_rot = wb.add_format(
+        {
+            "bold": True,
+            "font_size": 11,
+            "font_color": "#FFFFFF",
+            "bg_color": "#2C3E50",
+            "align": "center",
+            "rotation": 90,
+        }
+    )
     fmt_center = wb.add_format({"font_size": 10, "align": "center"})
-    fmt_diag = wb.add_format({"bold": True, "font_size": 11, "bg_color": "#D6E4F0", "align": "center"})
+    fmt_diag = wb.add_format(
+        {"bold": True, "font_size": 11, "bg_color": "#D6E4F0", "align": "center"}
+    )
 
     kw_lower = [kw.lower() for kw in keywords]
     kw_display = list(keywords)
@@ -811,5 +1034,3 @@ def _build_keyword_matrix(
     ws.set_column(0, 0, 28)
     ws.set_column(1, len(active) + 1, 6)
     ws.freeze_panes(1, 1)
-
-
