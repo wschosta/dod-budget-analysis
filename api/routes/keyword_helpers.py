@@ -12,6 +12,7 @@ from typing import Any
 
 from utils.normalization import BA_CANONICAL, R2_JUNK_TITLES
 from utils.patterns import PE_NUMBER_STRICT_CI, PE_SUFFIX_PATTERN  # noqa: F401 (PE_NUMBER_STRICT_CI re-exported)
+from utils.query import make_placeholders
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -38,7 +39,7 @@ SKIP_RAW_TITLES = frozenset(t.lower() for t in R2_JUNK_TITLES) | {"page"}
 def in_clause(params: list | set) -> tuple[str, list]:
     """Return ``'?,?,?'`` placeholder string and flat param list."""
     p = list(params)
-    return ", ".join("?" for _ in p), p
+    return make_placeholders(p), p
 
 
 def like_clauses(columns: list[str], keywords: list[str]) -> tuple[str, list[str]]:

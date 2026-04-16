@@ -3,7 +3,7 @@
 import pytest
 
 from utils.fuzzy_match import (
-    _levenshtein_distance,
+    levenshtein_distance,
     _max_edit_distance,
     expand_keywords,
     find_matched_keywords_fuzzy,
@@ -14,36 +14,36 @@ from utils.fuzzy_match import (
 
 class TestLevenshteinDistance:
     def test_identical_strings(self):
-        assert _levenshtein_distance("abc", "abc") == 0
+        assert levenshtein_distance("abc", "abc") == 0
 
     def test_empty_strings(self):
-        assert _levenshtein_distance("", "") == 0
+        assert levenshtein_distance("", "") == 0
 
     def test_one_empty(self):
-        assert _levenshtein_distance("abc", "") == 3
-        assert _levenshtein_distance("", "xyz") == 3
+        assert levenshtein_distance("abc", "") == 3
+        assert levenshtein_distance("", "xyz") == 3
 
     def test_single_substitution(self):
-        assert _levenshtein_distance("cat", "bat") == 1
+        assert levenshtein_distance("cat", "bat") == 1
 
     def test_single_insertion(self):
-        assert _levenshtein_distance("cat", "cats") == 1
+        assert levenshtein_distance("cat", "cats") == 1
 
     def test_single_deletion(self):
-        assert _levenshtein_distance("cats", "cat") == 1
+        assert levenshtein_distance("cats", "cat") == 1
 
     def test_symmetric(self):
         """Distance should be the same regardless of argument order."""
-        assert _levenshtein_distance("kitten", "sitting") == _levenshtein_distance(
+        assert levenshtein_distance("kitten", "sitting") == levenshtein_distance(
             "sitting", "kitten"
         )
 
     def test_known_distance(self):
         # "kitten" → "sitting": 3 operations
-        assert _levenshtein_distance("kitten", "sitting") == 3
+        assert levenshtein_distance("kitten", "sitting") == 3
 
     def test_completely_different(self):
-        assert _levenshtein_distance("abc", "xyz") == 3
+        assert levenshtein_distance("abc", "xyz") == 3
 
 
 class TestMaxEditDistance:
