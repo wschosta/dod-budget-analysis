@@ -883,52 +883,39 @@ def _build_xlsx_about_sheet(
 
     ws.write(r, 0, "Y/N/P Methodology", fmt_section)
     r += 1
-    ws.write(r, 0, "", fmt_label)
-    ws.write(
-        r,
-        1,
-        "Each fiscal-year cell is independently flagged Y, N, P, or left blank.",
-        fmt_text,
-    )
+    ynp_defs = [
+        (
+            "",
+            "Each fiscal-year cell is independently flagged Y, N, P, or left blank.",
+        ),
+        (
+            "Y (Yes)",
+            "The row\u2019s title fields or the PE\u2019s description text for that fiscal year "
+            "match one or more search keywords. Included in Y totals.",
+        ),
+        (
+            "N (No)",
+            "The fiscal year has a non-zero amount but no keyword match. "
+            "Excluded from Y totals.",
+        ),
+        (
+            "P (Possible)",
+            "Assigned automatically in two cases: (1) R-1 summary rows are capped at P "
+            "when their R-2 detail rows already carry Y matches, preventing double-counting; "
+            "(2) if any FY in a row is Y, the remaining N cells in that row are promoted to P. "
+            "You can also manually change N\u2192P in the data sheet \u2014 summary sheets update "
+            "automatically.",
+        ),
+        (
+            "Blank",
+            "The fiscal year has no amount (or $0 with no source reference). Not counted.",
+        ),
+    ]
+    for label, desc in ynp_defs:
+        ws.write(r, 0, label, fmt_label)
+        ws.write(r, 1, desc, fmt_text)
+        r += 1
     r += 1
-    ws.write(r, 0, "Y (Yes)", fmt_label)
-    ws.write(
-        r,
-        1,
-        "The row\u2019s title fields or the PE\u2019s description text for that fiscal year "
-        "match one or more search keywords. Included in Y totals.",
-        fmt_text,
-    )
-    r += 1
-    ws.write(r, 0, "N (No)", fmt_label)
-    ws.write(
-        r,
-        1,
-        "The fiscal year has a non-zero amount but no keyword match. "
-        "Excluded from Y totals.",
-        fmt_text,
-    )
-    r += 1
-    ws.write(r, 0, "P (Possible)", fmt_label)
-    ws.write(
-        r,
-        1,
-        "Assigned automatically in two cases: (1) R-1 summary rows are capped at P "
-        "when their R-2 detail rows already carry Y matches, preventing double-counting; "
-        "(2) if any FY in a row is Y, the remaining N cells in that row are promoted to P. "
-        "You can also manually change N\u2192P in the data sheet \u2014 summary sheets update "
-        "automatically.",
-        fmt_text,
-    )
-    r += 1
-    ws.write(r, 0, "Blank", fmt_label)
-    ws.write(
-        r,
-        1,
-        "The fiscal year has no amount (or $0 with no source reference). Not counted.",
-        fmt_text,
-    )
-    r += 2
 
     ws.write(r, 0, "Sheet Descriptions", fmt_section)
     r += 1
@@ -964,13 +951,11 @@ def _build_xlsx_about_sheet(
     ws.write(r, 0, "Caveats", fmt_section)
     r += 1
     caveats = [
-        "PDF-mined rows (e.g. r2_pdf, p5_pdf) may show 'Unknown' for Budget Activity "
+        "PDF-mined rows (exhibit_type r2_pdf) may show 'Unknown' for Budget Activity "
         "or Color of Money when the source document lacks structured metadata.",
         "Amounts are in thousands of dollars ($K). Multiply by 1,000 for actual dollar values.",
         "Non-matching rows (N) are included because their parent PE matched a keyword. "
         "They provide context but are excluded from Y totals.",
-        "R-1 summary rows are capped at P when R-2 detail rows already carry Y matches. "
-        "This prevents double-counting, since R-1 totals include R-2 dollars.",
         "Summary sheets use Excel 365 dynamic array formulas (FILTER, MAP, LAMBDA). "
         "They require Microsoft 365 or Excel 2021+.",
     ]
