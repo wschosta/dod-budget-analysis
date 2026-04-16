@@ -23,6 +23,7 @@ from api.routes.keyword_helpers import (
     in_clause,
 )
 from pipeline.r2_cost_parser import parse_r2_cost_table
+from utils.config import EXHIBIT_R1, EXHIBIT_R2
 from utils.normalization import clean_r2_title, normalize_r2_project_code
 from utils.strings import clean_narrative
 
@@ -333,7 +334,7 @@ def annotate_cross_pe_lineages(
     rows = conn.execute(f"""
         SELECT id, pe_number, line_item_title
         FROM {cache_table}
-        WHERE exhibit_type = 'r2'
+        WHERE exhibit_type = '{EXHIBIT_R2}'
     """).fetchall()
 
     if not rows:
@@ -379,7 +380,7 @@ def annotate_cross_pe_lineages(
 # ── R-1 stub enrichment helpers ──────────────────────────────────────────────
 
 
-def _extract_r1_titles_for_stubs(
+def extract_r1_titles_for_stubs(
     conn: sqlite3.Connection,
     cache_table: str,
     pdf_only_pes: set[str],
@@ -421,7 +422,7 @@ def _extract_r1_titles_for_stubs(
     # Batch-fetch current cache titles for all PEs
     cache_rows = conn.execute(
         f"SELECT pe_number, line_item_title FROM {cache_table} "
-        f"WHERE pe_number IN ({ph}) AND exhibit_type = 'r1'",
+        f"WHERE pe_number IN ({ph}) AND exhibit_type = '{EXHIBIT_R1}'",
         pe_params,
     ).fetchall()
     current_titles = {r[0]: r[1] for r in cache_rows}
@@ -457,12 +458,12 @@ def _extract_r1_titles_for_stubs(
     if update_batch:
         conn.executemany(
             f"UPDATE {cache_table} SET line_item_title = ? "
-            f"WHERE pe_number = ? AND exhibit_type = 'r1' AND line_item_title = ?",
+            f"WHERE pe_number = ? AND exhibit_type = '{EXHIBIT_R1}' AND line_item_title = ?",
             update_batch,
         )
 
 
-def _aggregate_r2_funding_into_r1_stubs(
+def aggregate_r2_funding_into_r1_stubs(
     conn: sqlite3.Connection,
     cache_table: str,
     year_range: list[int],
@@ -482,12 +483,12 @@ def _aggregate_r2_funding_into_r1_stubs(
     result = conn.execute(
         f"WITH sums AS ("
         f"  SELECT pe_number, {sum_cols} FROM {cache_table} "
-        f"  WHERE exhibit_type = 'r2' GROUP BY pe_number"
+        f"  WHERE exhibit_type = '{EXHIBIT_R2}' GROUP BY pe_number"
         f") "
         f"UPDATE {cache_table} AS stub SET {set_sql} "
         f"FROM sums "
         f"WHERE stub.pe_number = sums.pe_number "
-        f"AND stub.exhibit_type = 'r1' AND ({null_check})"
+        f"AND stub.exhibit_type = '{EXHIBIT_R1}' AND ({null_check})"
     )
 
     if result.rowcount:

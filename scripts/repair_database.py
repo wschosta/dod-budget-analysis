@@ -36,6 +36,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from utils.config import CORE_SUMMARY_TYPES  # noqa: E402
+from utils.query import make_placeholders  # noqa: E402
 from utils.normalization import (  # noqa: E402
     APPROPRIATION_KEYWORDS as _APPROPRIATION_KEYWORDS,
     ORG_NORMALIZE as _ORG_NORMALIZE,
@@ -140,9 +141,8 @@ def step_3_normalize_org_names(conn: sqlite3.Connection, dry_run: bool = False) 
         return 0
 
     # Count affected rows first
-    placeholders = ",".join("?" * len(in_values))
     count_row = conn.execute(
-        f"SELECT COUNT(*) FROM budget_lines WHERE organization_name IN ({placeholders})",
+        f"SELECT COUNT(*) FROM budget_lines WHERE organization_name IN ({make_placeholders(in_values)})",
         in_values,
     ).fetchone()
     affected = count_row[0] if count_row else 0
@@ -159,7 +159,7 @@ def step_3_normalize_org_names(conn: sqlite3.Connection, dry_run: bool = False) 
     sql = (
         f"UPDATE budget_lines SET organization_name = CASE {case_sql} "
         f"ELSE organization_name END "
-        f"WHERE organization_name IN ({placeholders})"
+        f"WHERE organization_name IN ({make_placeholders(in_values)})"
     )
     conn.execute(sql, params + in_values)
     conn.commit()
@@ -385,20 +385,6 @@ def step_8_backfill_pe_numbers(conn: sqlite3.Connection, dry_run: bool = False) 
               AND pb.organization_name = budget_lines.organization_name
               AND pb.fiscal_year = budget_lines.fiscal_year
           )
-          AND NOT EXISTS (
-            SELECT 1 FROM budget_lines existing
-            JOIN _pe_backfill pb
-              ON pb.line_item_title = budget_lines.line_item_title
-              AND pb.organization_name = budget_lines.organization_name
-              AND pb.fiscal_year = budget_lines.fiscal_year
-            WHERE existing.appropriation_code = budget_lines.appropriation_code
-              AND existing.fiscal_year = budget_lines.fiscal_year
-              AND existing.pe_number = pb.pe
-              AND existing.line_item_title = budget_lines.line_item_title
-              AND existing.organization_name = budget_lines.organization_name
-              AND existing.exhibit_type = budget_lines.exhibit_type
-              AND existing.amount_type = budget_lines.amount_type
-          )
     """)
 
     conn.execute("DROP TABLE IF EXISTS _pe_backfill")
@@ -501,8 +487,7 @@ def step_9_clean_header_leaked_descriptions(
             # Batch delete
             for i in range(0, len(delete_ids), 10000):
                 batch = delete_ids[i:i + 10000]
-                placeholders = ",".join("?" for _ in batch)
-                conn.execute(f"DELETE FROM {table} WHERE id IN ({placeholders})", batch)
+                conn.execute(f"DELETE FROM {table} WHERE id IN ({make_placeholders(batch)})", batch)
             # Batch update
             for i in range(0, len(update_pairs), 10000):
                 batch = update_pairs[i:i + 10000]
@@ -526,10 +511,9 @@ def step_10_clean_r2_metadata_rows(
     logger.info("Step 10: Cleaning R-2 PDF metadata/aggregation rows...")
 
     # Count exact-match labels
-    placeholders = ",".join("?" for _ in _R2_SKIP_LABELS)
     exact_count = conn.execute(
         f"SELECT COUNT(*) FROM budget_lines"
-        f" WHERE exhibit_type = 'r2_pdf' AND line_item_title IN ({placeholders})",
+        f" WHERE exhibit_type = 'r2_pdf' AND line_item_title IN ({make_placeholders(list(_R2_SKIP_LABELS))})",
         list(_R2_SKIP_LABELS),
     ).fetchone()[0]
 
@@ -550,7 +534,7 @@ def step_10_clean_r2_metadata_rows(
     if not dry_run and total > 0:
         conn.execute(
             f"DELETE FROM budget_lines"
-            f" WHERE exhibit_type = 'r2_pdf' AND line_item_title IN ({placeholders})",
+            f" WHERE exhibit_type = 'r2_pdf' AND line_item_title IN ({make_placeholders(list(_R2_SKIP_LABELS))})",
             list(_R2_SKIP_LABELS),
         )
         conn.execute(

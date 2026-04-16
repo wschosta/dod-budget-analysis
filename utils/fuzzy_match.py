@@ -35,10 +35,10 @@ def expand_keywords(keywords: list[str]) -> list[str]:
     return expanded
 
 
-def _levenshtein_distance(s1: str, s2: str) -> int:
+def levenshtein_distance(s1: str, s2: str) -> int:
     """Compute Levenshtein edit distance between two strings."""
     if len(s1) < len(s2):
-        return _levenshtein_distance(s2, s1)
+        return levenshtein_distance(s2, s1)
     if len(s2) == 0:
         return len(s1)
 
@@ -99,7 +99,7 @@ def fuzzy_match_keyword(keyword: str, text: str) -> str | None:
         # Only compare tokens of similar length
         if abs(len(token) - len(kw_lower)) > max_dist:
             continue
-        dist = _levenshtein_distance(kw_lower, token)
+        dist = levenshtein_distance(kw_lower, token)
         if dist <= max_dist:
             return "fuzzy"
 

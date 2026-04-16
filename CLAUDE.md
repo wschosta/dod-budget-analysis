@@ -26,7 +26,7 @@ When making changes to the codebase:
 pip install -r requirements-dev.txt
 python -m playwright install chromium
 
-# Tests (114 files, coverage tracked on api/ and utils/)
+# Tests (107 files, coverage tracked on api/ and utils/)
 python -m pytest tests/ -v
 python -m pytest tests/ --cov=api --cov=utils --cov-report=term-missing
 python -m pytest tests/ --ignore=tests/test_gui_tracker.py --ignore=tests/optimization_validation
@@ -63,7 +63,7 @@ dod-budget-analysis/
 │       ├── facets.py        # GET /api/v1/facets (cross-filtered counts)
 │       ├── feedback.py      # POST /api/v1/feedback
 │       ├── files.py         # GET /api/v1/files/{file_path}
-│       ├── frontend.py      # HTML routes (/, /about, /charts, /compare, /consolidated, /dashboard, /explorer, /programs)
+│       ├── frontend.py      # HTML routes (/, /about, /charts, /consolidated, /dashboard, /explorer, /programs, /spruill)
 │       ├── keyword_helpers.py # Shared constants, SQL utils, normalization
 │       ├── keyword_r2.py    # R-2 PDF parsing, mining, lineage detection
 │       ├── keyword_search.py # Cache builder orchestrator
@@ -72,22 +72,25 @@ dod-budget-analysis/
 │       ├── pe.py            # PE-centric views, funding, sub-elements
 │       ├── reference.py     # GET /api/v1/reference/{type}
 │       └── search.py        # GET /api/v1/search (FTS5)
-├── utils/                   # Shared utility library (19 modules)
-├── pipeline/                # Data pipeline modules (15 modules)
+├── utils/                   # Shared utility library (20 modules)
+├── pipeline/                # Data pipeline modules (16 modules)
 │   ├── builder.py           # Database builder (Excel/PDF parsing)
 │   ├── schema.py            # DB schema, migrations, reference table seeding
 │   ├── enricher.py          # PE enrichment (tags, descriptions, lineage)
 │   ├── db_validator.py      # Data quality validation
 │   ├── validator.py         # Validation rules
 │   ├── exhibit_catalog.py   # Exhibit type column layouts
+│   ├── exhibit_inventory.py # Exhibit inventory tracking
+│   ├── r2_cost_parser.py    # R-2 cost element parsing
+│   ├── r2_pdf_extractor.py  # R-2 PDF extraction
 │   ├── search.py            # CLI full-text search
 │   ├── gui.py               # tkinter build interface
 │   ├── refresh.py           # Data refresh workflow
 │   └── ...                  # backfill, staging, logging, run_ledger
 ├── downloader/              # Document downloader modules (6 modules)
-├── templates/               # Jinja2 HTML templates (12 pages + errors/ + partials/)
-├── static/                  # CSS (main.css) + JS assets (10 modules)
-├── tests/                   # pytest test suite (114 files)
+├── templates/               # Jinja2 HTML templates (11 pages + errors/ + partials/)
+├── static/                  # CSS (main.css) + JS assets (11 modules)
+├── tests/                   # pytest test suite (107 files)
 ├── scripts/                 # Operational scripts + pipeline entry points
 │   ├── run_pipeline.py      # 5-step pipeline orchestrator
 │   ├── repair_database.py   # Data quality repair (7-step process)
@@ -112,9 +115,11 @@ dod-budget-analysis/
 
 - **Framework:** pytest + pytest-cov, config in `pyproject.toml`
 - **Fixtures:** `test_db`, `test_db_excel_only`, `tmp_db`, `fixtures_dir` — defined in `tests/conftest.py`
+- **Auto-use fixture:** `_clear_api_caches` runs before every test to prevent cross-test contamination
 - Use `test_db_excel_only` when tests only need Excel data (avoids pdfplumber panics)
 - Rate-limiter tests must clear `api.app._rate_counters` (use `autouse=True` fixture)
 - API tests: `TestClient(create_app(db_path=...))` with tmp_path-backed SQLite
+- Test groups: `test_shared_group/`, `test_pipeline_group/`, `test_downloader_group/`, `test_web_group/`, `optimization_validation/`
 
 ## Code Standards
 
@@ -160,6 +165,9 @@ docs/<short-description>
 | `RATE_LIMIT_DOWNLOAD` | `10` | Download req/min/IP |
 | `RATE_LIMIT_DEFAULT` | `120` | Default req/min/IP |
 | `TRUSTED_PROXIES` | *(empty)* | Comma-separated proxy IPs for forwarded headers |
+| `APP_DOCS_DIR` | `DoD_Budget_Documents` | Root of budget documents directory |
+| `PLAYWRIGHT_HEADLESS` | *(empty)* | Set to `true` for headless browser mode |
+| `BACKUP_DIR` | `backups` | Database backup destination directory |
 
 ## Common Tasks
 
