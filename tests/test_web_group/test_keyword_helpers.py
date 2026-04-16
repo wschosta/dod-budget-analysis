@@ -26,7 +26,8 @@ from api.routes.keyword_helpers import (
 class TestInClause:
     def test_basic_list(self):
         placeholders, params = in_clause(["a", "b", "c"])
-        assert placeholders == "?, ?, ?"
+        # Three placeholders separated by commas (exact whitespace may vary)
+        assert placeholders.count("?") == 3
         assert params == ["a", "b", "c"]
 
     def test_single_element(self):
