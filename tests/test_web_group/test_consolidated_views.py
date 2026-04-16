@@ -3,7 +3,6 @@
 Covers the /consolidated and /consolidated/{pe_number} endpoints that were
 previously untested (lines 1095-1388 of frontend.py).
 """
-import json
 import sqlite3
 import sys
 import types

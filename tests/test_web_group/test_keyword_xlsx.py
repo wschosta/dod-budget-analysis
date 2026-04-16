@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 xlsxwriter = pytest.importorskip("xlsxwriter")
 
-from api.routes.keyword_xlsx import (
+from api.routes.keyword_xlsx import (  # noqa: E402
     xlsx_base_styles,
     _col_letter,
     _COL_WIDTH_DEFAULTS,

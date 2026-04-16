@@ -4,13 +4,11 @@ Covers: _keyword_set_id, _cache_table_name, _parse_keywords, _parse_extra_pes,
 _resolve_keyword_set, _ensure_meta_table, _prune_old_caches, _prune_stale_progress,
 and the explorer API endpoints (build, status, list, download, presets).
 """
-import hashlib
 import sqlite3
 import sys
 import time
 import types
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -22,7 +20,7 @@ for _mod in ("pdfplumber", "openpyxl", "pandas"):
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from api.routes.explorer import (
+from api.routes.explorer import (  # noqa: E402
     _keyword_set_id,
     _cache_table_name,
     _parse_keywords,
@@ -31,13 +29,10 @@ from api.routes.explorer import (
     _ensure_meta_table,
     _prune_old_caches,
     _prune_stale_progress,
-    _extract_column_value,
     _build_progress,
     _build_lock,
     MAX_KEYWORDS,
     MAX_CACHE_TABLES,
-    _HYPERSONICS_KEYWORDS,
-    _EXTRA_PES,
 )
 
 
