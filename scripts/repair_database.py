@@ -385,20 +385,6 @@ def step_8_backfill_pe_numbers(conn: sqlite3.Connection, dry_run: bool = False) 
               AND pb.organization_name = budget_lines.organization_name
               AND pb.fiscal_year = budget_lines.fiscal_year
           )
-          AND NOT EXISTS (
-            SELECT 1 FROM budget_lines existing
-            JOIN _pe_backfill pb
-              ON pb.line_item_title = budget_lines.line_item_title
-              AND pb.organization_name = budget_lines.organization_name
-              AND pb.fiscal_year = budget_lines.fiscal_year
-            WHERE existing.appropriation_code = budget_lines.appropriation_code
-              AND existing.fiscal_year = budget_lines.fiscal_year
-              AND existing.pe_number = pb.pe
-              AND existing.line_item_title = budget_lines.line_item_title
-              AND existing.organization_name = budget_lines.organization_name
-              AND existing.exhibit_type = budget_lines.exhibit_type
-              AND existing.amount_type = budget_lines.amount_type
-          )
     """)
 
     conn.execute("DROP TABLE IF EXISTS _pe_backfill")
