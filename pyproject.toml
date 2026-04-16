@@ -14,8 +14,25 @@ addopts = "-v --tb=short"
 source = ["api", "utils"]
 
 [tool.coverage.report]
-fail_under = 0
+# Gate against coverage regression. Current baseline is ~80% on api/ + utils/.
+fail_under = 78
 exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING",
 ]
+
+[tool.ruff]
+# Config used by CLI, CI, and pre-commit hooks so they stay in sync.
+line-length = 100
+extend-exclude = ["DoD_Budget_Documents"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F"]
+ignore = ["E501"]  # line length handled by black
+
+[tool.mypy]
+ignore_missing_imports = true
+no_error_summary = true
+# Scope mypy to the application code only; scripts/, tests/, pipeline/
+# aren't yet fully typed.
+files = ["api", "utils"]
