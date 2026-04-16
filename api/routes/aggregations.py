@@ -13,7 +13,6 @@ OPT-AGG-002: Background cache warmup at startup for common no-filter queries.
 import logging
 import sqlite3
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi import Query as FQuery
@@ -241,23 +240,15 @@ def hierarchy(
         else "NULL AS prev_amount"
     )
 
-    conditions: list[str] = [
-        f"{latest_col} IS NOT NULL",
-        "organization_name IS NOT NULL",
-    ]
-    params: list[Any] = []
-
-    if fiscal_year:
-        conditions.append("fiscal_year = ?")
-        params.append(fiscal_year)
-    if service:
-        conditions.append("organization_name = ?")
-        params.append(service)
-    if exhibit_type:
-        conditions.append("exhibit_type = ?")
-        params.append(exhibit_type)
-
-    where = "WHERE " + " AND ".join(conditions)
+    where, params = build_where_clause(
+        fiscal_year=[fiscal_year] if fiscal_year else None,
+        service=[service] if service else None,
+        exhibit_type=[exhibit_type] if exhibit_type else None,
+        extra_conditions=[
+            f"{latest_col} IS NOT NULL",
+            "organization_name IS NOT NULL",
+        ],
+    )
 
     rows = conn.execute(
         f"SELECT organization_name AS service, "

@@ -373,9 +373,9 @@ parameters, enabling routes with custom SQL conditions to use the shared builder
 **Migrated:**
 - `api/routes/dashboard.py` — manual conditions replaced with `build_where_clause(exclude_summary=True, extra_conditions=[...])`
 - `api/routes/budget_lines.py` — manual `EXCLUDE_SUMMARY_SQL` appending removed; handled via `FilterParams.where_kwargs()` which now passes `exclude_summary`
+- `api/routes/aggregations.py` — `hierarchy()` manual conditions replaced with `build_where_clause(extra_conditions=[...])`
 
 **Remaining (need JOIN/LIKE extensions):**
-- `api/routes/aggregations.py` (lines 212–227) — manual conditions list
 - `api/routes/pe.py` (lines 900–975) — manual WHERE with JOIN and LIKE
 - `api/routes/keyword_search.py` (lines 1156–1279) — manual IN clause
 
