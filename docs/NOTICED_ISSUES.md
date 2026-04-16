@@ -401,8 +401,20 @@ identify research programs. The DoD maps BLIs to PEs in P-5 detail exhibits, but
 
 **Future work:** Build a BLI-based enrichment/tagging pipeline parallel to the PE
 system. This would allow procurement items to be tagged and explored without requiring
-a PE number. The P-5 PDF text could also be parsed more aggressively to extract
-BLI→PE mappings from the structured header text that appears on each page.
+a PE number.
+
+**Update 2026-04-16 — P-5 header mining (Phase 11):** The P-5 PDF-text mining
+described as future work above is now implemented as enrichment Phase 11. Pages
+tagged `exhibit_type='p5'` are scanned for any Program Element (`\d{7}[A-Z]{1,2}`)
+and cross-referenced against `bli_index` (account + line item both appearing in
+the first ~1,500 chars of the page) to populate a new `bli_pe_map` table.
+Single-PE pages record mappings at confidence 0.9; multi-PE pages at 0.6. After
+extraction, `budget_lines.pe_number` is backfilled on P-1/P-1R rows where a
+mapping with confidence ≥ 0.8 exists. Dry-run on the live corpus yielded **2,759
+distinct (BLI, PE) pairs across 275 PEs covering 507 BLIs**, with **5,293 P-1
+rows eligible for backfill** (vs. the prior baseline of 10 distinct PEs). Some
+P-5 pages omit the PE from the header and cannot be mapped; tracked as a
+residual item in `docs/PRD.md` §9.7a.
 
 ---
 

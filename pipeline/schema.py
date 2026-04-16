@@ -421,6 +421,27 @@ CREATE INDEX IF NOT EXISTS idx_changelog_ts ON data_changelog(timestamp);
 CREATE INDEX IF NOT EXISTS idx_changelog_action ON data_changelog(action);
         """,
     ),
+    (
+        5,
+        "005_bli_pe_map: BLI→PE mappings mined from P-5 PDF page headers",
+        """
+-- Maps procurement BLIs (from bli_index) to the RDT&E Program Elements they
+-- reference in their P-5 justification pages. One BLI may map to multiple PEs
+-- when a procurement item funds work across several R&D programs (ammunition,
+-- shared subsystems, etc.); hence the composite primary key.
+CREATE TABLE IF NOT EXISTS bli_pe_map (
+    bli_key     TEXT NOT NULL,
+    pe_number   TEXT NOT NULL,
+    confidence  REAL NOT NULL,
+    source_file TEXT,
+    page_number INTEGER,
+    PRIMARY KEY (bli_key, pe_number),
+    FOREIGN KEY (bli_key) REFERENCES bli_index(bli_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_bli_pe_map_pe ON bli_pe_map(pe_number);
+        """,
+    ),
 ]
 
 

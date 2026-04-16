@@ -243,6 +243,14 @@ All code TODOs (H1, H2, M1, L1–L5) and agent groups (LION/TIGER/BEAR, 33/33) a
 **resolved**. Data quality issues are catalogued in
 [`docs/NOTICED_ISSUES.md`](NOTICED_ISSUES.md).
 
+**Completed 2026-04-16 — P-5 PDF header BLI↔PE mining (enrichment Phase 11).**
+Adds `bli_pe_map` table (migration 5) and a new phase that scans `pdf_pages`
+with `exhibit_type='p5'` for Program Element references, cross-references
+against `bli_index`, and backfills `budget_lines.pe_number` on P-1/P-1R rows
+where a high-confidence mapping (≥0.8) exists. Addresses the procurement PE
+coverage gap flagged in NOTICED_ISSUES §53. Dry-run yielded 2,759 (BLI, PE)
+pairs across 275 distinct PEs, with 5,293 P-1/P-1R rows eligible for backfill.
+
 Remaining work is organized into groups A–G:
 
 | Group | Focus | Code Status | What Remains |

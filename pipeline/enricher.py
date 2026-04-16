@@ -341,7 +341,7 @@ def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS pe_descriptions_fts")
     conn.execute("DROP TABLE IF EXISTS _enrichment_checkpoints")
     for table in ("project_descriptions", "pe_lineage", "pe_tags", "pe_descriptions", "pe_index",
-                   "bli_descriptions", "bli_tags", "bli_index"):
+                   "bli_pe_map", "bli_descriptions", "bli_tags", "bli_index"):
         conn.execute(f"DROP TABLE IF EXISTS {table}")
     conn.commit()
     # Recreate the tables so enrichment phases can INSERT into them.
@@ -496,6 +496,7 @@ def _drop_enrichment_tables(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_bli_desc_key ON bli_descriptions(bli_key);
         CREATE INDEX IF NOT EXISTS idx_bli_desc_fy ON bli_descriptions(fiscal_year);
     """)
+    conn.executescript(_BLI_PE_MAP_DDL)
     logger.info("Dropped enrichment tables.")
 
 
@@ -2303,6 +2304,192 @@ def run_phase10(conn: sqlite3.Connection, stop_event: threading.Event | None = N
     return updated
 
 
+# ── Phase 11: P-5 PDF Header → BLI↔PE Mapping ─────────────────────────────────
+
+# DDL used both by enrichment (as a defensive CREATE) and by the drop/recreate
+# path.  Kept in sync with migration 5 in pipeline/schema.py.
+_BLI_PE_MAP_DDL = """
+CREATE TABLE IF NOT EXISTS bli_pe_map (
+    bli_key     TEXT NOT NULL,
+    pe_number   TEXT NOT NULL,
+    confidence  REAL NOT NULL,
+    source_file TEXT,
+    page_number INTEGER,
+    PRIMARY KEY (bli_key, pe_number),
+    FOREIGN KEY (bli_key) REFERENCES bli_index(bli_key)
+);
+CREATE INDEX IF NOT EXISTS idx_bli_pe_map_pe ON bli_pe_map(pe_number);
+"""
+
+_BLI_PE_MAP_INSERT = """
+    INSERT OR IGNORE INTO bli_pe_map
+        (bli_key, pe_number, confidence, source_file, page_number)
+    VALUES (?, ?, ?, ?, ?)
+"""
+
+
+def _flush_bli_pe_map(conn: sqlite3.Connection,
+                      rows: list[tuple[str, str, float, str, int]]) -> None:
+    if not rows:
+        return
+    conn.executemany(_BLI_PE_MAP_INSERT, rows)
+    conn.commit()
+
+
+def run_phase11(conn: sqlite3.Connection, stop_event: threading.Event | None = None) -> int:
+    """Mine BLI→PE mappings from P-5 PDF headers, then backfill P-1 pe_number.
+
+    Two stages run in sequence:
+
+      1. Extraction — for each pdf_pages row with exhibit_type='p5', scan the
+         first ~1,200 characters for a PE number.  If any PE is present, look
+         for known BLIs (from bli_index) whose account and line_item both
+         appear in the same window, and record a (bli_key, pe_number) row in
+         bli_pe_map.  Confidence is 0.9 when exactly one PE is on the page
+         and 0.6 when multiple PEs are present (so multi-PE pages do not
+         trigger auto-backfill).
+
+      2. Backfill — for every P-1 / P-1R budget_lines row missing pe_number,
+         look up its bli_key in bli_pe_map and take the highest-confidence
+         mapping (>=0.8).
+
+    Re-runnable: composite primary key on bli_pe_map makes extraction
+    idempotent via INSERT OR IGNORE; backfill only touches NULL pe_number.
+
+    Returns the total number of bli_pe_map rows inserted in this run.
+    """
+    logger.info("[Phase 11] Mining BLI→PE mappings from P-5 PDF headers...")
+
+    conn.executescript(_BLI_PE_MAP_DDL)
+
+    bli_rows = conn.execute(
+        "SELECT bli_key, account, line_item FROM bli_index "
+        "WHERE account IS NOT NULL AND account != ''"
+    ).fetchall()
+
+    if not bli_rows:
+        logger.info("bli_index is empty — run Phase 7 first.")
+        return 0
+
+    # Precompile one word-boundary regex per known BLI — the alternative is
+    # compiling ~10M times across the 160k-page scan.
+    bli_by_account: dict[str, list[tuple[str, str, re.Pattern[str]]]] = {}
+    for bli_key, account, line_item in bli_rows:
+        if not line_item:
+            continue
+        li = str(line_item)
+        bli_by_account.setdefault(account, []).append(
+            (li, bli_key, re.compile(r"\b" + re.escape(li) + r"\b"))
+        )
+
+    pages = conn.execute(f"""
+        SELECT source_file, page_number,
+               substr(page_text, 1, {_P5_HEADER_SCAN_CHARS}) AS head
+        FROM pdf_pages
+        WHERE exhibit_type = 'p5' AND page_text IS NOT NULL
+    """).fetchall()
+
+    if not pages:
+        logger.info("No P-5 PDF pages found.")
+        return 0
+
+    logger.info("  Scanning %d P-5 pages against %d known accounts...",
+                len(pages), len(bli_by_account))
+
+    insert_buf: list[tuple[str, str, float, str, int]] = []
+    matched_pages = 0
+
+    for src_file, page_num, head in pages:
+        if stop_event and stop_event.is_set():
+            logger.info("  Phase 11 stopped early — flushing %d buffered rows.",
+                        len(insert_buf))
+            _flush_bli_pe_map(conn, insert_buf)
+            insert_buf = []
+            break
+
+        pes = sorted(set(PE_NUMBER.findall(head)))
+        if not pes:
+            continue
+
+        confidence = 0.9 if len(pes) == 1 else 0.6
+
+        page_matches: list[tuple[str, str, float, str, int]] = []
+        for account, items in bli_by_account.items():
+            if account not in head:
+                continue
+            for line_item, bli_key, pattern in items:
+                # Cheap substring filter before the word-boundary regex —
+                # eliminates the majority of line_items under a matched
+                # account without paying the regex cost.
+                if line_item not in head:
+                    continue
+                if pattern.search(head):
+                    for pe in pes:
+                        page_matches.append(
+                            (bli_key, pe, confidence, src_file, page_num)
+                        )
+        if page_matches:
+            matched_pages += 1
+            insert_buf.extend(page_matches)
+
+    _flush_bli_pe_map(conn, insert_buf)
+
+    distinct_pairs = conn.execute(
+        "SELECT COUNT(*) FROM bli_pe_map"
+    ).fetchone()[0]
+    distinct_pes = conn.execute(
+        "SELECT COUNT(DISTINCT pe_number) FROM bli_pe_map"
+    ).fetchone()[0]
+    logger.info(
+        "  Extraction: %d pages had BLI+PE hits, %d (bli,pe) pairs in table, "
+        "%d distinct PEs referenced.",
+        matched_pages, distinct_pairs, distinct_pes,
+    )
+
+    # ── Backfill budget_lines.pe_number for P-1/P-1R rows ────────────────────
+    before = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines "
+        "WHERE exhibit_type IN ('p1','p1r') "
+        "  AND pe_number IS NOT NULL AND pe_number != ''"
+    ).fetchone()[0]
+
+    conn.execute("""
+        UPDATE budget_lines
+        SET pe_number = (
+            SELECT pe_number FROM bli_pe_map
+            WHERE bli_key = (
+                budget_lines.account || ':' || COALESCE(budget_lines.line_item, '')
+            )
+              AND confidence >= 0.8
+            ORDER BY confidence DESC
+            LIMIT 1
+        )
+        WHERE exhibit_type IN ('p1','p1r')
+          AND (pe_number IS NULL OR pe_number = '')
+          AND EXISTS (
+              SELECT 1 FROM bli_pe_map
+              WHERE bli_key = (
+                  budget_lines.account || ':' || COALESCE(budget_lines.line_item, '')
+              )
+                AND confidence >= 0.8
+          )
+    """)
+    conn.commit()
+
+    after = conn.execute(
+        "SELECT COUNT(*) FROM budget_lines "
+        "WHERE exhibit_type IN ('p1','p1r') "
+        "  AND pe_number IS NOT NULL AND pe_number != ''"
+    ).fetchone()[0]
+
+    logger.info(
+        "  Backfill: P-1/P-1R rows with pe_number: %d → %d (+%d).",
+        before, after, after - before,
+    )
+    logger.info("Done. %d bli_pe_map rows inserted this run.", len(insert_buf))
+    return len(insert_buf)
+
+
 # ── Orchestrator ──────────────────────────────────────────────────────────────
 
 def enrich(
@@ -2356,6 +2543,7 @@ def enrich(
         8: lambda: run_phase8(conn, stop_event=stop_event),
         9: lambda: run_phase9(conn, stop_event=stop_event),
         10: lambda: run_phase10(conn, stop_event=stop_event),
+        11: lambda: run_phase11(conn, stop_event=stop_event),
     }
 
     for phase_num in sorted(_phase_runners):
@@ -2390,7 +2578,7 @@ def enrich(
     # Summary counts
     table_counts: dict[str, int] = {}
     for table in ("pe_index", "pe_descriptions", "pe_tags", "pe_lineage", "project_descriptions",
-                   "bli_index", "bli_tags", "bli_descriptions"):
+                   "bli_index", "bli_tags", "bli_descriptions", "bli_pe_map"):
         try:
             n = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             logger.info("  %s: %s rows", table, f"{n:,}")
@@ -2420,8 +2608,8 @@ def main() -> None:
                         help="Path to SQLite database (default: dod_budget.sqlite)")
     parser.add_argument("--with-llm", action="store_true",
                         help="Enable LLM-based tagging (requires ANTHROPIC_API_KEY)")
-    parser.add_argument("--phases", default="1,2,3,4,5,6,7,8,9,10",
-                        help="Comma-separated phases to run (default: all 1-10)")
+    parser.add_argument("--phases", default="1,2,3,4,5,6,7,8,9,10,11",
+                        help="Comma-separated phases to run (default: all 1-11)")
     parser.add_argument("--rebuild", action="store_true",
                         help="Drop and rebuild all enrichment tables")
     args = parser.parse_args()

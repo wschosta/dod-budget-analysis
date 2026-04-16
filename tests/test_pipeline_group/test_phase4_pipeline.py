@@ -224,12 +224,12 @@ class TestDataChangelogMigration:
         assert row[3] == 1000           # record_count
         conn.close()
 
-    def test_schema_version_is_4(self):
-        """After full migration, schema version should be 4."""
+    def test_schema_version_matches_latest_migration(self):
+        """After full migration, schema version should match the highest migration."""
         import sqlite3
-        from pipeline.schema import migrate, _current_version
+        from pipeline.schema import _MIGRATIONS, migrate, _current_version
 
         conn = sqlite3.connect(":memory:")
         migrate(conn)
-        assert _current_version(conn) == 4
+        assert _current_version(conn) == _MIGRATIONS[-1][0]
         conn.close()

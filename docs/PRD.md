@@ -89,7 +89,8 @@ Adds contextual metadata to program elements.
 - **BLI index:** Master list of budget line items from procurement exhibits
 - **BLI tags:** Keyword-based categorization of procurement line items
 - **BLI descriptions:** Narrative text extracted from P-5 procurement exhibit PDF pages, linked to BLIs by account code and line item number
-- **9 enrichment phases** (PE index → descriptions → tags → lineage → project decomposition → project tags → BLI index → BLI tags → BLI descriptions)
+- **BLI↔PE mapping:** BLIs cross-referenced to RDT&E Program Elements mined from P-5 PDF page headers (`bli_pe_map`); high-confidence mappings backfill `budget_lines.pe_number` on P-1/P-1R rows so procurement items appear in PE-centric views
+- **11 enrichment phases** (PE index → descriptions → tags → lineage → project decomposition → project tags → BLI index → BLI tags → BLI descriptions → R-2 metadata backfill → BLI↔PE mining)
 - **Uniform progress reporting** across all phases: logs completed/total count, percentage, elapsed time, ETA, and throughput rate via `_log_progress()` helper
 
 ---
@@ -233,6 +234,7 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 - **`bli_index`** — Master list of budget line items from procurement exhibits (account, line_item, display_title, organization_name)
 - **`bli_tags`** — Keyword tags for procurement line items
 - **`bli_descriptions`** — Narrative text from P-5 procurement exhibit PDF pages, linked to BLIs by account code and line item number
+- **`bli_pe_map`** — BLI→PE mappings mined from P-5 PDF page headers (Phase 11). Composite primary key `(bli_key, pe_number)` allows one BLI to reference multiple PEs. Confidence is `0.9` when a page has exactly one PE and `0.6` when it references multiple; backfill of `budget_lines.pe_number` uses only `confidence >= 0.8`.
 
 ### 5.5 Cache Tables
 
@@ -256,7 +258,7 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 | `scripts/stage_budget_data.py` | Optional Parquet staging layer (parse to Parquet, then load to SQLite) |
 | `pipeline/builder.py` | Database builder (Excel/PDF parsing, incremental/full-rebuild modes) |
 | `pipeline/gui.py` | tkinter GUI for database build with progress/ETA |
-| `pipeline/enricher.py` | PE/BLI enrichment pipeline (9 phases: index, descriptions, tags, lineage, projects, BLI) |
+| `pipeline/enricher.py` | PE/BLI enrichment pipeline (11 phases: PE index, PE descriptions, PE tags, lineage, projects, project tags, BLI index, BLI tags, BLI descriptions, R-2 metadata backfill, BLI↔PE mining) |
 | `pipeline/r2_pdf_extractor.py` | Extract R-2 funding tables from Defense-Wide PDF pages into budget_lines |
 | `pipeline/db_validator.py` | Data quality validation with JSON report output |
 | `pipeline/search.py` | CLI full-text search with filters, export (CSV/JSON) |
@@ -327,6 +329,7 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 5. **Tag over-indexing** — Enrichment pipeline assigns overly broad tags for some categories (e.g., `rdte` on 97% of PEs). Mitigated by `min_confidence` (default 0.85) and `max_coverage` (default 0.5) filters on the `/api/v1/pe/tags/all` endpoint (fixed 2026-04-02). Raw tag data in the database still contains broad tags.
 6. **Dollar rounding** — Service/program totals computed from parsed line items may not match official totals exactly due to rounding and coverage gaps
 7. **PDF-only PE handling** — D8Z Defense-Wide PEs that exist only in PDFs now have R-1 titles extracted from PDF pages and R-1 funding aggregated from R-2 sub-elements (fixed 2026-04-02). Some edge cases may remain for PEs with unusual PDF layouts.
+7a. **Procurement PE coverage** — P-1/P-1R rows use Budget Line Items (BLIs), not Program Elements. Phase 11 mines P-5 PDF page headers for BLI→PE references and backfills `pe_number` on P-1/P-1R rows where a high-confidence mapping exists, but only pages whose header simultaneously names a known BLI (account + line item) and an RDT&E PE are captured — P-5 pages that omit the PE (most continuation pages and some services/years) cannot be mapped.
 8. **Description quality varies** — R-1 descriptions may contain page headers or artifacts; `_is_garbage_description()` filters the worst cases but some noise may remain. R-2 descriptions are cleaned via `clean_narrative()` but multi-page artifacts can still slip through.
 
 ---
