@@ -33,8 +33,8 @@ from api.routes.keyword_helpers import (
     safe_json_list,
 )
 from api.routes.keyword_r2 import (
-    _aggregate_r2_funding_into_r1_stubs,
-    _extract_r1_titles_for_stubs,
+    aggregate_r2_funding_into_r1_stubs,
+    extract_r1_titles_for_stubs,
     annotate_cross_pe_lineages,
     mine_pdf_subelements,
 )
@@ -382,7 +382,7 @@ def _insert_stub_pes(
         conn.execute(insert_sql, vals)
         count += 1
     logger.info("Cache: inserted %d stub rows for PDF-only extra PEs", len(pdf_only_pes))
-    _extract_r1_titles_for_stubs(conn, cache_table, pdf_only_pes)
+    extract_r1_titles_for_stubs(conn, cache_table, pdf_only_pes)
     return count
 
 
@@ -398,11 +398,11 @@ def _backfill_organization(
             SELECT r1.organization_name
             FROM {cache_table} r1
             WHERE r1.pe_number = c.pe_number
-              AND r1.exhibit_type = 'r1'
+              AND r1.exhibit_type = '{EXHIBIT_R1}'
               AND r1.organization_name IS NOT NULL
             LIMIT 1
         )
-        WHERE c.exhibit_type = 'r2' AND c.organization_name IS NULL
+        WHERE c.exhibit_type = '{EXHIBIT_R2}' AND c.organization_name IS NULL
     """)
 
     latest_ref_col = f"fy{year_range[-1]}_ref"
@@ -646,7 +646,7 @@ def build_cache_table(
     # matching. This ensures r2 and r2_pdf rows for the same sub-element merge.
 
     from utils.normalization import normalize_r2_project_code
-    from utils.fuzzy_match import _levenshtein_distance
+    from utils.fuzzy_match import levenshtein_distance
 
     _lev_cache: dict[tuple[str, str], int] = {}
 
@@ -811,7 +811,7 @@ def build_cache_table(
                     continue
                 lev_key = (title, ex_title) if title <= ex_title else (ex_title, title)
                 if lev_key not in _lev_cache:
-                    _lev_cache[lev_key] = _levenshtein_distance(title, ex_title)
+                    _lev_cache[lev_key] = levenshtein_distance(title, ex_title)
                 dist = _lev_cache[lev_key]
                 if dist / max(shorter, 1) < LEVENSHTEIN_THRESHOLD:
                     _merge_into(existing, row)
@@ -913,7 +913,7 @@ def build_cache_table(
     if pdf_count:
         annotate_cross_pe_lineages(conn, cache_table)
 
-    _aggregate_r2_funding_into_r1_stubs(conn, cache_table, year_range)
+    aggregate_r2_funding_into_r1_stubs(conn, cache_table, year_range)
 
     # 7. Create indexes for fast filtering
     # Use short hash suffix to avoid name collisions across cache tables

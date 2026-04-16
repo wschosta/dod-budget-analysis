@@ -171,16 +171,17 @@ _PROGRESS_INTERVAL = 0.5  # seconds — throttle progress output
 _cli_logger = logging.getLogger("pipeline.cli")
 
 
-def _build_progress(phase: str, current: int, total: int, detail: str = "",
-                     metrics: dict | None = None) -> None:
-    """Progress callback for build_database() — standardised progress line."""
+def _throttled_progress(
+    phase: str, current: int, total: int, detail: str, label_map: dict[str, str]
+) -> None:
+    """Shared throttle logic for CLI progress callbacks."""
     global _last_progress_print
     if phase == "scan":
         if total > 0:
             print(f"  Scanning... {total} files found", flush=True)
-        else:
+        elif detail:
             print(f"  {detail}", flush=True)
-    elif phase in ("excel", "pdf"):
+    elif phase in label_map:
         now = time.monotonic()
         if current <= 1 or phase not in _phase_starts:
             _phase_starts[phase] = now
@@ -188,7 +189,7 @@ def _build_progress(phase: str, current: int, total: int, detail: str = "",
         if current != total and now - _last_progress_print < _PROGRESS_INTERVAL:
             return
         _last_progress_print = now
-        label = "Build Excel" if phase == "excel" else "Build PDF"
+        label = label_map[phase]
         short_detail = detail[:60] + "..." if len(detail) > 63 else detail
         line = log_progress(label, current, total, _phase_starts[phase], extra=short_detail)
         print(f"  {line}", flush=True)
@@ -199,38 +200,28 @@ def _build_progress(phase: str, current: int, total: int, detail: str = "",
             rows = detail.get("total_rows", 0)
             pages = detail.get("total_pages", 0)
             print(f"  Build complete: {rows:,} rows, {pages:,} PDF pages", flush=True)
-        elif isinstance(detail, str) and detail:
+        elif detail:
             print(f"  {detail}", flush=True)
     elif phase == "error":
         print(f"  ERROR: {detail}", flush=True)
 
 
+_BUILD_LABELS = {"excel": "Build Excel", "pdf": "Build PDF"}
+_STAGING_LABELS = {
+    "excel": "Stage Excel", "pdf": "Stage PDF",
+    "load_excel": "Load Excel", "load_pdf": "Load PDF",
+}
+
+
+def _build_progress(phase: str, current: int, total: int, detail: str = "",
+                     metrics: dict | None = None) -> None:
+    """Progress callback for build_database() — standardised progress line."""
+    _throttled_progress(phase, current, total, detail, _BUILD_LABELS)
+
+
 def _staging_progress(phase: str, current: int, total: int, detail: str = "") -> None:
     """Progress callback for stage_all_files() and load_staging_to_db()."""
-    global _last_progress_print
-    if phase == "scan":
-        if total > 0:
-            print(f"  Scanning... {total} files", flush=True)
-        elif detail:
-            print(f"  {detail}", flush=True)
-    elif phase in ("excel", "pdf", "load_excel", "load_pdf"):
-        now = time.monotonic()
-        if current <= 1 or phase not in _phase_starts:
-            _phase_starts[phase] = now
-            _last_progress_print = 0.0
-        if current != total and now - _last_progress_print < _PROGRESS_INTERVAL:
-            return
-        _last_progress_print = now
-        label = {"excel": "Stage Excel", "pdf": "Stage PDF",
-                 "load_excel": "Load Excel", "load_pdf": "Load PDF"}.get(phase, phase)
-        short_detail = detail[:60] + "..." if len(detail) > 63 else detail
-        line = log_progress(label, current, total, _phase_starts[phase], extra=short_detail)
-        print(f"  {line}", flush=True)
-    elif phase == "index":
-        print(f"  {detail}", flush=True)
-    elif phase == "done":
-        if detail:
-            print(f"  {detail}", flush=True)
+    _throttled_progress(phase, current, total, detail, _STAGING_LABELS)
 
 
 def _check_stopped(step_name: str = "") -> bool:

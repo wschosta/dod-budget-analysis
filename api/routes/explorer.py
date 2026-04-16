@@ -37,6 +37,7 @@ from api.routes.keyword_search import (
     lookup_cache_description,
 )
 from api.routes.keyword_xlsx import build_keyword_xlsx
+from utils.config import EXHIBIT_R1
 from utils.fuzzy_match import expand_keywords
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,14 @@ _EXTRA_PES = [
     "0603680D8Z", "0603680F", "0603941D8Z", "0603945D8Z", "0604250D8Z",
     "0604331D8Z", "0604940D8Z", "0605456A", "0607210D8Z", "0902199D8Z",
 ]
+
+_PRESETS: dict[str, dict] = {
+    "hypersonics": {
+        "keywords": _HYPERSONICS_KEYWORDS,
+        "extra_pes": _EXTRA_PES,
+        "label": "Hypersonics Programs",
+    },
+}
 
 router = APIRouter(prefix="/explorer", tags=["explorer"])
 
@@ -299,7 +308,6 @@ def start_build(
 
     expanded = expand_keywords(keyword_list)
 
-    # Evict stale progress entries to prevent unbounded memory growth
     with _build_lock:
         _prune_stale_progress()
 
@@ -435,7 +443,7 @@ def get_explorer_data(
         pe_rows = conn.execute(f"""
             SELECT
                 pe_number,
-                MAX(CASE WHEN exhibit_type = 'r1' THEN line_item_title END) AS r1_title,
+                MAX(CASE WHEN exhibit_type = '{EXHIBIT_R1}' THEN line_item_title END) AS r1_title,
                 MAX(line_item_title) AS any_title,
                 MAX(organization_name) AS service,
                 COUNT(*) AS total_sub_elements,
@@ -633,16 +641,9 @@ def download_explorer_xlsx(
 )
 def get_preset(name: str) -> dict:
     """Return keywords and extra_pes for a named search preset."""
-    presets = {
-        "hypersonics": {
-            "keywords": _HYPERSONICS_KEYWORDS,
-            "extra_pes": _EXTRA_PES,
-            "label": "Hypersonics Programs",
-        },
-    }
-    if name not in presets:
-        return {"error": f"Unknown preset: {name}", "available": list(presets)}
-    return presets[name]
+    if name not in _PRESETS:
+        return {"error": f"Unknown preset: {name}", "available": list(_PRESETS)}
+    return _PRESETS[name]
 
 
 def _extract_column_value(
