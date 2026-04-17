@@ -1204,59 +1204,38 @@ def check_bli_enrichment_orphans(conn: sqlite3.Connection) -> list[dict]:
     Symmetric with ``check_enrichment_orphans`` for PEs. Also flags
     Phase-11 bli_pe_map entries whose pe_number isn't in pe_index.
     """
+    # (child_table, child_col, parent_table, parent_col)
+    checks = [
+        ("bli_tags",         "bli_key",   "bli_index", "bli_key"),
+        ("bli_descriptions", "bli_key",   "bli_index", "bli_key"),
+        ("bli_pe_map",       "bli_key",   "bli_index", "bli_key"),
+        ("bli_pe_map",       "pe_number", "pe_index",  "pe_number"),
+    ]
+
     issues: list[dict] = []
-
-    if table_exists(conn, "bli_index"):
-        for table, col in [
-            ("bli_tags", "bli_key"),
-            ("bli_descriptions", "bli_key"),
-            ("bli_pe_map", "bli_key"),
-        ]:
-            if not table_exists(conn, table):
-                continue
-            try:
-                orphans = conn.execute(f"""
-                    SELECT COUNT(*) AS c FROM {table} t
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM bli_index b WHERE b.bli_key = t.{col}
-                    )
-                """).fetchone()["c"]
-            except sqlite3.OperationalError:
-                continue
-            if orphans > 0:
-                issues.append({
-                    "check": "bli_enrichment_orphans",
-                    "severity": "warning",
-                    "detail": (
-                        f"{orphans} row(s) in {table}.{col} reference bli_keys "
-                        "not found in bli_index — re-run enrichment with --rebuild"
-                    ),
-                    "table": table,
-                    "column": col,
-                    "orphan_count": orphans,
-                })
-
-    # bli_pe_map → pe_index: Phase-11 mappings should point to real PEs.
-    if table_exists(conn, "bli_pe_map") and table_exists(conn, "pe_index"):
+    for child, child_col, parent, parent_col in checks:
+        if not (table_exists(conn, child) and table_exists(conn, parent)):
+            continue
         try:
-            orphans = conn.execute("""
-                SELECT COUNT(*) AS c FROM bli_pe_map bpm
+            orphans = conn.execute(f"""
+                SELECT COUNT(*) AS c FROM {child} t
                 WHERE NOT EXISTS (
-                    SELECT 1 FROM pe_index p WHERE p.pe_number = bpm.pe_number
+                    SELECT 1 FROM {parent} p WHERE p.{parent_col} = t.{child_col}
                 )
             """).fetchone()["c"]
         except sqlite3.OperationalError:
-            orphans = 0
+            continue
         if orphans > 0:
             issues.append({
                 "check": "bli_enrichment_orphans",
                 "severity": "warning",
                 "detail": (
-                    f"{orphans} row(s) in bli_pe_map reference PE numbers not "
-                    "found in pe_index — re-run enrichment with --rebuild"
+                    f"{orphans} row(s) in {child}.{child_col} reference "
+                    f"{parent_col}s not found in {parent} — re-run "
+                    "enrichment with --rebuild"
                 ),
-                "table": "bli_pe_map",
-                "column": "pe_number",
+                "table": child,
+                "column": child_col,
                 "orphan_count": orphans,
             })
 
