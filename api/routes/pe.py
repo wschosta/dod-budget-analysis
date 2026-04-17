@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 import logging
 import sqlite3
 import zipfile
@@ -25,6 +24,7 @@ from fastapi.responses import Response
 
 from api.database import get_db
 from utils.patterns import PE_NUMBER_STRICT as _PE_FORMAT
+from utils.query import compute_yoy_change, make_placeholders, parse_json_list
 from utils.strings import sanitize_fts5_query
 
 logger = logging.getLogger(__name__)
@@ -46,16 +46,6 @@ def _validate_pe_number(pe_number: str) -> None:
 
 def _row_dict(row: sqlite3.Row) -> dict[str, Any]:
     return dict(row)
-
-
-def _json_list(val: str | None) -> list[str]:
-    """Parse a JSON array column value, returning [] on failure."""
-    if not val:
-        return []
-    try:
-        return json.loads(val)
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return []
 
 
 # ── GET /api/v1/pe/top-changes ────────────────────────────────────────────────
@@ -133,9 +123,7 @@ def get_top_changes(
         if min_delta is not None and abs(delta) < min_delta:
             continue
 
-        d["pct_change"] = (
-            round(((fy26 - fy25) / abs(fy25)) * 100, 1) if fy25 != 0 else None
-        )
+        d["pct_change"] = compute_yoy_change(fy26, fy25, precision=1)
         d["change_type"] = (
             "new" if fy25 == 0 and fy26 > 0
             else "terminated" if fy25 > 0 and fy26 == 0
@@ -174,7 +162,7 @@ def compare_pes(
     if len(pe) > 10:
         raise HTTPException(status_code=400, detail="Maximum 10 PE numbers for comparison")
 
-    ph = ",".join("?" * len(pe))
+    ph = make_placeholders(pe)
 
     # Get index info
     index_rows = conn.execute(
@@ -203,7 +191,7 @@ def compare_pes(
         funding = funding_map.get(p, {})
         fy25 = funding.get("fy2025_enacted", 0) or 0
         fy26 = funding.get("fy2026_request", 0) or 0
-        yoy_pct = round((fy26 - fy25) / abs(fy25) * 100, 2) if fy25 else None
+        yoy_pct = compute_yoy_change(fy26, fy25)
         entry = {
             "pe_number": p,
             "display_title": index_map.get(p, {}).get("display_title"),
@@ -240,7 +228,7 @@ def get_spruill_table(
     if len(pe) > 20:
         raise HTTPException(status_code=400, detail="Maximum 20 PE numbers for Spruill table")
 
-    ph = ",".join("?" * len(pe))
+    ph = make_placeholders(pe)
 
     # Get index info for display titles and organizations
     index_rows = conn.execute(
@@ -365,8 +353,8 @@ def get_pe(
         raise HTTPException(status_code=404, detail=f"PE {pe_number} not found in pe_index. "
                             "Run enrich_budget_db.py first.")
     index = _row_dict(row)
-    index["fiscal_years"] = _json_list(index.get("fiscal_years"))
-    index["exhibit_types"] = _json_list(index.get("exhibit_types"))
+    index["fiscal_years"] = parse_json_list(index.get("fiscal_years"))
+    index["exhibit_types"] = parse_json_list(index.get("exhibit_types"))
 
     # Funding by year
     funding_rows = conn.execute("""
@@ -600,9 +588,7 @@ def get_pe_changes(
     # Compute PE-level totals
     total_fy25 = sum(r["fy2025_total"] or 0 for r in rows)
     total_fy26 = sum(r["fy2026_request"] or 0 for r in rows)
-    pct_change = None
-    if total_fy25 and total_fy25 != 0:
-        pct_change = round(((total_fy26 - total_fy25) / abs(total_fy25)) * 100, 1)
+    pct_change = compute_yoy_change(total_fy26, total_fy25, precision=1)
 
     return {
         "pe_number": pe_number,
@@ -1025,7 +1011,7 @@ def list_pes(
     pe_numbers = [r["pe_number"] for r in rows]
     tags_by_pe: dict[str, list[dict]] = {}
     if pe_numbers:
-        ph = ",".join("?" * len(pe_numbers))
+        ph = make_placeholders(pe_numbers)
         all_tags = conn.execute(
             f"SELECT pe_number, tag, tag_source, confidence, source_files "
             f"FROM pe_tags "
@@ -1036,7 +1022,7 @@ def list_pes(
             tags_by_pe.setdefault(t["pe_number"], []).append(
                 {"tag": t["tag"], "tag_source": t["tag_source"],
                  "confidence": t["confidence"],
-                 "source_files": _json_list(t["source_files"])}
+                 "source_files": parse_json_list(t["source_files"])}
             )
 
     # Batch-fetch enrichment status and funding totals for all PEs in this page.
@@ -1045,7 +1031,7 @@ def list_pes(
     funding_by_pe: dict[str, float] = {}
     funding_prev_by_pe: dict[str, float] = {}
     if pe_numbers:
-        ph = ",".join("?" * len(pe_numbers))
+        ph = make_placeholders(pe_numbers)
         for r2 in conn.execute(
             f"SELECT DISTINCT pe_number FROM pe_descriptions "
             f"WHERE pe_number IN ({ph})", pe_numbers,
@@ -1074,7 +1060,7 @@ def list_pes(
     pdf_pages_by_pe: dict[str, int] = {}
     if pe_numbers:
         try:
-            ph = ",".join("?" * len(pe_numbers))
+            ph = make_placeholders(pe_numbers)
             for r2 in conn.execute(
                 f"SELECT pe_number, COUNT(*) AS page_count "
                 f"FROM pdf_pe_numbers WHERE pe_number IN ({ph}) "
@@ -1087,8 +1073,8 @@ def list_pes(
     items = []
     for r in rows:
         d = _row_dict(r)
-        d["fiscal_years"] = _json_list(d.get("fiscal_years"))
-        d["exhibit_types"] = _json_list(d.get("exhibit_types"))
+        d["fiscal_years"] = parse_json_list(d.get("fiscal_years"))
+        d["exhibit_types"] = parse_json_list(d.get("exhibit_types"))
         d["tags"] = tags_by_pe.get(r["pe_number"], [])
         d["has_descriptions"] = r["pe_number"] in desc_pes
         d["has_related"] = r["pe_number"] in related_pes
@@ -1096,9 +1082,7 @@ def list_pes(
         fy25 = funding_prev_by_pe.get(r["pe_number"], 0.0)
         d["total_fy2026_request"] = fy26
         d["total_fy2025_enacted"] = fy25
-        d["yoy_change_pct"] = (
-            round((fy26 - fy25) / abs(fy25) * 100, 2) if fy25 else None
-        )
+        d["yoy_change_pct"] = compute_yoy_change(fy26, fy25)
         d["pdf_page_count"] = pdf_pages_by_pe.get(r["pe_number"], 0)
         # Enrichment score: count of enrichment dimensions present (0-4)
         d["enrichment_score"] = sum([
@@ -1200,9 +1184,8 @@ def export_pe_table(
     for r in rows:
         fy25 = r["amount_fy2025_total"] or 0.0
         fy26 = r["amount_fy2026_request"] or 0.0
-        pct_change = ""
-        if fy25 and fy25 != 0:
-            pct_change = f"{((fy26 - fy25) / abs(fy25)) * 100:.1f}%"
+        pct = compute_yoy_change(fy26, fy25, precision=1)
+        pct_change = f"{pct:.1f}%" if pct is not None else ""
         writer.writerow([
             r["pe_number"], r["line_item_title"], r["organization_name"],
             r["exhibit_type"], r["fiscal_year"],
@@ -1248,7 +1231,7 @@ def export_pe_pages(
     fy_clause = "AND d.fiscal_year = ?" if fy else ""
     params: list[Any] = pe + ([fy] if fy else [])
 
-    pe_placeholders = ",".join("?" * len(pe))
+    pe_placeholders = make_placeholders(pe)
     rows = conn.execute(f"""
         SELECT DISTINCT d.pe_number, d.fiscal_year, d.source_file,
                d.page_start, d.page_end, pp.page_number, pp.page_text

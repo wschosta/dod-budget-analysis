@@ -1016,7 +1016,7 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
     # Also collect source_files for LION-106 provenance tracking.
     structured_fields: dict[str, tuple] = {}
     structured_sources: dict[str, list[str]] = {}
-    placeholders = ",".join("?" * len(to_tag))
+    placeholders = make_placeholders(to_tag)
     for row in conn.execute(f"""
         SELECT pe_number,
                MAX(budget_activity_title) AS ba_title,

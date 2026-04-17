@@ -252,6 +252,7 @@ def detect_fy_columns(
 def compute_yoy_change(
     current: float | None,
     previous: float | None,
+    precision: int = 2,
 ) -> float | None:
     """Compute year-over-year percentage change.
 
@@ -264,7 +265,7 @@ def compute_yoy_change(
     """
     if current is None or not previous:
         return None
-    return round((current - previous) / abs(previous) * 100, 2)
+    return round((current - previous) / abs(previous) * 100, precision)
 
 
 # ---------------------------------------------------------------------------

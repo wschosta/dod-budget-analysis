@@ -31,6 +31,7 @@ from utils.query import (
     ALLOWED_SORT_COLUMNS,
     _AMOUNT_COL_RE,
     build_where_clause,
+    make_placeholders,
     validate_amount_column,
     FISCAL_YEAR_COLUMN_LABELS,
     DEFAULT_AMOUNT_COLUMN,
@@ -414,7 +415,7 @@ def _query_results(
                 "sort_dir": filters["sort_dir"],
                 "parsed_query": parsed_query,
             }
-        id_placeholders = ",".join("?" * len(fts_ids))
+        id_placeholders = make_placeholders(fts_ids)
         id_condition = f"id IN ({id_placeholders})"
         if where:
             where = where + f" AND {id_condition}"
@@ -452,7 +453,7 @@ def _query_results(
     pe_totals: dict[str, dict] = {}
     if pe_numbers and table_exists(conn, "line_item_amounts"):
         try:
-            placeholders = ",".join("?" * len(pe_numbers))
+            placeholders = make_placeholders(pe_numbers)
             total_rows = conn.execute(
                 f"SELECT li.pe_number, "
                 f"       SUM(a.amount) AS total_value, "
@@ -630,7 +631,7 @@ def detail_partial(
 
             if tag_list:
                 # Find other PEs sharing these tags, ranked by shared tag count
-                tag_placeholders = ",".join("?" * len(tag_list))
+                tag_placeholders = make_placeholders(tag_list)
                 tag_related_rows = conn.execute(
                     f"SELECT b.id, b.pe_number, b.fiscal_year, b.line_item_title, "
                     f"b.organization_name, "
@@ -781,7 +782,7 @@ def program_detail(
     missing_pes = [r["referenced_pe"] for r in related
                    if not r.get("referenced_title") and r.get("referenced_pe")]
     if missing_pes:
-        ph = ",".join("?" * len(missing_pes))
+        ph = make_placeholders(missing_pes)
         title_map = {
             r["pe_number"]: r["display_title"]
             for r in conn.execute(
