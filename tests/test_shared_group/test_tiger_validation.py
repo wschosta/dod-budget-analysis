@@ -232,22 +232,11 @@ class TestCheckReferentialIntegrity:
 
     def test_orphaned_org_detected(self, conn):
         """Organization not in services_agencies → error."""
-        # Create the lookup table
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS services_agencies (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                code TEXT NOT NULL UNIQUE,
-                full_name TEXT NOT NULL,
-                category TEXT NOT NULL
-            )
-        """)
-        conn.execute(
-            "INSERT INTO services_agencies (code, full_name, category) "
-            "VALUES ('Navy', 'Department of the Navy', 'military')"
-        )
-        conn.commit()
-        # Insert a budget line with org not in lookup
-        _insert_line(conn, organization_name="Army")
+        # services_agencies is created + seeded by the migrations that
+        # pipeline.builder.create_database now runs (commit 2754f22).
+        # Pick an organization that is not in the seed list so the check
+        # has an orphan to report.
+        _insert_line(conn, organization_name="NotAnAgency")
         issues = check_referential_integrity(conn)
         org_issues = [i for i in issues if i.get("table") == "services_agencies"]
         assert len(org_issues) >= 1
