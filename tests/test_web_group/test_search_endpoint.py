@@ -207,6 +207,33 @@ class TestSearch:
         assert hasattr(result, "pdf_page_count")
         assert result.budget_line_count + result.pdf_page_count == result.total
 
+    def test_result_types_filter_to_budget_line_only(self, db):
+        result = _search(db, "Apache", result_types="budget_line")
+        assert {r.result_type for r in result.results} == {"budget_line"}
+
+    def test_result_types_filter_to_pdf_page_only(self, db):
+        result = _search(db, "Apache", result_types="pdf_page")
+        assert {r.result_type for r in result.results} == {"pdf_page"}
+
+    def test_result_types_multiple(self, db):
+        """Comma-separated allow-list includes only the requested types."""
+        result = _search(db, "Apache", result_types="budget_line,pdf_page")
+        observed = {r.result_type for r in result.results}
+        assert observed <= {"budget_line", "pdf_page"}
+
+    def test_result_types_invalid_returns_400(self, db):
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            _search(db, "Apache", result_types="not_a_thing")
+        assert exc_info.value.status_code == 400
+
+    def test_result_types_empty_string_returns_all(self, db):
+        """Empty/whitespace result_types is treated the same as unspecified."""
+        result_default = _search(db, "Apache")
+        result_empty = _search(db, "Apache", result_types=" ")
+        assert result_empty.total == result_default.total
+
     def test_result_type_counts_excel_only(self, db):
         """When type=excel, pdf_page_count should be 0."""
         result = _search(db, "Apache", type="excel")

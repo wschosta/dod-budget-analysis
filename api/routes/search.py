@@ -289,6 +289,35 @@ def _bli_description_select(
     )
 
 
+_ALL_RESULT_TYPES = frozenset(
+    {"budget_line", "pdf_page", "description", "bli_description"}
+)
+
+
+def _parse_result_types(raw: str | None) -> frozenset[str]:
+    """Return the set of result_types to include, or the full set if unspecified.
+
+    Accepts either a string or a non-string sentinel (e.g. the FastAPI
+    ``Query()`` default when this function is called outside an HTTP
+    request).  Non-string inputs are treated the same as unspecified.
+    """
+    if not isinstance(raw, str) or not raw.strip():
+        return _ALL_RESULT_TYPES
+    requested = {t.strip() for t in raw.split(",") if t.strip()}
+    if not requested:
+        return _ALL_RESULT_TYPES
+    bad = requested - _ALL_RESULT_TYPES
+    if bad:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid result_types: {sorted(bad)}. "
+                f"Valid values: {sorted(_ALL_RESULT_TYPES)}."
+            ),
+        )
+    return frozenset(requested)
+
+
 @router.get(
     "",
     response_model=SearchResponse,
@@ -342,6 +371,14 @@ def search(
         "budget_lines",
         description="Search source: 'budget_lines' (default), 'descriptions', or 'both'",
     ),
+    result_types: str | None = Query(
+        None,
+        description=(
+            "Comma-separated allow-list of result_type values to include. "
+            "Valid: budget_line, pdf_page, description, bli_description. "
+            "Default: all. Applied after source/type filtering."
+        ),
+    ),
     sort: str = Query(
         "relevance",
         description="Sort order: 'relevance' (BM25) or 'amount_desc'",
@@ -358,12 +395,19 @@ def search(
 
     The `source` parameter controls which data sources are searched:
     - "budget_lines" (default): searches budget_lines and pdf_pages (controlled by `type`)
-    - "descriptions": searches pe_descriptions only
-    - "both": searches budget_lines/pdf_pages AND pe_descriptions
+    - "descriptions": searches pe_descriptions AND bli_descriptions
+    - "both": all of the above
+
+    The `result_types` parameter (optional) narrows the response to
+    specific result_type values after the source/type query has run —
+    e.g. ``result_types=bli_description`` to get only procurement
+    justification hits.
     """
     # Validate source parameter
     if source not in ("budget_lines", "descriptions", "both"):
         source = "budget_lines"
+
+    wanted_types = _parse_result_types(result_types)
 
     fts_query = sanitize_fts5_query(q)
     if not fts_query:
@@ -380,7 +424,7 @@ def search(
 
     # Search budget_lines and pdf_pages when source is "budget_lines" or "both"
     if source in ("budget_lines", "both"):
-        if type in ("both", "excel"):
+        if type in ("both", "excel") and "budget_line" in wanted_types:
             try:
                 sql, params = _budget_select(
                     fts_query=fts_query,
@@ -422,7 +466,7 @@ def search(
                     )
                 )
 
-        if type in ("both", "pdf"):
+        if type in ("both", "pdf") and "pdf_page" in wanted_types:
             try:
                 sql, params = _pdf_select(
                     fts_query,
@@ -458,16 +502,20 @@ def search(
 
     # Search pe_descriptions and bli_descriptions when source is "descriptions" or "both"
     if source in ("descriptions", "both"):
-        desc_results = _description_select(fts_query, q, fetch_limit, offset, conn)
-        if len(desc_results) > limit:
-            desc_has_more = True
-            desc_results = desc_results[:limit]
-        bli_desc_results = _bli_description_select(
-            fts_query, q, fetch_limit, offset, conn
-        )
-        if len(bli_desc_results) > limit:
-            desc_has_more = True
-            bli_desc_results = bli_desc_results[:limit]
+        desc_results: list[dict] = []
+        bli_desc_results: list[dict] = []
+        if "description" in wanted_types:
+            desc_results = _description_select(fts_query, q, fetch_limit, offset, conn)
+            if len(desc_results) > limit:
+                desc_has_more = True
+                desc_results = desc_results[:limit]
+        if "bli_description" in wanted_types:
+            bli_desc_results = _bli_description_select(
+                fts_query, q, fetch_limit, offset, conn
+            )
+            if len(bli_desc_results) > limit:
+                desc_has_more = True
+                bli_desc_results = bli_desc_results[:limit]
         for dr in (*desc_results, *bli_desc_results):
             results.append(
                 SearchResultItem(
