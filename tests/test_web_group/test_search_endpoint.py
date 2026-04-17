@@ -323,6 +323,41 @@ class TestSuggest:
         result = suggest(q="A", limit=2, conn=suggest_db)
         assert len(result) <= 2
 
+    def test_bli_suggestions_by_key(self, suggest_db):
+        """Typing a BLI key prefix surfaces a bli_key field entry."""
+        suggest_db.execute(
+            "CREATE TABLE bli_index (bli_key TEXT PRIMARY KEY, account TEXT, "
+            "line_item TEXT, display_title TEXT, organization_name TEXT)"
+        )
+        suggest_db.execute(
+            "INSERT INTO bli_index VALUES ('1506N:0577', '1506N', '0577', "
+            "'EP-3 Series Mods', 'Navy')"
+        )
+        suggest_db.commit()
+        result = suggest(q="1506", limit=10, conn=suggest_db)
+        bli_entries = [s for s in result if s["field"] == "bli_key"]
+        assert any(s["value"] == "1506N:0577" for s in bli_entries)
+        assert bli_entries[0]["label"] == "EP-3 Series Mods"
+
+    def test_bli_suggestions_by_title(self, suggest_db):
+        """Typing a BLI display title substring also matches."""
+        suggest_db.execute(
+            "CREATE TABLE bli_index (bli_key TEXT PRIMARY KEY, account TEXT, "
+            "line_item TEXT, display_title TEXT, organization_name TEXT)"
+        )
+        suggest_db.execute(
+            "INSERT INTO bli_index VALUES ('1109N:2038', '1109N', '2038', "
+            "'LAV PIP', 'Navy')"
+        )
+        suggest_db.commit()
+        result = suggest(q="LAV", limit=10, conn=suggest_db)
+        assert any(s["field"] == "bli_key" for s in result)
+
+    def test_suggest_without_bli_index_is_not_an_error(self, suggest_db):
+        """Pre-Phase-7 DBs have no bli_index; suggest still returns PE suggestions."""
+        result = suggest(q="020", limit=5, conn=suggest_db)
+        assert any(s["field"] == "pe_number" for s in result)
+
     def test_org_name_in_suggestions(self, suggest_db):
         """Organization names appear in suggestions."""
         result = suggest(q="Army", limit=10, conn=suggest_db)

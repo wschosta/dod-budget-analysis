@@ -593,6 +593,23 @@ def suggest(
     except sqlite3.OperationalError:
         pass  # pe_index table may not exist
 
+    # BLI entries (procurement counterpart to pe_index) — match on the
+    # composite bli_key or the display_title. Emits ``field="bli_key"`` so
+    # the frontend can route to /api/v1/bli/{bli_key} for lookup.
+    if len(suggestions) < limit:
+        try:
+            for r in conn.execute(
+                "SELECT bli_key, display_title FROM bli_index "
+                "WHERE bli_key LIKE ? OR display_title LIKE ? "
+                "LIMIT ?",
+                (prefix_param, contains_param, limit),
+            ).fetchall():
+                if len(suggestions) >= limit:
+                    break
+                _add(r["bli_key"], "bli_key", r["display_title"])
+        except sqlite3.OperationalError:
+            pass  # bli_index table may not exist (pre-Phase-7 DBs)
+
     # Budget line fields in one query: prefix titles first, then contains
     # matches for titles, account, and org — ordered by priority.
     if len(suggestions) < limit:
