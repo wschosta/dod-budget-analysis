@@ -89,11 +89,26 @@ def _format_fy(value: str | None) -> str:
     return f"FY {s}" if s else ""
 
 
+def _path_basename(value: str | None) -> str:
+    """Return the final path segment, handling both `\\` and `/` separators.
+
+    The corpus is indexed on Windows so source_file values use backslashes,
+    but the same DB may be read on Linux in CI/deploy.  ``os.path.basename``
+    only handles the platform's native separator; splitting on both keeps
+    templates readable on either platform.
+    """
+    if not value:
+        return ""
+    s = str(value).replace("\\", "/")
+    return s.rsplit("/", 1)[-1]
+
+
 def set_templates(t: Jinja2Templates | None) -> None:
     global _templates
     _templates = t
     if t is not None:
         t.env.filters["format_fy"] = _format_fy
+        t.env.filters["path_basename"] = _path_basename
 
 
 def _tmpl() -> Jinja2Templates:

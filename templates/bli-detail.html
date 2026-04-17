@@ -92,7 +92,7 @@
         <td>{{ rp.pe_title or "—" }}</td>
         <td>{{ "%.1f" | format(rp.confidence) }}</td>
         <td class="meta-md">
-          {% if rp.source_file %}{{ rp.source_file.split('\\')[-1] }}{% if rp.page_number %} p{{ rp.page_number }}{% endif %}{% endif %}
+          {% if rp.source_file %}{{ rp.source_file | path_basename }}{% if rp.page_number %} p{{ rp.page_number }}{% endif %}{% endif %}
         </td>
       </tr>
       {% endfor %}
@@ -128,7 +128,7 @@
     <li class="description-item">
       <div class="meta-md">
         {% if d.fiscal_year %}<span class="badge">{{ d.fiscal_year }}</span>{% endif %}
-        {% if d.source_file %}{{ d.source_file.split('\\')[-1] }}{% endif %}
+        {% if d.source_file %}{{ d.source_file | path_basename }}{% endif %}
         {% if d.page_start %}p{{ d.page_start }}{% endif %}
       </div>
       <div>{{ d.snippet }}...</div>
