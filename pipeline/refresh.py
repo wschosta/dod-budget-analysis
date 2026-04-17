@@ -264,7 +264,7 @@ class RefreshWorkflow:
         self._write_progress("stage_5_enrich", "running", "Running enrichment pipeline")
 
         if self.dry_run:
-            self.log("[DRY RUN] Would call enrich_budget_db.enrich()", "detail")
+            self.log("[DRY RUN] Would call pipeline.enricher.enrich()", "detail")
             self.results["enrich"] = "completed"
             self._write_progress("stage_5_enrich", "completed")
             return True
@@ -278,7 +278,13 @@ class RefreshWorkflow:
         t0 = time.time()
         try:
             from pipeline.enricher import enrich  # noqa: PLC0415
-            enrich(self.db_path, phases={1, 2, 3, 4, 5}, rebuild=True)
+            # Run the full enrichment pipeline — phases 6–11 cover project
+            # decomposition & tagging, the BLI index/tags/descriptions, R-2
+            # metadata backfill, and the Phase-11 BLI↔PE mining that
+            # backfills procurement pe_number.  Before this change refresh
+            # only ran phases 1–5 so new P-1 rows never picked up their
+            # Phase-11 mappings between scheduled refreshes.
+            enrich(self.db_path, phases=set(range(1, 12)), rebuild=True)
             elapsed = time.time() - t0
             self.log(f"Enrichment complete in {fmt_time(elapsed)}", "ok")
 
