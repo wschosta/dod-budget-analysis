@@ -150,8 +150,10 @@ class TestTimeoutManager:
         tm.record_time("https://fast.com/a.xlsx", 1.0)
         tm.record_time("https://slow.com/a.xlsx", 50.0)
 
-        assert "fast.com" in tm.response_times
-        assert "slow.com" in tm.response_times
+        # Exact dict-key membership (not substring URL match) — response_times
+        # is keyed by normalized domain.
+        assert "fast.com" in tm.response_times.keys()
+        assert "slow.com" in tm.response_times.keys()
         assert len(tm.response_times["fast.com"]) == 1
         assert len(tm.response_times["slow.com"]) == 1
 

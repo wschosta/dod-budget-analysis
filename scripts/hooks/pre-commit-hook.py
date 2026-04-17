@@ -125,7 +125,12 @@ def check_code_quality():
 def check_security():
     """Check for potential security issues."""
     print("\nChecking for security issues...")
-    errors = []
+    # findings is a list of (filename, line_no, category) tuples.
+    # The matching `line` content is never stored, logged, or printed —
+    # only the position and the category name, so nothing sensitive
+    # reaches stdout.  The separation is explicit here for static
+    # analysers that track dataflow out of the regex-match branch.
+    findings: list[tuple[str, int, str]] = []
     root = Path(".")
 
     secret_patterns = [
@@ -145,14 +150,12 @@ def check_security():
 
                 for pattern, desc in secret_patterns:
                     if re.search(pattern, line, re.IGNORECASE):
-                        # Record only non-sensitive metadata about the finding.
-                        errors.append(f"{py_file.name}:{i}: {desc}")
+                        findings.append((py_file.name, i, desc))
 
-    if errors:
+    if findings:
         print("[FAILED] Security issues found:")
-        for error in errors:
-            # Do not include any matched content, only the pre-constructed metadata.
-            print("  " + error)
+        for fname, line_no, category in findings:
+            print(f"  {fname}:{line_no}: {category}")
         return False
 
     print("[PASSED] No hardcoded secrets detected.")

@@ -136,28 +136,54 @@ def _cache_table_name(kw_id: str) -> str:
     return f"explorer_cache_{kw_id[:16]}"
 
 
+class KeywordValidationError(ValueError):
+    """Raised by _parse_keywords with a pre-sanitized user-facing message.
+
+    The exception's ``str()`` is intentionally safe to echo back to HTTP
+    clients — all messages are authored in this module, never contain
+    traceback data, and cap at MAX_KEYWORD_LEN + 100 characters.  Endpoints
+    can catch this specific subclass instead of bare ValueError to make the
+    safety contract explicit for reviewers and static analysis.
+    """
+
+
+_MAX_USER_ERROR_LEN = MAX_KEYWORD_LEN + 100
+
+
+def _public_error_message(exc: KeywordValidationError) -> str:
+    """Return a length-bounded, newline-free message safe to send to clients."""
+    msg = exc.args[0] if exc.args else "Invalid keywords"
+    return str(msg).split("\n", 1)[0][:_MAX_USER_ERROR_LEN]
+
+
 def _parse_keywords(raw: str) -> list[str]:
     """Parse and validate comma-separated keywords string.
 
-    Returns cleaned keyword list. Raises ValueError on validation failure.
+    Returns cleaned keyword list. Raises KeywordValidationError on failure.
     """
     if not raw or not raw.strip():
-        raise ValueError("No keywords provided")
+        raise KeywordValidationError("No keywords provided")
 
     parts = [k.strip() for k in raw.split(",") if k.strip()]
     if not parts:
-        raise ValueError("No keywords provided")
+        raise KeywordValidationError("No keywords provided")
     if len(parts) > MAX_KEYWORDS:
-        raise ValueError(f"Too many keywords (max {MAX_KEYWORDS})")
+        raise KeywordValidationError(f"Too many keywords (max {MAX_KEYWORDS})")
 
     cleaned: list[str] = []
     for kw in parts:
         if len(kw) < MIN_KEYWORD_LEN:
-            raise ValueError(f"Keyword '{kw}' is too short (min {MIN_KEYWORD_LEN} characters)")
+            raise KeywordValidationError(
+                f"Keyword '{kw}' is too short (min {MIN_KEYWORD_LEN} characters)"
+            )
         if len(kw) > MAX_KEYWORD_LEN:
-            raise ValueError(f"Keyword '{kw}' is too long (max {MAX_KEYWORD_LEN} characters)")
+            raise KeywordValidationError(
+                f"Keyword '{kw}' is too long (max {MAX_KEYWORD_LEN} characters)"
+            )
         if not _KEYWORD_RE.match(kw):
-            raise ValueError(f"Keyword '{kw}' contains invalid characters")
+            raise KeywordValidationError(
+                f"Keyword '{kw}' contains invalid characters"
+            )
         cleaned.append(kw)
     return cleaned
 
@@ -303,8 +329,8 @@ def start_build(
     """Kick off a background cache build and return immediately."""
     try:
         keyword_list, pe_list, kw_id = _resolve_keyword_set(keywords, extra_pes)
-    except ValueError as e:
-        return {"error": str(e)}
+    except KeywordValidationError as e:
+        return {"error": _public_error_message(e)}
 
     expanded = expand_keywords(keyword_list)
 
@@ -388,8 +414,8 @@ def build_status(
     """
     try:
         keyword_list, pe_list, kw_id = _resolve_keyword_set(keywords, extra_pes)
-    except ValueError as e:
-        return {"state": "error", "progress": str(e)}
+    except KeywordValidationError as e:
+        return {"state": "error", "progress": _public_error_message(e)}
 
     with _build_lock:
         status = _build_progress.get(kw_id)
@@ -432,8 +458,8 @@ def get_explorer_data(
     """Return PE-level summary of cached results plus available download columns."""
     try:
         keyword_list, pe_list, kw_id = _resolve_keyword_set(keywords, extra_pes)
-    except ValueError as e:
-        return {"error": str(e)}
+    except KeywordValidationError as e:
+        return {"error": _public_error_message(e)}
 
     cache_table = _cache_table_name(kw_id)
     expanded = expand_keywords(keyword_list)
@@ -537,8 +563,12 @@ def download_explorer_xlsx(
     """
     try:
         keyword_list, pe_list, kw_id = _resolve_keyword_set(keywords, extra_pes)
-    except ValueError as e:
-        return Response(content=str(e).encode(), media_type="text/plain", status_code=400)
+    except KeywordValidationError as e:
+        return Response(
+            content=_public_error_message(e).encode(),
+            media_type="text/plain",
+            status_code=400,
+        )
 
     cache_table = _cache_table_name(kw_id)
 

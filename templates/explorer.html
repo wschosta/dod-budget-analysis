@@ -301,9 +301,22 @@ function clearValidation() {
 function renderKeywordTags(keywords) {
   kwTags.innerHTML = '';
   keywords.forEach((kw, i) => {
+    // Build DOM nodes explicitly — user keyword text goes through
+    // textContent (no HTML parsing), and the remove action uses
+    // addEventListener instead of an inline onclick= attribute, so
+    // even a keyword containing HTML-significant characters cannot
+    // escape its text node.
     const pill = document.createElement('span');
     pill.className = 'kw-tag-pill';
-    pill.innerHTML = `${kw} <button class="kw-remove" aria-label="Remove keyword ${kw}" onclick="removeKeyword(${i})">&times;</button>`;
+    pill.appendChild(document.createTextNode(kw + ' '));
+
+    const btn = document.createElement('button');
+    btn.className = 'kw-remove';
+    btn.setAttribute('aria-label', 'Remove keyword ' + kw);
+    btn.textContent = '\u00d7';  // multiplication sign (×)
+    btn.addEventListener('click', () => removeKeyword(i));
+    pill.appendChild(btn);
+
     kwTags.appendChild(pill);
   });
 }
