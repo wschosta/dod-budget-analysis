@@ -12,6 +12,7 @@ import threading
 import pytest
 
 from pipeline.enricher import (
+    _invalidate_explorer_caches,
     run_phase1,
     run_phase2,
     run_phase3,
@@ -1570,3 +1571,60 @@ class TestPhase5Checkpoint:
             "SELECT COUNT(*) FROM project_descriptions"
         ).fetchone()[0]
         assert rows1 == rows2
+
+
+class TestInvalidateExplorerCaches:
+    """_invalidate_explorer_caches drops cached keyword-search tables after
+    enrichment so the next Explorer request rebuilds with fresh data."""
+
+    def _make_cache_db(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE explorer_cache_meta (
+                keyword_set_id   TEXT PRIMARY KEY,
+                keywords_json    TEXT NOT NULL,
+                table_name       TEXT NOT NULL,
+                built_at         REAL NOT NULL,
+                last_accessed_at REAL NOT NULL,
+                row_count        INTEGER
+            );
+            CREATE TABLE explorer_cache_abc (id INTEGER, pe_number TEXT);
+            CREATE TABLE explorer_cache_def (id INTEGER, pe_number TEXT);
+            INSERT INTO explorer_cache_meta VALUES
+                ('abc', '["hypersonic"]', 'explorer_cache_abc', 1.0, 1.0, 10),
+                ('def', '["cyber"]',      'explorer_cache_def', 2.0, 2.0, 20);
+            INSERT INTO explorer_cache_abc VALUES (1, '0602702E');
+            INSERT INTO explorer_cache_def VALUES (1, '0303140D8Z');
+            """
+        )
+        return conn
+
+    def test_drops_meta_entries_and_backing_tables(self):
+        conn = self._make_cache_db()
+        _invalidate_explorer_caches(conn)
+        assert conn.execute("SELECT COUNT(*) FROM explorer_cache_meta").fetchone()[0] == 0
+        # Backing cache tables should have been dropped too.
+        tables = {r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()}
+        assert "explorer_cache_abc" not in tables
+        assert "explorer_cache_def" not in tables
+
+    def test_noop_when_cache_meta_absent(self):
+        """DBs that have never had an Explorer cache built must not error."""
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        _invalidate_explorer_caches(conn)  # Should just return cleanly.
+
+    def test_noop_when_meta_is_empty(self):
+        """Existing-but-empty cache_meta → nothing to drop, no error."""
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            "CREATE TABLE explorer_cache_meta ("
+            "keyword_set_id TEXT, keywords_json TEXT, table_name TEXT, "
+            "built_at REAL, last_accessed_at REAL, row_count INTEGER)"
+        )
+        _invalidate_explorer_caches(conn)
