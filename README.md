@@ -5,7 +5,8 @@ A searchable database of Department of Defense budget justification documents. D
 **Key capabilities:**
 - **6 data sources** — Comptroller, Defense-Wide, Army, Navy, Air Force (including WAF-protected sites via Playwright)
 - **15+ exhibit types** — P-1, P-5, R-1, R-2, R-3, R-4, O-1, M-1, C-1, RF-1, plus OCO/supplemental/amendment variants
-- **Full-text search** — SQLite FTS5 with BM25 relevance ranking across budget lines and PDF page text
+- **Full-text search** — SQLite FTS5 with BM25 relevance ranking across budget lines, PDF page text, PE descriptions, and procurement justification narratives
+- **Procurement↔RDT&E cross-referencing** — Automatically maps Budget Line Items (BLIs) to Program Elements (PEs) mined from P-5 justification PDFs, so procurement items are discoverable from RDT&E-centric views
 - **Keyword Explorer** — Fuzzy keyword search with prefix/acronym/edit-distance matching, async cache build, and XLSX export with dynamic array formulas
 - **30+ API endpoints** — Filtered queries, aggregations, PE drill-downs, faceted counts, streaming exports
 - **Interactive web UI** — HTMX + Chart.js with dark mode, sparklines, and responsive design
@@ -63,7 +64,7 @@ DoD websites (Comptroller, Army, Navy, Air Force, Defense-Wide)
 - **Build** — Excel/PDF parsing with data-driven column mapping, incremental and full-rebuild modes, parallel PDF processing
 - **Repair** — Organization name normalization, reference table population, index creation, FTS5 rebuild
 - **Validate** — 10+ automated quality checks including duplicate detection, null analysis, cross-service reconciliation
-- **Enrich** — 9-phase enrichment: PE index, descriptions, tags, lineage, project decomposition, BLI index/tags/descriptions
+- **Enrich** — 11-phase enrichment: PE index, descriptions, tags, lineage, project decomposition & tags, BLI index/tags/descriptions, R-2 metadata backfill, BLI↔PE mining from P-5 justification headers
 
 ## Data Sources
 
@@ -126,6 +127,12 @@ Per-IP rate limiting (configurable), ETag caching, CORS, CSP headers, and struct
 
 Amounts are in **thousands of dollars ($K)** unless `amount_unit` says otherwise.
 
+## What's New
+
+**2026-04-16 — Procurement gets connected to R&D.** Previously, 97.9% of P-1 / P-1R procurement rows had no Program Element number, which meant filtering, tagging, and keyword discovery silently skipped most procurement dollars. The new enrichment Phase 11 scans P-5 justification PDF headers for Program Element references, cross-references them against the BLI index, and backfills `budget_lines.pe_number` with high-confidence matches — taking P-1 PE coverage from 425 rows to 4,571 rows (10.8× increase, 276 distinct PEs now linked). Multi-PE mappings that couldn't be auto-resolved are surfaced on the budget-line detail page as "Related Program Elements" for manual inspection.
+
+**2026-04-16 — Procurement narratives are now searchable.** Migration 6 adds a FTS5 index over `bli_descriptions` (64,703 rows of P-5 justification text extracted from procurement PDFs). Searches via `/api/v1/search?source=descriptions` now return procurement hits alongside RDT&E PE descriptions. Try terms like "satellite" (1,110 matches), "cybersecurity" (596), or any program keyword you care about.
+
 ## Project Status
 
 | Phase | Status | Details |
@@ -136,7 +143,7 @@ Amounts are in **thousands of dollars ($K)** unless `amount_unit` says otherwise
 | **3 — Frontend & Docs** | ✅ Complete | 10 pages, Chart.js visualizations, 6 user guide docs |
 | **4 — Publish & Iterate** | 🔄 ~56% Complete | CI/CD, Docker, monitoring done; hosting/domain/launch pending |
 
-**Test suite:** 107 test files with comprehensive coverage across all modules. Automated CI via GitHub Actions (matrix testing, ruff, mypy, pytest+coverage, Docker build).
+**Test suite:** ~110 test files with comprehensive coverage across all modules. Automated CI via GitHub Actions (matrix testing, ruff, mypy, pytest+coverage, Docker build).
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the full task breakdown (65 tasks across 4 phases).
 
