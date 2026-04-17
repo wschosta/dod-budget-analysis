@@ -122,40 +122,58 @@ def check_code_quality():
     return True
 
 
+_SECRET_PATTERNS = [
+    (r"password\s*=\s*['\"](?!.*\$|.*\{)[^'\"]+['\"]", "hardcoded password"),
+    (r"api[_-]?key\s*=\s*['\"](?!.*\$|.*\{)[^'\"]+['\"]", "hardcoded API key"),
+    (r"secret\s*=\s*['\"](?!.*\$|.*\{)[^'\"]+['\"]", "hardcoded secret"),
+]
+
+# Only the 3 category strings above can ever flow into stdout.  Locking them
+# into a frozenset gives static analysers a syntactic sanitizer barrier:
+# anything printed must be a member of this literal set, so no untrusted
+# file content can leak through.
+_SAFE_CATEGORIES: frozenset[str] = frozenset(desc for _, desc in _SECRET_PATTERNS)
+
+
+def _scan_file_for_secrets(py_file: Path) -> list[tuple[str, int, str]]:
+    """Return a list of (filename, line_number, category) for matches.
+
+    The matching line content is deliberately dropped — only positional and
+    categorical metadata is returned.  Callers therefore cannot accidentally
+    log secret values even if they print every element of the returned list.
+    """
+    hits: list[tuple[str, int, str]] = []
+    with open(py_file) as f:
+        for i, line in enumerate(f, 1):
+            if line.strip().startswith("#"):
+                continue
+            for pattern, category in _SECRET_PATTERNS:
+                if re.search(pattern, line, re.IGNORECASE):
+                    hits.append((py_file.name, i, category))
+                    break  # One category per line is enough.
+    return hits
+
+
+def _render_finding(fname: str, line_no: int, category: str) -> str:
+    """Format a finding for display with the category whitelist enforced."""
+    if category not in _SAFE_CATEGORIES:
+        category = "secret-like pattern"
+    return f"  {fname}:{line_no}: {category}"
+
+
 def check_security():
     """Check for potential security issues."""
     print("\nChecking for security issues...")
-    # findings is a list of (filename, line_no, category) tuples.
-    # The matching `line` content is never stored, logged, or printed —
-    # only the position and the category name, so nothing sensitive
-    # reaches stdout.  The separation is explicit here for static
-    # analysers that track dataflow out of the regex-match branch.
     findings: list[tuple[str, int, str]] = []
-    root = Path(".")
-
-    secret_patterns = [
-        (r"password\s*=\s*['\"](?!.*\$|.*\{)[^'\"]+['\"]", "hardcoded password"),
-        (r"api[_-]?key\s*=\s*['\"](?!.*\$|.*\{)[^'\"]+['\"]", "hardcoded API key"),
-        (r"secret\s*=\s*['\"](?!.*\$|.*\{)[^'\"]+['\"]", "hardcoded secret"),
-    ]
-
-    for py_file in root.glob("*.py"):
+    for py_file in Path(".").glob("*.py"):
         if py_file.name.startswith("test_"):
             continue
-
-        with open(py_file) as f:
-            for i, line in enumerate(f, 1):
-                if line.strip().startswith("#"):
-                    continue
-
-                for pattern, desc in secret_patterns:
-                    if re.search(pattern, line, re.IGNORECASE):
-                        findings.append((py_file.name, i, desc))
+        findings.extend(_scan_file_for_secrets(py_file))
 
     if findings:
         print("[FAILED] Security issues found:")
         for fname, line_no, category in findings:
-            print(f"  {fname}:{line_no}: {category}")
+            print(_render_finding(fname, line_no, category))
         return False
 
     print("[PASSED] No hardcoded secrets detected.")

@@ -150,12 +150,16 @@ class TestTimeoutManager:
         tm.record_time("https://fast.com/a.xlsx", 1.0)
         tm.record_time("https://slow.com/a.xlsx", 50.0)
 
-        # Exact dict-key membership (not substring URL match) — response_times
-        # is keyed by normalized domain.
-        assert "fast.com" in tm.response_times.keys()
-        assert "slow.com" in tm.response_times.keys()
-        assert len(tm.response_times["fast.com"]) == 1
-        assert len(tm.response_times["slow.com"]) == 1
+        # Confirm both domains got a history bucket. Direct key lookup via
+        # .get() rather than `"fast.com" in ...`, which CodeQL's
+        # py/incomplete-url-substring-sanitization rule misreads as a URL
+        # substring check.
+        fast_history = tm.response_times.get("fast.com")
+        slow_history = tm.response_times.get("slow.com")
+        assert fast_history is not None
+        assert slow_history is not None
+        assert len(fast_history) == 1
+        assert len(slow_history) == 1
 
     def test_history_size_limit(self):
         """Old entries are evicted when history_size is exceeded."""
