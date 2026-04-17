@@ -2494,6 +2494,35 @@ def run_phase11(conn: sqlite3.Connection, stop_event: threading.Event | None = N
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────
 
+def _invalidate_explorer_caches(conn: sqlite3.Connection) -> None:
+    """Drop cached Explorer keyword-set results after enrichment.
+
+    The Explorer page (api/routes/explorer.py) caches keyword-search results
+    in per-keyword-set tables indexed by explorer_cache_meta.  Any enrichment
+    run can change which PEs match which keywords, so the cached rows become
+    stale.  We drop both the meta entries and their backing tables so the
+    next Explorer request triggers a fresh build.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT keyword_set_id, table_name FROM explorer_cache_meta"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return  # Cache system not initialized yet — nothing to invalidate.
+
+    if not rows:
+        return
+
+    for _kw_id, table_name in rows:
+        conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+    conn.execute("DELETE FROM explorer_cache_meta")
+    conn.commit()
+    logger.info(
+        "Invalidated %d Explorer cache(s) — next request will rebuild.",
+        len(rows),
+    )
+
+
 def enrich(
     db_path: Path,
     phases: set[int],
@@ -2576,6 +2605,8 @@ def enrich(
     elapsed = time.time() - t0
     logger.info("Enrichment complete in %.1fs", elapsed)
     conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+    _invalidate_explorer_caches(conn)
 
     # Summary counts
     table_counts: dict[str, int] = {}
