@@ -336,7 +336,7 @@ class SearchResultItem(BaseModel):
 
     result_type: str = Field(
         ...,
-        description="'budget_line', 'pdf_page', or 'description'",
+        description="'budget_line', 'pdf_page', 'description', or 'bli_description'",
         examples=["budget_line"],
     )
     id: int = Field(..., description="Row ID in the source table", examples=[1001])

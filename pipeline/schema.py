@@ -442,6 +442,58 @@ CREATE TABLE IF NOT EXISTS bli_pe_map (
 CREATE INDEX IF NOT EXISTS idx_bli_pe_map_pe ON bli_pe_map(pe_number);
         """,
     ),
+    (
+        6,
+        "006_bli_descriptions_fts: FTS5 virtual table + sync triggers for bli_descriptions",
+        """
+-- Ensure bli_descriptions base table exists before creating the FTS5 content
+-- table.  The enrichment pipeline (Phase 9) creates this with the full column
+-- set; the minimal DDL here lets the migration apply even on a fresh DB
+-- before enrichment runs.
+CREATE TABLE IF NOT EXISTS bli_descriptions (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    bli_key          TEXT NOT NULL,
+    fiscal_year      TEXT,
+    source_file      TEXT,
+    page_start       INTEGER,
+    page_end         INTEGER,
+    section_header   TEXT,
+    description_text TEXT
+);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS bli_descriptions_fts USING fts5(
+    bli_key,
+    section_header,
+    description_text,
+    content='bli_descriptions',
+    content_rowid='id'
+);
+
+-- Rebuild so any pre-existing rows in bli_descriptions (e.g. Phase 9 output
+-- from earlier enrichment runs) are indexed.  No-op on a fresh DB.
+INSERT INTO bli_descriptions_fts(bli_descriptions_fts) VALUES('rebuild');
+
+-- Sync trigger: INSERT
+CREATE TRIGGER IF NOT EXISTS bli_descriptions_ai AFTER INSERT ON bli_descriptions BEGIN
+    INSERT INTO bli_descriptions_fts(rowid, bli_key, section_header, description_text)
+    VALUES (new.id, new.bli_key, new.section_header, new.description_text);
+END;
+
+-- Sync trigger: DELETE
+CREATE TRIGGER IF NOT EXISTS bli_descriptions_ad AFTER DELETE ON bli_descriptions BEGIN
+    INSERT INTO bli_descriptions_fts(bli_descriptions_fts, rowid, bli_key, section_header, description_text)
+    VALUES('delete', old.id, old.bli_key, old.section_header, old.description_text);
+END;
+
+-- Sync trigger: UPDATE
+CREATE TRIGGER IF NOT EXISTS bli_descriptions_au AFTER UPDATE ON bli_descriptions BEGIN
+    INSERT INTO bli_descriptions_fts(bli_descriptions_fts, rowid, bli_key, section_header, description_text)
+    VALUES('delete', old.id, old.bli_key, old.section_header, old.description_text);
+    INSERT INTO bli_descriptions_fts(rowid, bli_key, section_header, description_text)
+    VALUES (new.id, new.bli_key, new.section_header, new.description_text);
+END;
+        """,
+    ),
 ]
 
 

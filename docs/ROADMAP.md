@@ -243,6 +243,13 @@ All code TODOs (H1, H2, M1, L1–L5) and agent groups (LION/TIGER/BEAR, 33/33) a
 **resolved**. Data quality issues are catalogued in
 [`docs/NOTICED_ISSUES.md`](NOTICED_ISSUES.md).
 
+**Completed 2026-04-16 — BLI narrative search (migration 6, `bli_descriptions_fts`).**
+Adds an FTS5 virtual table over `bli_descriptions.description_text` so the
+64,703 rows of P-5 procurement narrative text (populated by Phase 9) are
+searchable via `/api/v1/search?source=descriptions`. Results appear with
+`result_type="bli_description"`. Closes the searchability gap called out
+in NOTICED_ISSUES §53 as BLI-side future work.
+
 **Completed 2026-04-16 — P-5 PDF header BLI↔PE mining (enrichment Phase 11).**
 Adds `bli_pe_map` table (migration 5) and a new phase that scans `pdf_pages`
 with `exhibit_type='p5'` for Program Element references, cross-references

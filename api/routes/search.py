@@ -259,6 +259,92 @@ def _description_select(
     return results
 
 
+def _bli_description_select(
+    fts_query: str,
+    raw_query: str,
+    limit: int,
+    offset: int,
+    conn: sqlite3.Connection,
+) -> list[dict]:
+    """Search bli_descriptions via FTS5 (or LIKE fallback).
+
+    Mirrors ``_description_select`` but targets the procurement narrative
+    corpus (P-5 justification text extracted by enrichment Phase 9).
+    Returns result dicts with ``result_type="bli_description"``.
+    """
+    results: list[dict] = []
+
+    try:
+        conn.execute("SELECT 1 FROM bli_descriptions_fts LIMIT 0")
+        desc_fts_limit = min(_FTS_SCAN_LIMIT, offset + limit)
+        rows = conn.execute(
+            f"""
+            SELECT d.id, d.bli_key, d.section_header, d.description_text,
+                   d.source_file, d.fiscal_year,
+                   bm25(bli_descriptions_fts) AS score
+            FROM bli_descriptions d
+            JOIN (
+                SELECT rowid, bm25(bli_descriptions_fts) AS score
+                FROM bli_descriptions_fts
+                WHERE bli_descriptions_fts MATCH ?
+                ORDER BY rank LIMIT {desc_fts_limit}
+            ) fts ON d.id = fts.rowid
+            ORDER BY fts.score ASC
+            LIMIT ? OFFSET ?
+            """,
+            (fts_query, limit, offset),
+        ).fetchall()
+        for row in rows:
+            d = dict(row)
+            score = d.pop("score", None)
+            snippet = extract_snippet_highlighted(
+                str(d.get("description_text") or ""), raw_query, html=True, max_len=200
+            )
+            results.append({
+                "result_type": "bli_description",
+                "id": d["id"],
+                "source_file": d.get("source_file", ""),
+                "snippet": snippet,
+                "score": score,
+                "data": d,
+            })
+        return results
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
+        pass  # FTS5 table doesn't exist yet, fall through to LIKE
+
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, bli_key, section_header, description_text,
+                   source_file, fiscal_year
+            FROM bli_descriptions
+            WHERE description_text LIKE ?
+            ORDER BY bli_key, fiscal_year
+            LIMIT ? OFFSET ?
+            """,
+            (f"%{raw_query}%", limit, offset),
+        ).fetchall()
+        for row in rows:
+            d = dict(row)
+            snippet = extract_snippet_highlighted(
+                str(d.get("description_text") or ""), raw_query, html=True, max_len=200
+            )
+            results.append({
+                "result_type": "bli_description",
+                "id": d["id"],
+                "source_file": d.get("source_file", ""),
+                "snippet": snippet,
+                "score": None,
+                "data": d,
+            })
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
+        logger.warning(
+            "bli_descriptions search failed for q=%r", raw_query, exc_info=True
+        )
+
+    return results
+
+
 @router.get(
     "",
     response_model=SearchResponse,
@@ -426,13 +512,19 @@ def search(
                     )
                 )
 
-    # Search pe_descriptions when source is "descriptions" or "both"
+    # Search pe_descriptions and bli_descriptions when source is "descriptions" or "both"
     if source in ("descriptions", "both"):
         desc_results = _description_select(fts_query, q, fetch_limit, offset, conn)
         if len(desc_results) > limit:
             desc_has_more = True
             desc_results = desc_results[:limit]
-        for dr in desc_results:
+        bli_desc_results = _bli_description_select(
+            fts_query, q, fetch_limit, offset, conn
+        )
+        if len(bli_desc_results) > limit:
+            desc_has_more = True
+            bli_desc_results = bli_desc_results[:limit]
+        for dr in (*desc_results, *bli_desc_results):
             results.append(
                 SearchResultItem(
                     result_type=dr["result_type"],

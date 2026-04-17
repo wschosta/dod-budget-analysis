@@ -235,6 +235,7 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 - **`bli_tags`** — Keyword tags for procurement line items
 - **`bli_descriptions`** — Narrative text from P-5 procurement exhibit PDF pages, linked to BLIs by account code and line item number
 - **`bli_pe_map`** — BLI→PE mappings mined from P-5 PDF page headers (Phase 11). Composite primary key `(bli_key, pe_number)` allows one BLI to reference multiple PEs. Confidence is `0.9` when a page has exactly one PE and `0.6` when it references multiple; backfill of `budget_lines.pe_number` uses only `confidence >= 0.8`.
+- **`bli_descriptions_fts`** — FTS5 virtual table over `bli_descriptions.description_text` (migration 6). Makes the 64K+ rows of P-5 narrative justification searchable via `/api/v1/search?source=descriptions` — results appear with `result_type="bli_description"`. Kept in sync via INSERT/UPDATE/DELETE triggers.
 
 ### 5.5 Cache Tables
 
