@@ -137,13 +137,20 @@
 
   {# Phase 11: Related PEs mined from this BLI's P-5 justification pages. #}
   {% if related_pes %}
-  <h4 class="mt-lg mb-sm meta-lg">
+  <h4 class="mt-lg mb-sm meta-lg" id="related-pes-heading">
     Related Program Elements
-    <span class="meta-md" data-tooltip="Mined from P-5 PDF headers. Confidence 0.9 means the PE was the only one on the source page; 0.6 means the page listed multiple PEs.">
+    <button type="button"
+            class="meta-md"
+            tabindex="0"
+            aria-describedby="related-pes-help"
+            data-tooltip="Mined from P-5 PDF headers. Confidence 0.9 means the PE was the only one on the source page; 0.6 means the page listed multiple PEs.">
       (from P-5 justification)
+    </button>
+    <span id="related-pes-help" class="sr-only">
+      Mined from P-5 PDF headers. Confidence 0.9 means the PE was the only one on the source page; 0.6 means the page listed multiple PEs.
     </span>
   </h4>
-  <ul class="related-pes">
+  <ul class="related-pes" aria-labelledby="related-pes-heading">
     {% for rp in related_pes %}
     <li>
       <a href="/programs/{{ rp.pe_number }}" title="{{ rp.pe_title or '' }}">
