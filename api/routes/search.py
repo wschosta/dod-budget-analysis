@@ -168,125 +168,41 @@ def _pdf_select(
     return sql, params
 
 
-def _description_select(
+def _description_select_generic(
+    *,
+    table: str,
+    fts_table: str,
+    natural_key: str,
+    result_type: str,
     fts_query: str,
     raw_query: str,
     limit: int,
     offset: int,
     conn: sqlite3.Connection,
 ) -> list[dict]:
-    """Search pe_descriptions via FTS5 (or LIKE fallback).
+    """Search a descriptions table via FTS5 (or LIKE fallback).
 
-    Returns a list of result dicts with result_type="description".
+    Shared implementation behind ``_description_select`` (PE narrative) and
+    ``_bli_description_select`` (BLI narrative).  The two corpora have
+    parallel schemas differing only in the natural-key column name and the
+    result_type label.
     """
     results: list[dict] = []
 
-    # Try FTS5 first
+    # Try FTS5 first.  SEARCH-005: bound the FTS scan (issue #60).
     try:
-        conn.execute("SELECT 1 FROM pe_descriptions_fts LIMIT 0")
-        # SEARCH-005: Bound the FTS scan (issue #60).
+        conn.execute(f"SELECT 1 FROM {fts_table} LIMIT 0")
         desc_fts_limit = min(_FTS_SCAN_LIMIT, offset + limit)
         rows = conn.execute(
             f"""
-            SELECT d.id, d.pe_number, d.section_header, d.description_text,
+            SELECT d.id, d.{natural_key}, d.section_header, d.description_text,
                    d.source_file, d.fiscal_year,
-                   bm25(pe_descriptions_fts) AS score
-            FROM pe_descriptions d
+                   bm25({fts_table}) AS score
+            FROM {table} d
             JOIN (
-                SELECT rowid, bm25(pe_descriptions_fts) AS score
-                FROM pe_descriptions_fts
-                WHERE pe_descriptions_fts MATCH ?
-                ORDER BY rank LIMIT {desc_fts_limit}
-            ) fts ON d.id = fts.rowid
-            ORDER BY fts.score ASC
-            LIMIT ? OFFSET ?
-        """,
-            (fts_query, limit, offset),
-        ).fetchall()
-        for row in rows:
-            d = dict(row)
-            score = d.pop("score", None)
-            snippet = extract_snippet_highlighted(
-                str(d.get("description_text") or ""), raw_query, html=True, max_len=200
-            )
-            results.append(
-                {
-                    "result_type": "description",
-                    "id": d["id"],
-                    "source_file": d.get("source_file", ""),
-                    "snippet": snippet,
-                    "score": score,
-                    "data": d,
-                }
-            )
-        return results
-    except (sqlite3.OperationalError, sqlite3.DatabaseError):
-        pass  # FTS5 table doesn't exist, try LIKE fallback
-
-    # LIKE fallback on pe_descriptions
-    try:
-        rows = conn.execute(
-            """
-            SELECT id, pe_number, section_header, description_text,
-                   source_file, fiscal_year
-            FROM pe_descriptions
-            WHERE description_text LIKE ?
-            ORDER BY pe_number, fiscal_year
-            LIMIT ? OFFSET ?
-        """,
-            (f"%{raw_query}%", limit, offset),
-        ).fetchall()
-        for row in rows:
-            d = dict(row)
-            snippet = extract_snippet_highlighted(
-                str(d.get("description_text") or ""), raw_query, html=True, max_len=200
-            )
-            results.append(
-                {
-                    "result_type": "description",
-                    "id": d["id"],
-                    "source_file": d.get("source_file", ""),
-                    "snippet": snippet,
-                    "score": None,
-                    "data": d,
-                }
-            )
-    except (sqlite3.OperationalError, sqlite3.DatabaseError):
-        logger.warning(
-            "pe_descriptions search failed for q=%r", raw_query, exc_info=True
-        )
-
-    return results
-
-
-def _bli_description_select(
-    fts_query: str,
-    raw_query: str,
-    limit: int,
-    offset: int,
-    conn: sqlite3.Connection,
-) -> list[dict]:
-    """Search bli_descriptions via FTS5 (or LIKE fallback).
-
-    Mirrors ``_description_select`` but targets the procurement narrative
-    corpus (P-5 justification text extracted by enrichment Phase 9).
-    Returns result dicts with ``result_type="bli_description"``.
-    """
-    results: list[dict] = []
-
-    try:
-        conn.execute("SELECT 1 FROM bli_descriptions_fts LIMIT 0")
-        desc_fts_limit = min(_FTS_SCAN_LIMIT, offset + limit)
-        rows = conn.execute(
-            f"""
-            SELECT d.id, d.bli_key, d.section_header, d.description_text,
-                   d.source_file, d.fiscal_year,
-                   bm25(bli_descriptions_fts) AS score
-            FROM bli_descriptions d
-            JOIN (
-                SELECT rowid, bm25(bli_descriptions_fts) AS score
-                FROM bli_descriptions_fts
-                WHERE bli_descriptions_fts MATCH ?
+                SELECT rowid, bm25({fts_table}) AS score
+                FROM {fts_table}
+                WHERE {fts_table} MATCH ?
                 ORDER BY rank LIMIT {desc_fts_limit}
             ) fts ON d.id = fts.rowid
             ORDER BY fts.score ASC
@@ -301,7 +217,7 @@ def _bli_description_select(
                 str(d.get("description_text") or ""), raw_query, html=True, max_len=200
             )
             results.append({
-                "result_type": "bli_description",
+                "result_type": result_type,
                 "id": d["id"],
                 "source_file": d.get("source_file", ""),
                 "snippet": snippet,
@@ -310,16 +226,16 @@ def _bli_description_select(
             })
         return results
     except (sqlite3.OperationalError, sqlite3.DatabaseError):
-        pass  # FTS5 table doesn't exist yet, fall through to LIKE
+        pass  # FTS5 table missing — fall through to LIKE.
 
     try:
         rows = conn.execute(
-            """
-            SELECT id, bli_key, section_header, description_text,
+            f"""
+            SELECT id, {natural_key}, section_header, description_text,
                    source_file, fiscal_year
-            FROM bli_descriptions
+            FROM {table}
             WHERE description_text LIKE ?
-            ORDER BY bli_key, fiscal_year
+            ORDER BY {natural_key}, fiscal_year
             LIMIT ? OFFSET ?
             """,
             (f"%{raw_query}%", limit, offset),
@@ -330,7 +246,7 @@ def _bli_description_select(
                 str(d.get("description_text") or ""), raw_query, html=True, max_len=200
             )
             results.append({
-                "result_type": "bli_description",
+                "result_type": result_type,
                 "id": d["id"],
                 "source_file": d.get("source_file", ""),
                 "snippet": snippet,
@@ -338,11 +254,39 @@ def _bli_description_select(
                 "data": d,
             })
     except (sqlite3.OperationalError, sqlite3.DatabaseError):
-        logger.warning(
-            "bli_descriptions search failed for q=%r", raw_query, exc_info=True
-        )
+        logger.warning("%s search failed for q=%r", table, raw_query, exc_info=True)
 
     return results
+
+
+def _description_select(
+    fts_query: str, raw_query: str, limit: int, offset: int,
+    conn: sqlite3.Connection,
+) -> list[dict]:
+    """Search pe_descriptions (RDT&E narrative) via FTS5 or LIKE fallback."""
+    return _description_select_generic(
+        table="pe_descriptions",
+        fts_table="pe_descriptions_fts",
+        natural_key="pe_number",
+        result_type="description",
+        fts_query=fts_query, raw_query=raw_query,
+        limit=limit, offset=offset, conn=conn,
+    )
+
+
+def _bli_description_select(
+    fts_query: str, raw_query: str, limit: int, offset: int,
+    conn: sqlite3.Connection,
+) -> list[dict]:
+    """Search bli_descriptions (procurement narrative) via FTS5 or LIKE fallback."""
+    return _description_select_generic(
+        table="bli_descriptions",
+        fts_table="bli_descriptions_fts",
+        natural_key="bli_key",
+        result_type="bli_description",
+        fts_query=fts_query, raw_query=raw_query,
+        limit=limit, offset=offset, conn=conn,
+    )
 
 
 @router.get(
