@@ -2548,6 +2548,12 @@ def enrich(
     # init_pragmas already applied by get_connection; add bulk overrides
     conn.execute("PRAGMA cache_size=-262144")      # 256MB cache (overrides 64MB)
     conn.execute("PRAGMA mmap_size=536870912")     # 512MB mmap
+
+    # Bring the schema up to the latest migration before any phase runs —
+    # ensures FTS5 virtual tables, reference data, and future schema
+    # additions are in place on DBs that predate the migration system.
+    from pipeline.schema import migrate as _migrate
+    _migrate(conn)
     conn.execute("PRAGMA wal_autocheckpoint=0")    # manual checkpoint at end
 
     if rebuild:

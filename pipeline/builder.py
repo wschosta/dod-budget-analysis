@@ -373,6 +373,14 @@ def create_database(db_path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA mmap_size=536870912")         # 512MB memory-mapped I/O (was 30MB)
     conn.execute("PRAGMA wal_autocheckpoint=0")        # Disable auto-checkpoint; manual at end
 
+    # Run the versioned migrations so schema_version is populated on every
+    # prod build.  Migrations are idempotent (CREATE … IF NOT EXISTS) so
+    # running them here in addition to the inline DDL below is safe.  This
+    # closes the pre-2026-04 gap where prod DBs had schema_version empty
+    # because the migration system was only invoked by tests.
+    from pipeline.schema import migrate as _migrate
+    _migrate(conn)
+
     # ── Schema migration: add columns that may be missing on older databases ──
     # CREATE TABLE IF NOT EXISTS won't alter existing tables, so we need to
     # explicitly ADD COLUMN for any columns added after the initial schema.
