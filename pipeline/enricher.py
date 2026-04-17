@@ -2453,8 +2453,10 @@ def run_phase11(conn: sqlite3.Connection, stop_event: threading.Event | None = N
         "  AND pe_number IS NOT NULL AND pe_number != ''"
     ).fetchone()[0]
 
+    # UPDATE OR IGNORE: skips rows that would collide with the idx_bl_dedup
+    # unique index instead of aborting the whole UPDATE (see commit 3e82db4).
     conn.execute("""
-        UPDATE budget_lines
+        UPDATE OR IGNORE budget_lines
         SET pe_number = (
             SELECT pe_number FROM bli_pe_map
             WHERE bli_key = (
