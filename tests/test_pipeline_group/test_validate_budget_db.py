@@ -25,8 +25,10 @@ from pipeline.db_validator import (  # noqa: E402
     check_ingestion_errors,
     check_unit_consistency,
     check_empty_files,
+    check_bli_enrichment_orphans,
     check_enrichment_orphans,
     check_enrichment_staleness,
+    check_phase11_backfill_consistency,
     check_extreme_outliers,
     check_pe_org_consistency,
     check_budget_activity_consistency,
@@ -538,6 +540,79 @@ def test_enrichment_orphans_lineage_referenced_pe(conn):
     issues = check_enrichment_orphans(conn)
     assert len(issues) >= 1
     assert any(i["table"] == "pe_lineage" and i["column"] == "referenced_pe" for i in issues)
+
+
+# ── BLI Enrichment Orphans (Phase 11) ────────────────────────────────────
+
+def _ensure_bli_tables(conn):
+    """Create the BLI enrichment tables that Phase 7-11 would build."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS bli_index (
+            bli_key TEXT PRIMARY KEY, account TEXT NOT NULL, line_item TEXT,
+            display_title TEXT, organization_name TEXT
+        );
+        CREATE TABLE IF NOT EXISTS bli_tags (
+            bli_key TEXT, tag TEXT, tag_source TEXT, confidence REAL
+        );
+        CREATE TABLE IF NOT EXISTS bli_descriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, bli_key TEXT NOT NULL,
+            fiscal_year TEXT, description_text TEXT
+        );
+        CREATE TABLE IF NOT EXISTS bli_pe_map (
+            bli_key TEXT, pe_number TEXT, confidence REAL,
+            source_file TEXT, page_number INTEGER,
+            PRIMARY KEY (bli_key, pe_number)
+        );
+    """)
+
+
+def test_bli_enrichment_orphans_none(conn):
+    _ensure_bli_tables(conn)
+    conn.execute("INSERT INTO bli_index (bli_key, account, line_item) VALUES ('3010:AH-64', '3010', 'AH-64')")
+    conn.execute("INSERT INTO bli_tags VALUES ('3010:AH-64', 'aviation', 'keyword', 0.8)")
+    conn.execute("INSERT INTO pe_index (pe_number, display_title) VALUES ('0305206N', 'ISR')")
+    conn.execute("INSERT INTO bli_pe_map VALUES ('3010:AH-64', '0305206N', 0.9, 'p5.pdf', 1)")
+    conn.commit()
+    assert check_bli_enrichment_orphans(conn) == []
+
+
+def test_bli_enrichment_orphans_unknown_bli_key(conn):
+    _ensure_bli_tables(conn)
+    conn.execute("INSERT INTO bli_index (bli_key, account, line_item) VALUES ('3010:AH-64', '3010', 'AH-64')")
+    conn.execute("INSERT INTO bli_tags VALUES ('9999:GHOST', 'aviation', 'keyword', 0.8)")
+    conn.commit()
+    issues = check_bli_enrichment_orphans(conn)
+    assert any(i["table"] == "bli_tags" for i in issues)
+    assert all(i["severity"] == "warning" for i in issues)
+
+
+def test_bli_enrichment_orphans_unknown_pe_number(conn):
+    _ensure_bli_tables(conn)
+    conn.execute("INSERT INTO bli_index (bli_key, account, line_item) VALUES ('3010:AH-64', '3010', 'AH-64')")
+    conn.execute("INSERT INTO pe_index (pe_number, display_title) VALUES ('0305206N', 'ISR')")
+    conn.execute("INSERT INTO bli_pe_map VALUES ('3010:AH-64', '9999999X', 0.9, 'p5.pdf', 1)")
+    conn.commit()
+    issues = check_bli_enrichment_orphans(conn)
+    assert any(i["table"] == "bli_pe_map" and i["column"] == "pe_number" for i in issues)
+
+
+def test_bli_enrichment_orphans_without_bli_index(conn):
+    """Pre-Phase-7 DBs don't have bli_index — check must short-circuit cleanly."""
+    assert check_bli_enrichment_orphans(conn) == []
+
+
+def test_phase11_backfill_consistency_under_threshold(conn):
+    """A handful of unmapped pe_numbers is expected (Excel-sourced); no alert."""
+    _ensure_bli_tables(conn)
+    _insert_line(conn, exhibit_type="p1", account="3010", line_item="AH-64", pe_number="0207449A")
+    conn.commit()
+    # Below the 10k threshold the check is silent.
+    assert check_phase11_backfill_consistency(conn) == []
+
+
+def test_phase11_backfill_consistency_returns_empty_without_tables(conn):
+    """Missing bli_pe_map → check is a noop."""
+    assert check_phase11_backfill_consistency(conn) == []
 
 
 # ── Enrichment Staleness ─────────────────────────────────────────────────

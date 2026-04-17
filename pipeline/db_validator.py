@@ -1198,6 +1198,125 @@ def check_enrichment_orphans(conn: sqlite3.Connection) -> list[dict]:
     return issues
 
 
+def check_bli_enrichment_orphans(conn: sqlite3.Connection) -> list[dict]:
+    """Detect BLI enrichment rows that reference bli_keys not in bli_index.
+
+    Symmetric with ``check_enrichment_orphans`` for PEs. Also flags
+    Phase-11 bli_pe_map entries whose pe_number isn't in pe_index.
+    """
+    issues: list[dict] = []
+
+    if table_exists(conn, "bli_index"):
+        for table, col in [
+            ("bli_tags", "bli_key"),
+            ("bli_descriptions", "bli_key"),
+            ("bli_pe_map", "bli_key"),
+        ]:
+            if not table_exists(conn, table):
+                continue
+            try:
+                orphans = conn.execute(f"""
+                    SELECT COUNT(*) AS c FROM {table} t
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM bli_index b WHERE b.bli_key = t.{col}
+                    )
+                """).fetchone()["c"]
+            except sqlite3.OperationalError:
+                continue
+            if orphans > 0:
+                issues.append({
+                    "check": "bli_enrichment_orphans",
+                    "severity": "warning",
+                    "detail": (
+                        f"{orphans} row(s) in {table}.{col} reference bli_keys "
+                        "not found in bli_index — re-run enrichment with --rebuild"
+                    ),
+                    "table": table,
+                    "column": col,
+                    "orphan_count": orphans,
+                })
+
+    # bli_pe_map → pe_index: Phase-11 mappings should point to real PEs.
+    if table_exists(conn, "bli_pe_map") and table_exists(conn, "pe_index"):
+        try:
+            orphans = conn.execute("""
+                SELECT COUNT(*) AS c FROM bli_pe_map bpm
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM pe_index p WHERE p.pe_number = bpm.pe_number
+                )
+            """).fetchone()["c"]
+        except sqlite3.OperationalError:
+            orphans = 0
+        if orphans > 0:
+            issues.append({
+                "check": "bli_enrichment_orphans",
+                "severity": "warning",
+                "detail": (
+                    f"{orphans} row(s) in bli_pe_map reference PE numbers not "
+                    "found in pe_index — re-run enrichment with --rebuild"
+                ),
+                "table": "bli_pe_map",
+                "column": "pe_number",
+                "orphan_count": orphans,
+            })
+
+    return issues
+
+
+def check_phase11_backfill_consistency(conn: sqlite3.Connection) -> list[dict]:
+    """Verify P-1/P-1R rows backfilled by Phase 11 still have a backing mapping.
+
+    Phase 11 populates ``budget_lines.pe_number`` on procurement rows from
+    high-confidence (>=0.8) ``bli_pe_map`` entries.  If the bli_pe_map is
+    later truncated/rebuilt without re-running the backfill (or without
+    clearing pe_number first), budget_lines end up with a pe_number whose
+    source-of-truth mapping no longer exists.
+    """
+    if not (
+        table_exists(conn, "bli_pe_map")
+        and table_exists(conn, "budget_lines")
+    ):
+        return []
+
+    try:
+        row = conn.execute("""
+            SELECT COUNT(*) AS c FROM budget_lines bl
+            WHERE bl.exhibit_type IN ('p1', 'p1r')
+              AND bl.pe_number IS NOT NULL AND bl.pe_number != ''
+              AND NOT EXISTS (
+                  SELECT 1 FROM bli_pe_map bpm
+                  WHERE bpm.bli_key = (
+                      bl.account || ':' || COALESCE(bl.line_item, '')
+                  )
+                    AND bpm.pe_number = bl.pe_number
+                    AND bpm.confidence >= 0.8
+              )
+        """).fetchone()
+    except sqlite3.OperationalError:
+        return []
+
+    # Baseline: rows whose pe_number predates Phase 11 (present in Excel
+    # source) are expected — those have no bli_pe_map entry but aren't
+    # stale.  We can't cheaply distinguish the two without tracking the
+    # backfill in a separate column, so the check reports the total and
+    # lets humans judge.  Threshold: alert only when it's large enough to
+    # suggest a drift, not every Excel-sourced PE.
+    count = row["c"]
+    if count > 10_000:
+        return [{
+            "check": "phase11_backfill_consistency",
+            "severity": "info",
+            "detail": (
+                f"{count} P-1/P-1R rows have pe_number without a "
+                "high-confidence bli_pe_map backing. Expected when pe_number "
+                "predates Phase 11 (Excel-sourced); suspicious above the "
+                "baseline. Re-run enrichment with --rebuild to refresh."
+            ),
+            "rows_without_mapping": count,
+        }]
+    return []
+
+
 def check_enrichment_staleness(conn: sqlite3.Connection) -> list[dict]:
     """Detect PE numbers in budget_lines that are missing from pe_index.
 
@@ -1459,6 +1578,8 @@ ALL_CHECKS = [
     ("Extreme Amount Outliers", check_extreme_outliers),              # Outlier detection
     ("PE Org Consistency", check_pe_org_consistency),                # Multi-org PE detection
     ("Enrichment Orphans", check_enrichment_orphans),              # Orphan detection
+    ("BLI Enrichment Orphans", check_bli_enrichment_orphans),      # Phase 11 symmetric check
+    ("Phase 11 Backfill Consistency", check_phase11_backfill_consistency),
     ("Enrichment Staleness", check_enrichment_staleness),          # Stale PE detection
     ("FY Column Null Rates", check_fy_column_null_rates),          # NULL percentage check
     ("Duplicate Budget Lines", check_duplicate_budget_lines),      # Duplicate row detection
