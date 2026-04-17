@@ -231,3 +231,97 @@ class TestDetailPartialRoute:
         resp = app_client.get("/partials/detail/1", follow_redirects=False)
         assert resp.status_code == 302
         assert resp.headers.get("location") == "/"
+
+
+class TestBliDetailRoute:
+    """/bli/{bli_key} — procurement detail page (analog of /programs/{pe})."""
+
+    @pytest.fixture(scope="class")
+    def bli_client(self, tmp_path_factory):
+        tmp = tmp_path_factory.mktemp("bli_test")
+        db_path = tmp / "bli.sqlite"
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript(
+            """
+            CREATE TABLE bli_index (
+                bli_key TEXT PRIMARY KEY, account TEXT NOT NULL, line_item TEXT,
+                display_title TEXT, organization_name TEXT, budget_type TEXT,
+                budget_activity_title TEXT, appropriation_code TEXT,
+                appropriation_title TEXT, fiscal_years TEXT, exhibit_types TEXT,
+                row_count INTEGER
+            );
+            CREATE TABLE bli_tags (
+                bli_key TEXT, tag TEXT, tag_source TEXT, confidence REAL
+            );
+            CREATE TABLE pe_index (pe_number TEXT PRIMARY KEY, display_title TEXT);
+            CREATE TABLE bli_pe_map (
+                bli_key TEXT, pe_number TEXT, confidence REAL,
+                source_file TEXT, page_number INTEGER,
+                PRIMARY KEY (bli_key, pe_number)
+            );
+            CREATE TABLE bli_descriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, bli_key TEXT NOT NULL,
+                fiscal_year TEXT, source_file TEXT,
+                page_start INTEGER, page_end INTEGER,
+                section_header TEXT, description_text TEXT
+            );
+            INSERT INTO bli_index VALUES
+                ('1506N:0577', '1506N', '0577', 'EP-3 Series Mods', 'Navy',
+                 'investment', 'Combat Aircraft', 'APN',
+                 'Aircraft Procurement, Navy', '["FY2024","FY2025"]', '["p1"]', 3);
+            INSERT INTO bli_tags VALUES ('1506N:0577', 'aviation', 'keyword', 0.8);
+            INSERT INTO pe_index VALUES ('0305206N', 'Navy ISR Program');
+            INSERT INTO bli_pe_map VALUES
+                ('1506N:0577', '0305206N', 0.9, 'APN.pdf', 42);
+            INSERT INTO bli_descriptions
+                (bli_key, fiscal_year, source_file, page_start, page_end,
+                 section_header, description_text)
+            VALUES ('1506N:0577', 'FY2025', 'APN.pdf', 42, 42,
+                    'P-5 Justification',
+                    'Modifications to the EP-3 Series aircraft provide signals intelligence upgrades.');
+            """
+        )
+        conn.commit()
+        conn.close()
+        app = create_app(db_path=db_path)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_returns_200_for_known_bli(self, bli_client):
+        resp = bli_client.get("/bli/1506N:0577")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
+
+    def test_renders_bli_title_and_pe_link(self, bli_client):
+        resp = bli_client.get("/bli/1506N:0577")
+        body = resp.text
+        assert "EP-3 Series Mods" in body
+        assert "1506N:0577" in body
+        # Related PE is surfaced and links to the PE page.
+        assert "0305206N" in body
+        assert '/programs/0305206N' in body
+
+    def test_renders_description_snippet(self, bli_client):
+        resp = bli_client.get("/bli/1506N:0577")
+        assert "signals intelligence" in resp.text
+
+    def test_unknown_bli_returns_404(self, bli_client):
+        resp = bli_client.get("/bli/BOGUS:99999")
+        assert resp.status_code == 404
+
+    def test_missing_bli_index_returns_503(self, tmp_path_factory):
+        """Pre-enrichment DB: no bli_index table at all → 503, not 500."""
+        tmp = tmp_path_factory.mktemp("bli_pre_enrich")
+        db_path = tmp / "empty.sqlite"
+        conn = sqlite3.connect(str(db_path))
+        # Minimal schema so create_app + startup doesn't explode.
+        conn.executescript(
+            "CREATE TABLE budget_lines (id INTEGER PRIMARY KEY);"
+            "CREATE TABLE pdf_pages (id INTEGER PRIMARY KEY);"
+            "CREATE TABLE ingested_files (id INTEGER PRIMARY KEY);"
+        )
+        conn.commit()
+        conn.close()
+        app = create_app(db_path=db_path)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.get("/bli/any:thing")
+        assert resp.status_code == 503

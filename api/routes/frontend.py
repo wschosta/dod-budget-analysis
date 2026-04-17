@@ -783,6 +783,27 @@ def program_detail(
     })
 
 
+@router.get("/bli/{bli_key:path}", response_class=HTMLResponse, include_in_schema=False)
+def bli_detail(
+    bli_key: str,
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_db),
+) -> HTMLResponse:
+    """Procurement (BLI) detail page — analogue of /programs/{pe_number}."""
+    from api.routes.bli import get_bli
+    try:
+        bli_data = get_bli(bli_key, conn=conn)
+    except HTTPException as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=exc.detail or f"BLI {bli_key} not found",
+        ) from exc
+
+    return _tmpl().TemplateResponse(request, "bli-detail.html", context={
+        "bli_data": bli_data,
+    })
+
+
 @router.get("/compare", response_class=HTMLResponse, include_in_schema=False)
 def spruill_page(
     request: Request,

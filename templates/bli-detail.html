@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+
+{% block title %}{{ bli_data.display_title or bli_data.bli_key }} — Procurement Item{% endblock %}
+
+{% block content %}
+<nav class="breadcrumb" aria-label="Breadcrumb">
+  <a href="/">Search</a> &rsaquo; <span>{{ bli_data.bli_key }}</span>
+</nav>
+
+<h2>{{ bli_data.display_title or bli_data.bli_key }}</h2>
+<div class="pe-meta">
+  <span class="badge text-lg">{{ bli_data.bli_key }}</span>
+  {% if bli_data.organization_name %}
+  <span>{{ bli_data.organization_name }}</span>
+  {% endif %}
+  {% if bli_data.appropriation_title %}
+  <span class="text-secondary">{{ bli_data.appropriation_title }}</span>
+  {% endif %}
+</div>
+
+<div class="pe-enrichment-status">
+  <span class="enrichment-badge"
+        title="Account + line item composite key used throughout procurement exhibits">
+    Account {{ bli_data.account }}{% if bli_data.line_item %} · Line {{ bli_data.line_item }}{% endif %}
+  </span>
+  {% if bli_data.tags %}
+  <span class="enrichment-badge enrichment-complete" title="Keyword tags assigned">
+    Tags ({{ bli_data.tags | length }})
+  </span>
+  {% endif %}
+  {% if bli_data.related_pes %}
+  <span class="enrichment-badge enrichment-complete" title="Program Elements referenced from P-5 justification pages">
+    Related PEs ({{ bli_data.related_pes | length }})
+  </span>
+  {% endif %}
+  {% if bli_data.descriptions %}
+  <span class="enrichment-badge enrichment-complete" title="Narrative text extracted from P-5 PDF pages">
+    Descriptions ({{ bli_data.descriptions | length }})
+  </span>
+  {% endif %}
+</div>
+
+{# ── Metadata ────────────────────────────────────────────────────────────── #}
+<section class="pe-section" aria-label="Metadata">
+  <h3>Metadata</h3>
+  <dl class="meta-grid">
+    {% if bli_data.budget_activity_title %}
+    <dt>Budget activity</dt><dd>{{ bli_data.budget_activity_title }}</dd>
+    {% endif %}
+    {% if bli_data.appropriation_code %}
+    <dt>Appropriation code</dt><dd>{{ bli_data.appropriation_code }}</dd>
+    {% endif %}
+    {% if bli_data.budget_type %}
+    <dt>Budget type</dt><dd>{{ bli_data.budget_type }}</dd>
+    {% endif %}
+    {% if bli_data.fiscal_years %}
+    <dt>Fiscal years</dt>
+    <dd>{% for fy in bli_data.fiscal_years|sort %}<span class="badge">{{ fy }}</span> {% endfor %}</dd>
+    {% endif %}
+    {% if bli_data.exhibit_types %}
+    <dt>Exhibits</dt>
+    <dd>{% for ex in bli_data.exhibit_types %}<span class="badge">{{ ex | upper }}</span> {% endfor %}</dd>
+    {% endif %}
+    {% if bli_data.row_count is not none %}
+    <dt>Line-item rows</dt><dd>{{ bli_data.row_count }}</dd>
+    {% endif %}
+  </dl>
+</section>
+
+{# ── Related PEs (from Phase 11 P-5 mining) ──────────────────────────────── #}
+{% if bli_data.related_pes %}
+<section class="pe-section" aria-label="Related Program Elements">
+  <h3>Related Program Elements
+    <button type="button" class="meta-md" tabindex="0"
+            data-tooltip="Mined from P-5 PDF justification headers. Confidence 0.9 means the PE was the only one on the source page; 0.6 means the page listed multiple PEs.">
+      (from P-5 justification)
+    </button>
+  </h3>
+  <table class="pe-funding-table">
+    <thead>
+      <tr>
+        <th scope="col">PE</th>
+        <th scope="col">Title</th>
+        <th scope="col">Confidence</th>
+        <th scope="col">Source</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for rp in bli_data.related_pes %}
+      <tr>
+        <td><a href="/programs/{{ rp.pe_number }}">{{ rp.pe_number }}</a></td>
+        <td>{{ rp.pe_title or "—" }}</td>
+        <td>{{ "%.1f" | format(rp.confidence) }}</td>
+        <td class="meta-md">
+          {% if rp.source_file %}{{ rp.source_file.split('\\')[-1] }}{% if rp.page_number %} p{{ rp.page_number }}{% endif %}{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{# ── Tags ─────────────────────────────────────────────────────────────────── #}
+{% if bli_data.tags %}
+<section class="pe-section" aria-label="Tags">
+  <h3>Tags <span class="badge icon-indicator">{{ bli_data.tags | length }}</span></h3>
+  <div class="pe-card-tags">
+    {% for t in bli_data.tags %}
+    <span class="filter-chip tag-chip"
+          title="Source: {{ t.tag_source }} | Confidence: {{ '%.0f' | format((t.confidence or 0) * 100) }}%">
+      {{ t.tag }}
+      <span class="meta-xs text-xs ml-xs">{{ t.tag_source }}{% if t.confidence %} {{ '%.0f' | format(t.confidence * 100) }}%{% endif %}</span>
+    </span>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{# ── Descriptions (from P-5 PDFs) ─────────────────────────────────────────── #}
+{% if bli_data.descriptions %}
+<section class="pe-section" aria-label="P-5 justification narratives">
+  <h3>P-5 Justification Narratives
+    <span class="badge icon-indicator">{{ bli_data.descriptions | length }}</span>
+  </h3>
+  <ul class="description-list">
+    {% for d in bli_data.descriptions[:25] %}
+    <li class="description-item">
+      <div class="meta-md">
+        {% if d.fiscal_year %}<span class="badge">{{ d.fiscal_year }}</span>{% endif %}
+        {% if d.source_file %}{{ d.source_file.split('\\')[-1] }}{% endif %}
+        {% if d.page_start %}p{{ d.page_start }}{% endif %}
+      </div>
+      <div>{{ d.snippet }}...</div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% if bli_data.descriptions | length > 25 %}
+  <p class="meta-md">
+    Showing 25 of {{ bli_data.descriptions | length }}. Use
+    <a href="/api/v1/search?q={{ bli_data.display_title or bli_data.bli_key }}&source=descriptions&result_types=bli_description">
+      /api/v1/search
+    </a>
+    for full-text search across all narratives.
+  </p>
+  {% endif %}
+</section>
+{% endif %}
+
+{# ── Actions ──────────────────────────────────────────────────────────────── #}
+<div class="pe-actions">
+  <a href="/api/v1/bli/{{ bli_data.bli_key }}" class="btn btn-secondary btn-sm">
+    View JSON
+  </a>
+  <a href="/?q={{ bli_data.bli_key }}" class="btn btn-secondary btn-sm">
+    Search All Lines
+  </a>
+</div>
+{% endblock %}
