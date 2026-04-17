@@ -45,7 +45,7 @@ from starlette.responses import Response
 
 from api.database import get_db_path, _make_conn
 from utils.database import get_slow_queries, get_query_stats
-from api.routes import aggregations, budget_lines, dashboard, download, explorer, facets, feedback, files, metadata, pe, reference, search
+from api.routes import aggregations, bli, budget_lines, dashboard, download, explorer, facets, feedback, files, metadata, pe, reference, search
 from api.routes import frontend as frontend_routes
 from utils.config import AppConfig
 
@@ -586,6 +586,7 @@ def create_app(db_path: Path | None = None) -> FastAPI:
     app.include_router(reference.router,    prefix=prefix)
     app.include_router(download.router,     prefix=prefix)
     app.include_router(pe.router,           prefix=prefix)
+    app.include_router(bli.router,          prefix=prefix)
     app.include_router(feedback.router,     prefix=prefix)
     app.include_router(dashboard.router,   prefix=prefix)
     app.include_router(metadata.router,    prefix=prefix)
