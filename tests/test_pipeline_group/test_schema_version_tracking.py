@@ -68,3 +68,33 @@ def test_create_database_catches_up_legacy_db(tmp_path):
         assert _current_version(conn) == _MIGRATIONS[-1][0]
     finally:
         conn.close()
+
+
+def test_enrich_brings_schema_to_current(tmp_path):
+    """enrich() must migrate on DBs that predate the migration system."""
+    from pipeline.enricher import enrich
+
+    db = tmp_path / "legacy_enrich.sqlite"
+    # Build a minimal DB with just budget_lines (no schema_version, no
+    # enrichment tables).  enrich() should bring schema_version to latest
+    # even if no phases do meaningful work.
+    raw = sqlite3.connect(str(db))
+    raw.execute(
+        "CREATE TABLE budget_lines (id INTEGER PRIMARY KEY, source_file TEXT, "
+        "exhibit_type TEXT, pe_number TEXT, fiscal_year TEXT)"
+    )
+    raw.execute(
+        "CREATE TABLE pdf_pages (id INTEGER PRIMARY KEY, source_file TEXT, "
+        "exhibit_type TEXT, fiscal_year TEXT, page_number INTEGER, page_text TEXT)"
+    )
+    raw.commit()
+    raw.close()
+
+    # Run a no-op phase set — enrich() should still migrate before returning.
+    enrich(db, phases=set(), rebuild=False)
+
+    final = sqlite3.connect(str(db))
+    try:
+        assert _current_version(final) == _MIGRATIONS[-1][0]
+    finally:
+        final.close()

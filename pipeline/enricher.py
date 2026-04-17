@@ -37,6 +37,7 @@ from utils.patterns import PE_NUMBER, FISCAL_YEAR
 from utils.progress import log_progress
 from utils.query import make_placeholders
 from pipeline.r2_pdf_extractor import parse_r2_header_metadata
+from pipeline.schema import migrate as _schema_migrate
 from utils.pdf_sections import (
     detect_project_boundaries,
     parse_narrative_sections,
@@ -2552,8 +2553,7 @@ def enrich(
     # Bring the schema up to the latest migration before any phase runs —
     # ensures FTS5 virtual tables, reference data, and future schema
     # additions are in place on DBs that predate the migration system.
-    from pipeline.schema import migrate as _migrate
-    _migrate(conn)
+    _schema_migrate(conn)
     conn.execute("PRAGMA wal_autocheckpoint=0")    # manual checkpoint at end
 
     if rebuild:

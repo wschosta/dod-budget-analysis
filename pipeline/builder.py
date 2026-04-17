@@ -76,6 +76,7 @@ try:
 except ImportError:
     _HAS_XLRD = False
 from pipeline.exhibit_catalog import find_matching_columns as _catalog_find_matching_columns  # noqa: E402
+from pipeline.schema import migrate as _schema_migrate  # noqa: E402
 
 
 # ── Calamine fast-path abstraction ────────────────────────────────────────────
@@ -378,8 +379,7 @@ def create_database(db_path: Path) -> sqlite3.Connection:
     # running them here in addition to the inline DDL below is safe.  This
     # closes the pre-2026-04 gap where prod DBs had schema_version empty
     # because the migration system was only invoked by tests.
-    from pipeline.schema import migrate as _migrate
-    _migrate(conn)
+    _schema_migrate(conn)
 
     # ── Schema migration: add columns that may be missing on older databases ──
     # CREATE TABLE IF NOT EXISTS won't alter existing tables, so we need to
