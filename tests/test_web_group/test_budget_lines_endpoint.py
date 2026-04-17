@@ -430,6 +430,19 @@ class TestRelatedPEs:
         item = get_budget_line(1, conn=db)
         assert item.related_pes == []
 
+    def test_multiple_pes_ordered_by_confidence_desc(self, db):
+        self._with_bli_pe_map(db)
+        db.execute("INSERT INTO pe_index VALUES ('0304111N', 'Navy Comms')")
+        db.execute(
+            "INSERT INTO bli_pe_map VALUES ('3010:AH-64', '0304111N', 0.6, 'p5.pdf', 10)"
+        )
+        db.execute(
+            "INSERT INTO bli_pe_map VALUES ('3010:AH-64', '0305206N', 0.9, 'p5.pdf', 42)"
+        )
+        item = get_budget_line(1, conn=db)
+        assert [rp.pe_number for rp in item.related_pes] == ["0305206N", "0304111N"]
+        assert [rp.confidence for rp in item.related_pes] == [0.9, 0.6]
+
 
 class TestAllowedSort:
     def test_includes_common_columns(self):

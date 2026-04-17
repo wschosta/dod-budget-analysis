@@ -668,26 +668,14 @@ def detail_partial(
             ).fetchall()
             related_items = [dict(r) for r in related_rows]
 
-    # Phase 11: BLI→PE mappings mined from P-5 PDF headers.
-    related_pes: list[dict] = []
-    if item.get("exhibit_type") in ("p1", "p1r") and item.get("account") \
-            and table_exists(conn, "bli_pe_map"):
-        bli_key = f"{item['account']}:{item.get('line_item') or ''}"
-        try:
-            related_pes = [dict(r) for r in conn.execute(
-                """
-                SELECT bpm.pe_number, bpm.confidence,
-                       bpm.source_file, bpm.page_number,
-                       pi.display_title AS pe_title
-                FROM bli_pe_map bpm
-                LEFT JOIN pe_index pi ON pi.pe_number = bpm.pe_number
-                WHERE bpm.bli_key = ?
-                ORDER BY bpm.confidence DESC, bpm.pe_number
-                """,
-                (bli_key,),
-            ).fetchall()]
-        except sqlite3.OperationalError:
-            pass
+    # Phase 11: BLI→PE mappings mined from P-5 PDF headers (shared helper).
+    from api.routes.budget_lines import _fetch_related_pes
+    related_pes = [
+        rp.model_dump()
+        for rp in _fetch_related_pes(
+            conn, item.get("exhibit_type"), item.get("account"), item.get("line_item")
+        )
+    ]
 
     return _tmpl().TemplateResponse(
         request,
