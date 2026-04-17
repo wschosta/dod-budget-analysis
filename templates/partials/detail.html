@@ -135,6 +135,31 @@
   </div>
   {% endif %}
 
+  {# Phase 11: Related PEs mined from this BLI's P-5 justification pages. #}
+  {% if related_pes %}
+  <h4 class="mt-lg mb-sm meta-lg">
+    Related Program Elements
+    <span class="meta-md" title="Mined from P-5 PDF headers; confidence 0.9 means the PE was the only one on the source page, 0.6 means the page listed multiple PEs.">
+      (from P-5 justification)
+    </span>
+  </h4>
+  <ul class="related-pes">
+    {% for rp in related_pes %}
+    <li>
+      <a href="/programs/{{ rp.pe_number }}" title="{{ rp.pe_title or '' }}">
+        {{ rp.pe_number }}
+      </a>
+      {% if rp.pe_title %}
+        — {{ rp.pe_title }}
+      {% endif %}
+      <span class="meta-md">
+        (conf {{ "%.1f"|format(rp.confidence) }})
+      </span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
   {# FE-007: Download This Item + Source Document buttons #}
   <div class="mt-lg d-flex flex-wrap gap-sm">
     {# FIX-017: Use item_id for exact single-row download instead of PE/FY filter #}

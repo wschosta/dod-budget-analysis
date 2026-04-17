@@ -16,6 +16,7 @@ from api.models import (
     BudgetLineOut,
     FilterParams,
     PaginatedResponse,
+    RelatedPE,
 )
 from utils.query import (
     ALLOWED_SORT_COLUMNS,
@@ -119,4 +120,36 @@ def get_budget_line(
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail=f"Budget line {item_id} not found")
-    return BudgetLineDetailOut(**dict(row))
+
+    data = dict(row)
+    data["related_pes"] = _fetch_related_pes(
+        conn, data.get("exhibit_type"), data.get("account"), data.get("line_item")
+    )
+    return BudgetLineDetailOut(**data)
+
+
+def _fetch_related_pes(
+    conn: sqlite3.Connection,
+    exhibit_type: str | None,
+    account: str | None,
+    line_item: str | None,
+) -> list[RelatedPE]:
+    """Look up Phase-11 BLI→PE mappings for procurement rows."""
+    if exhibit_type not in ("p1", "p1r") or not account:
+        return []
+    bli_key = f"{account}:{line_item or ''}"
+    try:
+        rows = conn.execute(
+            """
+            SELECT bpm.pe_number, bpm.confidence, bpm.source_file, bpm.page_number,
+                   pi.display_title AS pe_title
+            FROM bli_pe_map bpm
+            LEFT JOIN pe_index pi ON pi.pe_number = bpm.pe_number
+            WHERE bpm.bli_key = ?
+            ORDER BY bpm.confidence DESC, bpm.pe_number
+            """,
+            (bli_key,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []  # bli_pe_map not present yet (pre-Phase-11 DB)
+    return [RelatedPE(**dict(r)) for r in rows]

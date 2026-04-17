@@ -379,6 +379,58 @@ class TestGetBudgetLine:
         assert item.amount_unit == "thousands"
 
 
+class TestRelatedPEs:
+    """Phase 11 BLI→PE mappings surfaced on the detail endpoint."""
+
+    def _with_bli_pe_map(self, db):
+        db.executescript(
+            """
+            CREATE TABLE bli_pe_map (
+                bli_key TEXT, pe_number TEXT, confidence REAL,
+                source_file TEXT, page_number INTEGER,
+                PRIMARY KEY (bli_key, pe_number)
+            );
+            CREATE TABLE pe_index (
+                pe_number TEXT PRIMARY KEY,
+                display_title TEXT
+            );
+            """
+        )
+        db.execute(
+            "INSERT INTO pe_index (pe_number, display_title) VALUES (?, ?)",
+            ("0305206N", "Navy ISR Program"),
+        )
+        return db
+
+    def test_procurement_row_includes_related_pes(self, db):
+        self._with_bli_pe_map(db)
+        # Row id=1 is a P-1 row with account='3010', line_item='AH-64'.
+        db.execute(
+            "INSERT INTO bli_pe_map VALUES ('3010:AH-64', '0305206N', 0.9, 'p5.pdf', 42)"
+        )
+        item = get_budget_line(1, conn=db)
+        assert len(item.related_pes) == 1
+        rp = item.related_pes[0]
+        assert rp.pe_number == "0305206N"
+        assert rp.pe_title == "Navy ISR Program"
+        assert rp.confidence == 0.9
+
+    def test_non_procurement_row_has_no_related_pes(self, db):
+        self._with_bli_pe_map(db)
+        # Row id=3 is an R-1 row with account='3600'.  Insert a mapping that
+        # would match on bli_key if we weren't filtering by exhibit_type.
+        db.execute(
+            "INSERT INTO bli_pe_map VALUES ('3600:', '0305206N', 0.9, 'p5.pdf', 1)"
+        )
+        item = get_budget_line(3, conn=db)
+        assert item.related_pes == []
+
+    def test_missing_bli_pe_map_is_not_an_error(self, db):
+        """DBs enriched before Phase 11 don't have bli_pe_map — endpoint must still work."""
+        item = get_budget_line(1, conn=db)
+        assert item.related_pes == []
+
+
 class TestAllowedSort:
     def test_includes_common_columns(self):
         assert "id" in _ALLOWED_SORT

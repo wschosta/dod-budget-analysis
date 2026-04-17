@@ -267,6 +267,18 @@ class BudgetLineOut(BaseModel):
     )
 
 
+class RelatedPE(BaseModel):
+    """A PE referenced from a BLI's P-5 justification page (Phase 11)."""
+
+    pe_number: str = Field(..., description="Program Element number", examples=["0305206N"])
+    pe_title: str | None = Field(None, description="Program Element title from pe_index")
+    confidence: float = Field(
+        ..., description="0.9 if sole PE on the source page; 0.6 for multi-PE pages"
+    )
+    source_file: str | None = Field(None, description="P-5 PDF the mapping came from")
+    page_number: int | None = Field(None, description="Page within the source PDF")
+
+
 class BudgetLineDetailOut(BudgetLineOut):
     """Full budget line item row including all amount and quantity columns."""
 
@@ -304,6 +316,15 @@ class BudgetLineDetailOut(BudgetLineOut):
     )
     quantity_fy2026_total: float | None = Field(
         None, description="Total procurement quantity for FY2026"
+    )
+    related_pes: list[RelatedPE] = Field(
+        default_factory=list,
+        description=(
+            "Program Elements referenced from this BLI's P-5 justification "
+            "pages (enrichment Phase 11). For P-1/P-1R rows only. "
+            "High-confidence entries drove the pe_number backfill; "
+            "low-confidence entries come from multi-PE pages."
+        ),
     )
 
 
