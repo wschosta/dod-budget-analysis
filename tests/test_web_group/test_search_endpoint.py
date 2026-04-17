@@ -234,6 +234,17 @@ class TestSearch:
         result_empty = _search(db, "Apache", result_types=" ")
         assert result_empty.total == result_default.total
 
+    def test_result_types_disjoint_with_source_returns_empty(self, db):
+        """Non-conflicting filters silently yield zero results — the
+        `result_types` allow-list is intersected with the corpora that
+        `source`/`type` selected, not a replacement for them."""
+        # source='budget_lines' excludes description corpora entirely;
+        # asking for result_types='description' on top yields an empty set.
+        result = _search(
+            db, "Apache", source="budget_lines", result_types="description"
+        )
+        assert result.total == 0
+
     def test_result_type_counts_excel_only(self, db):
         """When type=excel, pdf_page_count should be 0."""
         result = _search(db, "Apache", type="excel")
