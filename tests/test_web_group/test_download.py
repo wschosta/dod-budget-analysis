@@ -369,3 +369,86 @@ class TestDownloadLimit:
         reader = csv.DictReader(io.StringIO(_strip_csv_comments(resp.text)))
         rows = list(reader)
         assert len(rows) == 20
+
+
+class TestRelatedPesColumn:
+    """CSV/NDJSON exports include the computed related_pes column with a
+    ``pe_number(confidence);...`` string for P-1/P-1R rows, empty otherwise."""
+
+    @pytest.fixture(scope="class")
+    def client_with_mappings(self, tmp_path_factory):
+        tmp = tmp_path_factory.mktemp("dl_related")
+        db_path = tmp / "rel.sqlite"
+        conn = sqlite3.connect(str(db_path))
+        conn.executescript(
+            """
+            CREATE TABLE budget_lines (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_file TEXT, exhibit_type TEXT, sheet_name TEXT,
+                fiscal_year TEXT, account TEXT, account_title TEXT,
+                organization TEXT, organization_name TEXT,
+                budget_activity TEXT, budget_activity_title TEXT,
+                sub_activity TEXT, sub_activity_title TEXT,
+                line_item TEXT, line_item_title TEXT,
+                pe_number TEXT, appropriation_code TEXT, appropriation_title TEXT,
+                currency_year TEXT, amount_unit TEXT, amount_type TEXT,
+                amount_fy2024_actual REAL, amount_fy2025_enacted REAL,
+                amount_fy2025_supplemental REAL, amount_fy2025_total REAL,
+                amount_fy2026_request REAL, amount_fy2026_reconciliation REAL,
+                amount_fy2026_total REAL,
+                quantity_fy2024 REAL, quantity_fy2025 REAL,
+                quantity_fy2026_request REAL, quantity_fy2026_total REAL,
+                classification TEXT, extra_fields TEXT, budget_type TEXT
+            );
+            CREATE TABLE pdf_pages (
+                id INTEGER PRIMARY KEY, source_file TEXT,
+                source_category TEXT, page_number INTEGER,
+                page_text TEXT, has_tables INTEGER, table_data TEXT
+            );
+            CREATE TABLE ingested_files (
+                id INTEGER PRIMARY KEY, file_path TEXT, file_type TEXT,
+                row_count INTEGER, ingested_at TEXT, status TEXT
+            );
+            CREATE VIRTUAL TABLE budget_lines_fts USING fts5(
+                account_title, line_item_title, budget_activity_title,
+                content=budget_lines
+            );
+            CREATE TABLE bli_pe_map (
+                bli_key TEXT, pe_number TEXT, confidence REAL,
+                source_file TEXT, page_number INTEGER,
+                PRIMARY KEY (bli_key, pe_number)
+            );
+            INSERT INTO budget_lines
+                (id, exhibit_type, account, line_item, line_item_title,
+                 organization_name, fiscal_year)
+            VALUES
+                (1, 'p1', '1506N', '0577', 'EP-3 Series Mods', 'Navy', 'FY 2026'),
+                (2, 'r1', '3600',  '9999', 'RDTE Program',     'Army', 'FY 2026');
+            INSERT INTO bli_pe_map VALUES
+                ('1506N:0577', '0305206N', 0.9, 'APN.pdf', 42),
+                ('1506N:0577', '0304111N', 0.6, 'APN.pdf', 42);
+            """
+        )
+        conn.commit()
+        conn.close()
+        app = create_app(db_path=db_path)
+        return TestClient(app)
+
+    def test_p1_row_has_related_pes(self, client_with_mappings):
+        resp = client_with_mappings.get("/api/v1/download?fmt=csv&item_id=1")
+        text = _strip_csv_comments(resp.text)
+        reader = csv.DictReader(io.StringIO(text))
+        rows = list(reader)
+        assert len(rows) == 1
+        assert "related_pes" in rows[0]
+        # GROUP_CONCAT order is not guaranteed, so check membership of both pairs.
+        val = rows[0]["related_pes"]
+        assert "0305206N(0.9)" in val
+        assert "0304111N(0.6)" in val
+
+    def test_r1_row_has_empty_related_pes(self, client_with_mappings):
+        resp = client_with_mappings.get("/api/v1/download?fmt=csv&item_id=2")
+        text = _strip_csv_comments(resp.text)
+        reader = csv.DictReader(io.StringIO(text))
+        rows = list(reader)
+        assert rows[0]["related_pes"] == ""

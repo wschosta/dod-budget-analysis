@@ -41,6 +41,7 @@ _DOWNLOAD_COLUMNS = [
     "line_item",
     "line_item_title",
     "pe_number",
+    "related_pes",
     "appropriation_code",
     "appropriation_title",
     "budget_type",
@@ -55,6 +56,41 @@ _DOWNLOAD_COLUMNS = [
     "amount_unit",
     "currency_year",
 ]
+
+# Computed columns emit a SQL expression aliased to the column name instead
+# of a plain column reference.  `related_pes` joins bli_pe_map only for
+# procurement rows and yields a ``;``-separated ``pe_number(confidence)``
+# string, e.g. ``0305206N(0.9);0604876C(0.6)``.
+_COMPUTED_COLUMN_SQL: dict[str, str] = {
+    "related_pes": (
+        "CASE WHEN budget_lines.exhibit_type IN ('p1','p1r') THEN ("
+        "  SELECT GROUP_CONCAT("
+        "    bpm.pe_number || '(' || bpm.confidence || ')', ';'"
+        "  ) FROM bli_pe_map bpm"
+        "  WHERE bpm.bli_key = ("
+        "    budget_lines.account || ':' || COALESCE(budget_lines.line_item, '')"
+        "  )"
+        ") END AS related_pes"
+    ),
+}
+
+
+def _render_col(col: str, conn: sqlite3.Connection | None = None) -> str:
+    """Return the SELECT-list expression for a download column.
+
+    Computed columns may depend on tables that don't exist on pre-enrichment
+    DBs (e.g. related_pes needs bli_pe_map).  When ``conn`` is provided we
+    degrade to ``NULL AS <col>`` for any missing dependency.
+    """
+    if col not in _COMPUTED_COLUMN_SQL:
+        return f"budget_lines.{col}"
+    if col == "related_pes" and conn is not None:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bli_pe_map'"
+        ).fetchone()
+        if row is None:
+            return "NULL AS related_pes"
+    return _COMPUTED_COLUMN_SQL[col]
 
 
 def _iter_rows(conn: sqlite3.Connection, sql: str, params: list[Any]):
@@ -100,7 +136,7 @@ def _build_download_sql(
     count_sql = f"SELECT COUNT(*) FROM budget_lines {where}"
     total = conn.execute(count_sql, params).fetchone()[0]
 
-    col_list = ", ".join(export_cols)
+    col_list = ", ".join(_render_col(c, conn) for c in export_cols)
     sort_col = sort_by if sort_by in ALLOWED_SORT_COLUMNS else "id"
     direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
     sql = (
@@ -142,7 +178,7 @@ def download(
 
     # FIX-017: If item_id is specified, download just that single row
     if item_id is not None:
-        col_list = ", ".join(export_cols)
+        col_list = ", ".join(_render_col(c, conn) for c in export_cols)
         sql = f"SELECT {col_list} FROM budget_lines WHERE id = ?"
         params = [item_id]
         total_count = 1
