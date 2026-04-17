@@ -22,6 +22,7 @@ from utils.query import (
     ALLOWED_SORT_COLUMNS,
     build_where_clause,
     compute_pagination,
+    fetch_bli_related_pes,
 )
 from utils.strings import sanitize_fts5_query
 
@@ -138,18 +139,4 @@ def _fetch_related_pes(
     if exhibit_type not in ("p1", "p1r") or not account:
         return []
     bli_key = f"{account}:{line_item or ''}"
-    try:
-        rows = conn.execute(
-            """
-            SELECT bpm.pe_number, bpm.confidence, bpm.source_file, bpm.page_number,
-                   pi.display_title AS pe_title
-            FROM bli_pe_map bpm
-            LEFT JOIN pe_index pi ON pi.pe_number = bpm.pe_number
-            WHERE bpm.bli_key = ?
-            ORDER BY bpm.confidence DESC, bpm.pe_number
-            """,
-            (bli_key,),
-        ).fetchall()
-    except sqlite3.OperationalError:
-        return []  # bli_pe_map not present yet (pre-Phase-11 DB)
-    return [RelatedPE(**dict(r)) for r in rows]
+    return [RelatedPE(**r) for r in fetch_bli_related_pes(conn, bli_key)]

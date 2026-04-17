@@ -6,6 +6,7 @@ frontend.py, and download.py.
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from typing import Any
@@ -340,3 +341,39 @@ def fetch_with_has_more(
     if len(rows) > limit:
         return rows[:limit], True
     return rows, False
+
+
+def parse_json_list(val: str | None) -> list[str]:
+    """Parse a JSON array column value, returning [] on any failure."""
+    if not val:
+        return []
+    try:
+        data = json.loads(val)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return []
+    return [str(x) for x in data] if isinstance(data, list) else []
+
+
+def fetch_bli_related_pes(
+    conn: sqlite3.Connection, bli_key: str
+) -> list[dict[str, Any]]:
+    """Return Phase-11 BLI→PE mappings (joined with pe_index for titles).
+
+    Returns ``[]`` when the ``bli_pe_map`` table is missing — e.g. on a DB
+    that hasn't run enrichment Phase 11 yet.
+    """
+    try:
+        rows = conn.execute(
+            """
+            SELECT bpm.pe_number, bpm.confidence, bpm.source_file, bpm.page_number,
+                   pi.display_title AS pe_title
+            FROM bli_pe_map bpm
+            LEFT JOIN pe_index pi ON pi.pe_number = bpm.pe_number
+            WHERE bpm.bli_key = ?
+            ORDER BY bpm.confidence DESC, bpm.pe_number
+            """,
+            (bli_key,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    return [dict(r) for r in rows]

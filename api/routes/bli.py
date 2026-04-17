@@ -11,27 +11,17 @@ partial) actually has somewhere to link *back to* for BLIs.
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from api.database import get_db
+from utils.query import fetch_bli_related_pes, parse_json_list
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/bli", tags=["bli"])
-
-
-def _parse_json_array(val: str | None) -> list[str]:
-    if not val:
-        return []
-    try:
-        data = json.loads(val)
-        return [str(x) for x in data] if isinstance(data, list) else []
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return []
 
 
 @router.get(
@@ -67,8 +57,8 @@ def get_bli(
         raise HTTPException(status_code=404, detail=f"BLI {bli_key} not found")
 
     data = dict(idx)
-    data["fiscal_years"] = _parse_json_array(data.get("fiscal_years"))
-    data["exhibit_types"] = _parse_json_array(data.get("exhibit_types"))
+    data["fiscal_years"] = parse_json_list(data.get("fiscal_years"))
+    data["exhibit_types"] = parse_json_list(data.get("exhibit_types"))
 
     # Tags (optional table — may not exist on partially-enriched DBs).
     try:
@@ -82,21 +72,7 @@ def get_bli(
         data["tags"] = []
 
     # PE cross-references (Phase 11).
-    try:
-        pe_rows = conn.execute(
-            """
-            SELECT bpm.pe_number, bpm.confidence, bpm.source_file, bpm.page_number,
-                   pi.display_title AS pe_title
-            FROM bli_pe_map bpm
-            LEFT JOIN pe_index pi ON pi.pe_number = bpm.pe_number
-            WHERE bpm.bli_key = ?
-            ORDER BY bpm.confidence DESC, bpm.pe_number
-            """,
-            (bli_key,),
-        ).fetchall()
-        data["related_pes"] = [dict(r) for r in pe_rows]
-    except sqlite3.OperationalError:
-        data["related_pes"] = []
+    data["related_pes"] = fetch_bli_related_pes(conn, bli_key)
 
     # Description snippets — return first 200 chars per row to keep response
     # small; full text is available via /api/v1/search?source=descriptions.
