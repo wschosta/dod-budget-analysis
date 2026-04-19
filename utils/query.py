@@ -82,7 +82,7 @@ def validate_amount_column(column: str | None) -> str:
     return column
 
 
-def _add_in_condition(
+def add_in_condition(
     conditions: list[str],
     params: list[Any],
     column: str,
@@ -148,13 +148,13 @@ def build_where_clause(
     if extra_conditions:
         conditions.extend(extra_conditions)
 
-    _add_in_condition(conditions, params, "fiscal_year", fiscal_year)
+    add_in_condition(conditions, params, "fiscal_year", fiscal_year)
     # FIX-002b: exact IN() matching (LIKE was too broad).
-    _add_in_condition(conditions, params, "organization_name", service)
-    _add_in_condition(conditions, params, "exhibit_type", exhibit_type)
-    _add_in_condition(conditions, params, "pe_number", pe_number)
-    _add_in_condition(conditions, params, "appropriation_code", appropriation_code)
-    _add_in_condition(conditions, params, "budget_type", budget_type)
+    add_in_condition(conditions, params, "organization_name", service)
+    add_in_condition(conditions, params, "exhibit_type", exhibit_type)
+    add_in_condition(conditions, params, "pe_number", pe_number)
+    add_in_condition(conditions, params, "appropriation_code", appropriation_code)
+    add_in_condition(conditions, params, "budget_type", budget_type)
 
     # EAGLE-1: Use dynamic amount column (validated against whitelist)
     amt_col = validate_amount_column(amount_column)
@@ -171,7 +171,7 @@ def build_where_clause(
         if not fts_ids:
             # Empty FTS result → no rows match
             return "WHERE 1=0", []
-        _add_in_condition(conditions, params, "id", fts_ids)
+        add_in_condition(conditions, params, "id", fts_ids)
 
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
     return where, params
@@ -345,7 +345,12 @@ def fetch_with_has_more(
 
 
 def parse_json_list(val: str | None) -> list[str]:
-    """Parse a JSON array column value, returning [] on any failure."""
+    """Parse a JSON array column value, returning [] on any failure.
+
+    All elements are coerced to ``str``.  Use :func:`parse_json_array`
+    instead when you need to preserve original element types or when the
+    input may already be a list.
+    """
     if not val:
         return []
     try:
@@ -353,6 +358,31 @@ def parse_json_list(val: str | None) -> list[str]:
     except (json.JSONDecodeError, TypeError, ValueError):
         return []
     return [str(x) for x in data] if isinstance(data, list) else []
+
+
+def parse_json_array(val: Any) -> list:
+    """Parse a JSON-array value, passing through already-parsed lists.
+
+    Unlike :func:`parse_json_list`, this helper:
+
+    * returns *val* unchanged when it is already a ``list``,
+    * does NOT coerce elements to ``str``,
+    * returns ``[]`` for non-list JSON (objects, numbers, strings) and
+      for any parse failure.
+
+    Useful when the caller may receive either the raw JSON text from a
+    SQLite column or an already-deserialised list (e.g. after a first
+    pass through this function in an earlier pipeline stage).
+    """
+    if isinstance(val, list):
+        return val
+    if not val:
+        return []
+    try:
+        data = json.loads(val)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return []
+    return data if isinstance(data, list) else []
 
 
 def fetch_bli_related_pes(

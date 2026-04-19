@@ -45,6 +45,8 @@ except ImportError:
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from utils.query import make_placeholders
+
 logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -863,7 +865,7 @@ def _load_excel_parquets(
     all_col_names = EXCEL_FIXED_COLUMNS + all_fy_columns + EXCEL_TAIL_COLUMNS
 
     col_str = ", ".join(all_col_names)
-    placeholders = ", ".join(["?"] * len(all_col_names))
+    placeholders = make_placeholders(all_col_names)
     insert_sql = f"INSERT INTO budget_lines ({col_str}) VALUES ({placeholders})"
 
     for fi, pf in enumerate(parquet_files):

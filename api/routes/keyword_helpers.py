@@ -6,9 +6,7 @@ keyword_xlsx, and keyword_r2.
 
 from __future__ import annotations
 
-import json
 import re
-from typing import Any
 
 from utils.normalization import BA_CANONICAL, R2_JUNK_TITLES
 from utils.patterns import PE_NUMBER_STRICT_CI, PE_SUFFIX_PATTERN  # noqa: F401 (PE_NUMBER_STRICT_CI re-exported)
@@ -47,16 +45,6 @@ def like_clauses(columns: list[str], keywords: list[str]) -> tuple[str, list[str
     clauses = [f"{col} LIKE ?" for col in columns for _ in keywords]
     params = [f"%{kw}%" for _ in columns for kw in keywords]
     return " OR ".join(clauses), params
-
-
-def safe_json_list(val: Any) -> list:
-    """Parse a JSON string to list, returning ``[]`` on failure."""
-    if isinstance(val, list):
-        return val
-    try:
-        return json.loads(val) if val else []
-    except (json.JSONDecodeError, TypeError):
-        return []
 
 
 # ── Cache DDL ─────────────────────────────────────────────────────────────────

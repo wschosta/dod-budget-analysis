@@ -1009,9 +1009,9 @@ def list_pes(
     # Batch-fetch tags for all PEs in this page to avoid N+1 query pattern.
     # Single query instead of one per PE.
     pe_numbers = [r["pe_number"] for r in rows]
+    ph = make_placeholders(pe_numbers) if pe_numbers else ""
     tags_by_pe: dict[str, list[dict]] = {}
     if pe_numbers:
-        ph = make_placeholders(pe_numbers)
         all_tags = conn.execute(
             f"SELECT pe_number, tag, tag_source, confidence, source_files "
             f"FROM pe_tags "
@@ -1031,7 +1031,6 @@ def list_pes(
     funding_by_pe: dict[str, float] = {}
     funding_prev_by_pe: dict[str, float] = {}
     if pe_numbers:
-        ph = make_placeholders(pe_numbers)
         for r2 in conn.execute(
             f"SELECT DISTINCT pe_number FROM pe_descriptions "
             f"WHERE pe_number IN ({ph})", pe_numbers,
@@ -1060,7 +1059,6 @@ def list_pes(
     pdf_pages_by_pe: dict[str, int] = {}
     if pe_numbers:
         try:
-            ph = make_placeholders(pe_numbers)
             for r2 in conn.execute(
                 f"SELECT pe_number, COUNT(*) AS page_count "
                 f"FROM pdf_pe_numbers WHERE pe_number IN ({ph}) "

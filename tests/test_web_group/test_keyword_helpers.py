@@ -10,13 +10,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from api.routes.keyword_helpers import (
     in_clause,
     like_clauses,
-    safe_json_list,
     cache_ddl,
     normalize_budget_activity,
     color_of_money,
     find_matched_keywords,
     is_garbage_description,
 )
+from utils.query import parse_json_array
 
 
 # ── in_clause ────────────────────────────────────────────────────────────────
@@ -77,33 +77,35 @@ class TestLikeClauses:
         assert len(params) == 4
 
 
-# ── safe_json_list ───────────────────────────────────────────────────────────
+# ── parse_json_array ─────────────────────────────────────────────────────────
 
 
-class TestSafeJsonList:
+class TestParseJsonArray:
     def test_valid_json_array(self):
-        assert safe_json_list('["a", "b"]') == ["a", "b"]
+        assert parse_json_array('["a", "b"]') == ["a", "b"]
 
     def test_already_list(self):
-        assert safe_json_list(["x", "y"]) == ["x", "y"]
+        assert parse_json_array(["x", "y"]) == ["x", "y"]
 
     def test_none(self):
-        assert safe_json_list(None) == []
+        assert parse_json_array(None) == []
 
     def test_empty_string(self):
-        assert safe_json_list("") == []
+        assert parse_json_array("") == []
 
     def test_invalid_json(self):
-        assert safe_json_list("not json") == []
+        assert parse_json_array("not json") == []
 
-    def test_json_object_not_list(self):
-        # JSON object should trigger TypeError/decode path
-        result = safe_json_list('{"key": "val"}')
-        assert isinstance(result, dict)  # json.loads returns dict, not filtered
+    def test_json_object_returns_empty(self):
+        # parse_json_array returns [] for non-list JSON (unlike old safe_json_list)
+        assert parse_json_array('{"key": "val"}') == []
 
-    def test_json_number(self):
-        result = safe_json_list("42")
-        assert result == 42  # json.loads returns int
+    def test_json_number_returns_empty(self):
+        assert parse_json_array("42") == []
+
+    def test_preserves_non_string_elements(self):
+        # parse_json_array does NOT coerce to str (unlike parse_json_list)
+        assert parse_json_array("[1, 2, 3]") == [1, 2, 3]
 
 
 # ── cache_ddl ────────────────────────────────────────────────────────────────

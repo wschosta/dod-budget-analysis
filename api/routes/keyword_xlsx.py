@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from api.routes.keyword_helpers import safe_json_list
+from utils.query import parse_json_array
 
 # XLSX layout constants (used only by this module)
 HIDDEN_LOOKUP_COL = 200
@@ -1008,8 +1008,8 @@ def _build_keyword_matrix(
 
     row_kw_sets: list[set[str]] = []
     for row in items:
-        kws_r = safe_json_list(row.get("matched_keywords_row", []))
-        kws_d = safe_json_list(row.get("matched_keywords_desc", []))
+        kws_r = parse_json_array(row.get("matched_keywords_row", []))
+        kws_d = parse_json_array(row.get("matched_keywords_desc", []))
         combined = {k.lower() for k in kws_r} | {k.lower() for k in kws_d}
         if combined:
             row_kw_sets.append(combined)

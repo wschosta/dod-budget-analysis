@@ -15,6 +15,7 @@ from typing import Any
 from utils.config import EXHIBIT_R1, EXHIBIT_R2, R2_TYPES
 from utils.database import get_amount_columns
 from utils.organization import ORG_FROM_FILE
+from utils.query import parse_json_array
 
 from api.routes.keyword_helpers import (
     FY_END,
@@ -30,7 +31,6 @@ from api.routes.keyword_helpers import (
     is_garbage_description,
     like_clauses,
     normalize_budget_activity,
-    safe_json_list,
 )
 from api.routes.keyword_r2 import (
     aggregate_r2_funding_into_r1_stubs,
@@ -211,7 +211,7 @@ def cache_rows_to_dicts(
         for field in ("matched_keywords_row", "matched_keywords_desc"):
             raw = d.get(field, "[]")
             if raw not in json_cache:
-                json_cache[raw] = safe_json_list(raw)
+                json_cache[raw] = parse_json_array(raw)
             d[field] = json_cache[raw]
         refs: dict[str, str] = {}
         for ref_key, fy_label in zip(ref_keys, fy_labels):

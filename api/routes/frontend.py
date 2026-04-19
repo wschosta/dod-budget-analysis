@@ -49,6 +49,22 @@ def _safe_int(value: str, default: int) -> int:
     except (ValueError, TypeError):
         return default
 
+
+def _parse_json(value: str | None, default: Any) -> Any:
+    """Parse a JSON string, returning ``default`` on empty or malformed input.
+
+    Preserves the native JSON shape (dict or list) rather than coercing — used
+    for both object payloads (``raw_amounts``) and numeric arrays
+    (``fy_columns``, ``amounts``).
+    """
+    if not value:
+        return default
+    try:
+        return _json.loads(value)
+    except (ValueError, TypeError):
+        return default
+
+
 router = APIRouter(tags=["frontend"])
 
 
@@ -1287,12 +1303,7 @@ def consolidated_detail(request: Request, pe_number: str) -> HTMLResponse:
         # Parse raw_amounts JSON for display.
         parsed_subs = []
         for s in submissions:
-            raw = {}
-            if s["raw_amounts"]:
-                try:
-                    raw = _json.loads(s["raw_amounts"])
-                except (ValueError, TypeError):
-                    pass
+            raw = _parse_json(s["raw_amounts"], {})
             parsed_subs.append({
                 "fiscal_year": s["fiscal_year"],
                 "source_file": s["source_file"],
@@ -1320,8 +1331,8 @@ def consolidated_detail(request: Request, pe_number: str) -> HTMLResponse:
             ).fetchall()
             for pr in proj_rows:
                 pnum = pr["project_number"]
-                fy_cols = _json.loads(pr["fy_columns"]) if pr["fy_columns"] else []
-                amts = _json.loads(pr["amounts"]) if pr["amounts"] else []
+                fy_cols = _parse_json(pr["fy_columns"], [])
+                amts = _parse_json(pr["amounts"], [])
                 entry = {
                     "fiscal_year": pr["fiscal_year"],
                     "fy_columns": fy_cols,

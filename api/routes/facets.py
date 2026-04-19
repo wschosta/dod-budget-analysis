@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends
 from api.database import get_db
 from api.models import FilterParams
 from utils.cache import TTLCache
-from utils.query import _add_in_condition
+from utils.query import add_in_condition
 
 router = APIRouter(prefix="/facets", tags=["facets"])
 
@@ -33,13 +33,13 @@ def _build_conditions(
     params: list[Any] = []
 
     if exclude_dim != "fiscal_year":
-        _add_in_condition(conditions, params, "fiscal_year", fiscal_year)
+        add_in_condition(conditions, params, "fiscal_year", fiscal_year)
     if exclude_dim != "service":
-        _add_in_condition(conditions, params, "organization_name", service)
+        add_in_condition(conditions, params, "organization_name", service)
     if exclude_dim != "exhibit_type":
-        _add_in_condition(conditions, params, "exhibit_type", exhibit_type)
+        add_in_condition(conditions, params, "exhibit_type", exhibit_type)
     if exclude_dim != "budget_type":
-        _add_in_condition(conditions, params, "budget_type", budget_type)
+        add_in_condition(conditions, params, "budget_type", budget_type)
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
     return where, params
