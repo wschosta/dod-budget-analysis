@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from collections.abc import Sized
 from typing import Any
 
 from utils.config import CORE_SUMMARY_TYPES
@@ -291,10 +292,11 @@ EXCLUDE_SUMMARY_SQL = (
 # ---------------------------------------------------------------------------
 
 
-def make_placeholders(values: list[Any] | int) -> str:
+def make_placeholders(values: Sized | int) -> str:
     """Return comma-separated ``?`` placeholders for a parameterised query.
 
-    Accepts either an integer count or a list (whose length is used).
+    Accepts either an integer count or any sized collection (list, tuple,
+    set, frozenset, …) whose length is used.
 
     Examples:
         >>> make_placeholders(3)

@@ -44,7 +44,12 @@ def _pe_in_bl_like_all(filters: list[tuple[str, str]]) -> tuple[str, list[str]]:
 
 
 def _json_array_contains(column: str, value: str) -> tuple[str, str]:
-    return (f"p.{column} LIKE ?", f'%"{value}"%')
+    # JSON1 (json_each) handles escaping, distinguishes element matches from
+    # substring matches, and is amenable to expression indexes if needed.
+    return (
+        f"EXISTS (SELECT 1 FROM json_each(p.{column}) WHERE value = ?)",
+        value,
+    )
 
 
 def _validate_pe_number(pe_number: str) -> None:

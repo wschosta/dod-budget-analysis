@@ -843,6 +843,14 @@ class TestListPes:
                           limit=25, offset=0, conn=populated_db)
         assert result["total"] == 0
 
+    def test_json_array_filter_requires_exact_element(self, populated_db):
+        # Prefix of an element ("r") must not match the full element ("r2").
+        result = list_pes(tag=None, q=None, service=None, budget_type=None,
+                          approp=None, account=None, ba=None, exhibit="r",
+                          fy=None, sort_by=None, sort_dir=None, count_only=False,
+                          limit=25, offset=0, conn=populated_db)
+        assert result["total"] == 0
+
     def test_sort_by_funding_desc(self, populated_db):
         """Sort by FY2026 funding descending puts highest-funded PE first."""
         result = list_pes(tag=None, q=None, service=None, budget_type=None,
