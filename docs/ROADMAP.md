@@ -380,7 +380,7 @@ Resolved routes:
 - `api/routes/aggregations.py` → `aggregate()`
 - `api/routes/facets.py` → `get_facets()`
 
-#### 2. Duplicate WHERE Clause Construction — ✅ PARTIALLY RESOLVED
+#### 2. Duplicate WHERE Clause Construction — ✅ RESOLVED
 
 `build_where_clause()` now supports `exclude_summary` and `extra_conditions`
 parameters, enabling routes with custom SQL conditions to use the shared builder.
@@ -390,9 +390,37 @@ parameters, enabling routes with custom SQL conditions to use the shared builder
 - `api/routes/budget_lines.py` — manual `EXCLUDE_SUMMARY_SQL` appending removed; handled via `FilterParams.where_kwargs()` which now passes `exclude_summary`
 - `api/routes/aggregations.py` — `hierarchy()` manual conditions replaced with `build_where_clause(extra_conditions=[...])`
 
-**Remaining (need JOIN/LIKE extensions):**
-- `api/routes/pe.py` (lines 900–975) — manual WHERE with JOIN and LIKE
-- `api/routes/keyword_search.py` (lines 1156–1279) — manual IN clause
+**Resolved via local helpers (Wave 2, commit `ada8745`):**
+- `api/routes/pe.py` `list_pes()` — `build_where_clause()` was the wrong
+  abstraction (PE-prefixed columns, JSON-array-LIKE filters, dynamic tag
+  JOINs). Instead extracted two file-private helpers: `_pe_in_bl_like()`
+  collapses three duplicate `p.pe_number IN (SELECT ... FROM budget_lines
+  WHERE {col} LIKE ?)` subqueries into a loop, and `_json_array_contains()`
+  handles the `col LIKE '%"value"%'` pattern. Tag JOIN loop rewritten with
+  `enumerate()` for stable `pt_{i}` aliases.
+- `api/routes/keyword_search.py` — ROADMAP line range `1156–1279` is stale;
+  the file is now 939 lines (refactored into `keyword_r2.py` and
+  `keyword_helpers.py` in an earlier pass). No migration target remains.
+
+#### 3. Shared Query Helpers — ✅ RESOLVED (Wave 1, commit `57c7ebc`)
+
+Consolidated three duplicated patterns onto `utils/query.py`:
+- `make_placeholders(n)` replaced 6 inline placeholder joins in
+  `api/routes/pe.py` and 5 in `pipeline/{builder,schema,staging}.py` +
+  `scripts/consolidate_pe_lines.py`. One call site in `utils/database.py`
+  intentionally left inline to avoid a circular import.
+- `compute_yoy_change(prev, curr, precision=2)` replaced 5 inline YoY
+  calculations in `api/routes/pe.py`.
+- `parse_json_array(val)` (new, type-preserving) replaced the deleted
+  `safe_json_list()` in `api/routes/keyword_helpers.py`, with callers in
+  `keyword_search.py` and `keyword_xlsx.py` migrated. Distinct from
+  `parse_json_list()` which coerces elements to `str`.
+- Private `_add_in_condition` promoted to public `add_in_condition` and
+  re-exported from `utils/__init__.py`.
+- `api/routes/frontend.py` got a local `_parse_json(value, default)` helper
+  replacing three bare `json.loads` try/except blocks (can't share
+  `parse_json_list` because the amounts/raw_amounts payloads are numeric
+  and dict-shaped).
 
 ---
 
