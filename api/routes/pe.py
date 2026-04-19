@@ -32,6 +32,43 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pe", tags=["pe"])
 
 
+# ── Private WHERE-clause helpers for list_pes() ───────────────────────────────
+#
+# These helpers deduplicate the repeated shapes inside list_pes():
+#   * _pe_in_bl_like — three copies of `p.pe_number IN (SELECT ... FROM
+#     budget_lines WHERE col LIKE ?)` for approp/account/ba filters.
+#   * _json_array_contains — two copies of the JSON-array LIKE pattern used
+#     for exhibit_types and fiscal_years on pe_index.
+# They're intentionally private (prefixed `_`) and kept local: no other route
+# file filters pe_index this way today.
+
+def _pe_in_bl_like(column: str, value: str) -> tuple[str, str]:
+    """Build a ``p.pe_number IN (SELECT … FROM budget_lines WHERE col LIKE ?)``
+    condition for filtering pe_index rows by a substring of a budget_lines
+    column.
+
+    Returns ``(condition_sql, param)`` ready to append to the conditions and
+    params lists used by list_pes().
+    """
+    return (
+        f"p.pe_number IN (SELECT DISTINCT pe_number FROM budget_lines "
+        f"WHERE {column} LIKE ?)",
+        f"%{value}%",
+    )
+
+
+def _json_array_contains(column: str, value: str) -> tuple[str, str]:
+    """Build a JSON-array "contains value" LIKE condition for a pe_index
+    column that stores a JSON array of strings (e.g. exhibit_types,
+    fiscal_years).
+
+    Returns ``(condition_sql, param)``. The match is substring-on-the-
+    JSON-text with the value wrapped in double quotes — same behaviour the
+    surrounding code relied on before.
+    """
+    return (f"p.{column} LIKE ?", f'%"{value}"%')
+
+
 def _validate_pe_number(pe_number: str) -> None:
     """Raise 400 if pe_number is obviously malformed."""
     if not _PE_FORMAT.match(pe_number):
@@ -883,13 +920,20 @@ def list_pes(
     # Base: always join against pe_index
     base_from = "pe_index p"
 
-    # Tag filter — all tags must match (AND)
+    # Tag filter — all tags must match (AND).  Use enumerate() for stable
+    # alias naming rather than len(params): the previous version indexed the
+    # JOIN alias off the current length of `params`, which coupled the alias
+    # scheme to mutation order and would break if earlier code started
+    # appending params before the tag loop.
     if tag:
-        for t in tag:
-            base_from += f"""
-                JOIN pe_tags pt_{len(params)} ON pt_{len(params)}.pe_number = p.pe_number
-                    AND pt_{len(params)}.tag = ?"""
+        tag_joins: list[str] = []
+        for i, t in enumerate(tag):
+            tag_joins.append(
+                f"JOIN pe_tags pt_{i} ON pt_{i}.pe_number = p.pe_number "
+                f"AND pt_{i}.tag = ?"
+            )
             params.append(t.lower())
+        base_from += "\n                " + "\n                ".join(tag_joins)
 
     # Service filter
     if service:
@@ -901,40 +945,30 @@ def list_pes(
         conditions.append("p.budget_type = ?")
         params.append(budget_type)
 
-    # Appropriation filter (matches PE numbers that appear in budget_lines
-    # with a matching appropriation_title)
-    if approp:
-        conditions.append("""p.pe_number IN (
-            SELECT DISTINCT pe_number FROM budget_lines
-            WHERE appropriation_title LIKE ?
-        )""")
-        params.append(f"%{approp}%")
-
-    # Account title filter (matches PEs with budget_lines having matching account_title)
-    if account:
-        conditions.append("""p.pe_number IN (
-            SELECT DISTINCT pe_number FROM budget_lines
-            WHERE account_title LIKE ?
-        )""")
-        params.append(f"%{account}%")
-
-    # Budget activity filter (e.g. "6.2" matches "6.2 Applied Research")
-    if ba:
-        conditions.append("""p.pe_number IN (
-            SELECT DISTINCT pe_number FROM budget_lines
-            WHERE budget_activity_title LIKE ?
-        )""")
-        params.append(f"%{ba}%")
+    # Filters that match PE numbers appearing in budget_lines with a matching
+    # column substring.  All three collapse to the same shape, so go through
+    # the _pe_in_bl_like helper.
+    for col, val in (
+        ("appropriation_title", approp),
+        ("account_title", account),
+        ("budget_activity_title", ba),
+    ):
+        if val:
+            cond, param = _pe_in_bl_like(col, val)
+            conditions.append(cond)
+            params.append(param)
 
     # Exhibit type filter (pe_index.exhibit_types is a JSON array)
     if exhibit:
-        conditions.append("p.exhibit_types LIKE ?")
-        params.append(f'%"{exhibit}"%')
+        cond, param = _json_array_contains("exhibit_types", exhibit)
+        conditions.append(cond)
+        params.append(param)
 
     # Fiscal year filter (pe_index.fiscal_years is a JSON array)
     if fy:
-        conditions.append("p.fiscal_years LIKE ?")
-        params.append(f'%"{fy}"%')
+        cond, param = _json_array_contains("fiscal_years", fy)
+        conditions.append(cond)
+        params.append(param)
 
     # FTS5 topic search — restrict to PEs that have matching description text
     # OR matching display_title. Uses prefix matching for broader results.
