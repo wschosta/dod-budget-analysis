@@ -666,6 +666,18 @@ class TestListPes:
                           fy=None, sort_by=None, sort_dir=None, count_only=False, limit=25, offset=0, conn=populated_db)
         assert result["total"] == 1
 
+    def test_combined_bl_filters_use_and(self, populated_db):
+        # Army PE: approp='RDT&E, Army', account='RDT&E Budget Activity'.
+        # AF PE:   approp='RDT&E, Air Force', account='Aircraft Procurement'.
+        # approp='Army' alone → Army PE; account='Aircraft' alone → AF PE;
+        # requiring both must return zero (AND, not OR).
+        result = list_pes(tag=None, q=None, service=None, budget_type=None,
+                          approp="Army", account="Aircraft", ba=None,
+                          exhibit=None, fy=None, sort_by=None, sort_dir=None,
+                          count_only=False, limit=25, offset=0,
+                          conn=populated_db)
+        assert result["total"] == 0
+
     def test_items_include_tags(self, populated_db):
         result = list_pes(tag=None, q=None, service="Army", budget_type=None, approp=None, account=None, ba=None, exhibit=None,
                           fy=None, sort_by=None, sort_dir=None, count_only=False, limit=25, offset=0, conn=populated_db)

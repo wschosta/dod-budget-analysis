@@ -32,11 +32,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pe", tags=["pe"])
 
 
-def _pe_in_bl_like(column: str, value: str) -> tuple[str, str]:
+def _pe_in_bl_like_all(filters: list[tuple[str, str]]) -> tuple[str, list[str]]:
+    # Combine one or more (column, value) substring filters into a single
+    # `IN (SELECT … FROM budget_lines WHERE col1 LIKE ? AND col2 LIKE ? …)`
+    # subquery so SQLite scans budget_lines once regardless of filter count.
+    where = " AND ".join(f"{col} LIKE ?" for col, _ in filters)
     return (
-        f"p.pe_number IN (SELECT DISTINCT pe_number FROM budget_lines "
-        f"WHERE {column} LIKE ?)",
-        f"%{value}%",
+        f"p.pe_number IN (SELECT DISTINCT pe_number FROM budget_lines WHERE {where})",
+        [f"%{val}%" for _, val in filters],
     )
 
 
@@ -916,15 +919,19 @@ def list_pes(
         conditions.append("p.budget_type = ?")
         params.append(budget_type)
 
-    for col, val in (
-        ("appropriation_title", approp),
-        ("account_title", account),
-        ("budget_activity_title", ba),
-    ):
-        if val:
-            cond, param = _pe_in_bl_like(col, val)
-            conditions.append(cond)
-            params.append(param)
+    bl_filters = [
+        (col, val)
+        for col, val in (
+            ("appropriation_title", approp),
+            ("account_title", account),
+            ("budget_activity_title", ba),
+        )
+        if val
+    ]
+    if bl_filters:
+        cond, like_params = _pe_in_bl_like_all(bl_filters)
+        conditions.append(cond)
+        params.extend(like_params)
 
     # Exhibit type filter (pe_index.exhibit_types is a JSON array)
     if exhibit:
