@@ -20,7 +20,6 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.responses import Response
 from fastapi.templating import Jinja2Templates
 
-import json as _json
 from pathlib import Path as _Path
 
 from api.database import get_db
@@ -32,6 +31,7 @@ from utils.query import (
     _AMOUNT_COL_RE,
     build_where_clause,
     make_placeholders,
+    parse_json,
     validate_amount_column,
     FISCAL_YEAR_COLUMN_LABELS,
     DEFAULT_AMOUNT_COLUMN,
@@ -46,21 +46,6 @@ def _safe_int(value: str, default: int) -> int:
     """Convert string to int, returning default on failure."""
     try:
         return int(value)
-    except (ValueError, TypeError):
-        return default
-
-
-def _parse_json(value: str | None, default: Any) -> Any:
-    """Parse a JSON string, returning ``default`` on empty or malformed input.
-
-    Preserves the native JSON shape (dict or list) rather than coercing — used
-    for both object payloads (``raw_amounts``) and numeric arrays
-    (``fy_columns``, ``amounts``).
-    """
-    if not value:
-        return default
-    try:
-        return _json.loads(value)
     except (ValueError, TypeError):
         return default
 
@@ -1303,7 +1288,7 @@ def consolidated_detail(request: Request, pe_number: str) -> HTMLResponse:
         # Parse raw_amounts JSON for display.
         parsed_subs = []
         for s in submissions:
-            raw = _parse_json(s["raw_amounts"], {})
+            raw = parse_json(s["raw_amounts"], {})
             parsed_subs.append({
                 "fiscal_year": s["fiscal_year"],
                 "source_file": s["source_file"],
@@ -1331,8 +1316,8 @@ def consolidated_detail(request: Request, pe_number: str) -> HTMLResponse:
             ).fetchall()
             for pr in proj_rows:
                 pnum = pr["project_number"]
-                fy_cols = _parse_json(pr["fy_columns"], [])
-                amts = _parse_json(pr["amounts"], [])
+                fy_cols = parse_json(pr["fy_columns"], [])
+                amts = parse_json(pr["amounts"], [])
                 entry = {
                     "fiscal_year": pr["fiscal_year"],
                     "fy_columns": fy_cols,

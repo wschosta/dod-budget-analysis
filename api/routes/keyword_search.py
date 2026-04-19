@@ -15,7 +15,7 @@ from typing import Any
 from utils.config import EXHIBIT_R1, EXHIBIT_R2, R2_TYPES
 from utils.database import get_amount_columns
 from utils.organization import ORG_FROM_FILE
-from utils.query import parse_json_array
+from utils.query import make_placeholders, parse_json_array
 
 from api.routes.keyword_helpers import (
     FY_END,
@@ -598,7 +598,7 @@ def build_cache_table(
     ]
     for yr in year_range:
         insert_cols.extend([f"fy{yr}", f"fy{yr}_ref"])
-    placeholders_insert = ", ".join("?" for _ in insert_cols)
+    placeholders_insert = make_placeholders(insert_cols)
     insert_sql = f"INSERT INTO {cache_table} ({', '.join(insert_cols)}) VALUES ({placeholders_insert})"
 
     # 6b. Mine PDF sub-elements BEFORE the merge pre-pass so r2 and r2_pdf

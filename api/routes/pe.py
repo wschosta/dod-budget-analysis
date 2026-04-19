@@ -32,24 +32,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pe", tags=["pe"])
 
 
-# ── Private WHERE-clause helpers for list_pes() ───────────────────────────────
-#
-# These helpers deduplicate the repeated shapes inside list_pes():
-#   * _pe_in_bl_like — three copies of `p.pe_number IN (SELECT ... FROM
-#     budget_lines WHERE col LIKE ?)` for approp/account/ba filters.
-#   * _json_array_contains — two copies of the JSON-array LIKE pattern used
-#     for exhibit_types and fiscal_years on pe_index.
-# They're intentionally private (prefixed `_`) and kept local: no other route
-# file filters pe_index this way today.
-
 def _pe_in_bl_like(column: str, value: str) -> tuple[str, str]:
-    """Build a ``p.pe_number IN (SELECT … FROM budget_lines WHERE col LIKE ?)``
-    condition for filtering pe_index rows by a substring of a budget_lines
-    column.
-
-    Returns ``(condition_sql, param)`` ready to append to the conditions and
-    params lists used by list_pes().
-    """
     return (
         f"p.pe_number IN (SELECT DISTINCT pe_number FROM budget_lines "
         f"WHERE {column} LIKE ?)",
@@ -58,14 +41,6 @@ def _pe_in_bl_like(column: str, value: str) -> tuple[str, str]:
 
 
 def _json_array_contains(column: str, value: str) -> tuple[str, str]:
-    """Build a JSON-array "contains value" LIKE condition for a pe_index
-    column that stores a JSON array of strings (e.g. exhibit_types,
-    fiscal_years).
-
-    Returns ``(condition_sql, param)``. The match is substring-on-the-
-    JSON-text with the value wrapped in double quotes — same behaviour the
-    surrounding code relied on before.
-    """
     return (f"p.{column} LIKE ?", f'%"{value}"%')
 
 
@@ -920,11 +895,7 @@ def list_pes(
     # Base: always join against pe_index
     base_from = "pe_index p"
 
-    # Tag filter — all tags must match (AND).  Use enumerate() for stable
-    # alias naming rather than len(params): the previous version indexed the
-    # JOIN alias off the current length of `params`, which coupled the alias
-    # scheme to mutation order and would break if earlier code started
-    # appending params before the tag loop.
+    # Tag filter — all tags must match (AND).
     if tag:
         tag_joins: list[str] = []
         for i, t in enumerate(tag):
@@ -945,9 +916,6 @@ def list_pes(
         conditions.append("p.budget_type = ?")
         params.append(budget_type)
 
-    # Filters that match PE numbers appearing in budget_lines with a matching
-    # column substring.  All three collapse to the same shape, so go through
-    # the _pe_in_bl_like helper.
     for col, val in (
         ("appropriation_title", approp),
         ("account_title", account),
@@ -1041,11 +1009,10 @@ def list_pes(
     rows = conn.execute(data_sql, params + [limit, offset]).fetchall()
 
     # Batch-fetch tags for all PEs in this page to avoid N+1 query pattern.
-    # Single query instead of one per PE.
     pe_numbers = [r["pe_number"] for r in rows]
-    ph = make_placeholders(pe_numbers) if pe_numbers else ""
     tags_by_pe: dict[str, list[dict]] = {}
     if pe_numbers:
+        ph = make_placeholders(pe_numbers)
         all_tags = conn.execute(
             f"SELECT pe_number, tag, tag_source, confidence, source_files "
             f"FROM pe_tags "

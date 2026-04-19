@@ -344,45 +344,29 @@ def fetch_with_has_more(
     return rows, False
 
 
-def parse_json_list(val: str | None) -> list[str]:
-    """Parse a JSON array column value, returning [] on any failure.
-
-    All elements are coerced to ``str``.  Use :func:`parse_json_array`
-    instead when you need to preserve original element types or when the
-    input may already be a list.
+def parse_json(val: Any, default: Any) -> Any:
+    """Parse a JSON value, returning *default* on empty input or any parse
+    failure.  Already-deserialised lists and dicts pass through unchanged.
     """
+    if isinstance(val, (list, dict)):
+        return val
     if not val:
-        return []
+        return default
     try:
-        data = json.loads(val)
+        return json.loads(val)
     except (json.JSONDecodeError, TypeError, ValueError):
-        return []
-    return [str(x) for x in data] if isinstance(data, list) else []
+        return default
 
 
 def parse_json_array(val: Any) -> list:
-    """Parse a JSON-array value, passing through already-parsed lists.
+    """Parse a JSON-array value, returning ``[]`` for non-lists or failures."""
+    result = parse_json(val, [])
+    return result if isinstance(result, list) else []
 
-    Unlike :func:`parse_json_list`, this helper:
 
-    * returns *val* unchanged when it is already a ``list``,
-    * does NOT coerce elements to ``str``,
-    * returns ``[]`` for non-list JSON (objects, numbers, strings) and
-      for any parse failure.
-
-    Useful when the caller may receive either the raw JSON text from a
-    SQLite column or an already-deserialised list (e.g. after a first
-    pass through this function in an earlier pipeline stage).
-    """
-    if isinstance(val, list):
-        return val
-    if not val:
-        return []
-    try:
-        data = json.loads(val)
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return []
-    return data if isinstance(data, list) else []
+def parse_json_list(val: str | None) -> list[str]:
+    """Parse a JSON array and coerce every element to ``str``."""
+    return [str(x) for x in parse_json_array(val)]
 
 
 def fetch_bli_related_pes(

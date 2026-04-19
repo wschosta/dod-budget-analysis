@@ -121,6 +121,7 @@ from utils.query import (
     detect_fy_columns,
     fetch_with_has_more,
     make_placeholders,
+    parse_json,
     parse_json_array,
     parse_json_list,
 )
@@ -229,6 +230,7 @@ __all__ = [
     "detect_fy_columns",
     "fetch_with_has_more",
     "make_placeholders",
+    "parse_json",
     "parse_json_array",
     "parse_json_list",
     # Normalization
