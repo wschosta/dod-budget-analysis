@@ -402,25 +402,24 @@ parameters, enabling routes with custom SQL conditions to use the shared builder
   the file is now 939 lines (refactored into `keyword_r2.py` and
   `keyword_helpers.py` in an earlier pass). No migration target remains.
 
-#### 3. Shared Query Helpers — ✅ RESOLVED (Wave 1, commit `57c7ebc`)
+#### 3. Shared Query Helpers — ✅ RESOLVED (commits `57c7ebc`, `60e37e6`)
 
-Consolidated three duplicated patterns onto `utils/query.py`:
-- `make_placeholders(n)` replaced 6 inline placeholder joins in
-  `api/routes/pe.py` and 5 in `pipeline/{builder,schema,staging}.py` +
-  `scripts/consolidate_pe_lines.py`. One call site in `utils/database.py`
-  intentionally left inline to avoid a circular import.
+Consolidated duplicated patterns onto `utils/query.py`:
+- `make_placeholders(n)` replaced inline `", ".join("?" …)` joins across
+  `api/routes/{pe,keyword_search}.py`,
+  `pipeline/{builder,schema,staging,r2_pdf_extractor}.py`, and
+  `scripts/consolidate_pe_lines.py`. One call site in
+  `utils/database.py:433` intentionally left inline to avoid a circular
+  import (`utils.query` imports from `utils.database`).
 - `compute_yoy_change(prev, curr, precision=2)` replaced 5 inline YoY
   calculations in `api/routes/pe.py`.
-- `parse_json_array(val)` (new, type-preserving) replaced the deleted
-  `safe_json_list()` in `api/routes/keyword_helpers.py`, with callers in
-  `keyword_search.py` and `keyword_xlsx.py` migrated. Distinct from
-  `parse_json_list()` which coerces elements to `str`.
+- A three-tier JSON-parsing family: `parse_json(val, default)` is the
+  primitive; `parse_json_array(val) -> list` and
+  `parse_json_list(val) -> list[str]` delegate to it. The deleted
+  `safe_json_list()` in `api/routes/keyword_helpers.py` and the local
+  `_parse_json` in `api/routes/frontend.py` both migrated to this family.
 - Private `_add_in_condition` promoted to public `add_in_condition` and
   re-exported from `utils/__init__.py`.
-- `api/routes/frontend.py` got a local `_parse_json(value, default)` helper
-  replacing three bare `json.loads` try/except blocks (can't share
-  `parse_json_list` because the amounts/raw_amounts payloads are numeric
-  and dict-shaped).
 
 ---
 
