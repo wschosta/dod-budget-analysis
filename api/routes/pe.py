@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
 from api.database import get_db
+from utils.database import _validate_identifier
 from utils.patterns import PE_NUMBER_STRICT as _PE_FORMAT
 from utils.query import compute_yoy_change, make_placeholders, parse_json_list
 from utils.strings import sanitize_fts5_query
@@ -44,8 +45,7 @@ def _pe_in_bl_like_all(filters: list[tuple[str, str]]) -> tuple[str, list[str]]:
 
 
 def _json_array_contains(column: str, value: str) -> tuple[str, str]:
-    # JSON1 (json_each) handles escaping, distinguishes element matches from
-    # substring matches, and is amenable to expression indexes if needed.
+    _validate_identifier(column, "column name")
     return (
         f"EXISTS (SELECT 1 FROM json_each(p.{column}) WHERE value = ?)",
         value,
