@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from collections.abc import Sized
 from typing import Any
 
 from utils.config import CORE_SUMMARY_TYPES
@@ -82,7 +83,7 @@ def validate_amount_column(column: str | None) -> str:
     return column
 
 
-def _add_in_condition(
+def add_in_condition(
     conditions: list[str],
     params: list[Any],
     column: str,
@@ -148,13 +149,13 @@ def build_where_clause(
     if extra_conditions:
         conditions.extend(extra_conditions)
 
-    _add_in_condition(conditions, params, "fiscal_year", fiscal_year)
+    add_in_condition(conditions, params, "fiscal_year", fiscal_year)
     # FIX-002b: exact IN() matching (LIKE was too broad).
-    _add_in_condition(conditions, params, "organization_name", service)
-    _add_in_condition(conditions, params, "exhibit_type", exhibit_type)
-    _add_in_condition(conditions, params, "pe_number", pe_number)
-    _add_in_condition(conditions, params, "appropriation_code", appropriation_code)
-    _add_in_condition(conditions, params, "budget_type", budget_type)
+    add_in_condition(conditions, params, "organization_name", service)
+    add_in_condition(conditions, params, "exhibit_type", exhibit_type)
+    add_in_condition(conditions, params, "pe_number", pe_number)
+    add_in_condition(conditions, params, "appropriation_code", appropriation_code)
+    add_in_condition(conditions, params, "budget_type", budget_type)
 
     # EAGLE-1: Use dynamic amount column (validated against whitelist)
     amt_col = validate_amount_column(amount_column)
@@ -171,7 +172,7 @@ def build_where_clause(
         if not fts_ids:
             # Empty FTS result → no rows match
             return "WHERE 1=0", []
-        _add_in_condition(conditions, params, "id", fts_ids)
+        add_in_condition(conditions, params, "id", fts_ids)
 
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
     return where, params
@@ -252,6 +253,7 @@ def detect_fy_columns(
 def compute_yoy_change(
     current: float | None,
     previous: float | None,
+    precision: int = 2,
 ) -> float | None:
     """Compute year-over-year percentage change.
 
@@ -264,7 +266,7 @@ def compute_yoy_change(
     """
     if current is None or not previous:
         return None
-    return round((current - previous) / abs(previous) * 100, 2)
+    return round((current - previous) / abs(previous) * 100, precision)
 
 
 # ---------------------------------------------------------------------------
@@ -290,10 +292,11 @@ EXCLUDE_SUMMARY_SQL = (
 # ---------------------------------------------------------------------------
 
 
-def make_placeholders(values: list[Any] | int) -> str:
+def make_placeholders(values: Sized | int) -> str:
     """Return comma-separated ``?`` placeholders for a parameterised query.
 
-    Accepts either an integer count or a list (whose length is used).
+    Accepts either an integer count or any sized collection (list, tuple,
+    set, frozenset, …) whose length is used.
 
     Examples:
         >>> make_placeholders(3)
@@ -343,15 +346,29 @@ def fetch_with_has_more(
     return rows, False
 
 
-def parse_json_list(val: str | None) -> list[str]:
-    """Parse a JSON array column value, returning [] on any failure."""
+def parse_json(val: Any, default: Any) -> Any:
+    """Parse a JSON value, returning *default* on empty input or any parse
+    failure.  Already-deserialised lists and dicts pass through unchanged.
+    """
+    if isinstance(val, (list, dict)):
+        return val
     if not val:
-        return []
+        return default
     try:
-        data = json.loads(val)
+        return json.loads(val)
     except (json.JSONDecodeError, TypeError, ValueError):
-        return []
-    return [str(x) for x in data] if isinstance(data, list) else []
+        return default
+
+
+def parse_json_array(val: Any) -> list:
+    """Parse a JSON-array value, returning ``[]`` for non-lists or failures."""
+    result = parse_json(val, [])
+    return result if isinstance(result, list) else []
+
+
+def parse_json_list(val: str | None) -> list[str]:
+    """Parse a JSON array and coerce every element to ``str``."""
+    return [str(x) for x in parse_json_array(val)]
 
 
 def fetch_bli_related_pes(

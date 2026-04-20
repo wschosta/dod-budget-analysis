@@ -100,6 +100,48 @@ Defense-Wide covers OSD, DARPA, MDA, DISA, DHA, and other defense agencies.
 
 ---
 
+## Program Element (PE) Number Structure
+
+A Program Element is the DoD's atomic budgeting unit — the identifier that links RDT&E funding, narrative descriptions, and lineage across fiscal years. PE numbers follow a fixed positional format defined by [DoD 7045.7-H (FYDP Structure Handbook)](https://acqnotes.com/acqnote/acquisitions/program-element-pe).
+
+**Format:** 7 digits + 1–3-character alphanumeric suffix (8–10 total characters).
+
+| Position | Length | Meaning |
+|----------|--------|---------|
+| 1–2 | 2 digits | **Major Force Program (MFP)** — e.g. `01` Strategic Forces, `02` General Purpose Forces, `06` RDT&E, `07` Central Supply & Maintenance, `08` Training, `09` Admin & Assoc. |
+| 3 | 1 digit | **Budget Activity (BA)** — for MFP 06 (RDT&E): `1` Basic Research, `2` Applied Research, `3` Advanced Technology Development, `4` Advanced Component Development & Prototypes, `5` System Development & Demonstration, `6` RDT&E Management Support, `7` Operational System Development. |
+| 4–7 | 4 digits | **Unique identifier** within the (MFP, BA) group. |
+| 8+ | 1–3 chars | **Service / Agency suffix** (see table below). |
+
+### Service / Agency Suffix
+
+The trailing letter(s) identify the owning service or defense agency. Standard suffixes are 1–2 letters; Defense-Wide sub-components use a letter-digit-letter form (e.g. `D8Z`).
+
+| Suffix | Agency / Service |
+|--------|------------------|
+| `A` | Army |
+| `N` | Navy |
+| `M` | Marine Corps |
+| `F` | Air Force |
+| `SF` | Space Force (newer — created 2019; some `F`-suffixed PEs were rebranded to `SF` over time) |
+| `D` | Office of the Secretary of Defense (OSD) / Defense-Wide (also used as the first letter of `D#X` sub-codes) |
+| `E` | DARPA (Defense Advanced Research Projects Agency) |
+| `K` | DISA (Defense Information Systems Agency) |
+| `C` | Chemical / Biological Defense (CBDP); also appears on some historical rollups |
+| `D8X`, `D8W`, `D8Z`, … | Defense-Wide sub-components (first letter `D` = OSD/Def-Wide; middle digit + trailing letter identify the specific agency like MDA, DLA, DHA) |
+
+**Parser note:** `utils/patterns.py` defines `PE_SUFFIX_PATTERN = r'(?:[A-Z]{1,2}|[A-Z]\d[A-Z])'` to match both standard and Defense-Wide forms. When validating org-code assignments, compare the **first letter of the suffix** to the organization code — for `0603183D8Z` the service/agency letter is `D`, not `Z`.
+
+**Example decompositions:**
+
+- `0602702E` → MFP `06` (RDT&E), BA `2` (Applied Research), ID `702`, suffix `E` (DARPA)
+- `0801273F` → MFP `08` (Training), BA `0` + ID `1273`, suffix `F` (Air Force)
+- `0603183D8Z` → MFP `06` (RDT&E), BA `3` (Advanced Tech Dev), ID `183`, suffix `D8Z` (Defense-Wide sub-component)
+
+**Legacy parser artifacts:** FY2005–FY2010 Comptroller summary Excel files occasionally had column misalignment that leaked numeric codes (`2`, `92`, `9999999`) or single letters that don't match the PE suffix into `organization_name`. `scripts/repair_database.py` step 14 nulls these. See [NOTICED_ISSUES #66](../NOTICED_ISSUES.md#66-legacy-parser-org-code-misalignment).
+
+---
+
 ## File Formats
 
 The downloader accepts these file extensions:

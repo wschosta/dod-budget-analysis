@@ -21,6 +21,7 @@ import sqlite3
 from pathlib import Path
 
 from utils.database import init_pragmas
+from utils.query import make_placeholders
 
 
 # -- 2.A3-a  FTS Strategy Decision --------------------------------------------
@@ -708,7 +709,7 @@ def insert_normalized_budget_line(
         "quantity",
     ]
     values = [row.get(c) for c in columns]
-    placeholders = ", ".join("?" * len(columns))
+    placeholders = make_placeholders(columns)
     col_str = ", ".join(columns)
     cur = conn.execute(
         f"INSERT INTO budget_line_items ({col_str}) VALUES ({placeholders})",

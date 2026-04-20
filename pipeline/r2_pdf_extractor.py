@@ -27,6 +27,7 @@ from pathlib import Path
 from utils import get_connection
 from utils.normalization import clean_r2_title
 from utils.organization import infer_org
+from utils.query import make_placeholders
 
 from pipeline.r2_cost_parser import (  # noqa: F401
     SKIP_LABEL_PREFIXES,
@@ -194,7 +195,7 @@ def extract_r2_from_pdfs(
 
     inserted = 0
     for cols, val_lists in groups.items():
-        placeholders = ", ".join("?" for _ in cols)
+        placeholders = make_placeholders(len(cols))
         col_names = ", ".join(cols)
         conn.executemany(
             f"INSERT OR IGNORE INTO budget_lines ({col_names}) VALUES ({placeholders})",

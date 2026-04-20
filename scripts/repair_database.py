@@ -13,7 +13,10 @@ Fixes data quality issues identified during UI review (see docs/NOTICED_ISSUES.m
   9. Cleans exhibit header text leaked into pe_descriptions / project_descriptions
  10. Removes R-2 PDF aggregation/metadata rows from budget_lines
  11. Backfills organization_name for R-2 PDF rows with NULL org
- 12. Rebuilds FTS5 indexes (always runs last)
+ 12. Normalizes pe_index.fiscal_years (strips 'FY ' prefix from PDF source)
+ 13. Canonicalizes appropriation_title variants per (appropriation_code, organization_name)
+ 14. Nulls mismatched single-letter/numeric organization_name values (legacy parser artifacts)
+ 15. Rebuilds FTS5 indexes (always runs last)
 
 Safe to run multiple times (idempotent). Works on existing databases.
 
@@ -25,6 +28,7 @@ Usage:
 
 import argparse
 import logging
+import re
 import sqlite3
 import sys
 import time
@@ -42,7 +46,7 @@ from utils.normalization import (  # noqa: E402
     ORG_NORMALIZE as _ORG_NORMALIZE,
     TITLE_TO_CODE as _TITLE_TO_CODE,
 )
-from utils.patterns import PE_NUMBER as _PE_RE  # noqa: E402
+from utils.patterns import PE_NUMBER as _PE_RE, PE_SUFFIX_PATTERN  # noqa: E402
 from utils.pdf_sections import strip_exhibit_headers  # noqa: E402
 from pipeline.r2_cost_parser import (  # noqa: E402
     SKIP_LINE_LABELS as _R2_SKIP_LABELS,
@@ -604,9 +608,206 @@ def step_11_backfill_r2_org_names(
     return rows_updated
 
 
-def step_12_rebuild_fts(conn: sqlite3.Connection) -> None:
+def step_12_normalize_pe_index_fys(
+    conn: sqlite3.Connection, dry_run: bool = False
+) -> int:
+    """Strip ``'FY '`` prefix from pe_index.fiscal_years JSON arrays.
+
+    pdf_pe_numbers.fiscal_year stores ``'FY 2025'`` while budget_lines.fiscal_year
+    stores bare ``'2025'``; the enricher merges both into pe_index, so without
+    this cleanup cross-source filters (``?exhibit=r2&fy=2025``) are unreachable.
+    Idempotent: rows without the prefix are skipped.
+    """
+    logger.info("Step 12: Normalizing pe_index.fiscal_years (stripping 'FY ' prefix)...")
+    try:
+        count_row = conn.execute(
+            "SELECT COUNT(*) FROM pe_index WHERE fiscal_years LIKE '%FY %'"
+        ).fetchone()
+    except sqlite3.OperationalError:
+        logger.info("  pe_index table not present, skipping.")
+        return 0
+    affected = count_row[0] if count_row else 0
+    if affected == 0:
+        logger.info("  No rows needed normalization.")
+        return 0
+    if dry_run:
+        logger.info(f"  DRY RUN: would normalize {affected} rows.")
+        return affected
+    conn.execute(
+        """
+        UPDATE pe_index
+        SET fiscal_years = (
+            SELECT json_group_array(
+                CASE WHEN value LIKE 'FY %' THEN substr(value, 4) ELSE value END
+            )
+            FROM json_each(pe_index.fiscal_years)
+        )
+        WHERE fiscal_years LIKE '%FY %'
+        """
+    )
+    conn.commit()
+    logger.info(f"  Normalized {affected} rows.")
+    return affected
+
+
+def step_13_canonicalize_appropriation_titles(
+    conn: sqlite3.Connection, dry_run: bool = False
+) -> int:
+    """Collapse casing/punctuation variants of appropriation_title per (code, org).
+
+    The same appropriation_code frequently maps to several title casings
+    within a single service (``OPERATION & MAINTENANCE, NAVY`` vs.
+    ``Operation & Maintenance, Navy``). Pick the most common variant per
+    ``(appropriation_code, organization_name)`` pair and rewrite the rest.
+
+    Grouping by code alone would catastrophically merge across services
+    (e.g. ``APAF`` rows collapsing Army/Navy/Air Force variants into one).
+    Grouping by ``(code, organization_name)`` keeps service distinctions
+    intact while still canonicalizing pure casing/punctuation drift.
+    """
+    logger.info("Step 13: Canonicalizing appropriation_title per (code, org)...")
+    rows = conn.execute(
+        """
+        SELECT appropriation_code, organization_name, appropriation_title,
+               COUNT(*) AS cnt
+        FROM budget_lines
+        WHERE appropriation_code IS NOT NULL
+          AND appropriation_title IS NOT NULL
+          AND appropriation_title != ''
+          AND organization_name IS NOT NULL
+          AND organization_name != ''
+        GROUP BY appropriation_code, organization_name, appropriation_title
+        """
+    ).fetchall()
+
+    def _norm(s: str) -> str:
+        return re.sub(r"[^A-Za-z0-9]+", " ", s).strip().upper()
+
+    by_key: dict[tuple[str, str], list[tuple[str, int]]] = {}
+    for r in rows:
+        key = (r["appropriation_code"], r["organization_name"])
+        by_key.setdefault(key, []).append((r["appropriation_title"], r["cnt"]))
+
+    plan: list[tuple[str, str, str, list[str]]] = []
+    for (code, org), variants in by_key.items():
+        if len(variants) < 2:
+            continue
+        variants.sort(key=lambda v: (-v[1], v[0]))
+        canonical = variants[0][0]
+        canonical_norm = _norm(canonical)
+        losers = [t for t, _ in variants[1:] if _norm(t) == canonical_norm]
+        if losers:
+            plan.append((code, org, canonical, losers))
+
+    if not plan:
+        logger.info("  All (code, org) pairs already have a single title variant.")
+        return 0
+
+    if dry_run:
+        total = sum(
+            sum(c for t, c in by_key[(code, org)] if t in set(losers))
+            for code, org, _, losers in plan
+        )
+        logger.info(
+            f"  DRY RUN: would rewrite {total} rows across {len(plan)} (code, org) pairs."
+        )
+        return total
+
+    rewritten = 0
+    for code, org, canonical, losers in plan:
+        cur = conn.execute(
+            f"""
+            UPDATE budget_lines
+            SET appropriation_title = ?
+            WHERE appropriation_code = ?
+              AND organization_name = ?
+              AND appropriation_title IN ({make_placeholders(losers)})
+            """,
+            [canonical, code, org, *losers],
+        )
+        rewritten += cur.rowcount
+
+    conn.commit()
+    logger.info(f"  Rewrote {rewritten} rows across {len(plan)} (code, org) pairs.")
+    return rewritten
+
+
+def step_14_null_mismatched_org_codes(
+    conn: sqlite3.Connection, dry_run: bool = False
+) -> int:
+    """Null organization_name/organization for rows with bogus org codes.
+
+    Targets two classes of parser artifacts from old FY2005-2010 Comptroller
+    summary Excel files where column misalignment leaked non-org values into
+    organization_name:
+
+    - Numeric-only codes (``'2'``, ``'92'``, ``'9999999'``) - never valid orgs.
+    - Single letters where the letter doesn't match the PE suffix letter.
+      Per DoD PPBE convention the trailing letter of a PE number identifies
+      the owning service/agency, so ``org='K'`` on ``pe_number='...M'`` is
+      always an ingestion bug.
+
+    Single letters that DO match the PE suffix (e.g. ``org='E'`` on an
+    E-suffixed PE) are legitimate letter-convention rollups and left alone.
+    """
+    logger.info("Step 14: Nulling mismatched org codes from legacy parser artifacts...")
+    # Canonical PE suffix (handles D8Z-style Defense-Wide sub-codes); first
+    # character of the match is the service/agency letter.
+    pe_suffix_re = re.compile(rf"({PE_SUFFIX_PATTERN})$", re.IGNORECASE)
+
+    candidates = conn.execute(
+        """
+        SELECT id, pe_number, organization_name
+        FROM budget_lines
+        WHERE organization_name IS NOT NULL
+          AND (
+            (LENGTH(organization_name) = 1 AND organization_name GLOB '[A-Za-z]')
+            OR (organization_name GLOB '[0-9]*' AND LENGTH(organization_name) BETWEEN 1 AND 10)
+          )
+        """
+    ).fetchall()
+
+    bad_ids: list[int] = []
+    for r in candidates:
+        org = r["organization_name"]
+        if org.isdigit():
+            bad_ids.append(r["id"])
+            continue
+        pe = r["pe_number"] or ""
+        m = pe_suffix_re.search(pe)
+        service_letter = m.group(1)[0] if m else ""
+        if service_letter.upper() != org.upper():
+            bad_ids.append(r["id"])
+
+    if not bad_ids:
+        logger.info("  No mismatched org codes found.")
+        return 0
+
+    if dry_run:
+        logger.info(f"  DRY RUN: would null organization/organization_name on {len(bad_ids)} rows.")
+        return len(bad_ids)
+
+    # Chunked UPDATE to stay under SQLite's parameter limit.
+    nulled = 0
+    for i in range(0, len(bad_ids), 500):
+        chunk = bad_ids[i : i + 500]
+        conn.execute(
+            f"""
+            UPDATE budget_lines
+            SET organization_name = NULL, organization = NULL
+            WHERE id IN ({make_placeholders(chunk)})
+            """,
+            chunk,
+        )
+        nulled += len(chunk)
+    conn.commit()
+    logger.info(f"  Nulled {nulled} rows.")
+    return nulled
+
+
+def step_15_rebuild_fts(conn: sqlite3.Connection) -> None:
     """Rebuild FTS5 indexes to ensure consistency after data changes."""
-    logger.info("Step 12: Rebuilding FTS5 indexes...")
+    logger.info("Step 15: Rebuilding FTS5 indexes...")
     for table in ["budget_lines_fts", "pdf_pages_fts"]:
         try:
             conn.execute(f"INSERT INTO {table}({table}) VALUES('rebuild')")
@@ -651,8 +852,13 @@ def repair(db_path: Path, dry_run: bool = False) -> dict:
         summary["header_cleaned"] = step_9_clean_header_leaked_descriptions(conn, dry_run)
         summary["r2_metadata_deleted"] = step_10_clean_r2_metadata_rows(conn, dry_run)
         summary["r2_org_backfilled"] = step_11_backfill_r2_org_names(conn, dry_run)
+        summary["pe_index_fys_normalized"] = step_12_normalize_pe_index_fys(conn, dry_run)
+        summary["approp_titles_canonicalized"] = step_13_canonicalize_appropriation_titles(
+            conn, dry_run
+        )
+        summary["bad_org_codes_nulled"] = step_14_null_mismatched_org_codes(conn, dry_run)
         if not dry_run:
-            step_12_rebuild_fts(conn)
+            step_15_rebuild_fts(conn)
     finally:
         conn.close()
 

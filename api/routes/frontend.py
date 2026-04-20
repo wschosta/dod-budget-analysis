@@ -20,7 +20,6 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.responses import Response
 from fastapi.templating import Jinja2Templates
 
-import json as _json
 from pathlib import Path as _Path
 
 from api.database import get_db
@@ -31,6 +30,8 @@ from utils.query import (
     ALLOWED_SORT_COLUMNS,
     _AMOUNT_COL_RE,
     build_where_clause,
+    make_placeholders,
+    parse_json,
     validate_amount_column,
     FISCAL_YEAR_COLUMN_LABELS,
     DEFAULT_AMOUNT_COLUMN,
@@ -47,6 +48,7 @@ def _safe_int(value: str, default: int) -> int:
         return int(value)
     except (ValueError, TypeError):
         return default
+
 
 router = APIRouter(tags=["frontend"])
 
@@ -414,7 +416,7 @@ def _query_results(
                 "sort_dir": filters["sort_dir"],
                 "parsed_query": parsed_query,
             }
-        id_placeholders = ",".join("?" * len(fts_ids))
+        id_placeholders = make_placeholders(fts_ids)
         id_condition = f"id IN ({id_placeholders})"
         if where:
             where = where + f" AND {id_condition}"
@@ -452,7 +454,7 @@ def _query_results(
     pe_totals: dict[str, dict] = {}
     if pe_numbers and table_exists(conn, "line_item_amounts"):
         try:
-            placeholders = ",".join("?" * len(pe_numbers))
+            placeholders = make_placeholders(pe_numbers)
             total_rows = conn.execute(
                 f"SELECT li.pe_number, "
                 f"       SUM(a.amount) AS total_value, "
@@ -630,7 +632,7 @@ def detail_partial(
 
             if tag_list:
                 # Find other PEs sharing these tags, ranked by shared tag count
-                tag_placeholders = ",".join("?" * len(tag_list))
+                tag_placeholders = make_placeholders(tag_list)
                 tag_related_rows = conn.execute(
                     f"SELECT b.id, b.pe_number, b.fiscal_year, b.line_item_title, "
                     f"b.organization_name, "
@@ -781,7 +783,7 @@ def program_detail(
     missing_pes = [r["referenced_pe"] for r in related
                    if not r.get("referenced_title") and r.get("referenced_pe")]
     if missing_pes:
-        ph = ",".join("?" * len(missing_pes))
+        ph = make_placeholders(missing_pes)
         title_map = {
             r["pe_number"]: r["display_title"]
             for r in conn.execute(
@@ -1286,12 +1288,7 @@ def consolidated_detail(request: Request, pe_number: str) -> HTMLResponse:
         # Parse raw_amounts JSON for display.
         parsed_subs = []
         for s in submissions:
-            raw = {}
-            if s["raw_amounts"]:
-                try:
-                    raw = _json.loads(s["raw_amounts"])
-                except (ValueError, TypeError):
-                    pass
+            raw = parse_json(s["raw_amounts"], {})
             parsed_subs.append({
                 "fiscal_year": s["fiscal_year"],
                 "source_file": s["source_file"],
@@ -1319,8 +1316,8 @@ def consolidated_detail(request: Request, pe_number: str) -> HTMLResponse:
             ).fetchall()
             for pr in proj_rows:
                 pnum = pr["project_number"]
-                fy_cols = _json.loads(pr["fy_columns"]) if pr["fy_columns"] else []
-                amts = _json.loads(pr["amounts"]) if pr["amounts"] else []
+                fy_cols = parse_json(pr["fy_columns"], [])
+                amts = parse_json(pr["amounts"], [])
                 entry = {
                     "fiscal_year": pr["fiscal_year"],
                     "fy_columns": fy_cols,

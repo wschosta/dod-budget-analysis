@@ -113,6 +113,7 @@ from utils.pdf_sections import (
 from utils.query import (
     EXCLUDE_SUMMARY_SQL,
     SUMMARY_EXHIBIT_TYPES,
+    add_in_condition,
     build_where_clause,
     build_order_clause,
     compute_pagination,
@@ -120,6 +121,9 @@ from utils.query import (
     detect_fy_columns,
     fetch_with_has_more,
     make_placeholders,
+    parse_json,
+    parse_json_array,
+    parse_json_list,
 )
 
 # Normalization mappings (centralized from repair_database/builder/fix_data_quality)
@@ -218,6 +222,7 @@ __all__ = [
     # Query builder
     "EXCLUDE_SUMMARY_SQL",
     "SUMMARY_EXHIBIT_TYPES",
+    "add_in_condition",
     "build_where_clause",
     "build_order_clause",
     "compute_pagination",
@@ -225,6 +230,9 @@ __all__ = [
     "detect_fy_columns",
     "fetch_with_has_more",
     "make_placeholders",
+    "parse_json",
+    "parse_json_array",
+    "parse_json_list",
     # Normalization
     "APPROPRIATION_KEYWORDS",
     "ORG_NORMALIZE",

@@ -34,6 +34,7 @@ import os
 from utils import safe_float
 from utils.config import SUMMARY_EXHIBIT_KEYS, _SHORT_SUMMARY_KEYS
 from utils.database import init_pragmas, APPROP_TO_BUDGET_TYPE
+from utils.query import make_placeholders
 from utils.normalization import (
     ORG_NORMALIZE as ORG_MAP,
     parse_appropriation as _parse_appropriation_util,
@@ -1394,7 +1395,7 @@ def ingest_excel_file(conn: sqlite3.Connection, file_path: Path,
             )
             all_cols = ", ".join(filter(None, [_fixed_cols, _fy_col_str, _tail_cols]))
             n_params = len(all_cols.split(","))
-            placeholders = ", ".join(["?"] * n_params)
+            placeholders = make_placeholders(n_params)
             conn.executemany(
                 f"INSERT OR IGNORE INTO budget_lines ({all_cols}) VALUES ({placeholders})",
                 batch,
@@ -2698,7 +2699,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                     )
                     all_c = ", ".join(filter(None, [_fixed_c, _fy_c, _tail_c]))
                     n_p = len(all_c.split(","))
-                    ph = ", ".join(["?"] * n_p)
+                    ph = make_placeholders(n_p)
                     conn.executemany(f"INSERT OR IGNORE INTO budget_lines ({all_c}) VALUES ({ph})", rows)
                     total_budget_rows += len(rows)
                     _metrics["rows"] = total_budget_rows

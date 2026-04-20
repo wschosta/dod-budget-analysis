@@ -23,6 +23,13 @@ import sys
 import time
 from pathlib import Path
 
+# Ensure the project root is on sys.path so package imports work
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from utils.query import make_placeholders  # noqa: E402
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
@@ -287,7 +294,7 @@ def populate_line_items(conn: sqlite3.Connection) -> dict[tuple, int]:
         ))
 
     # Bulk insert.
-    meta_placeholders = ", ".join(["?"] * len(METADATA_COLS))
+    meta_placeholders = make_placeholders(METADATA_COLS)
     conn.executemany(
         f"""INSERT OR IGNORE INTO line_items (
                 exhibit_type, account, pe_number, line_item,

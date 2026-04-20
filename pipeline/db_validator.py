@@ -25,7 +25,7 @@ from pathlib import Path
 # Shared utilities: Import from utils package for consistency across codebase
 from utils import get_connection
 from utils.patterns import PE_NUMBER_STRICT as _PE_PATTERN
-from utils.database import _validate_identifier, table_exists
+from utils.database import _validate_identifier, get_table_schema, table_exists
 from pipeline.schema import check_database_integrity
 
 # Known exhibit types — imported from exhibit_catalog so it stays in sync
@@ -37,7 +37,25 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 
-KNOWN_EXHIBIT_TYPES = set(list_all_exhibit_types())
+# Exhibit types classified by builder.py fallback paths (amendment/OCO/supplemental
+# budgets, unclassified files) — legitimate values that don't have a structured
+# column layout in EXHIBIT_CATALOG but still appear in ingested data.
+_UNSTRUCTURED_EXHIBIT_TYPES = {"amendment", "oco", "ogsi", "supplemental", "unknown"}
+KNOWN_EXHIBIT_TYPES = set(list_all_exhibit_types()) | _UNSTRUCTURED_EXHIBIT_TYPES
+
+
+def _status_from_severities(severities: set[str], upper: bool = False) -> str:
+    """Collapse a set of issue severities to an overall check status.
+
+    ``info``-only issues stay at PASS — they're observational stats
+    (extraction quality, row counts, rescissions) that shouldn't
+    contribute to the overall WARN/FAIL gate.
+    """
+    if "error" in severities:
+        return "FAIL" if upper else "fail"
+    if "warning" in severities:
+        return "WARN" if upper else "warn"
+    return "PASS" if upper else "pass"
 
 # Known organizations — imported from build_budget_db.py so it stays in sync
 # with ORG_MAP (Step 1.B4-b).
@@ -92,13 +110,20 @@ def check_missing_years(conn: sqlite3.Connection) -> list[dict]:
 
 
 def check_duplicates(conn: sqlite3.Connection) -> list[dict]:
-    """Find rows with identical key tuples that suggest duplicate ingestion."""
+    """Find rows with identical content that suggest duplicate ingestion.
+
+    Groups by every non-id column so rows that share metadata but differ in
+    amounts (e.g. "Gross" vs "Less Reimbursables" lines that share a header)
+    are not flagged.
+    """
     issues = []
-    rows = conn.execute("""
+    group_cols = [c["name"] for c in get_table_schema(conn, "budget_lines") if c["name"] != "id"]
+    group_sql = ", ".join(group_cols)
+    rows = conn.execute(f"""
         SELECT source_file, exhibit_type, account, line_item, fiscal_year,
                COUNT(*) AS cnt
         FROM budget_lines
-        GROUP BY source_file, exhibit_type, account, line_item, fiscal_year
+        GROUP BY {group_sql}
         HAVING cnt > 1
         ORDER BY cnt DESC
         LIMIT 50
@@ -211,12 +236,18 @@ def check_unknown_exhibits(conn: sqlite3.Connection) -> list[dict]:
 
 
 def check_ingestion_errors(conn: sqlite3.Connection) -> list[dict]:
-    """Find files that were ingested with errors."""
+    """Find files that were ingested with errors.
+
+    ``ok_with_issues`` means the file parsed successfully but logged warnings
+    during extraction (typos, minor column anomalies, etc.).  Report those as
+    ``warning`` so they don't fail the overall run, and reserve ``error`` for
+    genuine parse failures where the file could not be ingested.
+    """
     issues = []
     rows = conn.execute("""
         SELECT file_path, file_type, status
         FROM ingested_files
-        WHERE status != 'ok'
+        WHERE status NOT IN ('ok', 'ok_with_issues')
         ORDER BY file_path
     """).fetchall()
 
@@ -226,6 +257,17 @@ def check_ingestion_errors(conn: sqlite3.Connection) -> list[dict]:
             "severity": "error",
             "detail": f"Ingestion error for {r['file_path']}: {r['status']}",
             "file_path": r["file_path"],
+        })
+
+    warn_count = conn.execute(
+        "SELECT COUNT(*) FROM ingested_files WHERE status = 'ok_with_issues'"
+    ).fetchone()[0]
+    if warn_count:
+        issues.append({
+            "check": "ingestion_errors",
+            "severity": "info",
+            "detail": f"{warn_count} file(s) parsed with non-fatal warnings (ok_with_issues)",
+            "count": warn_count,
         })
 
     return issues
@@ -1591,10 +1633,7 @@ def generate_json_report(conn: sqlite3.Connection) -> dict:
             # TIGER-006: Extract PDF quality score
             if "pdf_quality_score" in issue:
                 pdf_quality_score = issue["pdf_quality_score"]
-        severities = list({i["severity"] for i in issues})
-        status = "pass"
-        if issues:
-            status = "fail" if "error" in severities else "warn"
+        status = _status_from_severities({i["severity"] for i in issues})
         checks_output.append({
             "name": check_name,
             "status": status,
@@ -1651,8 +1690,9 @@ def generate_report(conn: sqlite3.Connection, verbose: bool = False) -> int:
         else:
             for issue in issues:
                 severity_counts[issue["severity"]] += 1
-            severities = set(i["severity"] for i in issues)
-            status = "FAIL" if "error" in severities else "WARN"
+            status = _status_from_severities(
+                {i["severity"] for i in issues}, upper=True
+            )
 
         print(f"\n  [{status:>4}] {check_name} — {count} issue(s)")
 

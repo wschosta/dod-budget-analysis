@@ -36,6 +36,7 @@ from utils.normalization import infer_ba_from_pe
 from utils.patterns import PE_NUMBER, FISCAL_YEAR
 from utils.progress import log_progress
 from utils.query import make_placeholders
+from utils.strings import normalize_fiscal_year
 from pipeline.r2_pdf_extractor import parse_r2_header_metadata
 from pipeline.schema import migrate as _schema_migrate
 from utils.pdf_sections import (
@@ -649,7 +650,10 @@ def run_phase1(conn: sqlite3.Connection, stop_event: threading.Event | None = No
                 GROUP BY ppn.pe_number, ppn.fiscal_year
             """.format(ph=make_placeholders(pe_list)), pe_list).fetchall()
             for pe, fy in fy_rows:
-                pe_fys[pe].append(fy)
+                # Normalize to bare-year form so pdf-sourced years align with
+                # the format used by budget_lines; cross-source filters
+                # (e.g. ?exhibit=r2&fy=2025) would otherwise be unreachable.
+                pe_fys[pe].append(normalize_fiscal_year(fy) or fy)
         except sqlite3.OperationalError:
             pass
         try:
@@ -1016,7 +1020,7 @@ def run_phase3(conn: sqlite3.Connection, with_llm: bool = False,
     # Also collect source_files for LION-106 provenance tracking.
     structured_fields: dict[str, tuple] = {}
     structured_sources: dict[str, list[str]] = {}
-    placeholders = ",".join("?" * len(to_tag))
+    placeholders = make_placeholders(to_tag)
     for row in conn.execute(f"""
         SELECT pe_number,
                MAX(budget_activity_title) AS ba_title,
