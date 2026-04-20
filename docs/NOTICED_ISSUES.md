@@ -669,6 +669,66 @@ are rows without enough context to infer an appropriation code.
 
 ---
 
+### 64. pe_index.fiscal_years mixed "FY 2025" and "2025" formats **[RESOLVED — 2026-04-19]**
+
+Cross-source filters like `/api/v1/pe?exhibit=r2&fy=2025` returned 0 PEs despite
+both filters returning non-empty sets individually. Root cause: `pdf_pe_numbers.fiscal_year`
+stored `"FY 2025"` (prefixed) while `budget_lines.fiscal_year` stored bare `"2025"`;
+the enricher merged both into `pe_index.fiscal_years` JSON arrays, leaving the two
+formats side-by-side. 1,633 rows affected.
+
+**Fix:**
+- `pipeline/enricher.py` Pass 2 now calls `normalize_fiscal_year()` before
+  appending to `pe_index.fiscal_years`.
+- `scripts/repair_database.py` step 12 strips `"FY "` prefixes from existing rows.
+
+**Verification:** `/api/v1/pe?exhibit=r2&fy=2025` now returns 37 PEs (was 0).
+
+---
+
+### 65. appropriation_title casing/punctuation drift per account **[RESOLVED — 2026-04-19]**
+
+Same `(appropriation_code, organization_name)` pair frequently had multiple title
+casings (`AIRCRAFT PROCUREMENT, ARMY` / `Aircraft Procurement, Army`), inflating
+UI dropdown options with cosmetic variants. Original naive canonicalization by
+`appropriation_code` alone would have destructively merged across services
+(`APAF` has distinct Navy / Army / Air Force rows).
+
+**Fix:** `scripts/repair_database.py` step 13 groups by
+`(appropriation_code, organization_name)` and only merges variants whose
+`re.sub(r"[^A-Za-z0-9]+", " ").upper()` fingerprints match — preserving
+semantic distinctions like `"Defense Health Program, Recovery Act"` vs
+`"Defense Health Program"`. 5,976 rows rewritten across 51 (code, org) pairs
+on production DB.
+
+---
+
+### 66. Legacy parser org-code misalignment **[RESOLVED — 2026-04-19]**
+
+FY2005–FY2010 Comptroller summary Excel files (`fy2005_p1.xlsx`,
+`fy2006_r1.xlsx`, etc.) had column misalignment that leaked non-org values
+into `budget_lines.organization_name`. Two classes of artifacts surfaced
+via `check_missing_years` and `check_pe_org_consistency` warnings:
+
+1. **Numeric codes** — `"2"`, `"92"`, `"9999999"` (6 rows). Never valid orgs.
+2. **Single letters not matching the PE suffix** — e.g. `pe_number="0206496M"`
+   with `organization_name="K"` (21 rows). Per DoD PPBE convention
+   ([acqnotes](https://acqnotes.com/acqnote/acquisitions/program-element-pe))
+   the trailing letter of a PE number **is** the owning service/agency code,
+   so an org code that doesn't match the PE suffix is always a parser bug.
+   Legitimate letter-convention rollups (`org="E"` on an E-suffixed DARPA PE)
+   are preserved.
+
+**Fix:** `scripts/repair_database.py` step 14 nulls `organization_name` and
+`organization` on the 29 matching rows. Extraction uses `PE_SUFFIX_PATTERN`
+from `utils/patterns.py` to correctly parse Defense-Wide `D8Z`-style suffixes
+(the service letter is `D`, not `Z`).
+
+See [data-sources.md § Program Element (PE) Number Structure](user-guide/data-sources.md#program-element-pe-number-structure)
+for the full suffix-to-agency mapping.
+
+---
+
 ### Round 5 Files Changed
 
 | File | Change |
