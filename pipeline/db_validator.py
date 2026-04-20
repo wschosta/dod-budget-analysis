@@ -37,7 +37,11 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 
-KNOWN_EXHIBIT_TYPES = set(list_all_exhibit_types())
+# Exhibit types classified by builder.py fallback paths (amendment/OCO/supplemental
+# budgets, unclassified files) — legitimate values that don't have a structured
+# column layout in EXHIBIT_CATALOG but still appear in ingested data.
+_UNSTRUCTURED_EXHIBIT_TYPES = {"amendment", "oco", "ogsi", "supplemental", "unknown"}
+KNOWN_EXHIBIT_TYPES = set(list_all_exhibit_types()) | _UNSTRUCTURED_EXHIBIT_TYPES
 
 # Known organizations — imported from build_budget_db.py so it stays in sync
 # with ORG_MAP (Step 1.B4-b).
@@ -1618,10 +1622,15 @@ def generate_json_report(conn: sqlite3.Connection) -> dict:
             # TIGER-006: Extract PDF quality score
             if "pdf_quality_score" in issue:
                 pdf_quality_score = issue["pdf_quality_score"]
-        severities = list({i["severity"] for i in issues})
+        severities = {i["severity"] for i in issues}
         status = "pass"
-        if issues:
-            status = "fail" if "error" in severities else "warn"
+        if "error" in severities:
+            status = "fail"
+        elif "warning" in severities:
+            status = "warn"
+        # info-only issues stay at "pass" — they're observational stats
+        # (extraction quality, row counts, rescissions) that shouldn't
+        # contribute to the overall WARN/FAIL gate.
         checks_output.append({
             "name": check_name,
             "status": status,
@@ -1678,8 +1687,14 @@ def generate_report(conn: sqlite3.Connection, verbose: bool = False) -> int:
         else:
             for issue in issues:
                 severity_counts[issue["severity"]] += 1
-            severities = set(i["severity"] for i in issues)
-            status = "FAIL" if "error" in severities else "WARN"
+            severities = {i["severity"] for i in issues}
+            if "error" in severities:
+                status = "FAIL"
+            elif "warning" in severities:
+                status = "WARN"
+            else:
+                # Info-only issues are observational — don't trip WARN.
+                status = "PASS"
 
         print(f"\n  [{status:>4}] {check_name} — {count} issue(s)")
 
