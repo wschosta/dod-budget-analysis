@@ -25,7 +25,7 @@ from pathlib import Path
 # Shared utilities: Import from utils package for consistency across codebase
 from utils import get_connection
 from utils.patterns import PE_NUMBER_STRICT as _PE_PATTERN
-from utils.database import _validate_identifier, table_exists
+from utils.database import _validate_identifier, get_table_schema, table_exists
 from pipeline.schema import check_database_integrity
 
 # Known exhibit types — imported from exhibit_catalog so it stays in sync
@@ -42,6 +42,20 @@ DEFAULT_DB_PATH = Path("dod_budget.sqlite")
 # column layout in EXHIBIT_CATALOG but still appear in ingested data.
 _UNSTRUCTURED_EXHIBIT_TYPES = {"amendment", "oco", "ogsi", "supplemental", "unknown"}
 KNOWN_EXHIBIT_TYPES = set(list_all_exhibit_types()) | _UNSTRUCTURED_EXHIBIT_TYPES
+
+
+def _status_from_severities(severities: set[str], upper: bool = False) -> str:
+    """Collapse a set of issue severities to an overall check status.
+
+    ``info``-only issues stay at PASS — they're observational stats
+    (extraction quality, row counts, rescissions) that shouldn't
+    contribute to the overall WARN/FAIL gate.
+    """
+    if "error" in severities:
+        return "FAIL" if upper else "fail"
+    if "warning" in severities:
+        return "WARN" if upper else "warn"
+    return "PASS" if upper else "pass"
 
 # Known organizations — imported from build_budget_db.py so it stays in sync
 # with ORG_MAP (Step 1.B4-b).
@@ -103,10 +117,7 @@ def check_duplicates(conn: sqlite3.Connection) -> list[dict]:
     are not flagged.
     """
     issues = []
-    all_cols = [row[1] for row in conn.execute("PRAGMA table_info(budget_lines)")]
-    group_cols = [c for c in all_cols if c != "id"]
-    for c in group_cols:
-        _validate_identifier(c, "column name")
+    group_cols = [c["name"] for c in get_table_schema(conn, "budget_lines") if c["name"] != "id"]
     group_sql = ", ".join(group_cols)
     rows = conn.execute(f"""
         SELECT source_file, exhibit_type, account, line_item, fiscal_year,
@@ -1622,15 +1633,7 @@ def generate_json_report(conn: sqlite3.Connection) -> dict:
             # TIGER-006: Extract PDF quality score
             if "pdf_quality_score" in issue:
                 pdf_quality_score = issue["pdf_quality_score"]
-        severities = {i["severity"] for i in issues}
-        status = "pass"
-        if "error" in severities:
-            status = "fail"
-        elif "warning" in severities:
-            status = "warn"
-        # info-only issues stay at "pass" — they're observational stats
-        # (extraction quality, row counts, rescissions) that shouldn't
-        # contribute to the overall WARN/FAIL gate.
+        status = _status_from_severities({i["severity"] for i in issues})
         checks_output.append({
             "name": check_name,
             "status": status,
@@ -1687,14 +1690,9 @@ def generate_report(conn: sqlite3.Connection, verbose: bool = False) -> int:
         else:
             for issue in issues:
                 severity_counts[issue["severity"]] += 1
-            severities = {i["severity"] for i in issues}
-            if "error" in severities:
-                status = "FAIL"
-            elif "warning" in severities:
-                status = "WARN"
-            else:
-                # Info-only issues are observational — don't trip WARN.
-                status = "PASS"
+            status = _status_from_severities(
+                {i["severity"] for i in issues}, upper=True
+            )
 
         print(f"\n  [{status:>4}] {check_name} — {count} issue(s)")
 

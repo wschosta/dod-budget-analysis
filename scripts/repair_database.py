@@ -28,6 +28,7 @@ Usage:
 
 import argparse
 import logging
+import re
 import sqlite3
 import sys
 import time
@@ -45,7 +46,7 @@ from utils.normalization import (  # noqa: E402
     ORG_NORMALIZE as _ORG_NORMALIZE,
     TITLE_TO_CODE as _TITLE_TO_CODE,
 )
-from utils.patterns import PE_NUMBER as _PE_RE  # noqa: E402
+from utils.patterns import PE_NUMBER as _PE_RE, PE_SUFFIX_PATTERN  # noqa: E402
 from utils.pdf_sections import strip_exhibit_headers  # noqa: E402
 from pipeline.r2_cost_parser import (  # noqa: E402
     SKIP_LINE_LABELS as _R2_SKIP_LABELS,
@@ -679,12 +680,8 @@ def step_13_canonicalize_appropriation_titles(
         """
     ).fetchall()
 
-    import re as _re
-
     def _norm(s: str) -> str:
-        # Fingerprint that ignores casing/punctuation drift but preserves
-        # semantic content ("Recovery Act", "Defense-Wide", etc.).
-        return _re.sub(r"[^A-Za-z0-9]+", " ", s).strip().upper()
+        return re.sub(r"[^A-Za-z0-9]+", " ", s).strip().upper()
 
     by_key: dict[tuple[str, str], list[tuple[str, int]]] = {}
     for r in rows:
@@ -753,12 +750,11 @@ def step_14_null_mismatched_org_codes(
     Single letters that DO match the PE suffix (e.g. ``org='E'`` on an
     E-suffixed PE) are legitimate letter-convention rollups and left alone.
     """
-    import re as _re
-
     logger.info("Step 14: Nulling mismatched org codes from legacy parser artifacts...")
-    suffix_re = _re.compile(r"([A-Za-z]+)$")
+    # Canonical PE suffix (handles D8Z-style Defense-Wide sub-codes); first
+    # character of the match is the service/agency letter.
+    pe_suffix_re = re.compile(rf"({PE_SUFFIX_PATTERN})$", re.IGNORECASE)
 
-    # Candidates: single-letter or numeric-only organization_name
     candidates = conn.execute(
         """
         SELECT id, pe_number, organization_name
@@ -777,11 +773,10 @@ def step_14_null_mismatched_org_codes(
         if org.isdigit():
             bad_ids.append(r["id"])
             continue
-        # Single letter: check against PE suffix
         pe = r["pe_number"] or ""
-        m = suffix_re.search(pe)
-        pe_suffix = m.group(1) if m else ""
-        if pe_suffix.upper() != org.upper():
+        m = pe_suffix_re.search(pe)
+        service_letter = m.group(1)[0] if m else ""
+        if service_letter.upper() != org.upper():
             bad_ids.append(r["id"])
 
     if not bad_ids:
