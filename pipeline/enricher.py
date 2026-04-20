@@ -649,7 +649,10 @@ def run_phase1(conn: sqlite3.Connection, stop_event: threading.Event | None = No
                 GROUP BY ppn.pe_number, ppn.fiscal_year
             """.format(ph=make_placeholders(pe_list)), pe_list).fetchall()
             for pe, fy in fy_rows:
-                pe_fys[pe].append(fy)
+                # Strip "FY " prefix so pdf-sourced years align with the bare
+                # year format used by budget_lines; cross-source filters
+                # (e.g. ?exhibit=r2&fy=2025) would otherwise be unreachable.
+                pe_fys[pe].append(fy[3:] if fy.startswith("FY ") else fy)
         except sqlite3.OperationalError:
             pass
         try:

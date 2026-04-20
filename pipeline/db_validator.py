@@ -92,13 +92,23 @@ def check_missing_years(conn: sqlite3.Connection) -> list[dict]:
 
 
 def check_duplicates(conn: sqlite3.Connection) -> list[dict]:
-    """Find rows with identical key tuples that suggest duplicate ingestion."""
+    """Find rows with identical content that suggest duplicate ingestion.
+
+    Groups by every non-id column so rows that share metadata but differ in
+    amounts (e.g. "Gross" vs "Less Reimbursables" lines that share a header)
+    are not flagged.
+    """
     issues = []
-    rows = conn.execute("""
+    all_cols = [row[1] for row in conn.execute("PRAGMA table_info(budget_lines)")]
+    group_cols = [c for c in all_cols if c != "id"]
+    for c in group_cols:
+        _validate_identifier(c, "column name")
+    group_sql = ", ".join(group_cols)
+    rows = conn.execute(f"""
         SELECT source_file, exhibit_type, account, line_item, fiscal_year,
                COUNT(*) AS cnt
         FROM budget_lines
-        GROUP BY source_file, exhibit_type, account, line_item, fiscal_year
+        GROUP BY {group_sql}
         HAVING cnt > 1
         ORDER BY cnt DESC
         LIMIT 50
@@ -211,12 +221,18 @@ def check_unknown_exhibits(conn: sqlite3.Connection) -> list[dict]:
 
 
 def check_ingestion_errors(conn: sqlite3.Connection) -> list[dict]:
-    """Find files that were ingested with errors."""
+    """Find files that were ingested with errors.
+
+    ``ok_with_issues`` means the file parsed successfully but logged warnings
+    during extraction (typos, minor column anomalies, etc.).  Report those as
+    ``warning`` so they don't fail the overall run, and reserve ``error`` for
+    genuine parse failures where the file could not be ingested.
+    """
     issues = []
     rows = conn.execute("""
         SELECT file_path, file_type, status
         FROM ingested_files
-        WHERE status != 'ok'
+        WHERE status NOT IN ('ok', 'ok_with_issues')
         ORDER BY file_path
     """).fetchall()
 
@@ -226,6 +242,17 @@ def check_ingestion_errors(conn: sqlite3.Connection) -> list[dict]:
             "severity": "error",
             "detail": f"Ingestion error for {r['file_path']}: {r['status']}",
             "file_path": r["file_path"],
+        })
+
+    warn_count = conn.execute(
+        "SELECT COUNT(*) FROM ingested_files WHERE status = 'ok_with_issues'"
+    ).fetchone()[0]
+    if warn_count:
+        issues.append({
+            "check": "ingestion_errors",
+            "severity": "info",
+            "detail": f"{warn_count} file(s) parsed with non-fatal warnings (ok_with_issues)",
+            "count": warn_count,
         })
 
     return issues
