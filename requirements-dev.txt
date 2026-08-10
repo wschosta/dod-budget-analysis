@@ -1,12 +1,16 @@
 # Development and test dependencies (install with: pip install -r requirements-dev.txt)
+#
+# Upper bounds are deliberate. This project sat dormant between April and
+# August 2026 and picked up a Starlette 1.x breakage purely from unpinned
+# floors; caps keep a quiet repo from silently drifting out of a working state.
 -r requirements.txt
-pytest>=7.0
-pytest-cov>=4.0
-fpdf2>=2.7  # For PDF fixture generation (test fixtures)
-black>=23.0  # Code formatting
-ruff>=0.1  # Linter (CI + pre-commit)
-mypy>=1.0  # Static type checker (CI + pre-commit)
-pyyaml>=6.0  # Pipeline config parsing
-beautifulsoup4>=4.12  # Downloader HTML parsing
-openpyxl>=3.1  # Excel ingestion
-pdfplumber>=0.10  # PDF text extraction
+pytest>=7.0,<10
+pytest-cov>=4.0,<8
+fpdf2>=2.7,<3  # For PDF fixture generation (test fixtures)
+black>=23.0,<27  # Code formatting
+ruff>=0.1,<1.0  # Linter (CI + pre-commit)
+mypy>=1.0,<3  # Static type checker (CI + pre-commit)
+pyyaml>=6.0,<7  # Pipeline config parsing
+beautifulsoup4>=4.12,<5  # Downloader HTML parsing
+openpyxl>=3.1,<4  # Excel ingestion
+pdfplumber>=0.10,<0.12  # PDF text extraction

@@ -10,12 +10,12 @@ Orchestrates the complete data refresh pipeline:
 5. Run enrichment pipeline (PE index, descriptions, tags, lineage, project decomposition)
 
 Usage:
-    python refresh_data.py --years 2026                    # Refresh FY2026 (all sources)
-    python refresh_data.py --years 2026 --sources army navy # FY2026 Army+Navy only
-    python refresh_data.py --years 2025 2026 --sources all  # Multiple years
-    python refresh_data.py --dry-run --years 2026           # Preview without downloading
-    python refresh_data.py --schedule daily --at-hour 02:00 # Schedule daily at 2am
-    python refresh_data.py --help                           # Show full options
+    python -m pipeline.refresh --years 2026                    # Refresh FY2026 (all sources)
+    python -m pipeline.refresh --years 2026 --sources army navy # FY2026 Army+Navy only
+    python -m pipeline.refresh --years 2025 2026 --sources all  # Multiple years
+    python -m pipeline.refresh --dry-run --years 2026           # Preview without downloading
+    python -m pipeline.refresh --schedule daily --at-hour 02:00 # Schedule daily at 2am
+    python -m pipeline.refresh --help                           # Show full options
 """
 
 import argparse
@@ -35,6 +35,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from utils.progress import fmt_time  # noqa: E402
+from utils.validation import latest_budget_fiscal_year  # noqa: E402
 
 # REFRESH-004: Path for the progress file polled by external monitors
 _PROGRESS_FILE = Path("logs/refresh_progress.json")
@@ -579,7 +580,7 @@ def run_scheduled(args: argparse.Namespace, workflow_kwargs: dict[str, object]) 
 
         print(f"\n[{datetime.now().isoformat()}] REFRESH-005: Starting scheduled run")
         workflow = RefreshWorkflow(**workflow_kwargs)
-        workflow.run(args.years or [2026], args.sources or ["all"])
+        workflow.run(args.years or [latest_budget_fiscal_year()], args.sources or ["all"])
 
         next_run = time.time() + interval
         print(f"  Next run scheduled for {datetime.fromtimestamp(next_run).isoformat()}")
@@ -592,10 +593,10 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python refresh_data.py --years 2026
-  python refresh_data.py --years 2025 2026 --sources army navy
-  python refresh_data.py --dry-run --years 2026
-  python refresh_data.py --schedule daily --at-hour 02:00
+  python -m pipeline.refresh --years 2026
+  python -m pipeline.refresh --years 2025 2026 --sources army navy
+  python -m pipeline.refresh --dry-run --years 2026
+  python -m pipeline.refresh --schedule daily --at-hour 02:00
         """,
     )
     parser.add_argument(
@@ -691,7 +692,7 @@ Examples:
         run_scheduled(args, workflow_kwargs)
     else:
         workflow = RefreshWorkflow(**workflow_kwargs)
-        exit_code = workflow.run(args.years or [2026], args.sources or ["all"])
+        exit_code = workflow.run(args.years or [latest_budget_fiscal_year()], args.sources or ["all"])
         sys.exit(exit_code)
 
 

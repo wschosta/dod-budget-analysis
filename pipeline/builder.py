@@ -2636,8 +2636,10 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
             }
             for xi, future in enumerate(as_completed(future_to_xl)):
                 if stop_event and stop_event.is_set():
-                    for f in future_to_xl:
-                        f.cancel()
+                    # Distinct name from the `f` used for Path comprehensions
+                    # earlier in this function — these are Futures.
+                    for pending in future_to_xl:
+                        pending.cancel()
                     _save_checkpoint(conn, session_id, files_done_total, total_files,
                                      int(_metrics["pages"]), total_budget_rows, 0, "", "interrupted")
                     conn.commit()

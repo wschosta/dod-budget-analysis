@@ -20,6 +20,7 @@ from api.models import (
 )
 from utils.query import (
     ALLOWED_SORT_COLUMNS,
+    is_allowed_sort,
     build_where_clause,
     compute_pagination,
     fetch_bli_related_pes,
@@ -60,10 +61,13 @@ def list_budget_lines(
     conn: sqlite3.Connection = Depends(get_db),
 ) -> PaginatedResponse:
     """Return a paginated, filtered list of budget line items."""
-    if sort_by not in ALLOWED_SORT_COLUMNS:
+    if not is_allowed_sort(sort_by):
         raise HTTPException(
             status_code=400,
-            detail=f"sort_by must be one of: {sorted(ALLOWED_SORT_COLUMNS)}",
+            detail=(
+                f"sort_by must be one of: {sorted(ALLOWED_SORT_COLUMNS)}, "
+                "or an amount_fy<YYYY>_<type> column"
+            ),
         )
 
     # FTS5 free-text search: resolve matching row IDs first

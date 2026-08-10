@@ -23,7 +23,7 @@ from fastapi.responses import StreamingResponse
 from api.database import get_db
 from api.models import FilterParams
 from utils import sanitize_fts5_query
-from utils.query import ALLOWED_SORT_COLUMNS, build_where_clause
+from utils.query import build_where_clause, is_allowed_sort
 
 router = APIRouter(prefix="/download", tags=["download"])
 
@@ -137,7 +137,7 @@ def _build_download_sql(
     total = conn.execute(count_sql, params).fetchone()[0]
 
     col_list = ", ".join(_render_col(c, conn) for c in export_cols)
-    sort_col = sort_by if sort_by in ALLOWED_SORT_COLUMNS else "id"
+    sort_col = sort_by if is_allowed_sort(sort_by) else "id"
     direction = "DESC" if sort_dir.lower() == "desc" else "ASC"
     sql = (
         f"SELECT {col_list} FROM budget_lines {where} "
