@@ -489,11 +489,11 @@ def build_cache_table(
         extra_set = set(extra_pes)
         # Check budget_lines first
         ep_ph, ep_params = in_clause(extra_set)
-        existing = conn.execute(
+        existing_rows = conn.execute(
             f"SELECT DISTINCT pe_number FROM budget_lines WHERE pe_number IN ({ep_ph})",
             ep_params,
         ).fetchall()
-        found_extra = {r[0] for r in existing}
+        found_extra = {r[0] for r in existing_rows}
         # Also check pe_index for PDF-only PEs (e.g., D8Z Defense-Wide programs)
         remaining = extra_set - found_extra
         if remaining:
@@ -872,16 +872,18 @@ def build_cache_table(
         if d.get("exhibit_type") == EXHIBIT_R1:
             pe = d["pe_number"]
             if pe in r1_dedup:
-                existing = r1_dedup[pe]
-                if len(d.get("line_item_title", "")) > len(existing.get("line_item_title", "")):
-                    existing["line_item_title"] = d["line_item_title"]
+                # Named `kept` rather than `existing` to avoid reusing the
+                # cluster-loop variable above, which holds a different type.
+                kept = r1_dedup[pe]
+                if len(d.get("line_item_title", "")) > len(kept.get("line_item_title", "")):
+                    kept["line_item_title"] = d["line_item_title"]
                 for yr in year_range:
                     col = f"fy{yr}"
-                    if existing.get(col) is None and d.get(col) is not None:
-                        existing[col] = d[col]
+                    if kept.get(col) is None and d.get(col) is not None:
+                        kept[col] = d[col]
                         ref_col = f"fy{yr}_ref"
                         if d.get(ref_col):
-                            existing[ref_col] = d[ref_col]
+                            kept[ref_col] = d[ref_col]
             else:
                 r1_dedup[pe] = d
                 deduped_other.append(d)

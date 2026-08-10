@@ -116,7 +116,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | **3.A4** | Build the results table | Display query results in a sortable, paginated table. Show key columns (service, fiscal year, program, amount, exhibit type). Allow column toggling. | ✅ **Complete** — `templates/partials/results.html` with sortable columns, pagination, page-size selector, and column toggle |
 | **3.A5** | Build the download feature | Allow users to download their current filtered result set as CSV or JSON. Include a "Download" button that triggers the API export endpoint. Show download progress for large files. | ✅ **Complete** — Download modal with CSV, JSON (NDJSON), and Excel (.xlsx) formats; streaming export; column subset support |
 | **3.A6** | Build a detail/drill-down view | When a user clicks a budget line, show full details: all available fields, the source document (link to original PDF on DoD site), and related line items across fiscal years. | ✅ **Complete** — `templates/partials/detail.html` with full metadata, funding breakdown, related fiscal years, source document links |
-| **3.A7** | Responsive design & accessibility | Ensure the UI works on mobile and tablet; meet WCAG 2.1 AA accessibility standards (keyboard navigation, screen reader support, sufficient contrast). | ✅ Mostly Complete — Skip-to-content, ARIA live regions, focus-visible styles, keyboard shortcuts, responsive breakpoints, print styles; remaining: Lighthouse/axe-core audit (needs running UI) |
+| **3.A7** | Responsive design & accessibility | Ensure the UI works on mobile and tablet; meet WCAG 2.1 AA accessibility standards (keyboard navigation, screen reader support, sufficient contrast). | ✅ **Complete** — Skip-to-content, ARIA live regions, focus-visible styles, keyboard shortcuts, responsive breakpoints, print styles. axe-core audit run 2026-08-10 against all 7 page routes in both colour schemes: **0 violations**. Repeatable via `scripts/accessibility_audit.py`. |
 
 ### 3.B — Data Visualization (Stretch)
 
@@ -148,9 +148,9 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 
 | ID | Task | Details | Status |
 |----|------|---------|--------|
-| **4.A1** | Choose a hosting platform | Evaluate options (AWS, GCP, Azure, Fly.io, Railway, Render, etc.) based on cost, reliability, and ease of deployment. Document the decision. | ⚠️ Not started — requires cloud account setup |
+| **4.A1** | Choose a hosting platform | Evaluate options (AWS, GCP, Azure, Fly.io, Railway, Render, etc.) based on cost, reliability, and ease of deployment. Document the decision. | ✅ **Complete** — Fly.io, single machine + persistent volume. Decision and rationale in [`docs/HOSTING_DECISION.md`](HOSTING_DECISION.md); machine config in `fly.toml`. Driven by the runtime write path (the Explorer builds cache tables in the live DB) plus SQLite WAL's single-writer constraint, which rules out serverless and horizontal scaling. |
 | **4.A2** | Containerize the application | Create a `Dockerfile` (and `docker-compose.yml` if needed) that bundles the API, front-end, and database for reproducible deployment. | ✅ **Complete** — `Dockerfile` (non-root user, HEALTHCHECK), `Dockerfile.multistage` (2-stage build), `docker-compose.yml` with volume mounts and hot-reload |
-| **4.A3** | Set up CI/CD pipeline | Configure GitHub Actions (or equivalent) to run tests, build the container, and deploy on push to the main branch. | ✅ Partially Complete — CI pipeline done (`ci.yml`: matrix testing, ruff, pytest+coverage, mypy, Docker build); CD deployment workflow pending (needs hosting platform) |
+| **4.A3** | Set up CI/CD pipeline | Configure GitHub Actions (or equivalent) to run tests, build the container, and deploy on push to the main branch. | ✅ **Complete pending credential** — CI (`ci.yml`: matrix testing, ruff, pytest+coverage, mypy, Docker build) and CD (`deploy.yml`: CI gate → GHCR build/push → `flyctl deploy` → smoke test). The deploy job skips with a warning until `FLY_API_TOKEN` is added as a repository secret, so image builds still run. |
 | **4.A4** | Configure a custom domain & TLS | Register or configure a domain name and set up HTTPS with automatic certificate renewal. | ⚠️ Not started — requires domain registration |
 | **4.A5** | Set up monitoring & alerting | Implement uptime monitoring, error tracking (e.g., Sentry), and basic usage analytics (privacy-respecting) to detect problems early. | ✅ **Complete** — `/health` + `/health/detailed` endpoints with uptime, request/error counts, DB metrics, response time tracking; structured access logging middleware; rate limiting with per-IP tracking |
 | **4.A6** | Implement backup & recovery | Automate database backups and document the recovery procedure. | ✅ **Complete** — `scripts/backup_db.py` with SQLite online backup API, `--keep N` pruning; staging docker-compose backup sidecar (6-hour cycle); `docs/developer/deployment.md` documents recovery procedure |
@@ -171,7 +171,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | **4.C1** | Triage and prioritize feedback | Review all feedback, categorize (bug, feature request, data quality, UX), and prioritize for the next development cycle. | ⚠️ Not started — requires public launch and user feedback |
 | **4.C2** | Implement high-priority improvements | Address the most impactful issues identified during the soft launch and public feedback rounds. | ⚠️ Not started — depends on user feedback |
 | **4.C3** | Keyword Explorer page | Generalized keyword search tool (`/explorer`). User-supplied keywords with fuzzy matching (prefix, acronym expansion, edit-distance). Async cache build with progress polling. PE-level preview. Drag-and-drop column picker for XLSX export. Hypersonics Preset button loads 27 keywords + 25 extra PEs. | ✅ **Complete** — Enhanced: xlsxwriter migration for dynamic array formulas; per-FY Y/N/P keyword matching; R-2 title cleanup (9K dirty titles fixed, 47% row reduction); merged FY headers; PE Summary/Dimension spill sheets; Keyword Matrix; Selected sheet; About sheet; Hypersonics Preset button; extra_pes support; 50 keyword limit. `/hypersonics` standalone page removed — Explorer preset replaces it. |
-| **4.C3b** | Automate annual data refresh | When new President's Budget or enacted appropriations are published, the pipeline should detect and ingest them with minimal manual intervention. | ✅ **Complete** — `pipeline/refresh.py` with 4-stage pipeline (download → build → validate → report), automatic rollback, progress tracking, `--schedule` flag; `.github/workflows/refresh-data.yml` with weekly cron |
+| **4.C3b** | Automate annual data refresh | When new President's Budget or enacted appropriations are published, the pipeline should detect and ingest them with minimal manual intervention. | ✅ **Complete (repaired 2026-08-10)** — `pipeline/refresh.py` with 4-stage pipeline (download → build → validate → report), automatic rollback, progress tracking, `--schedule` flag; `.github/workflows/refresh-data.yml` with weekly cron. **This was previously marked complete while broken:** the workflow invoked `python refresh_data.py`, which does not exist, so all 18 scheduled runs from 2026-02-22 to 2026-06-21 failed. Now invokes `python -m pipeline.refresh` and derives the target year from `latest_budget_fiscal_year()` instead of a hardcoded 2026. |
 | **4.C4** | Performance optimization | Profile and optimize slow queries, large downloads, and page-load times based on real usage patterns. | ✅ Mostly Complete — Connection pooling, FTS5 indexing, rate limiting, pagination, in-memory TTL cache, streaming exports, BM25 relevance scoring; profiling-based tuning pending real traffic |
 | **4.C5** | Ongoing documentation updates | Keep the data dictionary, FAQ, and methodology page current as the data and features evolve. | ✅ Mostly Complete — Comprehensive docs in `docs/user-guide/` and `docs/developer/` (20+ files); ongoing updates needed as features evolve |
 | **4.C6** | Community contribution guidelines | If the project attracts contributors, publish `CONTRIBUTING.md` with development setup, coding standards, and PR process. | ✅ **Complete** — `CONTRIBUTING.md` with prerequisites, dev setup, code standards, testing guide, PR process, and architecture overview |
@@ -268,7 +268,7 @@ Remaining work is organized into groups A–G:
 | **D** | FY attribution | ⚠️ Partial | Mismatch logs but no auto-correction (deferred) |
 | **E** | Enrichment quality | ✅ Resolved via test suite | — |
 | **F** | Download retry CLI | ✅ Complete | — |
-| **G** | Deploy & launch | ❌ Blocked | Needs user infrastructure decisions |
+| **G** | Deploy & launch | 🔄 In progress | G1/G2 done; G3–G6 need account credentials |
 
 ---
 
@@ -333,22 +333,39 @@ GROUP BY 1, 2 ORDER BY 1, 2;
 
 ---
 
-#### Group G: Deploy & Launch (Blocked)
-
-**Blocked on:** User infrastructure decisions (hosting platform, domain, credentials).
+#### Group G: Deploy & Launch (In progress)
 
 Scaffolding in place:
-- Docker: `Dockerfile` (production), `Dockerfile.multistage` (embedded DB)
-- CI/CD template: `.github/workflows/deploy.yml` (4 TODO placeholders)
+- Docker: `Dockerfile` (production), `docker/Dockerfile.multistage` (embedded DB)
+- CD pipeline: `.github/workflows/deploy.yml` — no TODO placeholders remain
+- Platform config: `fly.toml` (single machine, `/data` volume, `/health` check)
 - Health checks, monitoring, backup scripts all ready
 
 Sub-tasks (sequential):
-1. **G1** Choose hosting platform → create `docs/HOSTING_DECISION.md`
-2. **G2** Configure CD workflow → fill deploy.yml TODOs + GitHub secrets
-3. **G3** Register domain + TLS
-4. **G4** Accessibility audit (Lighthouse score ≥ 90)
-5. **G5** Soft launch to 5–10 users
-6. **G6** Public launch + announcement
+1. **G1** Choose hosting platform → ✅ **Complete** — [`docs/HOSTING_DECISION.md`](HOSTING_DECISION.md)
+2. **G2** Configure CD workflow → ✅ **Complete** — `deploy.yml` gates on CI, pushes
+   to GHCR, deploys via `flyctl deploy --image`, then smoke-tests the live URL
+3. **G3** Register domain + TLS — ⚠️ needs a Fly account and registrar access
+4. **G4** Accessibility audit → ✅ **Complete** — axe-core, WCAG 2.1 AA, all 7 pages,
+   light and dark, 0 violations. Re-run against production data after G3 with
+   `python scripts/accessibility_audit.py --base-url <url>`
+5. **G5** Soft launch to 5–10 users — ⚠️ needs G3
+6. **G6** Public launch + announcement — ⚠️ needs G5
+
+**Operator actions required before the first deploy** (see
+[`docs/HOSTING_DECISION.md`](HOSTING_DECISION.md) §6):
+
+| Action | Command / location |
+|---|---|
+| Create the Fly app | `fly apps create dod-budget-explorer` |
+| Create the volume | `fly volumes create dod_budget_data --size 10 --region iad` |
+| Add the deploy token | Repository secret `FLY_API_TOKEN` |
+| Seed the database | Build locally, then upload to `/data/dod_budget.sqlite` |
+
+**Also required:** GitHub disables scheduled workflows after 60 days without
+repository activity. `refresh-data.yml` and any other cron workflows must be
+re-enabled by hand in the Actions tab — pushing commits alone does not restore
+them.
 
 ---
 

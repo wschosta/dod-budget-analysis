@@ -25,6 +25,17 @@ ALLOWED_SORT_COLUMNS = {
 # Pattern for valid amount column names (amount_fyYYYY_type)
 _AMOUNT_COL_RE = re.compile(r"^amount_fy\d{4}_[a-z]+$")
 
+
+def is_allowed_sort(column: str) -> bool:
+    """Return True if ``column`` is safe to interpolate into an ORDER BY clause.
+
+    Accepts the fixed metadata columns plus any well-formed ``amount_fy<YYYY>_*``
+    name. Listing amount columns individually meant each new budget cycle
+    silently became unsortable via the API until someone remembered to add it;
+    the regex is just as strict about what it admits.
+    """
+    return column in ALLOWED_SORT_COLUMNS or bool(_AMOUNT_COL_RE.match(column))
+
 # Fallback labels used when DB introspection isn't available.
 # The frontend dynamically discovers columns via get_amount_columns() at runtime.
 FISCAL_YEAR_COLUMN_LABELS = [

@@ -1,5 +1,5 @@
 """
-Tests for refresh_data.py — RefreshWorkflow
+Tests for pipeline/refresh.py — RefreshWorkflow
 
 Verifies workflow orchestration, dry-run mode, stage sequencing,
 logging behaviour, and webhook notification logic without network calls.

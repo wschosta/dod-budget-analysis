@@ -715,6 +715,8 @@ def insert_normalized_budget_line(
         f"INSERT INTO budget_line_items ({col_str}) VALUES ({placeholders})",
         values,
     )
+    if cur.lastrowid is None:  # pragma: no cover - sqlite always sets this on INSERT
+        raise sqlite3.DatabaseError("INSERT into budget_line_items returned no rowid")
     return cur.lastrowid
 
 

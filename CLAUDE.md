@@ -168,6 +168,7 @@ docs/<short-description>
 | `APP_DOCS_DIR` | `DoD_Budget_Documents` | Root of budget documents directory |
 | `PLAYWRIGHT_HEADLESS` | *(empty)* | Set to `true` for headless browser mode |
 | `BACKUP_DIR` | `backups` | Database backup destination directory |
+| `APP_FEEDBACK_PATH` | `feedback.json` | Feedback submission log path (point at a writable volume in deployments) |
 
 ## Common Tasks
 

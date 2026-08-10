@@ -9,6 +9,7 @@ Provides reusable functions for:
 """
 
 from typing import List, Dict, Any, Callable, Optional
+from datetime import date
 import sqlite3
 
 
@@ -200,6 +201,31 @@ def is_valid_fiscal_year(year: int) -> bool:
         True if valid fiscal year, False otherwise
     """
     return isinstance(year, int) and 1990 <= year <= 2099
+
+
+# Month (1-12) from which the President's Budget for the *next* fiscal year is
+# normally published. The request is due to Congress the first Monday in
+# February, but the detailed justification books routinely slip to spring, so
+# we only roll forward once March begins.
+_PB_RELEASE_MONTH = 3
+
+
+def latest_budget_fiscal_year(today: date | None = None) -> int:
+    """Return the most recent fiscal year whose budget documents should exist.
+
+    DoD publishes the President's Budget for fiscal year N+1 during calendar
+    year N, so from spring onward the newest available justification books are
+    for the *following* fiscal year. Before then the newest complete set is
+    still the current calendar year's.
+
+    Args:
+        today: Date to evaluate against. Defaults to the current date.
+
+    Returns:
+        Four-digit fiscal year, e.g. 2027 for any date in Mar-Dec 2026.
+    """
+    today = today or date.today()
+    return today.year + 1 if today.month >= _PB_RELEASE_MONTH else today.year
 
 
 def is_valid_amount(value: float) -> bool:

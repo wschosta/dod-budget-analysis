@@ -22,9 +22,12 @@ import re
 import sqlite3
 import textwrap
 from pathlib import Path
+from typing import Callable
 
 # Shared utilities: Import from utils package for consistency across codebase
 from utils import get_connection, sanitize_fts5_query, format_amount
+from utils.database import get_amount_columns
+from utils.query import _AMOUNT_COL_RE
 
 # Private alias used by tests (test_search.py imports _sanitize_fts5_query)
 _sanitize_fts5_query = sanitize_fts5_query
@@ -128,6 +131,39 @@ def show_sources(conn: sqlite3.Connection) -> None:
 
 # -- Search Functions ----------------------------------------------------------
 
+# Preference order when ranking rows: the newest request wins, then that year's
+# total, then the prior year's enacted figure.
+_RANK_SUFFIX_ORDER = ("request", "total", "enacted", "actual")
+
+
+def _amount_columns(conn: sqlite3.Connection) -> list[str]:
+    """Return amount_fy* columns present in budget_lines, oldest year first."""
+    return [c for c in get_amount_columns(conn) if _AMOUNT_COL_RE.match(c)]
+
+
+def _fy_of(column: str) -> int:
+    """Extract the four-digit fiscal year from an ``amount_fy<YYYY>_<type>`` name."""
+    return int(column[len("amount_fy"):len("amount_fy") + 4])
+
+
+def _rank_columns(amount_cols: list[str], limit: int = 3) -> list[str]:
+    """Pick the columns to COALESCE over when ordering results by size.
+
+    Sorts newest fiscal year first, then by budget-cycle preference, so the
+    ranking automatically follows the newest data the schema carries.
+    """
+    def sort_key(col: str) -> tuple[int, int]:
+        suffix = col.rsplit("_", 1)[-1]
+        order = (
+            _RANK_SUFFIX_ORDER.index(suffix)
+            if suffix in _RANK_SUFFIX_ORDER
+            else len(_RANK_SUFFIX_ORDER)
+        )
+        return (-_fy_of(col), order)
+
+    return sorted(amount_cols, key=sort_key)[:limit]
+
+
 def search_budget_lines(conn: sqlite3.Connection, query: str,
                         org: str = None, exhibit: str = None,
                         limit: int = 25) -> list:
@@ -158,17 +194,21 @@ def search_budget_lines(conn: sqlite3.Connection, query: str,
 
     where = " AND ".join(conditions) if conditions else "1=1"
 
+    # Discover amount columns from the live schema rather than naming a fixed
+    # budget cycle. Each new fiscal year adds amount_fy<YYYY>_* columns via
+    # migration, and hardcoding them here silently pinned the CLI to FY2026.
+    amount_cols = _amount_columns(conn)
+    select_amounts = "".join(f",\n               {c}" for c in amount_cols)
+    order_terms = ", ".join(_rank_columns(amount_cols)) or "0"
+
     sql = f"""
         SELECT id, source_file, exhibit_type, sheet_name, fiscal_year,
                account, account_title, organization_name,
                budget_activity_title, sub_activity_title,
-               line_item, line_item_title,
-               amount_fy2024_actual, amount_fy2025_enacted,
-               amount_fy2026_request, amount_fy2026_total
+               line_item, line_item_title{select_amounts}
         FROM budget_lines
         WHERE {where}
-        ORDER BY COALESCE(amount_fy2026_request, amount_fy2026_total,
-                          amount_fy2025_enacted, 0) DESC
+        ORDER BY COALESCE({order_terms}, 0) DESC
         LIMIT ?
     """
     params.append(limit)
@@ -215,6 +255,33 @@ def search_pdf_pages(conn: sqlite3.Connection, query: str,
 # Note: _fmt_amount removed -- now using format_amount() from utils.formatting
 # format_amount() provides consistent currency formatting across the codebase
 
+# How many amount figures to show per result before wrapping to a new line.
+_AMOUNTS_PER_LINE = 3
+
+
+def _format_amount_lines(row: sqlite3.Row, fmt: Callable[[float | None], str]) -> list[str]:
+    """Render the populated amount columns of a result row as aligned text.
+
+    Columns are read off the row itself, so a new fiscal year shows up here as
+    soon as the migration adds it — no display code to update. Empty and zero
+    figures are skipped to keep sparse rows readable.
+
+    Args:
+        row: A result row from :func:`search_budget_lines`.
+        fmt: Formatter applied to each amount; supplied by the caller because
+             it carries the thousands/millions display scale.
+    """
+    populated = [c for c in row.keys() if _AMOUNT_COL_RE.match(c) and row[c]]
+    cells = []
+    for col in sorted(populated, key=lambda c: (_fy_of(c), c)):
+        label = f"FY{_fy_of(col)} {col.rsplit('_', 1)[-1].capitalize()}:"
+        cells.append(f"{label} {fmt(row[col]):>15}")
+
+    return [
+        "    ".join(cells[i:i + _AMOUNTS_PER_LINE])
+        for i in range(0, len(cells), _AMOUNTS_PER_LINE)
+    ] or ["(no amounts recorded)"]
+
 
 def display_budget_results(results: list, query: str,
                            unit: str = "thousands") -> None:
@@ -257,11 +324,8 @@ def display_budget_results(results: list, query: str,
         print(f"\n  [{org}] {title}")
         print(f"    Account: {r['account']}  |  Exhibit: {r['exhibit_type']}"
               f"  |  Sheet: {r['sheet_name']}")
-        print(f"    FY2024 Actual: {_amt(r['amount_fy2024_actual']):>15}"
-              f"    FY2025 Enacted: {_amt(r['amount_fy2025_enacted']):>15}"
-              f"    FY2026 Request: {_amt(r['amount_fy2026_request']):>15}")
-        if r["amount_fy2026_total"] and r["amount_fy2026_total"] != r["amount_fy2026_request"]:
-            print(f"    FY2026 Total:   {_amt(r['amount_fy2026_total']):>15}")
+        for line in _format_amount_lines(r, _amt):
+            print(f"    {line}")
         print(f"    Source: {r['source_file']}")
 
 

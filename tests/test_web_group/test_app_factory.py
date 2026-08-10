@@ -68,11 +68,11 @@ class TestCreateApp:
         assert app.version == "1.0.0"
 
     def test_registers_api_routes(self, test_db):
+        # Assert against the OpenAPI schema rather than walking app.routes:
+        # Starlette 1.x collapses included routers into opaque _IncludedRouter
+        # objects that expose neither .path nor their nested routes.
         app = create_app(db_path=test_db)
-        route_paths = {r.path for r in app.routes}
-        assert "/api/v1/search" in route_paths or any(
-            "/api/v1/search" in str(getattr(r, "path", "")) for r in app.routes
-        )
+        assert "/api/v1/search" in app.openapi()["paths"]
 
     def test_health_endpoint_exists(self, test_db):
         app = create_app(db_path=test_db)

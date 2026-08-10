@@ -1,0 +1,58 @@
+# Fly.io configuration — see docs/HOSTING_DECISION.md
+#
+# Single machine with an attached volume. The app runs SQLite in WAL mode and
+# the Keyword Explorer writes cache tables at runtime, so this deployment must
+# never scale beyond one machine: WAL supports a single writer and does not
+# coordinate across hosts.
+#
+# First-time setup:
+#   fly apps create dod-budget-explorer
+#   fly volumes create dod_budget_data --size 10 --region iad
+#   fly secrets set ...            # none required today
+#   fly deploy
+
+app = "dod-budget-explorer"
+primary_region = "iad"
+
+[build]
+  # CI builds and pushes to GHCR; `flyctl deploy --image` supplies the image.
+  # `fly deploy` run locally falls back to building this Dockerfile.
+  dockerfile = "Dockerfile"
+
+[env]
+  APP_DB_PATH = "/data/dod_budget.sqlite"
+  APP_HOST = "0.0.0.0"
+  APP_PORT = "8000"
+  APP_LOG_FORMAT = "json"
+  # Keep mutable state on the volume; the app code lives on the image's
+  # filesystem, which is replaced wholesale on every deploy.
+  APP_FEEDBACK_PATH = "/data/feedback.json"
+
+[mounts]
+  source = "dod_budget_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  # Always-on single machine: a cold start would also pay SQLite page-cache
+  # warm-up on the first query, and two machines would corrupt the WAL.
+  auto_stop_machines = false
+  auto_start_machines = false
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 40
+    hard_limit = 60
+
+[[http_service.checks]]
+  grace_period = "20s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"

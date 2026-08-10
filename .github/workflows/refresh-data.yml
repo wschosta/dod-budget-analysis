@@ -5,9 +5,9 @@
 #
 # Steps:
 #   1. Install Playwright + dependencies
-#   2. Run dod_budget_downloader.py to fetch new/updated documents
-#   3. Run build_budget_db.py to rebuild the database
-#   4. Upload the new database as a workflow artifact
+#   2. Run `python -m pipeline.refresh`, which orchestrates download -> build ->
+#      validate -> report with automatic rollback on failure
+#   3. Upload the new database as a workflow artifact
 #   5. Post summary to PR/commit comment
 
 name: Refresh Data
@@ -21,9 +21,9 @@ on:
   workflow_dispatch:
     inputs:
       fiscal_year:
-        description: "Fiscal year to refresh (e.g. 2026)"
+        description: "Fiscal year to refresh (e.g. 2027). Leave blank to auto-detect the latest."
         required: false
-        default: "2026"
+        default: ""
       dry_run:
         description: "Dry run (preview without downloading)"
         type: boolean
@@ -52,21 +52,28 @@ jobs:
           pip install playwright
           playwright install chromium --with-deps
 
+      # Scheduled runs pass no input, so fall back to the same helper the CLI
+      # uses. This keeps the cron job tracking the current budget cycle instead
+      # of pinning to whatever year was hardcoded when the workflow was written.
       - name: Determine refresh year
         id: year
         run: |
-          YEAR="${{ github.event.inputs.fiscal_year || '2026' }}"
+          YEAR="${{ github.event.inputs.fiscal_year }}"
+          if [ -z "$YEAR" ]; then
+            YEAR=$(python -c "from utils.validation import latest_budget_fiscal_year as f; print(f())")
+          fi
+          echo "Refreshing FY$YEAR"
           echo "year=$YEAR" >> $GITHUB_OUTPUT
 
       - name: Run refresh workflow (dry run)
         if: ${{ github.event.inputs.dry_run == 'true' }}
         run: |
-          python refresh_data.py --dry-run --years ${{ steps.year.outputs.year }} -v
+          python -m pipeline.refresh --dry-run --years ${{ steps.year.outputs.year }} -v
 
       - name: Run refresh workflow
         if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
-          python refresh_data.py --years ${{ steps.year.outputs.year }} -v
+          python -m pipeline.refresh --years ${{ steps.year.outputs.year }} -v
 
       - name: Upload database artifact
         if: ${{ github.event.inputs.dry_run != 'true' && always() }}

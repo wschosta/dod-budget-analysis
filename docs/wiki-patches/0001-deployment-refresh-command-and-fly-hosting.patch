@@ -1,0 +1,197 @@
+From 38a73375c2a4a057571256c6b69e8fec31b05ac2 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 10 Aug 2026 11:08:57 +0000
+Subject: [PATCH] Deployment: correct refresh command, document Fly.io hosting
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The runbook told readers to run `python refresh_data.py`, a file that has never
+existed in the repository; the scheduled workflow used the same wrong command
+and failed on all 18 runs between 2026-02-22 and 2026-06-21. Corrected to
+`python -m pipeline.refresh` throughout, with a note so the discrepancy is not
+read as a typo.
+
+Add Section 13 covering the production target: Fly.io, one machine plus a
+volume, and why it cannot be more than one — the Keyword Explorer writes cache
+tables to the live database, and SQLite WAL is single-writer with no cross-host
+coordination, which also rules out serverless.
+
+Also document APP_FEEDBACK_PATH, APP_HOST, APP_DOCS_DIR and BACKUP_DIR, and drop
+SUPPORTED_FISCAL_YEARS — that variable appears nowhere in the codebase, and its
+documented default of 2024,2025,2026 implied a fiscal-year limit that does not
+exist.
+---
+ Deployment.md | 107 ++++++++++++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 100 insertions(+), 7 deletions(-)
+
+diff --git a/Deployment.md b/Deployment.md
+index aaedac0..928ff5c 100644
+--- a/Deployment.md
++++ b/Deployment.md
+@@ -54,6 +54,9 @@ curl http://localhost:8000/health
+ 
+ ## 3. Docker Deployment
+ 
++> For the production hosting target and its single-machine constraint, see
++> [Section 13](#13-production-hosting----flyio).
++
+ ### Dockerfile
+ 
+ The project provides multiple Docker configurations:
+@@ -150,16 +153,26 @@ python -m pipeline.db_validator
+ python -m pipeline.enricher
+ 
+ # Refresh with automatic rollback on failure
+-python refresh_data.py --years 2026 -v
++python -m pipeline.refresh --years 2027 -v
++
++# Omit --years to target the newest published budget cycle automatically
++python -m pipeline.refresh -v
+ 
+ # Dry run -- preview what would be downloaded without writing files
+-python refresh_data.py --years 2026 --dry-run -v
++python -m pipeline.refresh --years 2027 --dry-run -v
+ ```
+ 
+-`refresh_data.py` downloads new source documents and then calls
++`pipeline/refresh.py` downloads new source documents and then calls
+ `pipeline/builder.py` internally. The resulting `dod_budget.sqlite` is written
+ to the working directory.
+ 
++> **Note:** this was previously documented as `python refresh_data.py`, a file
++> that has never existed in the repository. The scheduled workflow used the
++> same wrong command and failed on every run from 2026-02-22 to 2026-06-21.
++> When `--years` is omitted the target now comes from
++> `latest_budget_fiscal_year()`, which follows the budget calendar instead of a
++> hardcoded year.
++
+ ### Triggering the GitHub Actions workflow
+ 
+ The **Refresh Data** workflow runs automatically every Sunday at 06:00 UTC.
+@@ -167,7 +180,8 @@ To trigger it manually:
+ 
+ 1. Go to **Actions -> Refresh Data** in the GitHub repository.
+ 2. Click **Run workflow**.
+-3. Optionally set **Fiscal year** (default: `2026`) and **Dry run**.
++3. Optionally set **Fiscal year** (leave blank to auto-detect the newest
++   published cycle) and **Dry run**.
+ 4. After the run completes, download the `dod-budget-db-<year>-<run_id>`
+    artifact which contains `dod_budget.sqlite`, `data_quality_report.json`,
+    and `refresh_report.json`.
+@@ -191,7 +205,10 @@ All environment variables have sensible defaults and are optional.
+ | `RATE_LIMIT_DOWNLOAD` | `10` | Maximum download/export requests per minute per IP address. |
+ | `RATE_LIMIT_DEFAULT` | `120` | Maximum requests per minute per IP address for all other endpoints. |
+ | `TRUSTED_PROXIES` | (empty) | Comma-separated list of trusted proxy IP addresses for `X-Forwarded-For` handling. |
+-| `SUPPORTED_FISCAL_YEARS` | `2024,2025,2026` | Comma-separated list of supported fiscal years for validation and filtering. |
++| `APP_FEEDBACK_PATH` | `feedback.json` | Where feedback submissions are appended. Point at a writable volume (e.g. `/data/feedback.json`) wherever application code and mutable state live on separate filesystems, or submissions are lost on redeploy. |
++| `APP_HOST` | `127.0.0.1` | Bind address. Docker and Fly set `0.0.0.0`. |
++| `APP_DOCS_DIR` | `DoD_Budget_Documents` | Root of the downloaded budget documents directory. |
++| `BACKUP_DIR` | `backups` | Destination directory for `scripts/backup_db.py`. |
+ 
+ Set these in a `.env` file for local development or pass them with `-e` flags
+ to `docker run`.
+@@ -267,7 +284,7 @@ the container first.
+ 
+ 5. **Verify health** (see Section 9).
+ 
+-The `refresh_data.py` script includes automatic rollback: if the build or
++The `pipeline/refresh.py` script includes automatic rollback: if the build or
+ validation step fails, the previous database is restored automatically.
+ 
+ ---
+@@ -334,7 +351,7 @@ source data is downloaded from public DoD websites without authentication.
+ | Workflow | File | Trigger | Description |
+ |----------|------|---------|-------------|
+ | CI | `.github/workflows/ci.yml` | Push/PR to main | Lint, type check, test groups, coverage, Docker build |
+-| Deploy | `.github/workflows/deploy.yml` | Manual/tag | Docker build/push to GHCR + deploy |
++| Deploy | `.github/workflows/deploy.yml` | Push to main / Manual | CI gate, GHCR build/push, `flyctl deploy`, smoke test |
+ | Download | `.github/workflows/download.yml` | Manual | Automated document download |
+ | Refresh Data | `.github/workflows/refresh-data.yml` | Weekly (Sunday 06:00 UTC) / Manual | Download, build, validate, produce artifact |
+ 
+@@ -369,6 +386,82 @@ CloudWatch, etc.).
+ 
+ ---
+ 
++## 13. Production Hosting -- Fly.io
++
++The production target is **Fly.io: one machine with a persistent volume**.
++
++### Why a single machine
++
++This is a constraint, not a preference. The Keyword Explorer -- which serves the
++default landing page at `/` -- builds its cache by issuing `DROP TABLE` /
++`CREATE TABLE` / `INSERT` against the live database, so `dod_budget.sqlite` must
++be **writable at request time**. SQLite in WAL mode permits one writer and does
++not coordinate across hosts, so:
++
++- The app runs exactly one always-on machine (`min_machines_running = 1`,
++  `auto_stop_machines = false`).
++- It **cannot scale horizontally** without replacing the storage layer. Two
++  instances on separate volumes would serve divergent Explorer caches; two
++  sharing one network volume would corrupt it.
++- Serverless platforms are unusable here, despite this looking like a small
++  read-mostly API, because function filesystems are ephemeral.
++
++### Layout
++
++```
++ghcr.io/wschosta/dod-budget-analysis:<sha>
++        |  flyctl deploy --image
++        v
++Fly machine x1
++  |- /app     application code, replaced wholesale on each deploy
++  \- /data    volume: dod_budget.sqlite + feedback.json
++```
++
++Mutable state lives on the volume, never in the image. `APP_DB_PATH` and
++`APP_FEEDBACK_PATH` both point at `/data` for exactly this reason -- anything
++written under `/app` is discarded on the next deploy.
++
++### First-time setup
++
++```bash
++fly apps create dod-budget-explorer
++fly volumes create dod_budget_data --size 10 --region iad
++# Add FLY_API_TOKEN as a GitHub Actions repository secret
++```
++
++Then seed the database, which is *not* built during deploy (it needs network
++access to DoD sites and considerable time):
++
++```bash
++python scripts/run_pipeline.py            # produces dod_budget.sqlite
++ls -lh dod_budget.sqlite                  # size the volume at roughly 3x this
++fly sftp shell                            # put it at /data/dod_budget.sqlite
++```
++
++The 3x headroom covers the WAL file, the Explorer cache tables, and one refresh
++in flight.
++
++### Deploying
++
++`deploy.yml` runs automatically on push to `main`: it verifies CI passed, builds
++and pushes the image to GHCR, deploys it with `flyctl deploy --image`, then
++smoke-tests the live URL. Until `FLY_API_TOKEN` exists the deploy job logs a
++warning and exits cleanly, and the smoke test is skipped rather than run against
++a URL that was never deployed.
++
++Configuration lives in `fly.toml`; the decision record with rejected
++alternatives is in `docs/HOSTING_DECISION.md`.
++
++### Scheduled workflows go dormant
++
++GitHub disables scheduled workflows after 60 days without repository activity.
++This already happened once: `refresh-data.yml` stopped firing after 2026-06-21.
++Pushing commits does **not** restore them -- re-enable each one by hand under
++**Actions** in the GitHub UI, and check that they are still running after any
++long quiet period.
++
++---
++
+ ## Related Documentation
+ 
+ - [[Architecture]] -- System design and component interactions
+-- 
+2.43.0
+

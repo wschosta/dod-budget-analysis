@@ -55,9 +55,14 @@ def perf_client(tmp_path_factory):
             quantity_fy2026_request REAL, quantity_fy2026_total REAL,
             classification TEXT, extra_fields TEXT, budget_type TEXT
         );
+        -- fiscal_year and exhibit_type must be present: the PDF search branch
+        -- filters on both. Without them the query raised OperationalError,
+        -- which the route swallows into an empty result set — so this file was
+        -- timing an exception path instead of the search it meant to measure.
         CREATE TABLE pdf_pages (
             id INTEGER PRIMARY KEY, source_file TEXT,
-            source_category TEXT, page_number INTEGER,
+            source_category TEXT, fiscal_year TEXT, exhibit_type TEXT,
+            page_number INTEGER,
             page_text TEXT, has_tables INTEGER, table_data TEXT
         );
         CREATE TABLE ingested_files (
@@ -134,15 +139,32 @@ def reset_rate_counters():
 
 # ── Helper ────────────────────────────────────────────────────────────────────
 
+# One warm-up call plus best-of-N. A single wall-clock sample on a shared CI
+# runner measures scheduler contention as much as the code: this suite failed on
+# CI at 272 ms against a 100 ms threshold and passed on the next commit with no
+# relevant change. The minimum of several runs is stable under noise while still
+# moving if the code genuinely regresses, since noise can only ever add time.
+_TIMING_RUNS = 5
+
+
 def _elapsed_ms(client, method: str, url: str) -> float:
-    """Return elapsed time in milliseconds for a single request."""
-    t0 = time.monotonic()
-    resp = getattr(client, method)(url)
-    elapsed = (time.monotonic() - t0) * 1000
+    """Return the fastest of several timed requests, in milliseconds."""
+    call = getattr(client, method)
+
+    resp = call(url)  # warm-up: first call pays connection and lazy-import costs
     assert resp.status_code in (200, 206), (
         f"Unexpected status {resp.status_code} for {url}"
     )
-    return elapsed
+
+    best = float("inf")
+    for _ in range(_TIMING_RUNS):
+        t0 = time.monotonic()
+        resp = call(url)
+        best = min(best, (time.monotonic() - t0) * 1000)
+        assert resp.status_code in (200, 206), (
+            f"Unexpected status {resp.status_code} for {url}"
+        )
+    return best
 
 
 # ── Search performance ────────────────────────────────────────────────────────

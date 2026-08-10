@@ -614,6 +614,9 @@ function addCompareEntity() {
   sel.className = 'compare-entity-select';
   sel.style.cssText = 'padding:.3rem .5rem;border-radius:4px;border:1px solid var(--border-color)';
   sel.onchange = loadComparison;
+  // Dynamically added selects need an accessible name just as the two markup
+  // ones do; numbering continues from the selects already present.
+  sel.setAttribute('aria-label', 'Comparison entity ' + (existing.length + 1));
 
   var defaultOpt = document.createElement('option');
   defaultOpt.value = '';

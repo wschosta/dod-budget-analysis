@@ -6,6 +6,7 @@ in a local JSON file until GitHub integration is configured.
 """
 
 import json
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -17,7 +18,10 @@ from api.models import FeedbackSubmission
 
 router = APIRouter(prefix="/feedback", tags=["feedback"])
 
-FEEDBACK_FILE = Path("feedback.json")
+# Defaults to the working directory, which is correct for local development.
+# Deployments that keep application code and mutable state on separate volumes
+# point this at the writable one — otherwise submissions vanish on redeploy.
+FEEDBACK_FILE = Path(os.environ.get("APP_FEEDBACK_PATH", "feedback.json"))
 
 
 class FeedbackResponse(BaseModel):

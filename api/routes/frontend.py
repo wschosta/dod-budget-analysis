@@ -16,7 +16,8 @@ import sqlite3
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 from fastapi.templating import Jinja2Templates
 
@@ -53,22 +54,45 @@ def _safe_int(value: str, default: int) -> int:
 router = APIRouter(tags=["frontend"])
 
 
-# LION-001: Custom HTML error handlers for 404/500 pages
+# Paths served as data rather than pages. Errors under these prefixes must stay
+# machine-readable — an API client asking for a missing budget line needs JSON,
+# not a full HTML document.
+_DATA_PATH_PREFIXES = ("/api/", "/health", "/openapi.json", "/docs", "/redoc")
+
+
+def _wants_html(request: Request) -> bool:
+    """True when the caller is a browser navigating to a page, not an API client."""
+    return not request.url.path.startswith(_DATA_PATH_PREFIXES)
+
+
+# LION-001: Custom HTML error handlers for browser-facing pages
 def register_error_handlers(app: Any) -> None:
-    """Register custom exception handlers that render branded error pages."""
+    """Render branded error pages for page routes; keep API errors as JSON.
 
-    @app.exception_handler(404)
-    async def not_found_handler(request: Request, exc: Exception) -> HTMLResponse:
-        tmpl = _tmpl()
-        return tmpl.TemplateResponse(
-            request, "errors/404.html", status_code=404
-        )
+    Registered against HTTPException rather than individual status codes so
+    that statuses other than 404/500 — a 503 from an unavailable consolidated
+    database, say — also reach a rendered page instead of leaking raw JSON into
+    a browser window.
+    """
 
-    @app.exception_handler(500)
-    async def server_error_handler(request: Request, exc: Exception) -> HTMLResponse:
-        tmpl = _tmpl()
-        return tmpl.TemplateResponse(
-            request, "errors/500.html", status_code=500
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(
+        request: Request, exc: StarletteHTTPException
+    ) -> Response:
+        if not _wants_html(request):
+            headers = getattr(exc, "headers", None)
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": exc.detail, "status_code": exc.status_code},
+                headers=headers,
+            )
+
+        template = "errors/404.html" if exc.status_code == 404 else "errors/500.html"
+        return _tmpl().TemplateResponse(
+            request,
+            template,
+            status_code=exc.status_code,
+            context={"status_code": exc.status_code},
         )
 
 # Templates instance is set by create_app() after mounting.
