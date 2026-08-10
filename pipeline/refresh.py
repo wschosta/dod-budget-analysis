@@ -278,14 +278,14 @@ class RefreshWorkflow:
 
         t0 = time.time()
         try:
-            from pipeline.enricher import enrich  # noqa: PLC0415
+            from pipeline.enricher import ALL_PHASES, enrich  # noqa: PLC0415
             # Run the full enrichment pipeline — phases 6–11 cover project
             # decomposition & tagging, the BLI index/tags/descriptions, R-2
             # metadata backfill, and the Phase-11 BLI↔PE mining that
             # backfills procurement pe_number.  Before this change refresh
             # only ran phases 1–5 so new P-1 rows never picked up their
             # Phase-11 mappings between scheduled refreshes.
-            enrich(self.db_path, phases=set(range(1, 12)), rebuild=True)
+            enrich(self.db_path, phases=set(ALL_PHASES), rebuild=True)
             elapsed = time.time() - t0
             self.log(f"Enrichment complete in {fmt_time(elapsed)}", "ok")
 
