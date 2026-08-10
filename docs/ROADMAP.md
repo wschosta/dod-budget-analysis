@@ -116,7 +116,7 @@ This roadmap is organized into four phases. Every task has a reference ID (e.g.,
 | **3.A4** | Build the results table | Display query results in a sortable, paginated table. Show key columns (service, fiscal year, program, amount, exhibit type). Allow column toggling. | ✅ **Complete** — `templates/partials/results.html` with sortable columns, pagination, page-size selector, and column toggle |
 | **3.A5** | Build the download feature | Allow users to download their current filtered result set as CSV or JSON. Include a "Download" button that triggers the API export endpoint. Show download progress for large files. | ✅ **Complete** — Download modal with CSV, JSON (NDJSON), and Excel (.xlsx) formats; streaming export; column subset support |
 | **3.A6** | Build a detail/drill-down view | When a user clicks a budget line, show full details: all available fields, the source document (link to original PDF on DoD site), and related line items across fiscal years. | ✅ **Complete** — `templates/partials/detail.html` with full metadata, funding breakdown, related fiscal years, source document links |
-| **3.A7** | Responsive design & accessibility | Ensure the UI works on mobile and tablet; meet WCAG 2.1 AA accessibility standards (keyboard navigation, screen reader support, sufficient contrast). | ✅ Mostly Complete — Skip-to-content, ARIA live regions, focus-visible styles, keyboard shortcuts, responsive breakpoints, print styles; remaining: Lighthouse/axe-core audit (needs running UI) |
+| **3.A7** | Responsive design & accessibility | Ensure the UI works on mobile and tablet; meet WCAG 2.1 AA accessibility standards (keyboard navigation, screen reader support, sufficient contrast). | ✅ **Complete** — Skip-to-content, ARIA live regions, focus-visible styles, keyboard shortcuts, responsive breakpoints, print styles. axe-core audit run 2026-08-10 against all 7 page routes in both colour schemes: **0 violations**. Repeatable via `scripts/accessibility_audit.py`. |
 
 ### 3.B — Data Visualization (Stretch)
 
@@ -346,7 +346,9 @@ Sub-tasks (sequential):
 2. **G2** Configure CD workflow → ✅ **Complete** — `deploy.yml` gates on CI, pushes
    to GHCR, deploys via `flyctl deploy --image`, then smoke-tests the live URL
 3. **G3** Register domain + TLS — ⚠️ needs a Fly account and registrar access
-4. **G4** Accessibility audit (Lighthouse score ≥ 90) — ⚠️ needs a running deployment
+4. **G4** Accessibility audit → ✅ **Complete** — axe-core, WCAG 2.1 AA, all 7 pages,
+   light and dark, 0 violations. Re-run against production data after G3 with
+   `python scripts/accessibility_audit.py --base-url <url>`
 5. **G5** Soft launch to 5–10 users — ⚠️ needs G3
 6. **G6** Public launch + announcement — ⚠️ needs G5
 

@@ -351,5 +351,7 @@ Full rationale and rejected alternatives: [`HOSTING_DECISION.md`](HOSTING_DECISI
 - **Input sanitization:** FTS5 queries sanitized via `sanitize_fts5_query()`; SQL parameters always bound (never interpolated); ORDER BY columns whitelisted
 - **Content Security Policy:** Script sources restricted to `'self'`, `unpkg.com`, `cdn.jsdelivr.net`
 - **Docker:** Non-root container user, database mounted as external volume
+- **Error responses:** Data routes (`/api/`, `/health`, `/docs`, `/redoc`, `/openapi.json`) return JSON; page routes render the branded HTML error templates. Registered against `HTTPException` so statuses beyond 404/500 are covered too.
+- **Accessibility:** WCAG 2.1 AA verified with axe-core across all 7 page routes in both colour schemes — 0 violations as of 2026-08-10. Re-runnable via `scripts/accessibility_audit.py`.
 - **Rate limiting:** Per-IP with configurable limits per endpoint category
 - **Headers:** `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`
