@@ -274,25 +274,35 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 ### 7.1 Docker
 
 - Production `Dockerfile` with non-root user (`appuser`), health check
-- Multi-stage build (`Dockerfile.multistage`) for optimized image size
+- Multi-stage build (`docker/Dockerfile.multistage`) for optimized image size
 - Development `docker-compose.yml` with hot-reload and volume mounts
-- Staging `docker-compose.staging.yml` with backup sidecar (6-hour cycle)
+- Staging `docker/docker-compose.staging.yml` with backup sidecar (6-hour cycle)
 
-### 7.2 CI/CD
+### 7.2 Hosting
+
+Fly.io, a single machine with a persistent volume mounted at `/data`, configured
+in `fly.toml`. The topology is constrained rather than chosen for convenience:
+the Keyword Explorer builds cache tables inside the live database at request
+time, so the SQLite file must be writable, and WAL mode permits only one writer
+with no cross-host coordination. The app therefore runs exactly one always-on
+machine and cannot scale horizontally without changing the storage layer.
+Full rationale and rejected alternatives: [`HOSTING_DECISION.md`](HOSTING_DECISION.md).
+
+### 7.3 CI/CD
 
 - **GitHub Actions CI:** Matrix testing (Python 3.11, 3.12), ruff lint, mypy type check, pytest with coverage reporting on `api/` and `utils/`, Docker build validation
-- **Automated data refresh:** Weekly cron via `refresh-data.yml`
+- **Automated data refresh:** Weekly cron via `refresh-data.yml`, running `python -m pipeline.refresh` against the fiscal year returned by `latest_budget_fiscal_year()`
 - **Automated downloads:** Scheduled via `download.yml`
-- **Deploy workflow:** Docker build/push to GHCR (template)
+- **Deploy workflow:** `deploy.yml` — CI gate → GHCR build/push → `flyctl deploy --image` → smoke test against the live URL. The deploy and smoke-test jobs skip with a warning until `FLY_API_TOKEN` is present.
 
-### 7.3 Monitoring & Backup
+### 7.4 Monitoring & Backup
 
 - `/health` and `/health/detailed` endpoints with uptime, request counts, error counts, DB metrics, response time tracking
 - SQLite online backup via `scripts/backup_db.py` with `--keep N` pruning
 - Structured access logging middleware
 - Pre-commit hook: syntax, imports, secrets detection, code quality, schema validation
 
-### 7.4 Configuration
+### 7.5 Configuration
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -306,6 +316,7 @@ SQLite database (`dod_budget.sqlite`) with WAL mode for concurrent reads.
 | `RATE_LIMIT_DOWNLOAD` | `10` | Download rate limit (req/min/IP) |
 | `RATE_LIMIT_DEFAULT` | `120` | Default rate limit (req/min/IP) |
 | `TRUSTED_PROXIES` | (empty) | Trusted proxy IPs for X-Forwarded-For |
+| `APP_FEEDBACK_PATH` | `feedback.json` | Where feedback submissions are appended. Point at a writable volume in deployments where app code and mutable state live on separate filesystems. |
 
 ---
 

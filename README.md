@@ -129,6 +129,16 @@ Amounts are in **thousands of dollars ($K)** unless `amount_unit` says otherwise
 
 ## What's New
 
+**2026-08-10 — The automated refresh actually runs, and it tracks the current budget cycle.**
+The weekly refresh workflow had been invoking `python refresh_data.py`, a file that
+does not exist — every scheduled run since 2026-02-22 failed while the docs reported
+the feature as complete. It now calls `python -m pipeline.refresh` and derives its
+target fiscal year from the budget calendar rather than a hardcoded `2026`, so a
+dormant repository no longer quietly falls a cycle behind. The search CLI and the
+API sort allowlist likewise discover `amount_fy*` columns from the live schema
+instead of naming FY2026 columns. Deployment target is now decided and wired:
+Fly.io, single machine plus volume — see [docs/HOSTING_DECISION.md](docs/HOSTING_DECISION.md).
+
 **2026-04-16 — Procurement gets connected to R&D.** Previously, 97.9% of P-1 / P-1R procurement rows had no Program Element number, which meant filtering, tagging, and keyword discovery silently skipped most procurement dollars. The new enrichment Phase 11 scans P-5 justification PDF headers for Program Element references, cross-references them against the BLI index, and backfills `budget_lines.pe_number` with high-confidence matches — taking P-1 PE coverage from 425 rows to 4,571 rows (10.8× increase, 276 distinct PEs now linked). Multi-PE mappings that couldn't be auto-resolved are surfaced on the budget-line detail page as "Related Program Elements" for manual inspection.
 
 **2026-04-16 — Procurement narratives are now searchable.** Migration 6 adds a FTS5 index over `bli_descriptions` (64,703 rows of P-5 justification text extracted from procurement PDFs). Searches via `/api/v1/search?source=descriptions` now return procurement hits alongside RDT&E PE descriptions. Try terms like "satellite" (1,110 matches), "cybersecurity" (596), or any program keyword you care about.
@@ -141,7 +151,7 @@ Amounts are in **thousands of dollars ($K)** unless `amount_unit` says otherwise
 | **1 — Data Extraction** | ✅ ~97% Complete | 6 sources, 15+ exhibit types, 5-step pipeline |
 | **2 — Database & API** | ✅ Complete | Schema, migrations, 30+ API endpoints, 15 route modules |
 | **3 — Frontend & Docs** | ✅ Complete | 10 pages, Chart.js visualizations, 6 user guide docs |
-| **4 — Publish & Iterate** | 🔄 ~56% Complete | CI/CD, Docker, monitoring done; hosting/domain/launch pending |
+| **4 — Publish & Iterate** | 🔄 ~69% Complete | CI/CD, Docker, monitoring, hosting decision done; domain/launch pending credentials |
 
 **Test suite:** ~110 test files with comprehensive coverage across all modules. Automated CI via GitHub Actions (matrix testing, ruff, mypy, pytest+coverage, Docker build).
 
