@@ -243,6 +243,19 @@ All code TODOs (H1, H2, M1, L1–L5) and agent groups (LION/TIGER/BEAR, 33/33) a
 **resolved**. Data quality issues are catalogued in
 [`docs/NOTICED_ISSUES.md`](NOTICED_ISSUES.md).
 
+**Completed 2026-08-10 — enrichment phase set centralized (`enricher.ALL_PHASES`).**
+`scripts/run_pipeline.py` still defaulted to a hardcoded `{1..10}`, so a full
+`python scripts/run_pipeline.py` run never executed Phase 11 and left
+`bli_pe_map` empty — the same drift already fixed once in `pipeline/refresh.py`
+(commit c64057b). The dispatch table now lives in
+`pipeline/enricher._build_phase_runners()`, the canonical set in
+`pipeline.enricher.ALL_PHASES`, and both callers plus the `--phases` CLI default
+derive from it. `tests/test_pipeline_group/test_enricher_phase_coverage.py`
+fails if the constant, the dispatch table, or either caller drift apart.
+Note: Phase 11 needs service-source documents (army/navy/airforce) — a
+comptroller-only document set has no `exhibit_type='p5'` pages, so it correctly
+reports 0 mappings at that scope.
+
 **Completed 2026-04-16 — BLI narrative search (migration 6, `bli_descriptions_fts`).**
 Adds an FTS5 virtual table over `bli_descriptions.description_text` so the
 64,703 rows of P-5 procurement narrative text (populated by Phase 9) are

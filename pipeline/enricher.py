@@ -29,6 +29,7 @@ import sys
 import threading
 import time
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 
 from utils import get_connection
@@ -56,6 +57,13 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = Path("dod_budget.sqlite")
+
+# Canonical "run everything" phase set.  Callers that want a full enrichment
+# import this instead of hardcoding a literal — run_pipeline.py once carried a
+# stale {1..10} literal that silently skipped Phase 11 (bli_pe_map stayed
+# empty).  Adding a Phase 12 means registering it in _build_phase_runners() and
+# widening this range; test_enricher_phase_coverage.py fails if they disagree.
+ALL_PHASES: frozenset[int] = frozenset(range(1, 12))
 
 # Maximum characters to store for a PE narrative text block (no section headers).
 _MAX_NARRATIVE_TEXT_CHARS = 4000
@@ -2528,6 +2536,32 @@ def _invalidate_explorer_caches(conn: sqlite3.Connection) -> None:
     )
 
 
+def _build_phase_runners(
+    conn: sqlite3.Connection,
+    with_llm: bool = False,
+    stop_event: threading.Event | None = None,
+) -> dict[int, Callable[[], int]]:
+    """Map phase number → zero-arg callable that runs that phase.
+
+    Module level (rather than a local in enrich()) so tests can assert the
+    registered phase numbers match ALL_PHASES without touching a database —
+    none of the lambdas run until called.
+    """
+    return {
+        1: lambda: run_phase1(conn, stop_event=stop_event),
+        2: lambda: run_phase2(conn, stop_event=stop_event),
+        3: lambda: run_phase3(conn, with_llm=with_llm, stop_event=stop_event),
+        4: lambda: run_phase4(conn, stop_event=stop_event),
+        5: lambda: run_phase5(conn, stop_event=stop_event),
+        6: lambda: run_phase6(conn, stop_event=stop_event),
+        7: lambda: run_phase7(conn, stop_event=stop_event),
+        8: lambda: run_phase8(conn, stop_event=stop_event),
+        9: lambda: run_phase9(conn, stop_event=stop_event),
+        10: lambda: run_phase10(conn, stop_event=stop_event),
+        11: lambda: run_phase11(conn, stop_event=stop_event),
+    }
+
+
 def enrich(
     db_path: Path,
     phases: set[int],
@@ -2573,19 +2607,7 @@ def enrich(
     phases_skipped: list[dict[str, str | int]] = []
     stopped_after: int | None = None
 
-    _phase_runners = {
-        1: lambda: run_phase1(conn, stop_event=stop_event),
-        2: lambda: run_phase2(conn, stop_event=stop_event),
-        3: lambda: run_phase3(conn, with_llm=with_llm, stop_event=stop_event),
-        4: lambda: run_phase4(conn, stop_event=stop_event),
-        5: lambda: run_phase5(conn, stop_event=stop_event),
-        6: lambda: run_phase6(conn, stop_event=stop_event),
-        7: lambda: run_phase7(conn, stop_event=stop_event),
-        8: lambda: run_phase8(conn, stop_event=stop_event),
-        9: lambda: run_phase9(conn, stop_event=stop_event),
-        10: lambda: run_phase10(conn, stop_event=stop_event),
-        11: lambda: run_phase11(conn, stop_event=stop_event),
-    }
+    _phase_runners = _build_phase_runners(conn, with_llm=with_llm, stop_event=stop_event)
 
     for phase_num in sorted(_phase_runners):
         if phase_num not in phases:
@@ -2651,8 +2673,9 @@ def main() -> None:
                         help="Path to SQLite database (default: dod_budget.sqlite)")
     parser.add_argument("--with-llm", action="store_true",
                         help="Enable LLM-based tagging (requires ANTHROPIC_API_KEY)")
-    parser.add_argument("--phases", default="1,2,3,4,5,6,7,8,9,10,11",
-                        help="Comma-separated phases to run (default: all 1-11)")
+    all_phases_csv = ",".join(str(p) for p in sorted(ALL_PHASES))
+    parser.add_argument("--phases", default=all_phases_csv,
+                        help=f"Comma-separated phases to run (default: all {all_phases_csv})")
     parser.add_argument("--rebuild", action="store_true",
                         help="Drop and rebuild all enrichment tables")
     args = parser.parse_args()

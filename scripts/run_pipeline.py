@@ -1148,15 +1148,18 @@ def main(argv: list[str] | None = None) -> int:
 
     # ── Step 5 / 5: Enrich ───────────────────────────────────────────────
     if not args.skip_enrich:
-        from pipeline.enricher import enrich
+        from pipeline.enricher import ALL_PHASES, enrich
 
         enrich_report = pl.start_step("enrich")
 
-        # Parse enrichment phases
+        # Parse enrichment phases.  The default comes from the enricher so it
+        # can never drift behind a newly registered phase again — a stale
+        # {1..10} literal here meant a full pipeline run skipped Phase 11 and
+        # left bli_pe_map empty.
         if args.enrich_phases:
             phases = {int(p.strip()) for p in args.enrich_phases.split(",")}
         else:
-            phases = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+            phases = set(ALL_PHASES)
 
         ok, enrich_result = _run_step(
             "Step 5 / 5 -- Enrich database",
