@@ -63,7 +63,7 @@ dod-budget-analysis/
 │       ├── facets.py        # GET /api/v1/facets (cross-filtered counts)
 │       ├── feedback.py      # POST /api/v1/feedback
 │       ├── files.py         # GET /api/v1/files/{file_path}
-│       ├── frontend.py      # HTML routes (/, /about, /charts, /consolidated, /dashboard, /explorer, /programs, /spruill)
+│       ├── frontend.py      # HTML routes (/, /about, /charts, /compare, /consolidated, /dashboard, /explorer, /programs)
 │       ├── keyword_helpers.py # Shared constants, SQL utils, normalization
 │       ├── keyword_r2.py    # R-2 PDF parsing, mining, lineage detection
 │       ├── keyword_search.py # Cache builder orchestrator

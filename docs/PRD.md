@@ -164,9 +164,29 @@ Server-side rendered HTML using Jinja2 templates with HTMX for dynamic updates.
 | **Dashboard** | `/dashboard` | Summary cards (FY totals, YOY change), budget-by-service bar chart, Top-10 programs, appropriation breakdown. Not in primary nav; accessible via direct URL. |
 | **Programs** | `/programs` | Program element browsing with tag filters, search, and funding history table. Not in primary nav; accessible via direct URL. |
 | **Program Detail** | `/programs/{pe}` | Individual PE detail: funding breakdown by FY, narrative descriptions, related exhibits, source documents. |
-| **Spruill** | `/spruill` | Spruill-chart view for individual PE funding analysis. Not in primary nav. |
-| **Consolidated** | `/consolidated` | Consolidated PE-level budget view with drill-down detail. Not in primary nav. |
+| **Spruill** | `/compare` | Spruill-chart view for individual PE funding analysis. Not in primary nav. Accepts repeated `?pe=` params for multi-PE comparison. |
+| **Consolidated** | `/consolidated` | Consolidated PE-level budget view with drill-down detail. Not in primary nav. Reads a **separate work database** (`dod_budget_work.sqlite`), not the main DB; returns HTTP 503 until it is built (see below). |
 | **About** | `/about` | Project description, data coverage summary, methodology overview. |
+
+#### Building the consolidated work database
+
+`run_pipeline.py` does **not** produce `dod_budget_work.sqlite`; `/consolidated`
+returns 503 until it exists. It is built by copying the main database and
+running the consolidation script against the copy:
+
+```bash
+python scripts/consolidate_pe_lines.py --db dod_budget_work.sqlite
+```
+
+The script adds `line_items` (one golden record per PE), `line_item_amounts`
+(normalized EAV amounts carrying a `precedence_rank`), and `budget_submissions`
+(per-submission audit trail). It does not modify `budget_lines`.
+
+**Amount precedence:** a single `target_fy` normally carries several
+`amount_type` rows (actual, enacted, total, request) sourced from different
+submissions. `precedence_rank` orders them — 1 = actual, 2 = enacted, 3 = total,
+4 = request. Any total across fiscal years must take the lowest-ranked row per
+`target_fy`; summing every row double-counts each year once per amount type.
 
 ### 4.2 HTMX Partials
 
