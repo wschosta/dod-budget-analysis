@@ -622,6 +622,49 @@ def discover_comptroller_files(session: requests.Session, year: str,
     return files
 
 
+class SourceBlocked(Exception):
+    """The host refused us at the network edge — not a "no documents" result.
+
+    Distinguishing this from an empty page matters twice over: an operator
+    reading "0 files" cannot tell a blocked host from a fiscal year that has
+    not published yet, and an empty list must never be written to the
+    discovery cache, or the block is memoised and every later retry is
+    silently skipped.
+    """
+
+
+def probe_source_reachable(session: requests.Session, url: str) -> tuple[bool, str]:
+    """Check whether a source host will talk to us at all.
+
+    Returns ``(reachable, reason)``.  Akamai fronts the service budget sites
+    and answers a blocked network with HTTP 403 "Access Denied" (carrying a
+    reference id) or, for saffm.hq.af.mil, refuses the TLS handshake outright
+    with an internal-error alert.  Neither is fixable in this codebase — they
+    are properties of the egress network — so the useful thing is to say so
+    precisely rather than return an empty list.
+    """
+    try:
+        resp = session.get(url, timeout=30, stream=True)
+        status = resp.status_code
+        body = next(resp.iter_content(2048), b"")
+        resp.close()
+    except requests.exceptions.SSLError as e:
+        return False, f"TLS handshake refused by {urlparse(url).netloc} ({e.__class__.__name__})"
+    except requests.RequestException as e:
+        return False, f"{type(e).__name__}: {str(e)[:120]}"
+
+    if status == 403:
+        ref = ""
+        text = body.decode("utf-8", "replace")
+        marker = "Reference&#32;&#35;"
+        if marker in text:
+            ref = " " + text.split(marker, 1)[1][:40].replace("&#46;", ".")
+        return False, f"HTTP 403 Access Denied from {urlparse(url).netloc}{ref}"
+    if status >= 400:
+        return False, f"HTTP {status} from {urlparse(url).netloc}"
+    return True, "ok"
+
+
 def _http_extract_links(session: requests.Session, url: str,
                         text_filter: str | None = None) -> list[dict]:
     """Fetch a page with plain HTTP and extract downloadable links.
@@ -677,17 +720,22 @@ def discover_defense_wide_files(session: requests.Session, year: str) -> list[di
 
 # ---- Army (browser required) ----
 
-def discover_army_files(_session: requests.Session, year: str) -> list[dict]:
-    """Discover US Army budget files for a given fiscal year using a headless browser.
+def discover_army_files(session: requests.Session, year: str) -> list[dict]:
+    """Discover US Army budget files for a given fiscal year.
 
-    The Army website requires browser automation due to WAF protections on plain HTTP.
+    asafm.army.mil sits behind Akamai and answers HTTP 403 "Access Denied" to
+    both plain requests and a real headless Chromium with a browser user-agent
+    — the block is on the requesting network, not on the client fingerprint.
+    When that is the case the browser attempt is skipped entirely (it costs
+    seconds and returns nothing) and the reason is logged.
 
     Args:
-        _session: Unused (browser handles HTTP); kept for interface consistency.
+        session: Active requests.Session.
         year: Four-digit fiscal year string.
 
     Returns:
-        List of file dicts (url, name, extension, source).
+        List of file dicts (url, name, extension, source).  Empty if the host
+        is unreachable — and deliberately not cached in that case.
     """
     global _refresh_cache
     # Optimization: Check cache before fetching
@@ -699,6 +747,15 @@ def discover_army_files(_session: requests.Session, year: str) -> list[dict]:
             return cached
 
     url = SERVICE_PAGE_TEMPLATES["army"]["url"]
+    reachable, reason = probe_source_reachable(session, url)
+    if not reachable:
+        logger.warning(
+            "[Army] Source unreachable from this network — %s. "
+            "Skipping FY%s; this is an egress-network block, not a code issue.",
+            reason, year,
+        )
+        return []
+
     logger.info("[Army] Scanning FY%s (browser)...", year)
     files = _browser_extract_links(url, text_filter=f"/{year}/")
     _save_cache(cache_key, files)
@@ -815,16 +872,21 @@ def discover_navy_archive_files(_session: requests.Session, year: str) -> list[d
 
 # ---- Air Force (browser required) ----
 
-def discover_airforce_files(_session: requests.Session, year: str) -> list[dict]:
-    """Discover US Air Force/Space Force budget files for a given fiscal year
-    using a headless browser.
+def discover_airforce_files(session: requests.Session, year: str) -> list[dict]:
+    """Discover US Air Force/Space Force budget files for a given fiscal year.
+
+    saffm.hq.af.mil refuses the TLS handshake from a blocked network with a
+    ``TLSV1_ALERT_INTERNAL_ERROR`` at both TLS 1.2 and 1.3, and Chromium fails
+    the same way with ``ERR_SSL_PROTOCOL_ERROR`` — so the browser path cannot
+    help either.  The URL itself is current; the block is on egress.
 
     Args:
-        _session: Unused (browser handles HTTP); kept for interface consistency.
+        session: Active requests.Session.
         year: Four-digit fiscal year string.
 
     Returns:
-        List of file dicts (url, name, extension, source).
+        List of file dicts (url, name, extension, source).  Empty if the host
+        is unreachable — and deliberately not cached in that case.
     """
     global _refresh_cache
     # Optimization: Check cache before fetching
@@ -837,6 +899,15 @@ def discover_airforce_files(_session: requests.Session, year: str) -> list[dict]
 
     fy2 = year[-2:]
     url = SERVICE_PAGE_TEMPLATES["airforce"]["url"].format(fy2=fy2)
+    reachable, reason = probe_source_reachable(session, url)
+    if not reachable:
+        logger.warning(
+            "[Air Force] Source unreachable from this network — %s. "
+            "Skipping FY%s; this is an egress-network block, not a code issue.",
+            reason, year,
+        )
+        return []
+
     logger.info("[Air Force] Scanning FY%s (browser)...", year)
     files = _browser_extract_links(url, text_filter=f"FY{fy2}", expand_all=True)
     _save_cache(cache_key, files)
