@@ -271,6 +271,47 @@ where a high-confidence mapping (≥0.8) exists. Addresses the procurement PE
 coverage gap flagged in NOTICED_ISSUES §53. Dry-run yielded 2,759 (BLI, PE)
 pairs across 275 distinct PEs, with 5,293 P-1/P-1R rows eligible for backfill.
 
+**Completed 2026-08-11 — first full pipeline build, and the downloader fixes it
+required.** The database had never been built in this checkout. Building it
+surfaced three defects that only appear when the pipeline actually runs:
+
+- **The downloader aborted on its first bad source.** Playwright raised inside
+  Navy discovery and the exception propagated out of `main()`, killing a
+  six-source, four-year run before one file was fetched. Both discovery loops
+  now continue past a failing source.
+- **Navy never needed a browser.** `secnav.navy.mil` serves its page and its
+  justification books to plain `requests`; the browser path returned 0 files
+  and then threw. Switching to HTTP-first yields 36 files in ~2 s per year.
+- **The retry CLI could not be invoked.** `downloader/core.py` had a full
+  `main()` but no `__main__` guard, and the message printed after a failed
+  download named `dod_budget_downloader.py`, a file not in the repo. Group F
+  was signed off because all 18 tests called `main()` directly.
+
+Result: the corpus grew from 291 MB / 128 files to **3.4 GB / 786 files**, and
+`pdf_pages` from 9,113 to **111,277**, including **27,284 P-5 pages** and
+**19,520 R-2 pages** where there had been none. The database went from 119 MB
+to 730 MB.
+
+**Enrichment Phase 11 is now verified against real data** (previously it could
+only be shown to return 0 at comptroller-only scope): 745 (BLI, PE) pairs
+across 224 distinct PEs, and P-1/P-1R rows carrying a `pe_number` rose from
+153 to 1,001. `bli_descriptions` went from 0 to 16,038 rows.
+
+Still outstanding on the download side: **Army** returns HTTP 403 to plain
+requests and 0 files via the browser; **saffm.hq.af.mil** (Air Force) fails TLS
+negotiation outright. Both are now non-fatal but neither yields data.
+**Navy is now complete for FY2024–2027** (34–36 files per year). It required
+dropping to `--workers 1 --delay 2`: at 4 workers `secnav.navy.mil` began
+timing out after ~1.2 GB, while the single-worker run fetched 106 files /
+1.58 GB with zero failures. Use gentle concurrency for that host.
+
+**Groups A–C verified against the full build (2026-08-11):** Group A passes
+(32 `idx_bl_*` indexes, 0 NULL `budget_type`). Group C passes (43 distinct
+organizations, 59 blank-org rows). **Group B remains scope-limited** —
+`appropriation_titles` is 123 against an expected ~225, because `budget_lines`
+is sourced from Excel exhibits and the Army/Air Force workbooks are still
+missing. Do not mark Group B verified until those sources download.
+
 Remaining work is organized into groups A–G:
 
 | Group | Focus | Code Status | What Remains |
@@ -280,7 +321,7 @@ Remaining work is organized into groups A–G:
 | **C** | Org name normalization | ✅ Resolved via test suite | — |
 | **D** | FY attribution | ⚠️ Partial | Mismatch logs but no auto-correction (deferred) |
 | **E** | Enrichment quality | ✅ Resolved via test suite | — |
-| **F** | Download retry CLI | ✅ Complete | — |
+| **F** | Download retry CLI | ✅ Complete (fixed 2026-08-11) | Was marked complete while unrunnable — see below |
 | **G** | Deploy & launch | 🔄 In progress | G1/G2 done; G3–G6 need account credentials |
 
 ---

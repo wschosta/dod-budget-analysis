@@ -109,11 +109,42 @@ patterns:
 
 Start with (1). Move to (2) only if the refresh cadence increases.
 
-**Unmeasured:** the built database size is not known in this repository — it is
-gitignored and has never been built in CI. Volume size and the viability of ever
-baking the DB into the image both depend on it. Measure it on the first pipeline
-run (`ls -lh dod_budget.sqlite`) and size the volume to roughly 3× that, leaving
-room for the WAL file, the Explorer cache tables, and one refresh in flight.
+**Measured 2026-08-11.** The database was built for the first time and the two
+numbers this section was waiting on are now known.
+
+| Corpus | Documents | `dod_budget.sqlite` |
+|---|---|---|
+| FY2024–2027, Comptroller only | 291 MB, 128 files | **119 MB** |
+| + Defense-Wide, + Navy FY2027 | 1.9 GB, 678 files | **416 MB** |
+| + Navy FY2024–2026 (current) | 3.4 GB, 786 files | **730 MB** |
+
+The database grew 6× in one night purely by fixing the downloader, which is the
+useful lesson here: **size the volume against growth, not against today's
+file.** At 730 MB the 3× rule wants ~2.2 GB, so **3 GB is the right volume**.
+`fly.toml`'s setup comment says `fly volumes create --size 10`; that is still
+oversized, but far less absurd than it looked at 119 MB — do not shrink it to
+1 GB, which two hours of downloading would have already outgrown.
+
+Adding the remaining service sources (Army, Air Force) will grow this again;
+neither downloader works today (see ROADMAP), so treat 730 MB as a floor, not
+a ceiling. A corpus this size also makes "bake the DB into the image" less
+attractive than it was at 119 MB — a ~900 MB image is over the limit some
+free tiers impose, which should be checked before betting on that path.
+
+**This also weakens §1's "must be writable" constraint more than it appears.**
+The Explorer's cache build — the reason the deployment needs a writable
+database — was measured at **0.1 s** for a hypersonics keyword set on the
+119 MB corpus. Losing the cache to a container restart therefore costs a
+fraction of a second to rebuild, not a cold-start outage. The app needs a
+filesystem that is *writable*, but not necessarily *persistent*: an ephemeral
+container with the DB baked into the image is viable, which opens up hosts
+that were excluded on the assumption that a durable volume was mandatory. The
+only state that genuinely wants persistence is `feedback.json`, and
+`APP_FEEDBACK_PATH` already redirects it.
+
+This does not overturn the Fly decision — always-on with a volume is still the
+best operational answer — but the free-tier options should be re-examined
+against these numbers rather than the assumption they were rejected under.
 
 ## 6. What the operator still has to supply
 
