@@ -287,21 +287,23 @@ surfaced three defects that only appear when the pipeline actually runs:
   download named `dod_budget_downloader.py`, a file not in the repo. Group F
   was signed off because all 18 tests called `main()` directly.
 
-Result: the corpus grew from 291 MB / 128 files to **1.9 GB / 678 files**, and
-`pdf_pages` from 9,113 to **66,398**, including **10,092 P-5 pages** where
-there had been none.
+Result: the corpus grew from 291 MB / 128 files to **3.4 GB / 786 files**, and
+`pdf_pages` from 9,113 to **111,277**, including **27,284 P-5 pages** and
+**19,520 R-2 pages** where there had been none. The database went from 119 MB
+to 730 MB.
 
 **Enrichment Phase 11 is now verified against real data** (previously it could
-only be shown to return 0 at comptroller-only scope): 682 (BLI, PE) pairs
-across 212 distinct PEs, and P-1/P-1R rows carrying a `pe_number` rose from
-153 to 946. `bli_descriptions` went from 0 to 4,089 rows.
+only be shown to return 0 at comptroller-only scope): 745 (BLI, PE) pairs
+across 224 distinct PEs, and P-1/P-1R rows carrying a `pe_number` rose from
+153 to 1,001. `bli_descriptions` went from 0 to 16,038 rows.
 
 Still outstanding on the download side: **Army** returns HTTP 403 to plain
 requests and 0 files via the browser; **saffm.hq.af.mil** (Air Force) fails TLS
 negotiation outright. Both are now non-fatal but neither yields data.
-**Navy FY2024–2026** is incomplete — `secnav.navy.mil` began timing out after
-~1.2 GB at 4 workers, so only FY2027 Navy (34 files) is present; retry at lower
-concurrency.
+**Navy is now complete for FY2024–2027** (34–36 files per year). It required
+dropping to `--workers 1 --delay 2`: at 4 workers `secnav.navy.mil` began
+timing out after ~1.2 GB, while the single-worker run fetched 106 files /
+1.58 GB with zero failures. Use gentle concurrency for that host.
 
 **Groups A–C verified against the full build (2026-08-11):** Group A passes
 (32 `idx_bl_*` indexes, 0 NULL `budget_type`). Group C passes (43 distinct

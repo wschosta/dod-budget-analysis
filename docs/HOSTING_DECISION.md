@@ -115,16 +115,21 @@ numbers this section was waiting on are now known.
 | Corpus | Documents | `dod_budget.sqlite` |
 |---|---|---|
 | FY2024–2027, Comptroller only | 291 MB, 128 files | **119 MB** |
-| FY2024–2027, + Defense-Wide + Navy | 1.9 GB, 678 files | **416 MB** |
+| + Defense-Wide, + Navy FY2027 | 1.9 GB, 678 files | **416 MB** |
+| + Navy FY2024–2026 (current) | 3.4 GB, 786 files | **730 MB** |
 
-Size the volume against the second row: 3× is ~1.25 GB, so **1 GB is too tight
-and 3 GB is comfortable**. Note that `fly.toml`'s setup comment still says
-`fly volumes create --size 10`, which is roughly 3× more than needed even at
-the larger corpus — worth trimming before it becomes a recurring bill.
+The database grew 6× in one night purely by fixing the downloader, which is the
+useful lesson here: **size the volume against growth, not against today's
+file.** At 730 MB the 3× rule wants ~2.2 GB, so **3 GB is the right volume**.
+`fly.toml`'s setup comment says `fly volumes create --size 10`; that is still
+oversized, but far less absurd than it looked at 119 MB — do not shrink it to
+1 GB, which two hours of downloading would have already outgrown.
 
 Adding the remaining service sources (Army, Air Force) will grow this again;
-neither downloader works today (see ROADMAP), so treat 416 MB as a floor, not
-a ceiling.
+neither downloader works today (see ROADMAP), so treat 730 MB as a floor, not
+a ceiling. A corpus this size also makes "bake the DB into the image" less
+attractive than it was at 119 MB — a ~900 MB image is over the limit some
+free tiers impose, which should be checked before betting on that path.
 
 **This also weakens §1's "must be writable" constraint more than it appears.**
 The Explorer's cache build — the reason the deployment needs a writable
