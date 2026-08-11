@@ -18,6 +18,7 @@ Current schema (build_budget_db.py):
 """
 
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 
 from utils.database import init_pragmas
@@ -317,7 +318,11 @@ def _migration_007_page_exhibit_type(conn: sqlite3.Connection) -> None:
     )
 
 
-_MIGRATIONS = [
+# A migration step is either a SQL script or a callable that inspects the
+# database before acting (see _migration_007_page_exhibit_type).
+_MigrationStep = str | Callable[[sqlite3.Connection], None]
+
+_MIGRATIONS: list[tuple[int, str, _MigrationStep]] = [
     (
         1,
         "001_core_tables: reference tables + budget_line_items + document_sources",
