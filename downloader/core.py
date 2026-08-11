@@ -1316,12 +1316,21 @@ def main() -> None:
         all_files[year] = {}
 
         for source in selected_sources:
-            if source == "comptroller":
-                url = available_years[year]
-                files = discover_comptroller_files(session, year, url)
-            else:
-                discoverer = SOURCE_DISCOVERERS[source]
-                files = discoverer(session, year)
+            # One unreachable source must not abort the whole run.  A
+            # Playwright error inside the Navy discoverer used to propagate
+            # out of main() and kill a six-source, four-year download before
+            # a single file was fetched.
+            try:
+                if source == "comptroller":
+                    url = available_years[year]
+                    files = discover_comptroller_files(session, year, url)
+                else:
+                    discoverer = SOURCE_DISCOVERERS[source]
+                    files = discoverer(session, year)
+            except Exception as e:
+                print(f"  [WARN] {source} FY{year} discovery failed "
+                      f"({type(e).__name__}: {e}); continuing with other sources.")
+                files = []
 
             if type_filter:
                 files = [f for f in files if f["extension"] in type_filter]

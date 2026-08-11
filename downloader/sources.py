@@ -48,7 +48,11 @@ DISCOVERY_CACHE_DIR = Path("logs/discovery_cache")
 ALL_SOURCES = ["comptroller", "defense-wide", "army", "navy", "navy-archive", "airforce"]
 
 # Sources that require a real browser due to WAF/bot protection
-BROWSER_REQUIRED_SOURCES = {"army", "navy", "navy-archive", "airforce"}
+# Sources whose *file downloads* must go through Playwright.  Navy is absent
+# deliberately: secnav.navy.mil serves its justification books to an ordinary
+# request (verified end to end — a 4.6 MB, 252-page APN book downloads with a
+# plain GET), so routing them through a browser only added fragility.
+BROWSER_REQUIRED_SOURCES = {"army", "navy-archive", "airforce"}
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -618,6 +622,24 @@ def discover_comptroller_files(session: requests.Session, year: str,
     return files
 
 
+def _http_extract_links(session: requests.Session, url: str,
+                        text_filter: str | None = None) -> list[dict]:
+    """Fetch a page with plain HTTP and extract downloadable links.
+
+    Returns an empty list rather than raising when the fetch fails, so callers
+    can fall back to the browser path.  Sites behind a WAF typically answer
+    with 403 here, which is the signal to escalate to Playwright.
+    """
+    try:
+        resp = session.get(url, timeout=30)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        logger.debug("Plain HTTP fetch failed for %s: %s", url, e)
+        return []
+    soup = BeautifulSoup(resp.text, PARSER)
+    return _extract_downloadable_links(soup, url, text_filter)
+
+
 # ---- Defense Wide ----
 
 def discover_defense_wide_files(session: requests.Session, year: str) -> list[dict]:
@@ -685,15 +707,22 @@ def discover_army_files(_session: requests.Session, year: str) -> list[dict]:
 
 # ---- Navy (browser required) ----
 
-def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
-    """Discover US Navy/Marine Corps budget files for a given fiscal year using a headless browser.
+def discover_navy_files(session: requests.Session, year: str) -> list[dict]:
+    """Discover US Navy/Marine Corps budget files for a given fiscal year.
 
     FY2022+ pages live at /fmc/Pages/Fiscal-Year-{fy}.aspx.
     FY2017-2021 pages use the older /fmc/fmb/Pages/Fiscal-Year-{fy}.aspx URL.
-    If the primary URL returns 0 files, the alternate pattern is tried automatically.
+    If the primary URL returns 0 files, the alternate pattern is tried
+    automatically.
+
+    Plain HTTP is tried before the browser.  secnav.navy.mil serves these pages
+    and the justification books themselves to an ordinary request — the browser
+    path, by contrast, raised "Execution context was destroyed" on this page
+    (the ASPX view navigates during load) and returned nothing.  Playwright is
+    kept as the fallback for pages that do require it.
 
     Args:
-        _session: Unused (browser handles HTTP); kept for interface consistency.
+        session: Active requests.Session.
         year: Four-digit fiscal year string.
 
     Returns:
@@ -708,17 +737,31 @@ def discover_navy_files(_session: requests.Session, year: str) -> list[dict]:
             logger.info("[Navy] Using cached results for FY%s", year)
             return cached
 
+    alt_url = f"https://www.secnav.navy.mil/fmc/fmb/Pages/Fiscal-Year-{year}.aspx"
     url = SERVICE_PAGE_TEMPLATES["navy"]["url"].format(fy=year)
-    logger.info("[Navy] Scanning FY%s (browser)...", year)
-    files = _browser_extract_links(url)
+
+    logger.info("[Navy] Scanning FY%s...", year)
+    files = _http_extract_links(session, url)
 
     # Fallback: older FYs (pre-2022) use a different URL path
     if not files:
-        alt_url = (
-            f"https://www.secnav.navy.mil/fmc/fmb/Pages/Fiscal-Year-{year}.aspx"
-        )
         logger.info("[Navy] Primary URL returned 0 files, trying alternate URL...")
-        files = _browser_extract_links(alt_url)
+        files = _http_extract_links(session, alt_url)
+
+    # Last resort: the browser, for pages that genuinely need JS or defeat
+    # plain requests.  Failures here are swallowed — an unreachable optional
+    # path must not abort discovery for every other source.
+    if not files:
+        for candidate in (url, alt_url):
+            logger.info("[Navy] Plain HTTP found nothing, trying browser...")
+            try:
+                files = _browser_extract_links(candidate)
+            except Exception as e:
+                logger.warning("[Navy] Browser discovery failed for %s: %s",
+                               candidate, e)
+                files = []
+            if files:
+                break
 
     _save_cache(cache_key, files)
     return files
