@@ -450,3 +450,73 @@ class TestRetryFailuresPath:
             main()
 
         assert exc_info.value.code == 1
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
+
+
+class TestDownloaderEntryPoint:
+    """The retry path has to be reachable from a shell, not just importable.
+
+    downloader/core.py defined main() but had no `if __name__ == "__main__"`
+    guard, so `python -m downloader.core` imported the module and exited
+    silently — and the failure message advertised `dod_budget_downloader.py`,
+    which does not exist in the repository.  Every test above patched and
+    called main() directly, so the logic was covered while the entry point was
+    unreachable.  These tests exercise the layer those miss.
+    """
+
+    def test_package_main_module_exists(self):
+        """`python -m downloader` needs a __main__.py in the package."""
+        main_py = (
+            Path(__file__).resolve().parents[2] / "downloader" / "__main__.py"
+        )
+        assert main_py.exists(), "downloader/__main__.py is missing"
+
+    def test_module_is_runnable_from_a_shell(self):
+        """Smoke test: the CLI parses args and exits 0 on --help."""
+        import subprocess
+
+        repo = Path(__file__).resolve().parents[2]
+        result = subprocess.run(
+            [sys.executable, "-m", "downloader", "--help"],
+            capture_output=True, text=True, cwd=repo, timeout=120,
+            # Windows: pytest's capture leaves no inheritable stdin handle,
+            # and DuplicateHandle fails with WinError 6 without this.
+            stdin=subprocess.DEVNULL,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "--retry-failures" in result.stdout
+
+    def test_no_runtime_warning_on_invocation(self):
+        """`python -m downloader.core` double-imports; the package entry does not."""
+        import subprocess
+
+        repo = Path(__file__).resolve().parents[2]
+        result = subprocess.run(
+            [sys.executable, "-m", "downloader", "--help"],
+            capture_output=True, text=True, cwd=repo, timeout=120,
+            # Windows: pytest's capture leaves no inheritable stdin handle,
+            # and DuplicateHandle fails with WinError 6 without this.
+            stdin=subprocess.DEVNULL,
+        )
+        assert "RuntimeWarning" not in result.stderr
+
+    def test_advertised_retry_command_is_the_real_one(self):
+        """The printed retry hint must name a target that actually runs.
+
+        It once pointed at dod_budget_downloader.py — a file that is not in
+        the repo — so anyone following the message got an immediate error.
+        """
+        repo = Path(__file__).resolve().parents[2]
+        for rel in ("downloader/core.py", "downloader/gui.py"):
+            src = (repo / rel).read_text(encoding="utf-8")
+            assert "dod_budget_downloader.py" not in src, (
+                f"{rel} advertises a script that does not exist"
+            )
+            if "--retry-failures" in src:
+                assert "-m downloader" in src, (
+                    f"{rel} should advertise `python -m downloader`"
+                )
