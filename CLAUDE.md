@@ -22,9 +22,12 @@ When making changes to the codebase:
 ## Quick Reference
 
 ```bash
-# Install
+# Install (development — includes pipeline, downloader, and test deps)
 pip install -r requirements-dev.txt
 python -m playwright install chromium
+
+# Install (API only — what the Docker image installs)
+pip install -r requirements-runtime.txt
 
 # Tests (107 files, coverage tracked on api/ and utils/)
 python -m pytest tests/ -v
