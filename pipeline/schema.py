@@ -281,6 +281,42 @@ CREATE TABLE IF NOT EXISTS schema_version (
 
 # Migration SQL ordered by version number.
 # Each entry: (version, description, sql)
+def _migration_007_page_exhibit_type(conn: sqlite3.Connection) -> None:
+    """Add pdf_pages.page_exhibit_type — the exhibit each page says it is.
+
+    ``pdf_pages.exhibit_type`` is derived from the filename, so it is a *book*
+    level label stamped onto every page: a ``PROC_*.pdf`` procurement book is
+    marked "p5" cover to back although only ~9% of its pages are Exhibit P-5 —
+    the rest are P-3A, P-40, P-21, P-1 and others.  ``page_exhibit_type``
+    records the exhibit named in each page's own header, and stays NULL for
+    pages that carry none (contents pages, narrative continuations).
+
+    ``exhibit_type`` is deliberately left alone: existing queries, tests and
+    enrichment phases filter on it, and quietly changing its meaning underneath
+    them would be worse than adding a column.
+
+    Written as a callable because the correct action depends on the database:
+    on a fresh one, ``migrate()`` runs before the builder creates ``pdf_pages``
+    (and that DDL already declares the column), so there is nothing to alter;
+    on an existing one the table is present without the column.  SQLite has no
+    ``ADD COLUMN IF NOT EXISTS``.
+    """
+    table_exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='pdf_pages'"
+    ).fetchone()
+    if not table_exists:
+        return  # builder DDL will create it with the column already present
+
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(pdf_pages)")}
+    if "page_exhibit_type" not in columns:
+        conn.execute("ALTER TABLE pdf_pages ADD COLUMN page_exhibit_type TEXT")
+
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pdf_pages_page_exhibit "
+        "ON pdf_pages(page_exhibit_type)"
+    )
+
+
 _MIGRATIONS = [
     (
         1,
@@ -495,6 +531,16 @@ CREATE TRIGGER IF NOT EXISTS bli_descriptions_au AFTER UPDATE ON bli_description
 END;
         """,
     ),
+    (
+        7,
+        "007_page_exhibit_type: per-page exhibit identification on pdf_pages",
+        # Callable rather than SQL: on a fresh database migrate() runs before
+        # the builder creates pdf_pages (whose own DDL already declares the
+        # column), so the ALTER must be skipped; on an existing database the
+        # table is there without the column and the ALTER is required. SQLite
+        # has no "ADD COLUMN IF NOT EXISTS" to express that in plain SQL.
+        _migration_007_page_exhibit_type,
+    ),
 ]
 
 
@@ -531,7 +577,14 @@ def migrate(conn: sqlite3.Connection) -> int:
     for version, description, sql in _MIGRATIONS:
         if version <= current:
             continue
-        conn.executescript(sql)
+        # A migration step may be a SQL script or a callable.  Callables exist
+        # for steps that must inspect the database first — SQLite has no
+        # "ALTER TABLE ADD COLUMN IF NOT EXISTS", and migrate() runs before the
+        # builder has created its tables on a fresh database.
+        if callable(sql):
+            sql(conn)
+        else:
+            conn.executescript(sql)
         conn.execute(
             "INSERT INTO schema_version (version, description) VALUES (?, ?)",
             (version, description),
