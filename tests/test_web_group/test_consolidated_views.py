@@ -286,3 +286,64 @@ class TestConsolidatedDetail:
         resp = client.get("/consolidated/0305116BB")
         assert resp.status_code == 200
         assert "Space Fence" in resp.text
+
+
+# ── Golden-record total (precedence) ─────────────────────────────────────────
+
+
+class TestTotalProgramValuePrecedence:
+    """The card total must respect precedence_rank, not sum every amount row.
+
+    A single target_fy usually carries several amount_type rows (actual,
+    enacted, total, request) across submissions.  The list view once summed
+    all of them, inflating every card — the real database showed $1.80T
+    instead of $826B (2.18x).  The detail view already de-duplicated via
+    MIN(precedence_rank); these tests pin the list view to the same rule.
+    """
+
+    @pytest.fixture()
+    def competing_db(self, consolidated_db):
+        """Add a PE whose 2026 has four competing amount rows."""
+        conn = sqlite3.connect(str(consolidated_db))
+        conn.executescript("""
+            INSERT INTO line_items
+                (id, pe_number, line_item_title, organization_name,
+                 budget_type, submission_count)
+            VALUES (4, '0699999X', 'Precedence Probe', 'Army', 'RDT&E', 4);
+
+            -- FY2026 has four rows; only the rank-1 actual (100000) counts.
+            -- FY2027 has one row (70000).  Correct total = 170000.
+            -- Summing every row instead yields 340000.
+            INSERT INTO line_item_amounts
+                (line_item_id, target_fy, amount_type, amount, precedence_rank)
+            VALUES
+                (4, 2026, 'actual',  100000.0, 1),
+                (4, 2026, 'enacted',  90000.0, 2),
+                (4, 2026, 'total',    80000.0, 3),
+                (4, 2026, 'request',  70000.0, 4),
+                (4, 2027, 'request',  70000.0, 4);
+        """)
+        conn.commit()
+        conn.close()
+        return consolidated_db
+
+    def test_total_uses_one_amount_per_fiscal_year(self, competing_db, client):
+        resp = client.get("/consolidated?q=0699999X")
+        assert resp.status_code == 200
+        assert "170,000" in resp.text, "expected rank-1 amount per target_fy"
+        assert "340,000" not in resp.text, "summed every amount_type row"
+
+    def test_list_total_matches_detail_view(self, competing_db, client):
+        """List and detail must agree on the same line item."""
+        detail = client.get("/consolidated/0699999X")
+        assert detail.status_code == 200
+        # Detail renders the winning rows only: 100000 for FY2026.
+        assert "100,000" in detail.text
+        assert "90,000" not in detail.text
+
+    def test_single_amount_per_year_is_unaffected(self, competing_db, client):
+        """PEs without competing rows keep their existing totals."""
+        resp = client.get("/consolidated?q=0602120A")
+        assert resp.status_code == 200
+        # 150000 + 125000 + 110000, one row per year, no competition.
+        assert "385,000" in resp.text

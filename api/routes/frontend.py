@@ -479,13 +479,24 @@ def _query_results(
     if pe_numbers and table_exists(conn, "line_item_amounts"):
         try:
             placeholders = make_placeholders(pe_numbers)
+            # One amount per (line_item, target_fy), chosen by precedence_rank
+            # (1=actual … 4=request).  Summing every row instead double-counts
+            # each year once per amount_type — see PRD 4.1 "Amount precedence".
             total_rows = conn.execute(
                 f"SELECT li.pe_number, "
-                f"       SUM(a.amount) AS total_value, "
-                f"       MIN(a.target_fy) AS fy_min, "
-                f"       MAX(a.target_fy) AS fy_max "
+                f"       SUM(best.amount) AS total_value, "
+                f"       MIN(best.target_fy) AS fy_min, "
+                f"       MAX(best.target_fy) AS fy_max "
                 f"FROM line_items li "
-                f"JOIN line_item_amounts a ON a.line_item_id = li.id "
+                f"JOIN ("
+                f"    SELECT line_item_id, target_fy, amount, "
+                f"           ROW_NUMBER() OVER ("
+                f"               PARTITION BY line_item_id, target_fy "
+                f"               ORDER BY precedence_rank, source_submission_fy DESC"
+                f"           ) AS rn "
+                f"    FROM line_item_amounts "
+                f"    WHERE amount IS NOT NULL"
+                f") best ON best.line_item_id = li.id AND best.rn = 1 "
                 f"WHERE li.pe_number IN ({placeholders}) "
                 f"GROUP BY li.pe_number",
                 pe_numbers,
@@ -1228,10 +1239,19 @@ def consolidated_list(request: Request) -> HTMLResponse:
                           AND a.amount IS NOT NULL
                         ORDER BY a.precedence_rank, a.target_fy DESC
                         LIMIT 1) AS best_label,
-                       (SELECT ROUND(SUM(a.amount), 0)
-                        FROM line_item_amounts a
-                        WHERE a.line_item_id = li.id
-                          AND a.amount IS NOT NULL) AS total_program_value,
+                       (SELECT ROUND(SUM(best.amount), 0)
+                        FROM (
+                            SELECT a.amount,
+                                   ROW_NUMBER() OVER (
+                                       PARTITION BY a.target_fy
+                                       ORDER BY a.precedence_rank,
+                                                a.source_submission_fy DESC
+                                   ) AS rn
+                            FROM line_item_amounts a
+                            WHERE a.line_item_id = li.id
+                              AND a.amount IS NOT NULL
+                        ) best
+                        WHERE best.rn = 1) AS total_program_value,
                        (SELECT COUNT(DISTINCT a.target_fy)
                         FROM line_item_amounts a
                         WHERE a.line_item_id = li.id
