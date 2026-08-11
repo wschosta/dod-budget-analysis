@@ -151,3 +151,90 @@ class TestDiscoveryLoopResilience:
         assert "try:" in src[max(0, idx - 800):idx], (
             "pipeline download step does not guard discovery failures"
         )
+
+
+class TestBlockedSourceReporting:
+    """A blocked host must be distinguishable from a source with no documents.
+
+    Army and Air Force are blocked at the network edge from some networks:
+    asafm.army.mil answers HTTP 403 "Access Denied" (Akamai, with a reference
+    id) to both plain requests and a real Chromium with a browser user-agent,
+    and saffm.hq.af.mil refuses the TLS handshake at both 1.2 and 1.3. Neither
+    is fixable in this codebase. Previously both simply returned [], which was
+    indistinguishable from "this fiscal year has not published yet" — and worse,
+    that [] was written to the discovery cache, so every later retry was
+    silently skipped even from a network that could reach the host.
+    """
+
+    def test_probe_reports_403_with_reference_id(self):
+        from downloader.sources import probe_source_reachable
+        session = MagicMock()
+        resp = MagicMock()
+        resp.status_code = 403
+        resp.iter_content.return_value = iter([
+            b"<HTML><HEAD><TITLE>Access Denied</TITLE></HEAD><BODY>"
+            b"Reference&#32;&#35;18&#46;730f3417"
+        ])
+        session.get.return_value = resp
+        ok, reason = probe_source_reachable(session, "https://www.asafm.army.mil/x/")
+        assert ok is False
+        assert "403" in reason and "asafm.army.mil" in reason
+
+    def test_probe_reports_tls_refusal(self):
+        from downloader.sources import probe_source_reachable
+        session = MagicMock()
+        session.get.side_effect = requests.exceptions.SSLError("internal error")
+        ok, reason = probe_source_reachable(session, "https://www.saffm.hq.af.mil/x/")
+        assert ok is False
+        assert "TLS" in reason and "saffm.hq.af.mil" in reason
+
+    def test_probe_accepts_a_reachable_host(self):
+        from downloader.sources import probe_source_reachable
+        session = MagicMock()
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.iter_content.return_value = iter([b"<html></html>"])
+        session.get.return_value = resp
+        ok, reason = probe_source_reachable(session, "https://example.test/")
+        assert ok is True and reason == "ok"
+
+    @pytest.mark.parametrize("discoverer_name,module_attr", [
+        ("army", "discover_army_files"),
+        ("airforce", "discover_airforce_files"),
+    ])
+    def test_blocked_source_returns_empty_without_caching(
+        self, discoverer_name, module_attr
+    ):
+        """The empty result must not be memoised, or retries never happen."""
+        import downloader.sources as src
+        discoverer = getattr(src, module_attr)
+        session = MagicMock()
+        with patch.object(src, "probe_source_reachable",
+                          return_value=(False, "HTTP 403 Access Denied")), \
+             patch.object(src, "_save_cache") as save_cache, \
+             patch.object(src, "_browser_extract_links") as browser:
+            result = discoverer(session, "2026")
+
+        assert result == []
+        # A block must never be cached, and there is no point launching a
+        # browser at a host that refuses us at the network edge.
+        save_cache.assert_not_called()
+        browser.assert_not_called()
+
+    @pytest.mark.parametrize("module_attr", [
+        "discover_army_files", "discover_airforce_files",
+    ])
+    def test_reachable_source_still_uses_the_browser(self, module_attr):
+        """The probe must not become a second failure mode for working hosts."""
+        import downloader.sources as src
+        discoverer = getattr(src, module_attr)
+        session = MagicMock()
+        found = [{"filename": "x.pdf", "url": "https://x/x.pdf",
+                  "extension": ".pdf", "source": "s"}]
+        with patch.object(src, "probe_source_reachable", return_value=(True, "ok")), \
+             patch.object(src, "_save_cache"), \
+             patch.object(src, "_browser_extract_links", return_value=found) as browser:
+            result = discoverer(session, "2026")
+
+        assert result == found
+        assert browser.called
