@@ -46,7 +46,11 @@ from utils.normalization import (  # noqa: E402
     ORG_NORMALIZE as _ORG_NORMALIZE,
     TITLE_TO_CODE as _TITLE_TO_CODE,
 )
-from utils.patterns import PE_NUMBER as _PE_RE, PE_SUFFIX_PATTERN  # noqa: E402
+from utils.patterns import (  # noqa: E402
+    PE_NUMBER as _PE_RE,
+    PE_SUFFIX_PATTERN,
+    classify_page_exhibit,
+)
 from utils.pdf_sections import strip_exhibit_headers  # noqa: E402
 from pipeline.r2_cost_parser import (  # noqa: E402
     SKIP_LINE_LABELS as _R2_SKIP_LABELS,
@@ -818,6 +822,64 @@ def step_15_rebuild_fts(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def step_16_classify_page_exhibits(
+    conn: sqlite3.Connection, dry_run: bool = False
+) -> int:
+    """Populate pdf_pages.page_exhibit_type from each page's own header.
+
+    ``exhibit_type`` is derived from the filename, so every page of a
+    justification book inherits one label — a PROC_*.pdf book is "p5" from
+    cover to back although only ~9% of its pages are Exhibit P-5.  This reads
+    the "Exhibit P-40, ..." header each page prints for itself.
+
+    Only NULL rows are filled, so re-running is cheap and a rebuilt page keeps
+    the value the builder already assigned.
+    """
+    logger.info("Step 16: Classifying PDF pages by their own exhibit header...")
+
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(pdf_pages)")}
+    if "page_exhibit_type" not in cols:
+        logger.info("  pdf_pages.page_exhibit_type missing (pre-migration 7) — skipping")
+        return 0
+
+    rows = conn.execute(
+        "SELECT id, page_text FROM pdf_pages "
+        "WHERE page_exhibit_type IS NULL AND page_text IS NOT NULL"
+    ).fetchall()
+    if not rows:
+        logger.info("  All pages already classified.")
+        return 0
+
+    updates = []
+    for row in rows:
+        label = classify_page_exhibit(row["page_text"])
+        if label:
+            updates.append((label, row["id"]))
+
+    logger.info(
+        "  %d unclassified page(s); %d carry an exhibit header",
+        len(rows), len(updates),
+    )
+    if dry_run or not updates:
+        return len(updates)
+
+    conn.executemany(
+        "UPDATE pdf_pages SET page_exhibit_type = ? WHERE id = ?", updates
+    )
+    conn.commit()
+
+    top = conn.execute(
+        "SELECT page_exhibit_type, COUNT(*) c FROM pdf_pages "
+        "WHERE page_exhibit_type IS NOT NULL "
+        "GROUP BY 1 ORDER BY c DESC LIMIT 5"
+    ).fetchall()
+    logger.info(
+        "  Top page exhibits: %s",
+        ", ".join(f"{r[0]}={r[1]:,}" for r in top),
+    )
+    return len(updates)
+
+
 def repair(db_path: Path, dry_run: bool = False) -> dict:
     """Run all repair steps on the database.
 
@@ -857,6 +919,7 @@ def repair(db_path: Path, dry_run: bool = False) -> dict:
             conn, dry_run
         )
         summary["bad_org_codes_nulled"] = step_14_null_mismatched_org_codes(conn, dry_run)
+        summary["pages_classified"] = step_16_classify_page_exhibits(conn, dry_run)
         if not dry_run:
             step_15_rebuild_fts(conn)
     finally:

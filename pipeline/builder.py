@@ -41,7 +41,7 @@ from utils.normalization import (
 )
 from utils.progress import fmt_time
 from utils.strings import normalize_fiscal_year as _normalize_fy_value
-from utils.patterns import PE_NUMBER
+from utils.patterns import PE_NUMBER, classify_page_exhibit
 
 logger = logging.getLogger(__name__)
 
@@ -500,6 +500,7 @@ def create_database(db_path: Path) -> sqlite3.Connection:
             source_category TEXT,
             fiscal_year TEXT,
             exhibit_type TEXT,
+            page_exhibit_type TEXT,
             page_number INTEGER,
             page_text TEXT,
             has_tables INTEGER DEFAULT 0,
@@ -1885,7 +1886,8 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                     relative_path,
                     category,
                     pdf_fiscal_year,     # LION-100
-                    pdf_exhibit_type,    # LION-100
+                    pdf_exhibit_type,    # LION-100 (book-level, from filename)
+                    classify_page_exhibit(text),  # page-level, from the page header
                     i + 1,
                     text,
                     1 if tables else 0,
@@ -1900,9 +1902,9 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
                 if len(batch) >= 1000:
                     conn.executemany("""
                         INSERT INTO pdf_pages (source_file, source_category,
-                            fiscal_year, exhibit_type,
+                            fiscal_year, exhibit_type, page_exhibit_type,
                             page_number, page_text, has_tables, table_data)
-                        VALUES (?,?,?,?,?,?,?,?)
+                        VALUES (?,?,?,?,?,?,?,?,?)
                     """, batch)
                     total_pages += len(batch)
                     batch = []
@@ -1910,9 +1912,9 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
               if batch:
                 conn.executemany("""
                     INSERT INTO pdf_pages (source_file, source_category,
-                        fiscal_year, exhibit_type,
+                        fiscal_year, exhibit_type, page_exhibit_type,
                         page_number, page_text, has_tables, table_data)
-                    VALUES (?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?)
                 """, batch)
                 total_pages += len(batch)
 
@@ -2034,7 +2036,8 @@ def _extract_pdf_data(args):
                     pages_data.append((
                         relative_path, category,
                         pdf_fiscal_year,     # LION-100
-                        pdf_exhibit_type,    # LION-100
+                        pdf_exhibit_type,    # LION-100 (book-level, from filename)
+                        classify_page_exhibit(text),  # page-level, from the header
                         page_num, text,
                         1 if tables else 0,
                         table_text if table_text else None,
@@ -3091,9 +3094,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                     if pages_data:
                         conn.executemany("""
                             INSERT INTO pdf_pages (source_file, source_category,
-                                fiscal_year, exhibit_type,
+                                fiscal_year, exhibit_type, page_exhibit_type,
                                 page_number, page_text, has_tables, table_data)
-                            VALUES (?,?,?,?,?,?,?,?)
+                            VALUES (?,?,?,?,?,?,?,?,?)
                         """, pages_data)
 
                     # Record extraction issues
