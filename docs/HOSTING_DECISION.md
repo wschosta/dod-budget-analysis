@@ -131,16 +131,28 @@ a ceiling. A corpus this size also makes "bake the DB into the image" less
 attractive than it was at 119 MB — a ~900 MB image is over the limit some
 free tiers impose, which should be checked before betting on that path.
 
-**This also weakens §1's "must be writable" constraint more than it appears.**
-The Explorer's cache build — the reason the deployment needs a writable
-database — was measured at **0.1 s** for a hypersonics keyword set on the
-119 MB corpus. Losing the cache to a container restart therefore costs a
-fraction of a second to rebuild, not a cold-start outage. The app needs a
-filesystem that is *writable*, but not necessarily *persistent*: an ephemeral
-container with the DB baked into the image is viable, which opens up hosts
-that were excluded on the assumption that a durable volume was mandatory. The
-only state that genuinely wants persistence is `feedback.json`, and
-`APP_FEEDBACK_PATH` already redirects it.
+**This also weakens §1's "must be writable" constraint — but less than it
+first appeared, and the trend matters.** The Explorer's cache build is the
+reason the deployment needs a writable database. Measured:
+
+| Corpus | Hypersonics keyword set | Broad set (`missile`) |
+|---|---|---|
+| 119 MB | 0.1 s | — |
+| 730 MB | **2.3 s** | **3.0 s** (2,706 rows) |
+
+A 6× database produced a ~25× slower cache build, so this scales worse than
+linearly and will get worse again when Army and Air Force land. At 2–3 s,
+losing the cache to a container restart is still a tolerable one-time cost on
+the first request rather than an outage — so the app needs a filesystem that
+is *writable* but not necessarily *persistent*, and an ephemeral container
+with the DB baked in remains viable. But this is no longer the "fraction of a
+second" it was at 119 MB, and it is the number to re-measure before choosing
+a host that restarts frequently or sleeps on idle. The only state that
+genuinely wants persistence is `feedback.json`, and `APP_FEEDBACK_PATH`
+already redirects it.
+
+Read latency is not a concern at this size: all pages and API endpoints answer
+in 4–25 ms against the 730 MB database, except `/programs` at 176 ms.
 
 This does not overturn the Fly decision — always-on with a volume is still the
 best operational answer — but the free-tier options should be re-examined
