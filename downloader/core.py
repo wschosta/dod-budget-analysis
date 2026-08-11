@@ -1077,7 +1077,7 @@ def download_all(
             json.dumps(_tracker._failed_files, indent=2), encoding="utf-8"
         )
         print(f"\n  Failure log: {failed_json_path}")
-        print(f"  Retry with: python dod_budget_downloader.py "
+        print(f"  Retry with: python -m downloader "
               f"--retry-failures {failed_json_path}")
     elif failed_json_path.exists():
         # Clean up stale failure log from a previous run

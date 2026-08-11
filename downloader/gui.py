@@ -299,7 +299,7 @@ class GuiProgressTracker:
         failed_json_path = str(_manifest_path).replace("manifest.json",
                                                         "failed_downloads.json") \
             if _manifest_path else "failed_downloads.json"
-        retry_cmd = f"python dod_budget_downloader.py --retry-failures {failed_json_path}"
+        retry_cmd = f"python -m downloader --retry-failures {failed_json_path}"
 
         # Destroy the old progress window
         self.close()
