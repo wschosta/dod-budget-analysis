@@ -661,16 +661,24 @@ def _run_download(args: argparse.Namespace, docs_dir: Path) -> dict:
     for year in selected_years:
         all_files[year] = {}
         for source in selected_sources:
-            if source == "comptroller":
-                if year not in available_years:
-                    continue
-                url = available_years[year]
-                files = discover_comptroller_files(session, year, url)
-            else:
-                discoverer = SOURCE_DISCOVERERS.get(source)
-                if discoverer is None:
-                    continue
-                files = discoverer(session, year)
+            # Keep one bad source from aborting the pipeline's download step —
+            # same failure mode the standalone downloader hit when Playwright
+            # raised inside Navy discovery.
+            try:
+                if source == "comptroller":
+                    if year not in available_years:
+                        continue
+                    url = available_years[year]
+                    files = discover_comptroller_files(session, year, url)
+                else:
+                    discoverer = SOURCE_DISCOVERERS.get(source)
+                    if discoverer is None:
+                        continue
+                    files = discoverer(session, year)
+            except Exception as e:
+                print(f"  [WARN] {source} FY{year} discovery failed "
+                      f"({type(e).__name__}: {e}); continuing with other sources.")
+                files = []
 
             # FY validation: filter out misrouted files
             pre_count = len(files)
