@@ -26,9 +26,14 @@ WORKDIR /app
 
 # Install Python dependencies first (cached layer)
 # DOCKER-002: Pin pip to avoid supply chain issues
-COPY requirements.txt .
+#
+# Runtime-only requirements: this image serves the API and never runs the
+# pipeline or the downloader, so playwright, pandas, pyarrow, and pdfplumber
+# would be installed and never imported. tests/test_web_group/
+# test_runtime_requirements.py fails if an API import outgrows this file.
+COPY requirements-runtime.txt .
 RUN pip install --no-cache-dir --upgrade pip==24.3.1 && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements-runtime.txt
 
 # Copy application source (exclude test/dev files via .dockerignore)
 COPY api/           api/
