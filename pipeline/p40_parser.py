@@ -22,10 +22,10 @@ look plausible in a chart.
 "0300D: Procurement, Defense-Wide / BA 01: Major Equipment / BSA 9: Major"
 followed by "20 / Major Equipment, DCSA" is really a left column
 (Appropriation / BA / BSA) printed beside a right column (P-1 Line Item Number
-/ Title), and the BSA title wraps. The appropriation code and budget activity
-are recoverable; the line item number is not reliably separable from text
-alone, so it is reported as a best-effort field and flagged, never guessed
-silently.
+/ Title), and the BSA title wraps. The appropriation code, budget activity and
+BSA are recoverable from the flattened text; the line item number is not —
+see :mod:`pipeline.p40_positional`, which recovers it from word coordinates at
+99.0% accuracy against the Excel P-1 rows.
 """
 
 from __future__ import annotations
@@ -46,6 +46,18 @@ _APPROPRIATION = re.compile(
     r"^(?P<code>\d{4}[A-Z]?):\s*(?P<title>.+?)\s*/\s*BA\s*(?P<ba>\d+)\s*:\s*(?P<ba_title>[^/]+)",
     re.M,
 )
+
+# "... / BSA 9: Major" — the budget sub-activity number.
+#
+# This is the discriminator that makes a line item unique. Procurement,
+# Defense-Wide line item 30 is "Major Equipment" for a dozen different
+# agencies, each with its own P-40 page and its own BSA; joining on
+# (account, line_item) alone collapses them together and double-counts. Excel
+# carries the same value in budget_lines.sub_activity.
+#
+# Optional by design: Navy lines of the form "BA 07: <title> / 8081 / <title>"
+# carry no BSA segment at all.
+_BSA = re.compile(r"/\s*BSA\s*(?P<bsa>[A-Za-z0-9]+)\s*:")
 
 # "Program Elements for Code B Items: 0901220SE"
 _CODE_B_PE = re.compile(
@@ -86,6 +98,7 @@ class P40Record:
     appropriation_title: str | None = None
     budget_activity: str | None = None
     budget_activity_title: str | None = None
+    sub_activity: str | None = None
     pe_number: str | None = None
     # column label -> value in thousands (None where the source printed "-"),
     # keyed by the semantic column name, e.g. "fy2024_base", "prior_years".
@@ -189,6 +202,10 @@ def parse_p40_page(page_text: str | None) -> P40Record | None:
         record.budget_activity_title = " ".join(approp.group("ba_title").split())
     else:
         record.warnings.append("appropriation line not found")
+
+    bsa = _BSA.search(page_text)
+    if bsa:
+        record.sub_activity = bsa.group("bsa")
 
     code_b = _CODE_B_PE.search(page_text)
     if code_b:
