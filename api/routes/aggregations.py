@@ -25,7 +25,7 @@ from utils.database import (
     _validate_identifier,
     get_amount_columns,
 )
-from utils.query import build_where_clause, compute_yoy_change
+from utils.query import build_where_clause, compute_yoy_change, exclude_non_additive
 
 _logger = logging.getLogger(__name__)
 
@@ -148,6 +148,11 @@ def aggregate(
 
     sum_exprs = ",\n            ".join(f"SUM({c}) AS {c}" for c in amount_cols)
 
+    # P-1R restates Guard/Reserve equipment already counted in P-1, so summing
+    # both double-counts it (~2.76% on procurement totals). Skipped when the
+    # caller explicitly filtered to that exhibit.
+    where = exclude_non_additive(where, filters.exhibit_type)
+
     latest_count_expr = f"COUNT({amount_cols[-1]}) AS rows_with_amount"
     sql = f"""
         SELECT
@@ -249,6 +254,9 @@ def hierarchy(
             "organization_name IS NOT NULL",
         ],
     )
+
+    # Same memo-exhibit exclusion as the grouped aggregation above.
+    where = exclude_non_additive(where, exhibit_type)
 
     rows = conn.execute(
         f"SELECT organization_name AS service, "

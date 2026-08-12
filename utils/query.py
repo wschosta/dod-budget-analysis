@@ -405,3 +405,61 @@ def fetch_bli_related_pes(
     except sqlite3.OperationalError:
         return []
     return [dict(r) for r in rows]
+
+
+# ── Non-additive exhibits ────────────────────────────────────────────────────
+#
+# P-1R is the Reserve / National Guard procurement exhibit, and its rows are
+# memoranda: 1,141 of its 1,143 rows are explicitly titled "NATL Guard Equip
+# (MEMO NON ADD)" or "Reserve Equip (MEMO NON ADD)" (the remaining two are
+# empty). That equipment is already counted in the P-1 totals, so summing P-1R
+# alongside P-1 double-counts it.
+#
+# Measured on the corpus, including these rows inflates procurement totals by
+# 2.76% overall and up to 6.35% on individual fiscal-year columns — roughly
+# $80.5 billion.
+#
+# The `add_non_add` column does NOT protect against this: it reads "Add" on all
+# 6,758 P-1 rows including every memo row, so it cannot be used as the filter.
+#
+# This applies to *summation* only. P-1R rows stay fully visible in search,
+# browse and detail views — a user looking for Guard equipment should find it.
+NON_ADDITIVE_EXHIBIT_TYPES: tuple[str, ...] = ("p1r",)
+
+_NON_ADDITIVE_SQL = " AND ".join(
+    f"COALESCE(exhibit_type,'') != '{t}'" for t in NON_ADDITIVE_EXHIBIT_TYPES
+)
+
+
+def exclude_non_additive(
+    where_clause: str, requested_exhibit_types: "list[str] | str | None" = None
+) -> str:
+    """Add the non-additive exhibit exclusion to a WHERE clause.
+
+    Accepts a clause that may be empty or already start with ``WHERE`` and
+    returns one that also excludes memo exhibits. Takes no parameters, so
+    caller parameter lists are unaffected.
+
+    If the caller explicitly asked for a non-additive exhibit — someone
+    filtering a chart to P-1R specifically — the exclusion is skipped and the
+    clause is returned unchanged. Silently returning an empty result for a
+    filter the user deliberately chose would be worse than showing memo totals
+    they asked to see.
+    """
+    if requested_exhibit_types:
+        requested = (
+            [requested_exhibit_types]
+            if isinstance(requested_exhibit_types, str)
+            else list(requested_exhibit_types)
+        )
+        if any(
+            (t or "").strip().lower() in NON_ADDITIVE_EXHIBIT_TYPES for t in requested
+        ):
+            return where_clause
+
+    clause = (where_clause or "").strip()
+    if not clause:
+        return f"WHERE {_NON_ADDITIVE_SQL}"
+    if clause.upper().startswith("WHERE"):
+        return f"{clause} AND {_NON_ADDITIVE_SQL}"
+    return f"WHERE {clause} AND {_NON_ADDITIVE_SQL}"
