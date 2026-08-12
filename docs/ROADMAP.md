@@ -312,6 +312,42 @@ organizations, 59 blank-org rows). **Group B remains scope-limited** —
 is sourced from Excel exhibits and the Army/Air Force workbooks are still
 missing. Do not mark Group B verified until those sources download.
 
+**Completed 2026-08-12 — P-40 parsed and reconciled against the Excel P-1
+rows; deliberately NOT ingested.**
+
+`pipeline/p40_parser.py` reads the Budget Line Item Justification grid (1,826
+of 1,830 Resource Summaries yield a clean twelve-value row) and
+`pipeline/p40_positional.py` recovers the P-1 line item number from word
+coordinates at 99.0% accuracy — text parsing cannot do it, because the header
+is two printed columns pdfplumber concatenates and titles contain slashes.
+`scripts/reconcile_p40_vs_p1.py` makes the comparison repeatable.
+
+Result: **1,808 of 1,830 records match an Excel P-1 row, and 1,401 of 1,565
+comparable values agree within 1% (89.5%).** Every remaining disagreement has
+`pdf=0` against a real Excel value, from two understood causes:
+
+- **Shipbuilding accounting.** For ship lines (1611N), "Net Procurement (P-1)"
+  legitimately reads 0.000 in a year funded through advance procurement.
+  Total Obligation Authority resolves only 9 of 29 such cases, so there is no
+  single P-40 row that maps to P-1 across all accounts.
+- **Multi-agency line items.** Defense-Wide line item 30 is "Major Equipment"
+  for five agencies distinguished only by budget sub-activity, and the P-40
+  text carries a BSA for only 66% of records (Navy prints none), so those
+  compare one agency's page against Excel's summed rows.
+
+**Recommendation: Excel P-1 stays authoritative for line-item funding.** P-40
+should not be written into `budget_lines` — at 89.5% agreement with structural
+exceptions, ingesting it would import ambiguity into totals that are currently
+consistent. Its unique value is what Excel does *not* carry: out-year columns
+(FY+1..FY+4, To Complete, Total), procurement quantities, Code B program
+element numbers, and line item titles. Those belong in a separate table keyed
+to the P-1 rows, not merged into them.
+
+**Data-quality finding:** `add_non_add` reads "Add" on all 6,758 P-1 rows and
+does not flag memo entries. 1,141 rows are "MEMO NON ADD" — visible only in
+`cost_type_title` — and summing them double-counts. Any aggregate over
+`budget_lines` P-1 rows must exclude `cost_type_title LIKE '%NON ADD%'`.
+
 Remaining work is organized into groups A–G:
 
 | Group | Focus | Code Status | What Remains |
