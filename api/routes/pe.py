@@ -25,7 +25,12 @@ from fastapi.responses import Response
 from api.database import get_db
 from utils.database import _validate_identifier
 from utils.patterns import PE_NUMBER_STRICT as _PE_FORMAT
-from utils.query import compute_yoy_change, make_placeholders, parse_json_list
+from utils.query import (
+    NON_ADDITIVE_SQL,
+    compute_yoy_change,
+    make_placeholders,
+    parse_json_list,
+)
 from utils.strings import sanitize_fts5_query
 
 logger = logging.getLogger(__name__)
@@ -120,7 +125,7 @@ def get_top_changes(
             SUM(COALESCE(b.amount_fy2026_request, 0))
                 - SUM(COALESCE(b.amount_fy2025_total, 0)) AS delta
         FROM budget_lines b
-        WHERE {where}
+        WHERE {where} AND {NON_ADDITIVE_SQL}
         GROUP BY b.pe_number
         HAVING fy2025_total != 0 OR fy2026_request != 0
         ORDER BY {order_expr}
@@ -201,7 +206,7 @@ def compare_pes(
             SUM(COALESCE(amount_fy2026_request, 0)) AS fy2026_request,
             SUM(COALESCE(amount_fy2026_total, 0))   AS fy2026_total
         FROM budget_lines
-        WHERE pe_number IN ({ph})
+        WHERE pe_number IN ({ph}) AND {NON_ADDITIVE_SQL}
         GROUP BY pe_number
     """, pe).fetchall()
     funding_map = {r["pe_number"]: _row_dict(r) for r in funding_rows}
@@ -267,7 +272,7 @@ def get_spruill_table(
             SUM(COALESCE(amount_fy2026_request, 0)) AS fy2026_request,
             SUM(COALESCE(amount_fy2026_total, 0))   AS fy2026_total
         FROM budget_lines
-        WHERE pe_number IN ({ph})
+        WHERE pe_number IN ({ph}) AND {NON_ADDITIVE_SQL}
         GROUP BY pe_number
     """, pe).fetchall()
     funding_map = {r["pe_number"]: _row_dict(r) for r in funding_rows}

@@ -130,3 +130,115 @@ class TestNonAggregateViewsUnaffected:
         assert resp.status_code == 200
         exhibits = {row["exhibit_type"] for row in resp.json()["items"]}
         assert "p1r" in exhibits, "memo rows disappeared from the row listing"
+
+
+class TestDashboardNotEmptiedBySummaryExclusion:
+    """The dashboard must not exclude the only exhibit types the data has.
+
+    `build_where_clause(exclude_summary=True)` drops P-1, R-1, O-1, M-1, C-1,
+    RF-1 and P-1R. Every row in budget_lines comes from a summary workbook —
+    the detail exhibits (P-5, R-2) live in pdf_pages — so passing that flag
+    matched zero of 18,200 rows and the dashboard served total_lines 0, null
+    totals and an empty array for every chart.
+
+    Nor is it needed: the six appropriation summaries cover disjoint
+    appropriations, so summing them is a total rather than a double count.
+    """
+
+    def test_totals_are_not_zero(self, client):
+        resp = client.get("/api/v1/dashboard/summary")
+        assert resp.status_code == 200
+        totals = resp.json()["totals"]
+        assert totals["total_lines"] > 0, "dashboard excluded every row"
+        assert totals["total_fy26_request"], "dashboard reported no funding"
+
+    def test_charts_are_populated(self, client):
+        resp = client.get("/api/v1/dashboard/summary")
+        body = resp.json()
+        assert body["by_service"], "service breakdown empty"
+        assert body["by_fiscal_year"], "fiscal year breakdown empty"
+
+    def test_memo_row_excluded_from_dashboard_totals(self, client):
+        """1,000 from the P-1 row; the 250 memo row must not be added."""
+        totals = client.get("/api/v1/dashboard/summary").json()["totals"]
+        assert totals["total_fy26_request"] == pytest.approx(1000.0)
+
+    def test_memo_row_absent_from_top_programs(self, client):
+        """A memo line presented among Top Programs reads as new spending."""
+        body = client.get("/api/v1/dashboard/summary").json()
+        amounts = [p.get("fy26_request") for p in body["top_programs"]]
+        assert 250.0 not in amounts
+
+
+class TestProgramElementTotals:
+    """Phase 11 backfills pe_number onto P-1R rows, so PE views are exposed too.
+
+    46 memo rows carry a PE number in the corpus, inflating individual program
+    elements by up to 8.1%.
+    """
+
+    def test_pe_totals_exclude_memo_rows(self, memo_db):
+        """/pe/top-changes groups budget_lines by pe_number and sums it."""
+        import sqlite3 as _sqlite3
+
+        conn = _sqlite3.connect(str(memo_db))
+        conn.execute(
+            "UPDATE budget_lines SET pe_number = '0204571N' "
+            "WHERE exhibit_type IN ('p1','p1r')"
+        )
+        conn.commit()
+        conn.close()
+
+        from api.app import create_app
+        local = TestClient(create_app(db_path=memo_db))
+        resp = local.get("/api/v1/pe/top-changes?limit=5")
+        assert resp.status_code == 200
+
+        rows = resp.json()
+        rows = rows["items"] if isinstance(rows, dict) else rows
+        entry = next((r for r in rows if r.get("pe_number") == "0204571N"), None)
+        assert entry is not None, "PE missing from top-changes"
+        # 1,000 from the P-1 row; the 250 memo row must not be added.
+        assert entry["fy2026_request"] == pytest.approx(1000.0)
+
+
+class TestHasDetailExhibits:
+    """Whether summaries should be excluded depends on what the table holds.
+
+    FIX-006 was right for a corpus carrying both detail and summary exhibits;
+    it was wrong for one carrying only summaries. The decision cannot be made
+    statically, so it is read from the database.
+    """
+
+    def _db(self, tmp_path, rows):
+        import sqlite3 as _sqlite3
+        db = tmp_path / "detect.sqlite"
+        conn = _sqlite3.connect(str(db))
+        conn.execute(
+            "CREATE TABLE budget_lines (id INTEGER PRIMARY KEY, exhibit_type TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO budget_lines (exhibit_type) VALUES (?)", [(r,) for r in rows]
+        )
+        conn.commit()
+        return conn
+
+    def test_summary_only_corpus_reports_no_detail(self, tmp_path):
+        from utils.query import has_detail_exhibits
+        conn = self._db(tmp_path, ["p1", "r1", "o1", "c1", "m1", "rf1", "p1r"])
+        assert has_detail_exhibits(conn) is False
+        conn.close()
+
+    def test_corpus_with_detail_reports_detail(self, tmp_path):
+        from utils.query import has_detail_exhibits
+        conn = self._db(tmp_path, ["p1", "r1", "r2"])
+        assert has_detail_exhibits(conn) is True
+        conn.close()
+
+    def test_missing_table_is_not_an_error(self, tmp_path):
+        """Called during request handling; a bad database must not 500."""
+        import sqlite3 as _sqlite3
+        from utils.query import has_detail_exhibits
+        conn = _sqlite3.connect(str(tmp_path / "empty.sqlite"))
+        assert has_detail_exhibits(conn) is False
+        conn.close()
