@@ -8,7 +8,12 @@ from fastapi import APIRouter, Depends, Query
 from api.database import get_db
 from utils.cache import TTLCache
 from utils.database import BUDGET_TYPE_CASE_EXPR
-from utils.query import build_where_clause, detect_fy_columns, exclude_non_additive
+from utils.query import (
+    build_where_clause,
+    detect_fy_columns,
+    exclude_non_additive,
+    has_detail_exhibits,
+)
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -54,8 +59,10 @@ def dashboard_summary(
     fy26_col, fy25_col = detect_fy_columns(conn)
 
     # FIX-006: Exclude summary exhibits (p1, r1, o1, m1, c1, rf1, p1r) to avoid
-    # double-counting with detail exhibits. Also exclude rows with invalid
-    # fiscal_year values (non-numeric like "Details").
+    # double-counting with detail exhibits — but only when detail exhibits are
+    # actually present. Also exclude rows with invalid fiscal_year values
+    # (non-numeric like "Details").
+    _has_detail = has_detail_exhibits(conn)
     _fy_validity = (
         "(fiscal_year IS NULL OR fiscal_year GLOB '[0-9][0-9][0-9][0-9]' "
         " OR fiscal_year GLOB 'FY [0-9][0-9][0-9][0-9]' "
@@ -67,7 +74,13 @@ def dashboard_summary(
         service=[service] if service else None,
         exhibit_type=[exhibit_type] if exhibit_type else None,
         budget_type=[budget_type] if budget_type else None,
-        exclude_summary=True,
+        # Exclude summary exhibits only when detail exhibits are actually
+        # present to be double-counted against.  Passing True unconditionally
+        # emptied the dashboard against the real corpus, where every
+        # budget_lines row comes from a summary workbook (the detail exhibits
+        # live in pdf_pages): it matched 0 of 18,200 rows and served
+        # total_lines 0 with every chart array empty.
+        exclude_summary=_has_detail,
         extra_conditions=[_fy_validity],
     )
 
@@ -169,9 +182,13 @@ def dashboard_summary(
         service=[service] if service else None,
         exhibit_type=[exhibit_type] if exhibit_type else None,
         budget_type=[budget_type] if budget_type else None,
-        exclude_summary=True,
+        exclude_summary=_has_detail,   # see the summary query above
         extra_conditions=[f"{fy26_col} IS NOT NULL", _fy_validity],
     )
+    # A P-1R memo row is Guard/Reserve equipment already counted elsewhere;
+    # listing one among "Top Programs" would present it as new spending.
+    tp_where = exclude_non_additive(tp_where, exhibit_type)
+
     top_programs_rows = conn.execute(
         f"SELECT id, line_item_title, organization_name, pe_number, "
         f"{fy26_col} as fy26_request, {fy25_col} as fy25_enacted "

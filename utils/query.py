@@ -426,9 +426,13 @@ def fetch_bli_related_pes(
 # browse and detail views — a user looking for Guard equipment should find it.
 NON_ADDITIVE_EXHIBIT_TYPES: tuple[str, ...] = ("p1r",)
 
-_NON_ADDITIVE_SQL = " AND ".join(
+# Bare predicate, for hand-written queries that build their own WHERE clause.
+# Contains no bound parameters, so it can be concatenated safely.
+NON_ADDITIVE_SQL = " AND ".join(
     f"COALESCE(exhibit_type,'') != '{t}'" for t in NON_ADDITIVE_EXHIBIT_TYPES
 )
+
+_NON_ADDITIVE_SQL = NON_ADDITIVE_SQL
 
 
 def exclude_non_additive(
@@ -463,3 +467,28 @@ def exclude_non_additive(
     if clause.upper().startswith("WHERE"):
         return f"{clause} AND {_NON_ADDITIVE_SQL}"
     return f"WHERE {clause} AND {_NON_ADDITIVE_SQL}"
+
+
+def has_detail_exhibits(conn: sqlite3.Connection) -> bool:
+    """True when budget_lines holds detail exhibits, not only summaries.
+
+    Whether summary exhibits should be excluded from a total depends entirely
+    on what else is in the table, and both situations occur:
+
+    * With detail rows present (R-2, P-5) alongside their summaries (R-1,
+      P-1), summing everything double-counts — the summary is a roll-up of the
+      detail. This is what FIX-006 addressed.
+    * With only summaries present — the current corpus, where every
+      budget_lines row comes from a summary workbook and the detail exhibits
+      live in pdf_pages — excluding them removes every row, which served a
+      dashboard of zeroes against 18,200 rows.
+
+    So the caller cannot decide statically; it has to ask the database.
+    """
+    try:
+        row = conn.execute(
+            f"SELECT 1 FROM budget_lines WHERE {EXCLUDE_SUMMARY_SQL} LIMIT 1"
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return False
+    return row is not None
