@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query
 from api.database import get_db
 from utils.cache import TTLCache
 from utils.database import BUDGET_TYPE_CASE_EXPR
-from utils.query import build_where_clause, detect_fy_columns
+from utils.query import build_where_clause, detect_fy_columns, exclude_non_additive
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -70,6 +70,11 @@ def dashboard_summary(
         exclude_summary=True,
         extra_conditions=[_fy_validity],
     )
+
+    # P-1R restates Guard/Reserve equipment already counted in P-1; every
+    # figure below is a SUM, so including it would double-count (~2.76% on
+    # procurement). Skipped when the caller explicitly asked for that exhibit.
+    fy_filter = exclude_non_additive(fy_filter, exhibit_type)
 
     # Batch the main budget_lines aggregations into a single CTE query.
     # This scans the table once instead of 4 separate passes.
