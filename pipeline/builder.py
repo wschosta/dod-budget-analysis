@@ -33,7 +33,7 @@ import os
 
 from utils import safe_float
 from utils.config import SUMMARY_EXHIBIT_KEYS, _SHORT_SUMMARY_KEYS
-from utils.database import init_pragmas, APPROP_TO_BUDGET_TYPE
+from utils.database import init_pragmas, APPROP_TO_BUDGET_TYPE, database_size_mb
 from utils.query import make_placeholders
 from utils.normalization import (
     ORG_NORMALIZE as ORG_MAP,
@@ -3544,7 +3544,9 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
     # ── Summary ────────────────────────────────────────────────────────────
     total_lines = conn.execute("SELECT COUNT(*) FROM budget_lines").fetchone()[0]
     total_pages = conn.execute("SELECT COUNT(*) FROM pdf_pages").fetchone()[0]
-    db_size = db_path.stat().st_size / (1024 * 1024)
+    # Includes the -wal sidecar: measuring only the main file reports
+    # ~0 MB right after a build, before any checkpoint.
+    db_size = database_size_mb(db_path)
 
     summary = (
         f"Database: {db_path} ({db_size:.1f} MB)\n"

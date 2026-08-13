@@ -10,7 +10,7 @@ import json
 import re
 import sqlite3
 from collections.abc import Sized
-from typing import Any
+from typing import Any, TypedDict
 
 from utils.config import CORE_SUMMARY_TYPES
 from utils.database import _validate_identifier, get_amount_columns
@@ -324,11 +324,24 @@ def make_placeholders(values: Sized | int) -> str:
 # ---------------------------------------------------------------------------
 
 
+class Pagination(TypedDict):
+    """Page metadata returned by :func:`compute_pagination`.
+
+    A TypedDict rather than dict[str, int | bool] so that callers splatting it
+    into a Pydantic model keep per-key types — ``**pag`` otherwise widens
+    ``has_next`` to ``int | bool`` and fails to type-check against ``bool``.
+    """
+
+    page: int
+    page_count: int
+    has_next: bool
+
+
 def compute_pagination(
     offset: int,
     limit: int,
     total: int,
-) -> dict[str, int | bool]:
+) -> Pagination:
     """Derive page metadata from offset/limit/total.
 
     Returns a dict with ``page`` (0-based), ``page_count``, and ``has_next``.
