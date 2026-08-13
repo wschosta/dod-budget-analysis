@@ -486,6 +486,13 @@ def populate_submissions_and_amounts(
             AMOUNT_TYPE_PRECEDENCE.get(display_type, 99),
         ))
 
+    # INSERT OR IGNORE drops rows that collide on (line_item_id, target_fy,
+    # amount_type). Reporting len(amt_batch) called those "inserted", so the
+    # script contradicted its own summary — it logged 13,556 while the table
+    # ended with 13,548. Count the real writes, and say plainly when rows were
+    # discarded: a collision means two source rows claimed the same
+    # (item, year, type) with different values and one silently won.
+    _changes_before = conn.total_changes
     conn.executemany(
         """INSERT OR IGNORE INTO line_item_amounts
            (line_item_id, target_fy, amount_type,
@@ -495,7 +502,14 @@ def populate_submissions_and_amounts(
         amt_batch,
     )
     conn.commit()
-    log.info("  Inserted %d line_item_amounts rows", len(amt_batch))
+    inserted = conn.total_changes - _changes_before
+    ignored = len(amt_batch) - inserted
+    log.info("  Inserted %d line_item_amounts rows", inserted)
+    if ignored:
+        log.warning(
+            "  %d row(s) ignored as duplicate (item, fiscal year, amount type) "
+            "— two source rows disagreed and one was dropped", ignored
+        )
 
 
 def create_compatibility_view(conn: sqlite3.Connection):
@@ -621,8 +635,26 @@ def consolidate(db_path: str, dry_run: bool = False) -> dict:
         conn.close()
         return {"line_items": groups, "source_rows": total, "dry_run": True}
 
-    # Step 2: Create new tables.
+    # Step 2: Create new tables, then clear them.
+    #
+    # These three are derived entirely from budget_lines, and every insert
+    # below is INSERT OR IGNORE against a UNIQUE key. Without clearing, a
+    # second run against an already-populated database ignores every row and
+    # silently keeps the old values — so re-running after a data refresh
+    # produced no error, no warning, and stale output. Rebuilding is the
+    # behaviour the documented workflow implies.
     create_tables(conn)
+    existing = conn.execute("SELECT COUNT(*) FROM line_items").fetchone()[0]
+    if existing:
+        log.info("  Rebuilding: clearing %d existing line_items row(s) and "
+                 "their amounts/submissions", existing)
+        # line_item_amounts and budget_submissions cascade from line_items,
+        # but foreign_keys=ON only enforces that if the child rows were
+        # created under it — delete explicitly so the rebuild is unconditional.
+        conn.execute("DELETE FROM line_item_amounts")
+        conn.execute("DELETE FROM budget_submissions")
+        conn.execute("DELETE FROM line_items")
+        conn.commit()
 
     # Step 3: Populate line_items.
     key_to_id = populate_line_items(conn)

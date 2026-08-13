@@ -550,3 +550,27 @@ class QueryBuilder:
         if self._offset is not None:
             sql += f" OFFSET {self._offset}"
         return sql, params
+
+
+def database_size_mb(db_path: Path | str) -> float:
+    """Total on-disk size of a SQLite database, in MB, including its WAL.
+
+    In WAL mode recent writes live in the ``-wal`` sidecar until a checkpoint,
+    so measuring only the main file understates the size — and immediately
+    after a fresh build, where nothing has been checkpointed yet, it reports
+    close to zero. The first full build of this project logged
+    "Database: dod_budget.sqlite (0.0 MB)" for a database that in fact held
+    119 MB of freshly written data.
+
+    Counting the WAL gives a number that reflects the data actually written,
+    without forcing a checkpoint purely to measure it.
+    """
+    path = Path(db_path)
+    total = 0
+    for suffix in ("", "-wal"):
+        candidate = path.with_name(path.name + suffix)
+        try:
+            total += candidate.stat().st_size
+        except OSError:
+            pass  # absent WAL simply contributes nothing
+    return total / (1024 * 1024)
