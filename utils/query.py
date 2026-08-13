@@ -445,7 +445,6 @@ NON_ADDITIVE_SQL = " AND ".join(
     f"COALESCE(exhibit_type,'') != '{t}'" for t in NON_ADDITIVE_EXHIBIT_TYPES
 )
 
-_NON_ADDITIVE_SQL = NON_ADDITIVE_SQL
 
 
 def exclude_non_additive(
@@ -476,10 +475,10 @@ def exclude_non_additive(
 
     clause = (where_clause or "").strip()
     if not clause:
-        return f"WHERE {_NON_ADDITIVE_SQL}"
+        return f"WHERE {NON_ADDITIVE_SQL}"
     if clause.upper().startswith("WHERE"):
-        return f"{clause} AND {_NON_ADDITIVE_SQL}"
-    return f"WHERE {clause} AND {_NON_ADDITIVE_SQL}"
+        return f"{clause} AND {NON_ADDITIVE_SQL}"
+    return f"WHERE {clause} AND {NON_ADDITIVE_SQL}"
 
 
 def has_detail_exhibits(conn: sqlite3.Connection) -> bool:

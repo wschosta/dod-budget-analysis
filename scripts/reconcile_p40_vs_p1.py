@@ -137,7 +137,6 @@ def _excel_index(conn: sqlite3.Connection) -> tuple[dict, list[str]]:
     conn.row_factory = sqlite3.Row
     query = (
         "SELECT account, sub_activity, line_item, source_fiscal_year, "
-        "cost_type_title, "
         + ", ".join(amount_cols)
         + " FROM budget_lines WHERE exhibit_type IN ('p1','p1r') "
         "AND COALESCE(cost_type_title,'') NOT LIKE '%NON ADD%'"
@@ -254,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
     log.info("")
     log.info("Largest disagreements:")
     for item in result["disagreements"][:10]:
-        log.info("   %8.1f%%  %s  pdf=%,.0f excel=%,.0f  %s".replace(",", ""),
+        log.info("   %8.1f%%  %s  pdf=%.0f excel=%.0f  %s",
                  item["delta_pct"], item["key"], item["pdf"], item["excel"],
                  str(item["title"])[:30])
     return 0

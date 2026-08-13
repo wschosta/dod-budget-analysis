@@ -532,6 +532,13 @@ def create_database(db_path: Path) -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_pdf_pages_exhibit
             ON pdf_pages(exhibit_type);
 
+        -- Page-level exhibit. Declared here as well as in migration 007:
+        -- that migration returns early on a fresh database (pdf_pages does
+        -- not exist yet when migrate() runs), so without this a newly built
+        -- database would have the column but no index on it.
+        CREATE INDEX IF NOT EXISTS idx_pdf_pages_page_exhibit
+            ON pdf_pages(page_exhibit_type);
+
         -- LION-103: PE-to-PDF junction table — pre-computed during ingestion
         -- Enables direct joins from PE numbers to their PDF pages without
         -- the expensive text-scan enrichment step.

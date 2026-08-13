@@ -45,6 +45,7 @@ except ImportError:
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from utils.patterns import classify_page_exhibit
 from utils.query import make_placeholders
 
 logger = logging.getLogger(__name__)
@@ -957,9 +958,11 @@ def _load_pdf_parquets(
     total_pages = 0
     insert_sql = (
         "INSERT INTO pdf_pages "
+        # Column order mirrors PDF_COLUMNS, with page_exhibit_type appended
+        # last to match the value appended after that loop.
         "(source_file, source_category, fiscal_year, exhibit_type, "
-        "page_number, page_text, has_tables, table_data) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        "page_number, page_text, has_tables, table_data, page_exhibit_type) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     )
     pe_insert_sql = (
         "INSERT INTO pdf_pe_numbers "
@@ -1002,6 +1005,13 @@ def _load_pdf_parquets(
                     row_values.append(val)
                 else:
                     row_values.append(None)
+            # Page-level exhibit, derived here rather than carried in the
+            # parquet: staged files predate the column, and the builder's
+            # direct path classifies at insert time the same way. Without
+            # this, a staging-loaded database has page_exhibit_type NULL for
+            # every row and anything filtering on it silently finds nothing.
+            _page_text = col_data.get("page_text", [None] * n_rows)[row_idx]
+            row_values.append(classify_page_exhibit(_page_text))
             batch.append(tuple(row_values))
 
         conn.executemany(insert_sql, batch)

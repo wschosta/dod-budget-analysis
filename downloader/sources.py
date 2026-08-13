@@ -622,17 +622,6 @@ def discover_comptroller_files(session: requests.Session, year: str,
     return files
 
 
-class SourceBlocked(Exception):
-    """The host refused us at the network edge — not a "no documents" result.
-
-    Distinguishing this from an empty page matters twice over: an operator
-    reading "0 files" cannot tell a blocked host from a fiscal year that has
-    not published yet, and an empty list must never be written to the
-    discovery cache, or the block is memoised and every later retry is
-    silently skipped.
-    """
-
-
 def probe_source_reachable(session: requests.Session, url: str) -> tuple[bool, str]:
     """Check whether a source host will talk to us at all.
 
