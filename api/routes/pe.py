@@ -26,6 +26,7 @@ from api.database import get_db
 from utils.database import _validate_identifier
 from utils.patterns import PE_NUMBER_STRICT as _PE_FORMAT
 from utils.query import (
+    NON_ADDITIVE_EXHIBIT_TYPES,
     NON_ADDITIVE_SQL,
     compute_yoy_change,
     make_placeholders,
@@ -610,9 +611,16 @@ def get_pe_changes(
         ORDER BY ABS(delta) DESC
     """, (pe_number,)).fetchall()
 
-    # Compute PE-level totals
-    total_fy25 = sum(r["fy2025_total"] or 0 for r in rows)
-    total_fy26 = sum(r["fy2026_request"] or 0 for r in rows)
+    # Compute PE-level totals.
+    #
+    # The query above groups by exhibit_type, so P-1R is a distinguishable row
+    # and belongs in the per-exhibit breakdown. Rolling every group into one
+    # number is where it must drop out: P-1R restates Guard/Reserve equipment
+    # the P-1 rows already count, and including it here made this endpoint
+    # disagree with /pe/top-changes for the same PE.
+    _additive = [r for r in rows if (r["exhibit_type"] or "") not in NON_ADDITIVE_EXHIBIT_TYPES]
+    total_fy25 = sum(r["fy2025_total"] or 0 for r in _additive)
+    total_fy26 = sum(r["fy2026_request"] or 0 for r in _additive)
     pct_change = compute_yoy_change(total_fy26, total_fy25, precision=1)
 
     return {
@@ -1001,7 +1009,7 @@ def list_pes(
             FROM {base_from}
             LEFT JOIN (
                 SELECT pe_number, SUM(COALESCE(amount_fy2026_request, 0)) AS total
-                FROM budget_lines GROUP BY pe_number
+                FROM budget_lines WHERE {NON_ADDITIVE_SQL} GROUP BY pe_number
             ) bl_sum ON bl_sum.pe_number = p.pe_number
             {where}
             ORDER BY _sort_funding {direction}, p.pe_number
@@ -1068,6 +1076,7 @@ def list_pes(
             f"  SUM(COALESCE(amount_fy2026_request, 0)) AS total_fy2026, "
             f"  SUM(COALESCE(amount_fy2025_enacted, 0)) AS total_fy2025 "
             f"FROM budget_lines WHERE pe_number IN ({ph}) "
+            f"  AND {NON_ADDITIVE_SQL} "
             f"GROUP BY pe_number", pe_numbers,
         ).fetchall():
             funding_by_pe[r2[0]] = r2[1] or 0.0

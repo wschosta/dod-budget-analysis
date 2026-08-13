@@ -84,10 +84,14 @@ def dashboard_summary(
         extra_conditions=[_fy_validity],
     )
 
-    # P-1R restates Guard/Reserve equipment already counted in P-1; every
-    # figure below is a SUM, so including it would double-count (~2.76% on
-    # procurement). Skipped when the caller explicitly asked for that exhibit.
-    fy_filter = exclude_non_additive(fy_filter, exhibit_type)
+    # P-1R restates Guard/Reserve equipment already counted in P-1, so any
+    # figure that TOTALS money must leave it out (~2.76% on procurement).
+    #
+    # Kept as a separate clause rather than reassigning fy_filter: the
+    # exhibit-type distribution below is a breakdown *by exhibit*, not a
+    # total, and P-1R belongs in it. Folding the exclusion into the shared
+    # filter silently erased a whole bar from that chart.
+    fy_filter_additive = exclude_non_additive(fy_filter, exhibit_type)
 
     # Batch the main budget_lines aggregations into a single CTE query.
     # This scans the table once instead of 4 separate passes.
@@ -98,7 +102,7 @@ def dashboard_summary(
                    id, line_item_title, pe_number,
                    {fy26_col} AS fy26, {fy25_col} AS fy25
             FROM budget_lines
-            {fy_filter}
+            {fy_filter_additive}
         ),
         totals AS (
             SELECT COUNT(*) AS total_lines,
@@ -169,7 +173,7 @@ def dashboard_summary(
                SUM({fy25_col}) AS prev_total,
                COUNT(*) AS line_count
         FROM budget_lines
-        {fy_filter}
+        {fy_filter_additive}
         {"AND " + bt_extra if bt_extra else ""}
         GROUP BY {_BT}
         ORDER BY SUM(COALESCE({fy26_col}, 0)) DESC

@@ -47,6 +47,7 @@ from utils.normalization import (  # noqa: E402
     TITLE_TO_CODE as _TITLE_TO_CODE,
 )
 from utils.patterns import (  # noqa: E402
+    PAGE_EXHIBIT_SCAN_CHARS,
     PE_NUMBER as _PE_RE,
     PE_SUFFIX_PATTERN,
     classify_page_exhibit,
@@ -842,9 +843,14 @@ def step_16_classify_page_exhibits(
         logger.info("  pdf_pages.page_exhibit_type missing (pre-migration 7) — skipping")
         return 0
 
+    # Only the first PAGE_EXHIBIT_SCAN_CHARS characters are ever examined, so
+    # fetch just those. Selecting whole pages held 306 MB resident on the real
+    # corpus (111,277 rows, 219 MB of page_text) to read 700 characters each;
+    # SUBSTR counts characters on TEXT, matching the Python slice exactly.
     rows = conn.execute(
-        "SELECT id, page_text FROM pdf_pages "
-        "WHERE page_exhibit_type IS NULL AND page_text IS NOT NULL"
+        "SELECT id, SUBSTR(page_text, 1, ?) AS page_text FROM pdf_pages "
+        "WHERE page_exhibit_type IS NULL AND page_text IS NOT NULL",
+        (PAGE_EXHIBIT_SCAN_CHARS,),
     ).fetchall()
     if not rows:
         logger.info("  All pages already classified.")
