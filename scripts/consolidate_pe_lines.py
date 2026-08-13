@@ -28,7 +28,7 @@ _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from utils.query import make_placeholders  # noqa: E402
+from utils.query import NON_ADDITIVE_SQL, make_placeholders  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -243,7 +243,11 @@ def populate_line_items(conn: sqlite3.Connection) -> dict[tuple, int]:
     log.info("Populating line_items...")
 
     # Find all unique PE groups with their latest submission info.
-    groups = conn.execute("""
+    # Memo exhibits are excluded from the golden records: P-1R restates
+    # Guard/Reserve equipment the P-1 rows already carry, and consolidating
+    # it produced a second card for the same PE and title (e.g. 0605212M
+    # "H-53 Series" appeared twice, one of them memo data).
+    groups = conn.execute(f"""
         SELECT
             exhibit_type,
             account,
@@ -253,6 +257,7 @@ def populate_line_items(conn: sqlite3.Connection) -> dict[tuple, int]:
             COUNT(*) AS sub_count
         FROM budget_lines
         WHERE pe_number IS NOT NULL AND pe_number != ''
+          AND {NON_ADDITIVE_SQL}
         GROUP BY exhibit_type, account, pe_number
         ORDER BY pe_number, exhibit_type
     """).fetchall()
@@ -329,8 +334,9 @@ def populate_submissions_and_amounts(
     # Fetch all PE rows from budget_lines.
     all_col_names = [c[1] for c in conn.execute("PRAGMA table_info(budget_lines)").fetchall()]
     rows = conn.execute(
-        """SELECT * FROM budget_lines
-           WHERE pe_number IS NOT NULL AND pe_number != ''"""
+        f"""SELECT * FROM budget_lines
+           WHERE pe_number IS NOT NULL AND pe_number != ''
+           AND {NON_ADDITIVE_SQL}"""
     ).fetchall()
 
     log.info("  Processing %d source rows", len(rows))
