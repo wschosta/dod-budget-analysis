@@ -242,3 +242,67 @@ class TestHasDetailExhibits:
         conn = _sqlite3.connect(str(tmp_path / "empty.sqlite"))
         assert has_detail_exhibits(conn) is False
         conn.close()
+
+
+class TestConsolidationExcludesMemoExhibits:
+    """Memo rows must not become golden records.
+
+    scripts/consolidate_pe_lines.py groups by (exhibit_type, account,
+    pe_number), so a P-1R row became its own line_item — a second card on
+    /consolidated for the same program with the same title. In the corpus that
+    produced visible duplicates: "H-53 Series" under PE 0605212M and "Power
+    Equipment Assorted" under 0206624M each rendered twice, one of them memo
+    equipment already counted by the P-1 card beside it.
+    """
+
+    def test_p1r_does_not_become_a_line_item(self, tmp_path):
+        import sqlite3 as _sqlite3
+        import sys as _sys
+        from pathlib import Path as _Path
+
+        _sys.path.insert(0, str(_Path(__file__).resolve().parents[2] / "scripts"))
+        from consolidate_pe_lines import consolidate
+
+        db = tmp_path / "consol.sqlite"
+        conn = _sqlite3.connect(str(db))
+        conn.executescript("""
+            CREATE TABLE budget_lines (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_file TEXT, sheet_name TEXT, fiscal_year TEXT,
+                exhibit_type TEXT, account TEXT, account_title TEXT,
+                organization TEXT, organization_name TEXT,
+                budget_activity TEXT, budget_activity_title TEXT,
+                sub_activity TEXT, sub_activity_title TEXT,
+                line_item TEXT, line_item_title TEXT, classification TEXT,
+                cost_type TEXT, cost_type_title TEXT, add_non_add TEXT,
+                extra_fields TEXT, pe_number TEXT, currency_year TEXT,
+                appropriation_code TEXT, appropriation_title TEXT,
+                amount_unit TEXT, budget_type TEXT, amount_type TEXT,
+                amount_fy2026_request REAL
+            );
+            -- consolidate() reads narratives from pe_descriptions.
+            CREATE TABLE pe_descriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pe_number TEXT, fiscal_year TEXT, description_text TEXT
+            );
+            INSERT INTO budget_lines
+                (source_file, fiscal_year, exhibit_type, account, pe_number,
+                 line_item_title, amount_fy2026_request)
+            VALUES
+                ('p1.xlsx','2026','p1','1506N','0605212M','H-53 Series',1000.0),
+                ('p1r.xlsx','2026','p1r','1506N','0605212M','H-53 Series',250.0);
+        """)
+        conn.commit()
+        conn.close()
+
+        consolidate(str(db))
+
+        conn = _sqlite3.connect(str(db))
+        kinds = [r[0] for r in conn.execute("SELECT exhibit_type FROM line_items")]
+        titles = conn.execute(
+            "SELECT COUNT(*) FROM line_items WHERE line_item_title = 'H-53 Series'"
+        ).fetchone()[0]
+        conn.close()
+
+        assert "p1r" not in kinds, "memo exhibit became a golden record"
+        assert titles == 1, "the same program rendered as two cards"
