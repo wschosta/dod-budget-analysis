@@ -546,6 +546,51 @@ END;
         # has no "ADD COLUMN IF NOT EXISTS" to express that in plain SQL.
         _migration_007_page_exhibit_type,
     ),
+    (
+        8,
+        "008_p40_line_details: P-40 detail that the Excel P-1 rows do not carry",
+        # Reconciling Exhibit P-40 against the Excel P-1 rows showed 89.5%
+        # agreement with structural exceptions (ship advance procurement,
+        # multi-agency line items), so P-40 funding is NOT merged into
+        # budget_lines — P-1 stays authoritative for line-item money.
+        #
+        # What P-40 has and P-1 does not is worth keeping separately: the
+        # out-year horizon (budget year +1..+4, To Complete, Total),
+        # procurement quantities, the Code B program element, and the line
+        # item title as printed. These tables hold exactly that, keyed so they
+        # join to budget_lines rather than compete with it.
+        """
+CREATE TABLE IF NOT EXISTS p40_line_details (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    account         TEXT NOT NULL,   -- Treasury code; joins budget_lines.account
+    sub_activity    TEXT,            -- BSA; distinguishes multi-agency line items
+    line_item       TEXT NOT NULL,   -- P-1 line item number
+    fiscal_year     TEXT NOT NULL,   -- budget year of the source book
+    line_item_title TEXT,
+    pe_number       TEXT,            -- "Program Elements for Code B Items"
+    organization    TEXT,
+    source_file     TEXT,
+    page_number     INTEGER,
+    UNIQUE(account, sub_activity, line_item, fiscal_year)
+);
+
+CREATE INDEX IF NOT EXISTS idx_p40d_join
+    ON p40_line_details(account, line_item, fiscal_year);
+CREATE INDEX IF NOT EXISTS idx_p40d_pe ON p40_line_details(pe_number);
+
+CREATE TABLE IF NOT EXISTS p40_line_amounts (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    detail_id     INTEGER NOT NULL REFERENCES p40_line_details(id) ON DELETE CASCADE,
+    column_label  TEXT NOT NULL,     -- prior_years, fy2027_base, to_complete, total
+    amount        REAL,              -- thousands, converted from the printed millions
+    quantity      REAL,
+    is_continuing INTEGER NOT NULL DEFAULT 0,  -- source printed "Continuing", not a number
+    UNIQUE(detail_id, column_label)
+);
+
+CREATE INDEX IF NOT EXISTS idx_p40a_detail ON p40_line_amounts(detail_id);
+        """,
+    ),
 ]
 
 
