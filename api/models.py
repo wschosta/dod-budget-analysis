@@ -384,7 +384,14 @@ class SearchResponse(BaseModel):
         examples=["hypersonic missile"],
     )
     total: int = Field(
-        ..., description="Total number of matching results returned", examples=[42]
+        ...,
+        description=(
+            "Number of results in THIS response, not the total number of "
+            "matches in the corpus. The FTS scan is bounded, so a corpus-wide "
+            "match count is never computed; has_more indicates whether more "
+            "results exist."
+        ),
+        examples=[42],
     )
     budget_line_count: int = Field(
         0, description="Number of budget_line results in this page"
@@ -392,7 +399,17 @@ class SearchResponse(BaseModel):
     pdf_page_count: int = Field(
         0, description="Number of pdf_page results in this page"
     )
-    limit: int = Field(..., description="Maximum results per page", examples=[20])
+    limit: int = Field(
+        ...,
+        description=(
+            "Maximum results **per source**, not per page. Budget lines, PDF "
+            "pages and descriptions are queried and limited independently, so "
+            "a response may contain up to limit x (number of sources searched) "
+            "items — limit=25 with source=both returns up to 75. Use has_more "
+            "to page, not total."
+        ),
+        examples=[20],
+    )
     offset: int = Field(..., description="Pagination offset", examples=[0])
     has_more: bool = Field(
         False, description="Whether more results exist beyond this page"
