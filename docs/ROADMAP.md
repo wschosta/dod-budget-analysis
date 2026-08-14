@@ -348,6 +348,30 @@ does not flag memo entries. 1,141 rows are "MEMO NON ADD" — visible only in
 `cost_type_title` — and summing them double-counts. Any aggregate over
 `budget_lines` P-1 rows must exclude `cost_type_title LIKE '%NON ADD%'`.
 
+**Measured 2026-08-13 — performance at 730 MB.** The database grew 6x; the
+API did not slow down with it.
+
+| Path | Warm | Cold |
+|---|---|---|
+| `/explorer`, `/dashboard`, `/charts`, `/consolidated` | 3–11 ms | 13–68 ms |
+| `/programs` (slowest page) | 91 ms | 407 ms |
+| `/api/v1/*` (metadata, facets, aggregations, search, budget-lines, PE) | 7–35 ms | 10–124 ms |
+
+Index coverage was checked with `EXPLAIN QUERY PLAN` on the hot queries —
+`pdf_pages` by page exhibit, by exhibit, by source; `budget_lines` by PE and
+by exhibit; `pe_index`; `bli_pe_map`. Every one uses an index, most of them
+covering indexes. No action needed.
+
+**The one regression is the Explorer cache build**, at 2.7–4.7 s against 0.1 s
+on the 119 MB corpus. It is not result-size driven — a single-term search
+takes 3.77 s to return one row — because 95% of the time is
+`mine_pdf_subelements` parsing all 6,630 R-2/R-2A pages, which scales with
+`pdf_pages` (9,113 → 111,277). See `docs/HOSTING_DECISION.md` for the full
+numbers, the safe fix (materialise the keyword-independent parse during
+enrichment), and the tempting-but-wrong shortcut (scoping pages by
+`pdf_pe_numbers` is a 99.8% reduction that silently removes the Explorer's
+ability to discover PEs it was not given).
+
 Remaining work is organized into groups A–G:
 
 | Group | Focus | Code Status | What Remains |

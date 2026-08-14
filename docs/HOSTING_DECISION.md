@@ -151,6 +151,24 @@ a host that restarts frequently or sleeps on idle. The only state that
 genuinely wants persistence is `feedback.json`, and `APP_FEEDBACK_PATH`
 already redirects it.
 
+**Why it scales that way (profiled 2026-08-13).** A single-term search costs
+**3.77 s to return one row**, so the cost is not in the result — 95% of it is
+`mine_pdf_subelements` parsing every R-2/R-2A page in the corpus (6,630 of
+them) through `parse_r2_cost_table` / `_convert_parsed_table`. That is
+proportional to `pdf_pages`, which went 9,113 → 111,277, which is the whole
+story of 0.1 s → ~3 s.
+
+If this needs fixing, the expensive half is **keyword-independent**: the parse
+is identical for every search and only `find_matched_keywords` varies.
+Materialising the parsed R-2 rows once during enrichment would make each
+search proportional to its matches rather than to the corpus.
+
+The obvious shortcut is **not** safe and should not be attempted: restricting
+the page scan to PEs already known via `pdf_pe_numbers` cuts it by 99.8%
+(6,630 pages → 10 for one PE), but the loop's `else` branch is precisely how
+the Explorer discovers programs that were *not* in the requested set. Scoping
+the pages would silently delete that capability while appearing to work.
+
 Read latency is not a concern at this size: all pages and API endpoints answer
 in 4–25 ms against the 730 MB database, except `/programs` at 176 ms.
 
