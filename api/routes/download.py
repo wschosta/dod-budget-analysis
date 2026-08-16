@@ -130,7 +130,12 @@ def _build_download_sql(
             fts_ids = []
 
     # OPT-DL-001: Use shared WHERE builder
-    where, params = build_where_clause(**filters.where_kwargs(fts_ids=fts_ids))
+    where, params = build_where_clause(
+        # conn lets the builder skip exclude_summary when the corpus
+        # holds only summary exhibits — without it, ?exclude_summary=true
+        # matched nothing and this endpoint returned an empty result.
+        conn=conn, **filters.where_kwargs(fts_ids=fts_ids)
+    )
 
     # DL-003: Count first for X-Total-Count header
     count_sql = f"SELECT COUNT(*) FROM budget_lines {where}"

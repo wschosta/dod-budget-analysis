@@ -547,7 +547,23 @@ def _load_cache(cache_key: str) -> list[dict] | None:
 
 
 def _save_cache(cache_key: str, files: list[dict]):
-    """Save discovery results to cache."""
+    """Save discovery results to cache.
+
+    An empty result is never cached. A discovery that found nothing is far
+    more likely to be a bad day — a WAF challenge page, a selector that no
+    longer matches, a network block — than a fiscal year that genuinely
+    published no documents. Memoising it hides the failure for the cache
+    lifetime and makes every retry a silent no-op, which is exactly what
+    happened to the Army and Air Force sources: `army_2024.json` and
+    `airforce_2026.json` sat on disk containing `"files": []`, so re-running
+    the downloader could never recover even from a network that could reach
+    the host.
+
+    Costing a re-fetch on a genuinely empty year is the cheaper mistake.
+    """
+    if not files:
+        logger.debug("Not caching empty discovery result for %s", cache_key)
+        return
     try:
         DISCOVERY_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         cache_file = DISCOVERY_CACHE_DIR / f"{cache_key}.json"

@@ -45,6 +45,7 @@ except ImportError:
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from pipeline.builder import _PDF_PAGES_INSERT_SQL
 from utils.patterns import classify_page_exhibit
 from utils.query import make_placeholders
 
@@ -956,14 +957,10 @@ def _load_pdf_parquets(
         return 0
 
     total_pages = 0
-    insert_sql = (
-        "INSERT INTO pdf_pages "
-        # Column order mirrors PDF_COLUMNS, with page_exhibit_type appended
-        # last to match the value appended after that loop.
-        "(source_file, source_category, fiscal_year, exhibit_type, "
-        "page_number, page_text, has_tables, table_data, page_exhibit_type) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    )
+    # Same statement the builder uses, so a fifth copy cannot drift out of
+    # sync. Column order there is PDF_COLUMNS with page_exhibit_type fifth, so
+    # the row tuple is reordered to match rather than the SQL being forked.
+    insert_sql = _PDF_PAGES_INSERT_SQL
     pe_insert_sql = (
         "INSERT INTO pdf_pe_numbers "
         "(pdf_page_id, pe_number, page_number, source_file, fiscal_year) "
@@ -1011,7 +1008,9 @@ def _load_pdf_parquets(
             # this, a staging-loaded database has page_exhibit_type NULL for
             # every row and anything filtering on it silently finds nothing.
             _page_text = col_data.get("page_text", [None] * n_rows)[row_idx]
-            row_values.append(classify_page_exhibit(_page_text))
+            # Position 4 (0-indexed) to match _PDF_PAGES_INSERT_SQL, which
+            # lists page_exhibit_type immediately after exhibit_type.
+            row_values.insert(4, classify_page_exhibit(_page_text))
             batch.append(tuple(row_values))
 
         conn.executemany(insert_sql, batch)

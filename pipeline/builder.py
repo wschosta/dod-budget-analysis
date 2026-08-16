@@ -43,6 +43,17 @@ from utils.progress import fmt_time
 from utils.strings import normalize_fiscal_year as _normalize_fy_value
 from utils.patterns import PE_NUMBER, classify_page_exhibit
 
+# Single definition of the pdf_pages insert. It previously existed as three
+# copies in this module plus a fourth in pipeline/staging.py; adding
+# page_exhibit_type required five coordinated edits and the staging copy was
+# missed, leaving that column NULL for every staging-loaded row.
+_PDF_PAGES_INSERT_SQL = (
+    "INSERT INTO pdf_pages (source_file, source_category, fiscal_year, "
+    "exhibit_type, page_exhibit_type, page_number, page_text, has_tables, "
+    "table_data) VALUES (?,?,?,?,?,?,?,?,?)"
+)
+
+
 logger = logging.getLogger(__name__)
 
 # For backward compatibility, use the shared pattern
@@ -1907,22 +1918,12 @@ def ingest_pdf_file(conn: sqlite3.Connection, file_path: Path,
 
                 # Batch insert every 1000 pages (larger batch = fewer executemany calls)
                 if len(batch) >= 1000:
-                    conn.executemany("""
-                        INSERT INTO pdf_pages (source_file, source_category,
-                            fiscal_year, exhibit_type, page_exhibit_type,
-                            page_number, page_text, has_tables, table_data)
-                        VALUES (?,?,?,?,?,?,?,?,?)
-                    """, batch)
+                    conn.executemany(_PDF_PAGES_INSERT_SQL, batch)
                     total_pages += len(batch)
                     batch = []
 
               if batch:
-                conn.executemany("""
-                    INSERT INTO pdf_pages (source_file, source_category,
-                        fiscal_year, exhibit_type, page_exhibit_type,
-                        page_number, page_text, has_tables, table_data)
-                    VALUES (?,?,?,?,?,?,?,?,?)
-                """, batch)
+                conn.executemany(_PDF_PAGES_INSERT_SQL, batch)
                 total_pages += len(batch)
 
               # Batch insert all issues at once (avoids per-issue execute overhead)
@@ -3099,12 +3100,7 @@ def build_database(docs_dir: Path, db_path: Path, rebuild: bool = False,
                     # Batch insert all pages for this file
                     pages = len(pages_data)
                     if pages_data:
-                        conn.executemany("""
-                            INSERT INTO pdf_pages (source_file, source_category,
-                                fiscal_year, exhibit_type, page_exhibit_type,
-                                page_number, page_text, has_tables, table_data)
-                            VALUES (?,?,?,?,?,?,?,?,?)
-                        """, pages_data)
+                        conn.executemany(_PDF_PAGES_INSERT_SQL, pages_data)
 
                     # Record extraction issues
                     if issues:

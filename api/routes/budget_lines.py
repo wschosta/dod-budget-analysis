@@ -84,7 +84,12 @@ def list_budget_lines(
             except (sqlite3.OperationalError, sqlite3.DatabaseError):
                 fts_ids = []  # FTS table missing → no matches
 
-    where, params = build_where_clause(**filters.where_kwargs(fts_ids=fts_ids))
+    where, params = build_where_clause(
+        # conn lets the builder skip exclude_summary when the corpus
+        # holds only summary exhibits — without it, ?exclude_summary=true
+        # matched nothing and this endpoint returned an empty result.
+        conn=conn, **filters.where_kwargs(fts_ids=fts_ids)
+    )
 
     direction = "DESC" if sort_dir == "desc" else "ASC"
 

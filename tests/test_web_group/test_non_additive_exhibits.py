@@ -306,3 +306,54 @@ class TestConsolidationExcludesMemoExhibits:
 
         assert "p1r" not in kinds, "memo exhibit became a golden record"
         assert titles == 1, "the same program rendered as two cards"
+
+
+class TestBuilderOwnsThePolicy:
+    """Both exclusions belong in build_where_clause, not in its callers.
+
+    Applying them afterwards meant every new aggregate query had to remember,
+    and four of them did not — the same PE reported different totals on
+    /pe/top-changes and on the PE list. It also meant exclude_summary emptied
+    endpoints whose corpus holds only summary exhibits.
+    """
+
+    def test_exclude_summary_is_skipped_when_there_is_no_detail(self, memo_db):
+        """?exclude_summary=true returned zero rows against a summary corpus."""
+        import sqlite3 as _sqlite3
+        from utils.query import build_where_clause
+
+        conn = _sqlite3.connect(str(memo_db))
+        where, _ = build_where_clause(exclude_summary=True, conn=conn)
+        conn.close()
+        assert where == "", f"summary-only corpus would be emptied: {where}"
+
+    def test_exclude_summary_still_applies_when_detail_exists(self, tmp_path):
+        import sqlite3 as _sqlite3
+        from utils.query import build_where_clause
+
+        db = tmp_path / "detail.sqlite"
+        conn = _sqlite3.connect(str(db))
+        conn.execute("CREATE TABLE budget_lines (id INTEGER PRIMARY KEY, exhibit_type TEXT)")
+        conn.executemany("INSERT INTO budget_lines (exhibit_type) VALUES (?)",
+                         [("p1",), ("r2",)])
+        conn.commit()
+        where, _ = build_where_clause(exclude_summary=True, conn=conn)
+        conn.close()
+        assert "NOT IN" in where
+
+    def test_builder_applies_the_memo_exclusion(self):
+        from utils.query import build_where_clause
+        where, _ = build_where_clause(exclude_non_additive_exhibits=True)
+        assert "p1r" in where
+
+    def test_builder_defers_to_an_explicit_memo_filter(self):
+        from utils.query import build_where_clause
+        where, _ = build_where_clause(
+            exhibit_type=["p1r"], exclude_non_additive_exhibits=True
+        )
+        assert "!=" not in where, "an explicit p1r filter must still return p1r"
+
+    def test_budget_lines_endpoint_honours_exclude_summary(self, client):
+        """The endpoint returned total=0 against the real corpus."""
+        body = client.get("/api/v1/budget-lines?limit=5&exclude_summary=true").json()
+        assert body["total"] > 0
