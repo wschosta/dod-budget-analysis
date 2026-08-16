@@ -8,12 +8,7 @@ from fastapi import APIRouter, Depends, Query
 from api.database import get_db
 from utils.cache import TTLCache
 from utils.database import BUDGET_TYPE_CASE_EXPR
-from utils.query import (
-    build_where_clause,
-    detect_fy_columns,
-    exclude_non_additive,
-    has_detail_exhibits,
-)
+from utils.query import build_where_clause, detect_fy_columns
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -62,7 +57,6 @@ def dashboard_summary(
     # double-counting with detail exhibits — but only when detail exhibits are
     # actually present. Also exclude rows with invalid fiscal_year values
     # (non-numeric like "Details").
-    _has_detail = has_detail_exhibits(conn)
     _fy_validity = (
         "(fiscal_year IS NULL OR fiscal_year GLOB '[0-9][0-9][0-9][0-9]' "
         " OR fiscal_year GLOB 'FY [0-9][0-9][0-9][0-9]' "
@@ -80,18 +74,25 @@ def dashboard_summary(
         # budget_lines row comes from a summary workbook (the detail exhibits
         # live in pdf_pages): it matched 0 of 18,200 rows and served
         # total_lines 0 with every chart array empty.
-        exclude_summary=_has_detail,
+        exclude_summary=True,
+        conn=conn,
         extra_conditions=[_fy_validity],
     )
 
-    # P-1R restates Guard/Reserve equipment already counted in P-1, so any
-    # figure that TOTALS money must leave it out (~2.76% on procurement).
-    #
-    # Kept as a separate clause rather than reassigning fy_filter: the
-    # exhibit-type distribution below is a breakdown *by exhibit*, not a
-    # total, and P-1R belongs in it. Folding the exclusion into the shared
-    # filter silently erased a whole bar from that chart.
-    fy_filter_additive = exclude_non_additive(fy_filter, exhibit_type)
+    # Second clause for the queries that TOTAL money. The exhibit-type
+    # distribution further down is a breakdown *by exhibit*, not a total, so it
+    # keeps the plain filter — folding the exclusion into the shared one
+    # silently erased a whole bar from that chart.
+    fy_filter_additive, _ = build_where_clause(
+        fiscal_year=[fiscal_year] if fiscal_year else None,
+        service=[service] if service else None,
+        exhibit_type=[exhibit_type] if exhibit_type else None,
+        budget_type=[budget_type] if budget_type else None,
+        exclude_summary=True,
+        exclude_non_additive_exhibits=True,
+        conn=conn,
+        extra_conditions=[_fy_validity],
+    )
 
     # Batch the main budget_lines aggregations into a single CTE query.
     # This scans the table once instead of 4 separate passes.
@@ -186,13 +187,11 @@ def dashboard_summary(
         service=[service] if service else None,
         exhibit_type=[exhibit_type] if exhibit_type else None,
         budget_type=[budget_type] if budget_type else None,
-        exclude_summary=_has_detail,   # see the summary query above
+        exclude_summary=True,
+        exclude_non_additive_exhibits=True,   # a memo row in Top Programs reads as new spending
+        conn=conn,
         extra_conditions=[f"{fy26_col} IS NOT NULL", _fy_validity],
     )
-    # A P-1R memo row is Guard/Reserve equipment already counted elsewhere;
-    # listing one among "Top Programs" would present it as new spending.
-    tp_where = exclude_non_additive(tp_where, exhibit_type)
-
     top_programs_rows = conn.execute(
         f"SELECT id, line_item_title, organization_name, pe_number, "
         f"{fy26_col} as fy26_request, {fy25_col} as fy25_enacted "

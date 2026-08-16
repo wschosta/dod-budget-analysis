@@ -125,6 +125,8 @@ def build_where_clause(
     fts_ids: list[int] | None = None,
     amount_column: str | None = None,
     exclude_summary: bool = False,
+    exclude_non_additive_exhibits: bool = False,
+    conn: sqlite3.Connection | None = None,
     extra_conditions: list[str] | None = None,
 ) -> tuple[str, list[Any]]:
     """Build a SQL WHERE clause from filter parameters.
@@ -143,7 +145,17 @@ def build_where_clause(
         amount_column: Which FY amount column to filter on.
             Must be in VALID_AMOUNT_COLUMNS. Defaults to amount_fy2026_request.
         exclude_summary: If True, exclude summary exhibit types (P-1, R-1,
-            O-1, M-1, C-1, RF-1, P-1R) to avoid double-counting.
+            O-1, M-1, C-1, RF-1, P-1R) to avoid double-counting with detail
+            exhibits — but only when detail exhibits are actually present.
+            Pass *conn* so that can be checked; without it the exclusion is
+            applied unconditionally, which empties a summary-only corpus.
+        exclude_non_additive_exhibits: If True, drop memo exhibits (P-1R) from
+            the result. Intended for queries that TOTAL money — P-1R restates
+            Guard/Reserve equipment the P-1 rows already count. Skipped
+            automatically when *exhibit_type* explicitly asks for a memo
+            exhibit, so a deliberate filter still returns its rows.
+        conn: Optional connection, used only to decide whether
+            *exclude_summary* would empty the table.
         extra_conditions: Additional raw SQL condition strings to include
             in the WHERE clause. These are ANDed with other conditions.
 
@@ -155,7 +167,17 @@ def build_where_clause(
     params: list[Any] = []
 
     if exclude_summary:
-        conditions.append(EXCLUDE_SUMMARY_SQL)
+        # Excluding summaries is only correct when there are detail rows to
+        # double-count against. Against a summary-only corpus — which is what
+        # budget_lines currently holds, the detail exhibits living in
+        # pdf_pages — it matches nothing and the caller gets an empty result.
+        if conn is None or has_detail_exhibits(conn):
+            conditions.append(EXCLUDE_SUMMARY_SQL)
+
+    if exclude_non_additive_exhibits:
+        requested = [(t or "").strip().lower() for t in (exhibit_type or [])]
+        if not any(t in NON_ADDITIVE_EXHIBIT_TYPES for t in requested):
+            conditions.append(NON_ADDITIVE_SQL)
 
     if extra_conditions:
         conditions.extend(extra_conditions)
