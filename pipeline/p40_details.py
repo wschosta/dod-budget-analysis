@@ -50,7 +50,11 @@ def _rows_for_page(record, columns, source_file: str, page_number: int) -> tuple
     """Build the detail row and its amount rows for one parsed page."""
     detail = (
         record.appropriation_code,
-        record.sub_activity,
+        # Empty string, not None, for a missing BSA. SQLite treats NULLs as
+        # distinct in a UNIQUE constraint, so NULL sub_activity rows would
+        # never collide and the same line item would be stored once per page —
+        # 616 of these are Navy lines, which print no BSA at all.
+        record.sub_activity or "",
         columns.line_item,
         record.fiscal_year,
         columns.line_item_title,

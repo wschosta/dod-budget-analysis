@@ -161,3 +161,44 @@ class TestSkips:
             summary = populate_p40_details(db, tmp_path)
         assert summary["skipped_no_line_item"] == 1
         assert summary["details"] == 0
+
+
+class TestMissingBsaStillDeduplicates:
+    """A missing BSA must not defeat the UNIQUE key.
+
+    SQLite treats NULLs as distinct in a UNIQUE constraint, so storing NULL
+    for the 616 Navy line items that print no BSA meant the same line item was
+    written once per page instead of once. Empty string collides properly.
+    """
+
+    def test_same_line_item_twice_yields_one_row(self, db, tmp_path):
+        import sqlite3 as _sqlite3
+        from unittest.mock import patch as _patch
+
+        # A second page for the same line item, as a Navy book would produce.
+        conn = _sqlite3.connect(str(db))
+        page_no_bsa = PAGE.replace("/ BSA 9: Major 20 /", "/ 20 /")
+        conn.execute(
+            "INSERT INTO pdf_pages (source_file, page_exhibit_type, page_number, page_text)"
+            " VALUES ('FY2024/PB/x/PROC_DCSA.pdf', 'p40', 18, ?)", (page_no_bsa,),
+        )
+        conn.execute(
+            "UPDATE pdf_pages SET page_text = ? WHERE page_number = 17", (page_no_bsa,),
+        )
+        conn.commit()
+        conn.close()
+
+        class _PDF:
+            pages = [object() for _ in range(20)]
+
+            def close(self):
+                pass
+
+        cols = P40HeaderColumns(line_item="20", line_item_title="Major Equipment, DCSA")
+        with _patch("pdfplumber.open", return_value=_PDF()), \
+             _patch("pipeline.p40_details.extract_header_columns", return_value=cols):
+            populate_p40_details(db, tmp_path)
+
+        rows = _rows(db, "SELECT account, sub_activity, line_item, fiscal_year FROM p40_line_details")
+        assert len(rows) == 1, f"missing BSA defeated the UNIQUE key: {rows}"
+        assert rows[0]["sub_activity"] == ""
