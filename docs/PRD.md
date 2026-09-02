@@ -307,6 +307,9 @@ time, so the SQLite file must be writable, and WAL mode permits only one writer
 with no cross-host coordination. The app therefore runs exactly one always-on
 machine and cannot scale horizontally without changing the storage layer.
 Full rationale and rejected alternatives: [`HOSTING_DECISION.md`](HOSTING_DECISION.md).
+Static hosting (GitHub Pages) was assessed separately and not adopted; the
+route-by-route feasibility analysis is in
+[`GITHUB_PAGES_ASSESSMENT.md`](GITHUB_PAGES_ASSESSMENT.md).
 
 ### 7.3 CI/CD
 
